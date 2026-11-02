@@ -20,7 +20,8 @@ const cookie = await cookieHeader(advisorId);
 // Two fixed-price lines to play with, and one recovery line.
 const svc = (await sql("select id from public.services where is_active and price_aed is not null and line_kind is distinct from 'labour' order by position limit 1"))[0];
 const l1 = (await api("/api/quote/save", { quotationId, addLine: { title: "E2E PPF Exterior", line_type: "package", unit_price: 12000 } }, cookie)).json;
-const l2 = (await api("/api/quote/save", { quotationId, addLine: { title: "E2E PPF Interior", line_type: "package", unit_price: 1, unit_cost: 80 } }, cookie)).json;
+// 2 November 2026: nothing goes in below its cost, so the line starts above its cost of 80 (it is made complimentary below).
+const l2 = (await api("/api/quote/save", { quotationId, addLine: { title: "E2E PPF Interior", line_type: "package", unit_price: 100, unit_cost: 80 } }, cookie)).json;
 void svc;
 
 const adv = await browserFor("service_advisor", { viewport: { width: 1500, height: 1300 } });
@@ -47,7 +48,8 @@ await page.locator(`#item-line-${l1.id} [data-line-menu] > button`).first().clic
 await page.waitForTimeout(400);
 await page.getByRole("button", { name: "Included in package" }).first().click();
 await page.waitForTimeout(1500);
-const row1 = await until(async () => { const r = (await sql("select price_display, line_total from public.quotation_lines where id = $1", [l1.id]))[0]; return r?.price_display === "included" ? r : null; });
+// Wait for the LAST step of the save (the totals refresh writes line_total after the change itself).
+const row1 = await until(async () => { const r = (await sql("select price_display, line_total from public.quotation_lines where id = $1", [l1.id]))[0]; return r?.price_display === "included" && Number(r.line_total) === 0 ? r : null; });
 check("menu: Included in package saves and sells for 0", !!row1 && Number(row1.line_total) === 0, JSON.stringify(row1));
 
 // 3. No "enter the price" blocker; the estimate completes.

@@ -9,7 +9,8 @@ import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { liveInvoicesOf } from "@/lib/quote-lock";
 import { dropParts } from "@/lib/drop-parts";
 import { createChargeInvoice } from "@/lib/invoice-flow";
-import { COPY_FIELDS, askOwnerForRevision, createNextVersion, missingPricedParts, syncMissingParts } from "@/lib/quote-versions";
+import { COPY_FIELDS, askOwnerForRevision, createNextVersion, missingPricedParts, requestPartsCleared, requestPartsGone, revisionPreview, syncMissingParts } from "@/lib/quote-versions";
+import { belowCostOptsFor, flagBelowCost, stampBelowCost, unapprovedBelowCost } from "@/lib/below-cost";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff, requirePermission } from "@/lib/auth";
@@ -20,7 +21,7 @@ import { notifyManagers,notifyRoles, notifyStaff } from "@/lib/notifications";
 import { handBack, quoteLeadIds } from "@/lib/quote-lead";
 import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, packageCostingForQuote, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor, approvalReasonsNow } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
-import { aed, approvalCovers, hasPackageLine, effectiveMarkupPercent, isUnchosen, marginToneOf, positionsWarningOf, quoteTotals, recoveryTitle, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
+import { aed, approvalCovers, hasPackageLine, effectiveMarkupPercent, isUnchosen, marginToneOf, positionsWarningOf, quoteTotals, recoveryTitle, revisionRowRed, revisionRowWarning, round2, sendBlockers, type QuoteLine, blockOf } from "@/lib/quotes";
 import { shortFor } from "@/lib/short-links";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { formatPlate } from "@/lib/types";
@@ -356,7 +357,7 @@ async function makeVersion(quotationId: string, urgentOnly: boolean) {
   // The customer approved this quotation: the owner revises it directly; anyone else needs the owner's one-time permission.
   if (q.status === "approved" && q.kind === "quotation" && staff.role_id !== "owner") {
     if (!q.revision_allowed_at) redirect(`${back}?error=${encodeURIComponent("The customer approved this quotation. Ask the owner to allow a revision first.")}`);
-    await createAdminClient().from("quotations").update({ revision_allowed_at: null, revision_allowed_by: null, updated_by: staff.id }).eq("id", q.id);
+    await createAdminClient().from("quotations").update({ revision_allowed_at: null, revision_allowed_by: null, ...(await requestPartsCleared()), updated_by: staff.id }).eq("id", q.id);
     await logQuoteEvent(q.id, q.job_id, staff.id, "revision_used", `${q.number}: the owner's permission to revise was used by ${staff.display_name}`);
   }
   const r = await createNextVersion(quotationId, staff, { urgentOnly });
@@ -408,13 +409,46 @@ export async function decideRevision(quotationId: string, formData: FormData) {
   if (decision === "allow") {
     const live = liveInvoicesOf(await invoicesForLock(q.job_id));
     if (live.tax) redirect(`${back}?error=${encodeURIComponent(`Tax invoice ${live.tax.number} has been issued for this job: the quotation cannot be revised any more. Issue a credit note on the invoice page instead.`)}`);
+    // 2 November 2026 (Q-00039): the owner allows what he sees. A part that would sell below cost, or whose cost is under
+    // half of the same part elsewhere, needs his reason (logged). A Parts request closes by itself only when EVERY part
+    // it names was taken off since; one that names no parts (an early charge) or has only changes the customer sees
+    // (type, brand, side) makes the new version like any other.
+    const preview = q.job_id ? await revisionPreview(q.id) : [];
+    const reds = preview.filter(revisionRowRed);
+    const redWords = reds.map((r) => revisionRowWarning(r)).filter((x): x is string => !!x);
+    const behind = q.revision_request_kind === "parts" && q.job_id ? await requestPartsGone(q.id) : null;
+    if (behind?.allGone) {
+      const closed = `Nothing left to change: ${behind.words} ${behind.words.includes(",") ? "were" : "was"} taken off by Parts.`;
+      await admin.from("quotations").update({ revision_declined_at: now, revision_declined_by: staff.id, revision_decision_note: closed, ...(await requestPartsCleared()), updated_by: staff.id }).eq("id", q.id);
+      await logQuoteEvent(q.id, q.job_id, staff.id, "revision_withdrawn", `${q.number}: the request is closed. ${closed}`);
+      await notifyStaff(requester.filter((x) => x !== staff.id), { type: "revision_request", title: `Revision request on ${q.number} closed: nothing left to change`, body: `${closed} The approved quotation stands.`, jobId: q.job_id, href: back });
+      refresh(q.job_id, q.id);
+      redirect(`${back}?message=${encodeURIComponent("Nothing left to change: the request is closed. The approved quotation stands.")}`);
+    }
+    if (redWords.length && (note ?? "").length < 5) redirect(`${back}?revise=1&error=${encodeURIComponent(`Check the price first: ${redWords.join("; ")}. To allow it anyway, write why in the note.`)}`);
     await admin.from("quotations").update({ revision_allowed_at: now, revision_allowed_by: staff.id, revision_declined_at: null, revision_declined_by: null, revision_decision_note: note, updated_by: staff.id }).eq("id", q.id);
-    await logQuoteEvent(q.id, q.job_id, staff.id, "revision_allowed", `${q.number}: the owner allowed one revision${note ? `: ${note}` : ""}`);
+    await logQuoteEvent(q.id, q.job_id, staff.id, "revision_allowed", `${q.number}: the owner allowed one revision${note ? `: ${note}` : ""}${redWords.length ? ` (allowed despite: ${redWords.join("; ")})` : ""}`);
     if (q.revision_request_kind === "parts" && q.job_id) {
-      // The change from Parts: the new version is made now, with every priced part on it; the advisor sends it.
-      const r = await createNextVersion(q.id, staff, { reason: "parts changed, allowed by the owner" });
+      // The change from Parts: the new version is made now, every part at its own figures (a changed cost lands as
+      // the box showed it), every priced part and waiting early charge on it; the advisor sends it.
+      const r = await createNextVersion(q.id, staff, { reason: "parts changed, allowed by the owner", quietBelow: true });
       if (!("error" in r)) {
-        await admin.from("quotations").update({ revision_allowed_at: null, revision_allowed_by: null, updated_by: staff.id }).eq("id", q.id);
+        // His reason covers exactly the red rows he saw below cost, at the figures he saw - never another line.
+        const stamped = new Set<string>();
+        const sawBelow = reds.filter((x) => x.below && !x.below.approved);
+        if (sawBelow.length && note) {
+          const charges = sawBelow.some((x) => x.kind === "charge") ? await admin.from("charge_lines").select("id, quotation_line_id").in("id", sawBelow.filter((x) => x.kind === "charge").map((x) => x.partId)) : { data: [] as { id: string; quotation_line_id: string | null }[] };
+          const lineOfCharge = new Map((charges.data ?? []).map((c) => [c.id as string, c.quotation_line_id as string | null]));
+          for (const b of await unapprovedBelowCost(r.id)) {
+            const row = sawBelow.find((x) => (x.kind === "charge" ? lineOfCharge.get(x.partId) === b.line.id : b.line.part_item_id === x.partId) && Math.abs((x.below?.sell ?? -1) - b.below.sell) < 0.01 && Math.abs((x.below?.cost ?? -1) - b.below.cost) < 0.01);
+            if (!row) continue;
+            if (await stampBelowCost({ id: r.id, number: r.number, version: r.version, job_id: q.job_id }, b.line, b.below, note, staff)) stamped.add(b.line.id);
+          }
+        }
+        // Anything else the new figures put below cost is written down and waits for a higher price or his approval.
+        const rest = r.synced.filter((id) => !stamped.has(id));
+        if (rest.length) await flagBelowCost(r.id, rest, staff.id, "a part's cost or an early charge changed while the quotation was approved");
+        await admin.from("quotations").update({ revision_allowed_at: null, revision_allowed_by: null, ...(await requestPartsCleared()), updated_by: staff.id }).eq("id", q.id);
         const ids = Array.from(new Set([...(await quoteLeadIds(q)), q.sent_by, ...requester].filter((x): x is string => !!x)));
         await notifyStaff(ids, { type: "quote_revised_by_parts", title: `Owner allowed the revised ${q.number}: send it`, body: `Version ${r.version} is ready with the change from Parts.${note ? ` Owner: ${note}` : ""}`, jobId: q.job_id, href: `/jobs/${q.job_id}/quote/${r.id}?send=1` });
         refresh(q.job_id, r.id);
@@ -425,7 +459,7 @@ export async function decideRevision(quotationId: string, formData: FormData) {
     refresh(q.job_id, q.id);
     redirect(`${back}?message=${encodeURIComponent("Allowed: one revision can be made.")}`);
   }
-  await admin.from("quotations").update({ revision_declined_at: now, revision_declined_by: staff.id, revision_decision_note: note, updated_by: staff.id }).eq("id", q.id);
+  await admin.from("quotations").update({ revision_declined_at: now, revision_declined_by: staff.id, revision_decision_note: note, ...(await requestPartsCleared()), updated_by: staff.id }).eq("id", q.id);
   await logQuoteEvent(q.id, q.job_id, staff.id, "revision_declined", `${q.number}: the owner declined the revision${note ? `: ${note}` : ""}`);
   await notifyStaff(requester.length ? requester : await quoteLeadIds(q), { type: "revision_request", title: `Owner declined the revision of ${q.number}`, body: note ?? "The approved quotation stands.", jobId: q.job_id, href: back });
   refresh(q.job_id, q.id);
@@ -649,7 +683,7 @@ export async function resendQuotation(quotationId: string): Promise<SendQuoteSta
 async function quoteBlockers(bundle: NonNullable<Awaited<ReturnType<typeof loadQuotation>>>, settings: Awaited<ReturnType<typeof getSettings>>, checks: { openRequests: number; workshopEstimate: { hours: number | null; managerHours: number | null; agreed: boolean } | null }) {
   const q = bundle.quotation;
   // Findings not quoted never block: the advisor sees them as a reference list and decides.
-  const out = sendBlockers(q, bundle.lines, bundle.parts, { minMarkup: minMarkupFor(settings, bundle.vehicle?.make?.name ?? null), ...checks, confirmPercent: Number(settings.markup_confirm_percent) || 100 });
+  const out = sendBlockers(q, bundle.lines, bundle.parts, { minMarkup: minMarkupFor(settings, bundle.vehicle?.make?.name ?? null), ...checks, confirmPercent: Number(settings.markup_confirm_percent) || 100, ...(await belowCostOptsFor(settings, q, bundle.lines)) });
   // Section 5 (30 October 2026): anything free needs its reason (and the original job, or the note) before it can go out.
   const decidedComeback = !!(bundle.job as { comeback_free?: boolean } | null)?.comeback_free;
   if (q.comp_reason !== undefined && !decidedComeback && compLinesOf(bundle.lines, q).length) {
@@ -708,7 +742,7 @@ export async function completeQuotation(quotationId: string, opts: { /** "Send a
     }
   }
   // The parts markup never moved off the minimum: asked once (Set markup / Continue anyway); "Continue anyway" is logged for the owner's summary.
-  const minMarkup = Number(settings.parts_min_markup_percent) || 5;
+  const minMarkup = minMarkupFor(settings, bundle.vehicle?.make?.name ?? null);
   const partLines = active.filter((l) => l.line_type === "part" && !isUnchosen(l) && !l.left_off);
   const markupUntouched = partLines.length > 0 && partLines.every((l) => Math.abs(effectiveMarkupPercent(l) - minMarkup) < 0.001);
   if (markupUntouched && !q.markup_skipped_at) {

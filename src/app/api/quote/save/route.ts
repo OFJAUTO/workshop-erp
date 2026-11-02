@@ -5,8 +5,10 @@ import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { dropParts } from "@/lib/drop-parts";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
-import { LINE_TYPES, effectiveMarkupPercent, floorProblem, isHidden, lineTotal, minimumMarkupAed, parseHours, recoveryTitle, round2, type LineType, type QuoteLine } from "@/lib/quotes";
-import { LINE_SELECT, SERVICE_SELECT, approvalReasonsNow, labourRateFor, loadQuotation, minMarkupFor, refreshQuoteTotals, toLine, logQuoteEvent } from "@/lib/quote-data";
+import { LINE_TYPES, belowCostAll, belowCostChangesIn, belowCostWords, effectiveMarkupPercent, floorProblem, minimumMarkupAed, needsPackageCosting, parseHours, priceSideKeys, recoveryTitle, round2, worseBelowCost, type BelowCost, type BelowCostOpts, type LineType, type QuoteHeaderForTotals, type QuoteLine } from "@/lib/quotes";
+import { LINE_SELECT, SERVICE_SELECT, approvalReasonsNow, attachBelowCost, labourRateFor, loadQuotation, minMarkupFor, refreshQuoteTotals, toLine, logQuoteEvent } from "@/lib/quote-data";
+import { belowCostOptsFor, flagBelowCost, headerOf, linesForBelowCost, stampBelowCost } from "@/lib/below-cost";
+import { belowCostReady } from "@/lib/schema-ready";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { toSnapshot } from "@/lib/packages";
@@ -71,6 +73,8 @@ type LinePatch = {
   installer_hours?: number | string | null;
   /** Estimate parts: the advisor's note for the parts desk ("OEM only", "front left"). */
   parts_note?: string | null;
+  /** 2 November 2026: the OWNER's reason for letting this line sell below its cost (logged with the figures). */
+  below_cost_reason?: string | null;
 };
 type Body = {
   quotationId?: string;
@@ -82,7 +86,7 @@ type Body = {
   /** withParts: the parts under the job go too (off the parts list; Parts asked when one was already ordered). */
   removeLine?: { id: string; keepParts?: boolean; withParts?: boolean };
   reorder?: { ids: string[] };
-  header?: { deposit_mode?: string | null; deposit_value?: number | string | null; discount_scope?: string; discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; materials_cost_aed?: number | string | null; /** Section 7: the per-job film rolls for the package cost estimate. */ film_rolls_est?: number | string | null; /** 30 October 2026: why the rolls go below the default (required then, logged). */ film_rolls_note?: string | null };
+  header?: { deposit_mode?: string | null; deposit_value?: number | string | null; discount_scope?: string; discount_percent?: number | string; customer_note?: string | null; validity_days?: number | string; payment_by_card?: boolean; expected_payment_method?: string; /** The labour discount: a percentage or a fixed amount of our own labour lines. */ discount_kind?: string | null; discount_value?: number | string | null; materials_cost_aed?: number | string | null; /** Section 7: the per-job film rolls for the package cost estimate. */ film_rolls_est?: number | string | null; /** 30 October 2026: why the rolls go below the default (required then, logged). */ film_rolls_note?: string | null; /** 2 November 2026: the OWNER's reason for a discount that takes a line below its cost. */ below_cost_reason?: string | null };
   /** The editing lock: "take" every half minute while the editor is open, "release" on leaving. */
   lock?: "take" | "release";
   /** An advisor's part: description and quantity only; it goes to the Parts desk to be priced. */
@@ -93,6 +97,10 @@ type Body = {
   sendToDesk?: { ids: string[] };
   /** Estimate parts: the advisor already has a price (a dealer on the phone). Marked "Priced by advisor"; the parts desk checks it. */
   advisorPrice?: { id: string; cost: number | string; supplier: string };
+  /** The owner approves a line that already sells below its cost (Parts raised the cost), with his reason. */
+  belowCostApprove?: { id: string; reason: string };
+  /** An advisor asks the owner to look at a line below its cost. */
+  belowCostAsk?: { id: string };
 };
 
 const n = (v: unknown): number | null => {
@@ -123,7 +131,7 @@ export async function POST(request: NextRequest) {
   const isOwner = role === "owner";
   if (!can(role, "editQuotes")) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   const admin = createAdminClient();
-  const { data: q } = await admin.from("quotations").select("id, kind, job_id, number, status, created_by, vehicle_id, not_quoted, editing_by, editing_at").eq("id", String(body.quotationId ?? "")).maybeSingle();
+  const { data: q } = await admin.from("quotations").select("id, kind, job_id, number, version, status, created_by, vehicle_id, not_quoted, editing_by, editing_at, film_rolls_est, tint_spec, discount_percent, vat_percent, discount_kind, discount_value, discount_scope").eq("id", String(body.quotationId ?? "")).maybeSingle();
   if (!q) return NextResponse.json({ error: "Quotation not found." }, { status: 404 });
   // One person edits a quotation at a time. The lock is fresh for a minute and a half after the last heartbeat.
   const LOCK_FRESH_MS = 90000;
@@ -323,12 +331,59 @@ export async function POST(request: NextRequest) {
     return out;
   };
 
-  /** After a change, a line with a cost must still clear the floor. */
+  /** After a change, a line with a cost must still clear the minimum-markup floor (below its COST is belowCostGate's). */
   const checkFloor = (merged: QuoteLine) => {
     const problem = floorProblem(merged, minMarkup);
     if (problem) return `Blocked: ${problem}. The minimum markup is a floor on the final price, after every discount.`;
-    if (merged.unit_cost !== null && merged.unit_cost !== undefined && (merged.line_type === "part" || merged.line_type === "other") && !isHidden(merged) && lineTotal(merged) + 0.005 < round2(merged.unit_cost * (merged.quantity || 1))) return "Blocked: that would sell the part below its cost.";
     return null;
+  };
+  // Nothing below cost (2 November 2026): ONE rule (belowCostChangesIn in quotes.ts) on every add, every change and every
+  // header discount. Every line is judged after its share of the header discount, against the cost the internal box
+  // counts. A PRICE-side change that sells a line below cost (or deeper below it) is refused for an advisor in plain
+  // words; the owner may, with a typed reason (logged with the figures). A COST is a fact and never refused: a change
+  // of cost only is saved, and a line it puts below cost is written down and stops the send (flagBelowCost). Before the
+  // database update the owner is refused too (his approval has nowhere to be kept yet).
+  const header0 = headerOf(q);
+  let belowBase: { lines: QuoteLine[] } | null = null;
+  /** The quotation's active lines with the owner's approvals (read once per request). */
+  const belowLines = async () => {
+    if (!belowBase) {
+      const { data: rows } = await admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", q.id).eq("is_active", true);
+      belowBase = { lines: await attachBelowCost(((rows ?? []) as Record<string, unknown>[]).map(toLine)) };
+    }
+    return belowBase;
+  };
+  // What the lines are judged with: the package costing is read only when a line that is judged needs it (a package or
+  // a plain PPF service that is not free or hidden), once per request.
+  let costingOpts: Omit<BelowCostOpts, "headerDiscount"> | null = null;
+  const optsFor = async (lines: QuoteLine[]): Promise<Omit<BelowCostOpts, "headerDiscount">> => {
+    if (!needsPackageCosting(lines)) return { bodyshopRate: Number(settings.bodyshop_cost_rate_aed) || 50 };
+    if (!costingOpts) costingOpts = await belowCostOptsFor(settings, q, lines);
+    return costingOpts;
+  };
+  /** Every line a change would take below its cost (or deeper), the changed line given as it would stand. */
+  const belowChanges = async (changed: QuoteLine | null, header: QuoteHeaderForTotals = header0) => {
+    const before = (await belowLines()).lines;
+    const after = changed ? (before.some((l) => l.id === changed.id) ? before.map((l) => (l.id === changed.id ? changed : l)) : [...before, changed]) : before;
+    // Only a line below cost NOW can be worse, so the costing is needed only when a line judged after the change needs it.
+    return belowCostChangesIn({ lines: before, q: header0 }, { lines: after, q: header }, await optsFor(after));
+  };
+  const belowWords = (hits: { line: QuoteLine; below: BelowCost }[]) => `${belowCostWords(hits[0].line.title, hits[0].below)}${hits.length > 1 ? `; and ${hits.length - 1} more line${hits.length === 2 ? "" : "s"}` : ""}`;
+  /** A price-side change: refused for an advisor, asked of the owner (409 with the figures), or his reason to stamp. */
+  const belowCostGate = async (hits: { line: QuoteLine; below: BelowCost }[], reason: unknown): Promise<{ res: NextResponse } | { stamps: { line: QuoteLine; below: BelowCost }[] } | null> => {
+    if (!hits.length) return null;
+    const words = belowWords(hits);
+    if (!isOwner) return { res: NextResponse.json({ error: `Not saved: ${words}. Raise the price – only the owner can sell below cost.`, belowCost: true, lineIds: hits.map((h) => h.line.id) }, { status: 400 }) };
+    if (!(await belowCostReady())) return { res: NextResponse.json({ error: `Not saved: ${words}. Selling below cost opens once the database update is applied.`, belowCost: true, lineIds: hits.map((h) => h.line.id) }, { status: 400 }) };
+    const why = typeof reason === "string" ? reason.trim() : "";
+    if (why.length < 5) return { res: NextResponse.json({ error: `${words}. Write why it sells below cost; it is logged.`, confirm: true, ask: "below_cost", cost: hits[0].below.cost, sell: hits[0].below.sell, short: hits[0].below.short, title: hits[0].line.title, lineId: hits[0].line.id, more: hits.length - 1 }, { status: 409 }) };
+    return { stamps: hits };
+  };
+  const actor = { id: staff.id, display_name: staff.display_name };
+  const qRef = { id: q.id, number: q.number as string, version: Number(q.version) || 1, job_id: q.job_id as string | null };
+  /** The owner's reason on every line he saw below cost (the figures as they stand after the save). */
+  const stampAll = async (hits: { line: QuoteLine; below: BelowCost }[], reason: unknown, idOf: (l: QuoteLine) => string = (l) => l.id) => {
+    for (const h of hits) await stampBelowCost(qRef, { id: idOf(h.line), title: h.line.title }, h.below, String(reason ?? ""), actor);
   };
   const rememberProvider = async (name: string | null | undefined) => {
     const clean = (name ?? "").trim();
@@ -337,6 +392,29 @@ export async function POST(request: NextRequest) {
     if (list.some((x) => x.toLowerCase() === clean.toLowerCase())) return;
     await admin.from("settings").update({ value: [clean, ...list].slice(0, 50) }).eq("key", "recovery_providers");
   };
+
+  if (body.belowCostApprove || body.belowCostAsk) {
+    const id = String(body.belowCostApprove?.id ?? body.belowCostAsk?.id ?? "");
+    const base = await belowLines();
+    const line = base.lines.find((l) => l.id === id);
+    if (!line) return NextResponse.json({ error: "Line not found." }, { status: 404 });
+    const b = belowCostAll(base.lines, header0, await optsFor(base.lines)).get(id) ?? null;
+    // The saved line is not below cost (an unsaved figure on the screen was): nothing to ask or approve - the screen
+    // puts the saved figure back (asked: false).
+    if (!b || b.approved) return NextResponse.json({ ok: true, asked: false, notBelow: true });
+    if (body.belowCostAsk) {
+      await logQuoteEvent(q.id, q.job_id, staff.id, "below_cost_asked", `${q.number} v${qRef.version}: ${staff.display_name} asks the owner to approve ${belowCostWords(line.title, b)}`);
+      await notifyRoles(["owner"], { type: "quote_below_cost", title: `Approve below cost? ${q.kind === "estimate" ? "ESTIMATE " : ""}${q.number}: ${line.title}`, body: `${belowCostWords(line.title, b)}. Asked by ${staff.display_name}.`, jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
+      return NextResponse.json({ ok: true, asked: true });
+    }
+    if (!isOwner) return NextResponse.json({ error: "Only the owner approves a price below cost." }, { status: 403 });
+    if (!(await belowCostReady())) return NextResponse.json({ error: "Selling below cost opens once the database update is applied." }, { status: 400 });
+    const reason = String(body.belowCostApprove?.reason ?? "").trim();
+    if (reason.length < 5) return NextResponse.json({ error: "Write why it sells below cost; it is logged." }, { status: 400 });
+    if (!(await stampBelowCost(qRef, line, b, reason, actor))) return NextResponse.json({ error: "Could not save the approval. Try again." }, { status: 500 });
+    await refreshed();
+    return NextResponse.json({ ok: true });
+  }
 
   if (body.notQuoted) {
     const key = String(body.notQuoted.key ?? "").slice(0, 160);
@@ -390,6 +468,8 @@ export async function POST(request: NextRequest) {
     await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "part_priced_by_advisor", note: `${staff.display_name} priced ${cur.title} at AED ${cost.toLocaleString("en-GB")} each from ${supplier} (priced by advisor; the parts desk checks it)`, created_by: staff.id });
     await notifyRoles(["parts"], { type: "estimate_price_check", title: `Check this price · ESTIMATE ${q.number}`, body: `${cur.title}: AED ${cost.toLocaleString("en-GB")} each from ${supplier}, typed by ${staff.display_name}. ${await vehicleWords()}`, href: `/parts/estimate/${q.id}` });
     await refreshed();
+    // A cost is a fact, never refused; a line it puts below cost is written down and stops the send (2 November 2026).
+    await flagBelowCost(q.id, [cur.id], staff.id, `${staff.display_name} typed the cost`);
     return NextResponse.json({ ok: true });
   }
 
@@ -480,7 +560,12 @@ export async function POST(request: NextRequest) {
       if (type === "other" && !row.title) row.title = "";
     }
     // The editor draws the line before the save answers and sends its id: the row is born with it, so the screen and the server agree.
+    // The new line as it would stand: nothing goes in below its cost (the owner: with his reason).
     const wantId = typeof (a as { id?: unknown }).id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test((a as { id: string }).id) ? (a as { id: string }).id : null;
+    const NEW_ID = wantId ?? "new-line";
+    const asLine = { quotation_id: q.id, quantity: 1, unit_cost: null, markup_percent: null, unit_price: null, hours: null, labour_rate: null, discount_percent: 0, visible_to_customer: true, is_active: true, chosen: true, left_off: false, ...row, id: NEW_ID } as unknown as QuoteLine;
+    const addGate = await belowCostGate(await belowChanges(asLine), a.below_cost_reason);
+    if (addGate && "res" in addGate) return addGate.res;
     if (wantId) row.id = wantId;
     const { data: last } = await admin.from("quotation_lines").select("position").eq("quotation_id", q.id).eq("is_active", true).neq("line_type", "fee").order("position", { ascending: false }).limit(1).maybeSingle();
     row.position = (Number(last?.position) || 0) + 1;
@@ -488,6 +573,7 @@ export async function POST(request: NextRequest) {
     if (typeof row.details === "string") row.details = capsText(row.details);
     const { data: created, error } = await admin.from("quotation_lines").insert(row).select("id").single();
     if (error || !created) return NextResponse.json({ error: error?.message ?? "Could not add the line." }, { status: 500 });
+    if (addGate && "stamps" in addGate) await stampAll(addGate.stamps, a.below_cost_reason, (l) => (l.id === NEW_ID ? created.id : l.id));
     if (linked) {
       await admin.from("part_requests").insert(linked.rows);
       await notifyRoles(["parts"], { type: "parts_request", title: `Parts to price · ${job?.job_number ?? ""}`, body: `${linked.rows.map((r) => r.label).join(", ")} for ${linked.name}.`, jobId: q.job_id, href: `/parts/${q.job_id}` });
@@ -513,6 +599,14 @@ export async function POST(request: NextRequest) {
       patch.details = null;
       merged.title = String(patch.title);
     }
+    // The line as it stands with the owner's approvals (the screen's lines carry them; the plain read above does not).
+    const stamped = (await belowLines()).lines.find((l) => l.id === cur.id);
+    const mergedB = { ...(stamped ?? cur), ...patch, title: merged.title } as QuoteLine;
+    const hits = await belowChanges(mergedB);
+    // A change of cost (or plain words) only is never refused: saved, then written down when it puts a line below cost.
+    const costOnly = priceSideKeys({ ...body.patchLine, ...patch }).length === 0;
+    const gate = costOnly ? null : await belowCostGate(hits, body.patchLine.below_cost_reason);
+    if (gate && "res" in gate) return gate.res;
     const floorError = checkFloor(merged);
     if (floorError) return NextResponse.json({ error: floorError }, { status: 400 });
     if ("labour_rate" in patch && Number(patch.labour_rate) !== Number(cur.labour_rate ?? 0)) {
@@ -531,6 +625,10 @@ export async function POST(request: NextRequest) {
     if (typeof patch.details === "string") patch.details = capsText(patch.details);
     const { error } = await admin.from("quotation_lines").update({ ...patch, ...stamp }).eq("id", cur.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (gate && "stamps" in gate) await stampAll(gate.stamps, body.patchLine.below_cost_reason);
+    // A cost typed (our cost, the trips' cost, the installer hours): never refused - a line it put below cost is written
+    // down, the people in charge told, and "Before sending" stops it until the price is raised or the owner approves it.
+    if (costOnly && hits.length) await flagBelowCost(q.id, hits.map((h) => h.line.id), staff.id, `${staff.display_name} changed the cost`);
     // One option used per group: choosing this one puts the others aside.
     if (patch.chosen === true && cur.option_group) await admin.from("quotation_lines").update({ chosen: false, ...stamp }).eq("quotation_id", q.id).eq("option_group", cur.option_group).neq("id", cur.id);
     if (cur.line_type === "recovery" && (merged.recovery_provider_kind ?? "ours") === "external") await rememberProvider(merged.recovery_provider);
@@ -541,6 +639,10 @@ export async function POST(request: NextRequest) {
     const { data: cur } = await admin.from("quotation_lines").select("id, fee_kind, line_type, part_item_id").eq("id", body.removeLine.id).eq("quotation_id", q.id).maybeSingle();
     if (!cur) return NextResponse.json({ error: "Line not found." }, { status: 404 });
     if (cur.fee_kind) return NextResponse.json({ error: "The bank charge line is automatic; it cannot be removed." }, { status: 400 });
+    // Taking a line off moves the header discount's shares (an AED discount over fewer lines): never refused, but a line
+    // it puts below its cost is written down like a cost change.
+    const gone = (await belowLines()).lines.find((l) => l.id === cur.id);
+    const removalHits = gone ? await belowChanges({ ...gone, is_active: false }) : [];
     const { error } = await admin.from("quotation_lines").update({ is_active: false, ...stamp }).eq("id", cur.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     const actor = { id: staff.id, display_name: staff.display_name };
@@ -560,6 +662,7 @@ export async function POST(request: NextRequest) {
       await dropParts(q.job_id, [cur.part_item_id], actor, "removed");
     }
     await refreshed();
+    if (removalHits.length) await flagBelowCost(q.id, removalHits.map((h) => h.line.id), staff.id, `${cur.line_type === "labour" ? "a labour line" : "a line"} was taken off and the discount now falls on fewer lines`);
     return NextResponse.json({ ok: true });
   }
   if (body.reorder) {
@@ -649,9 +752,26 @@ export async function POST(request: NextRequest) {
       if (!["card", "link", "cash", "cheque", "transfer", "not_sure"].includes(m)) return NextResponse.json({ error: "Choose how the customer will pay." }, { status: 400 });
       patch.expected_payment_method = m;
     }
+    // The header discount comes off the labour and the packages: one that takes a package below its cost is a price
+    // below cost like any other (refused for an advisor; the owner, with his reason, stamped on every line it touches).
+    const discountMoves = ["discount_kind", "discount_value", "discount_percent", "discount_scope"].some((k) => k in patch);
+    const headerAfter = headerOf({ ...q, ...(patch as Partial<typeof q>) });
+    const headerHits = discountMoves ? (await belowChanges(null, headerAfter)) : [];
+    const headerGate = await belowCostGate(headerHits, h.below_cost_reason);
+    if (headerGate && "res" in headerGate) return headerGate.res;
+    // The film rolls are a cost (the package's film): never refused, written down when they take a package below cost.
+    const rollsBefore = h.film_rolls_est !== undefined ? await belowLines() : null;
     const { error } = await admin.from("quotations").update(patch).eq("id", q.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     await refreshed();
+    if (headerGate && "stamps" in headerGate) await stampAll(headerGate.stamps, h.below_cost_reason);
+    if (rollsBefore) {
+      const before = belowCostAll(rollsBefore.lines, header0, await optsFor(rollsBefore.lines));
+      const after = await linesForBelowCost(q.id);
+      const now = belowCostAll(after.lines, after.header, after.opts);
+      const worse = after.lines.filter((l) => worseBelowCost(before.get(l.id) ?? null, now.get(l.id) ?? null)).map((l) => l.id);
+      if (worse.length) await flagBelowCost(q.id, worse, staff.id, `${staff.display_name} changed the film rolls`);
+    }
     if (ownerDiscountWhilePending) {
       // The owner changed the discount on a quotation waiting for him: his discount is no longer a reason. Whatever
       // else is left (a large total, a line discount) stays in his box; with nothing left it goes back to the advisor.

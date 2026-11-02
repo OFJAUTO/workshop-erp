@@ -11,7 +11,11 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Nothing. The list is empty.
+The newest backup, taken read-only before this batch's database change, is `backups/2026-11-02T15-57-56` (109 tables, 242,238 rows). A fresh one is taken again right before applying.
+
+| # | Migration | Task | What it switches on | Backup |
+|---|---|---|---|---|
+| 1 | `20261203090000_below_cost.sql` | Section 1: price calculation and nothing below cost (Q-00039) | The owner's "Approve below cost" with a reason kept on the line, for a typed price and for a discount that takes a line below its cost (before it, a price or discount below cost is refused for everyone, the owner too; a cost typed is always saved and flagged), and the automatic withdrawal of a Parts revision request when every part it names was taken off (never an advisor's request). It also withdraws Peter's waiting Q-00039 request ("Peter added FRONT RH HEAD LIGHT, AED 5,502.73": the part was removed as a duplicate this morning), marks that bell and Q-00020's already-answered bell read, and prices any early charge sitting on a quotation at its charge instead of its cost (none on live tonight). | `backups/2026-11-02T15-57-56` |
 
 ## Applied on 2 November 2026, morning
 

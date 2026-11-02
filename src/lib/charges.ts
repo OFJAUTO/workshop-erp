@@ -5,6 +5,8 @@ import { newToken } from "./media";
 import { jobAdvisorIds, notifyRoles, notifyStaff } from "./notifications";
 import { quoteTargetFor } from "./quote-versions";
 import { refreshQuoteTotals } from "./quote-data";
+import { markupFromSell } from "./quotes";
+import { flagBelowCost } from "./below-cost";
 import { schemaReady } from "./schema-ready";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
@@ -102,25 +104,66 @@ export async function addCharges(home: { jobId?: string; entryId?: string }, inp
 
 /** After the check-in approval a charge goes into the quotation (the open one, or the next version through the usual rule). */
 export async function pushIntoQuotation(jobId: string, lines: ChargeLineRow[], staff: Actor): Promise<string | null> {
-  const admin = createAdminClient();
   const target = await quoteTargetFor(jobId, staff.id, `${staff.display_name} added ${lines.map((l) => l.description).join(", ")}`);
   if (!target) return null;
+  return (await insertChargeLines(target.id, lines, staff)).label;
+}
+
+/** The quotation line an early charge goes in as (ONE rule): what it costs us and what the customer pays, exactly. */
+export function chargeQuoteLine(l: ChargeLineRow): Record<string, unknown> {
+  const recovery = l.kind === "recovery";
+  const qty = recovery ? Math.max(1, l.trips ?? 1) : 1;
+  const unitCost = r2((Number(l.cost_aed) || 0) / qty);
+  const unitSell = r2(chargeNet(l) / qty);
+  // THE price rule prices an Other line with a cost as cost + markup (quotes.ts), so the typed charge goes in as the
+  // markup that lands exactly on it - never the cost alone (2 November 2026: a fuel charge sold at its cost). An
+  // Other line with no cost is a plain price.
+  const priced = recovery ? { unit_cost: unitCost, unit_price: unitSell } : unitCost > 0 ? { unit_cost: unitCost, unit_price: unitSell, markup_mode: "percent", ...markupFromSell({ unit_cost: unitCost, markup_percent: null, markup_mode: "percent" }, unitSell) } : { unit_cost: null, unit_price: unitSell };
+  return { line_type: recovery ? "recovery" : "other", title: l.description, source_type: "manual", quantity: qty, ...priced, ...(recovery ? { recovery_type: l.recovery_type, recovery_trips: qty, recovery_paid_by: "customer" } : {}), ...(l.free ? { price_display: "complimentary" } : {}) };
+}
+
+/**
+ * Early charges added after the check-in approval that are still on no quotation: the quotation was approved, so they
+ * wait for the owner to allow a revised version (ChargesCard: "Waiting for the revised quotation").
+ */
+export async function chargesWaitingForRevision(jobId: string): Promise<ChargeLineRow[]> {
+  if (!(await chargesReady())) return [];
+  const { data: job } = await createAdminClient().from("jobs").select("first_approval_at").eq("id", jobId).maybeSingle();
+  if (!job?.first_approval_at) return [];
+  return (await loadCharges({ jobId })).filter((l) => !l.agreed_at && !l.quotation_line_id && !l.invoice_id && l.free_status !== "refused");
+}
+
+/** The waiting early charges join a new version of the quotation (the owner allowed the revision): one line each. */
+export async function pushWaitingCharges(jobId: string, quotationId: string, staff: { id: string; display_name: string }): Promise<string[]> {
+  const waiting = await chargesWaitingForRevision(jobId);
+  if (!waiting.length) return [];
+  // The new version judges below cost itself (the owner's decision, or its own notice): no second notice from here.
+  return (await insertChargeLines(quotationId, waiting, { ...staff, role_id: "" }, { quiet: true })).made;
+}
+
+async function insertChargeLines(targetId: string, lines: ChargeLineRow[], staff: Actor, opts: { quiet?: boolean } = {}): Promise<{ label: string | null; made: string[] }> {
+  const admin = createAdminClient();
+  const target = { id: targetId };
   const { data: last } = await admin.from("quotation_lines").select("position").eq("quotation_id", target.id).order("position", { ascending: false }).limit(1).maybeSingle();
   let pos = (Number(last?.position) || 0) + 1;
+  const made: string[] = [];
   for (const l of lines) {
-    const recovery = l.kind === "recovery";
-    const qty = recovery ? Math.max(1, l.trips ?? 1) : 1;
     const { data: ql } = await admin
       .from("quotation_lines")
-      .insert({ quotation_id: target.id, position: pos++, line_type: recovery ? "recovery" : "other", title: l.description, source_type: "manual", quantity: qty, unit_cost: r2(l.cost_aed / qty), unit_price: r2(chargeNet(l) / qty), ...(recovery ? { recovery_type: l.recovery_type, recovery_trips: qty, recovery_paid_by: "customer" } : {}), ...(l.free ? { price_display: "complimentary" } : {}), created_by: staff.id, updated_by: staff.id })
+      .insert({ quotation_id: target.id, position: pos++, ...chargeQuoteLine(l), created_by: staff.id, updated_by: staff.id })
       .select("id")
       .single();
-    if (ql) await admin.from("charge_lines").update({ quotation_line_id: ql.id, updated_by: staff.id }).eq("id", l.id);
+    if (ql) {
+      made.push(ql.id);
+      await admin.from("charge_lines").update({ quotation_line_id: ql.id, updated_by: staff.id }).eq("id", l.id);
+    }
   }
   const { getSettings } = await import("./settings");
   await refreshQuoteTotals(target.id, await getSettings(), staff.id);
+  // A charge that costs more than it is charged at is a line below cost: written down, it waits for the owner.
+  if (!opts.quiet) await flagBelowCost(target.id, made, staff.id, "an early charge costs more than its price");
   const { data: q } = await admin.from("quotations").select("number, version").eq("id", target.id).maybeSingle();
-  return q ? `${q.number} v${q.version}` : null;
+  return { label: q ? `${q.number} v${q.version}` : null, made };
 }
 
 /** The charges listed on the vehicle check-in (added before the approval): not agreed yet, not on a quotation, not invoiced. */

@@ -94,8 +94,12 @@ try {
   await adv.page.locator("[data-charge-open]").click();
   await addChargeRow(adv.page, 0, { kind: "other", description: "Parking at the dealer", cost: 50, charge: 60 });
   await adv.page.locator("[data-charge-save]").click();
-  const parked = await until(async () => (await sql("select cl.quotation_line_id, ql.title, ql.unit_price::float as price from public.charge_lines cl join public.quotation_lines ql on ql.id = cl.quotation_line_id where cl.job_id = $1 and cl.description ilike 'parking%'", [jobId]))[0]);
+  // The quotation is totalled after the line goes in: wait for the line to carry its total.
+  const parked = await until(async () => { const r = (await sql("select cl.quotation_line_id, ql.title, ql.unit_price::float as price, ql.line_total::float as total, ql.markup_percent::float as markup from public.charge_lines cl join public.quotation_lines ql on ql.id = cl.quotation_line_id where cl.job_id = $1 and cl.description ilike 'parking%'", [jobId]))[0]; return r && r.total > 0 ? r : null; });
   check(`B: a charge after the approval goes into the quotation ("${parked?.title}", AED ${parked?.price})`, !!parked?.quotation_line_id && parked?.title === "PARKING AT THE DEALER" && parked?.price === 60);
+  // 2 November 2026: THE price rule prices an Other line with a cost as cost + markup, so the charge goes in as the markup
+  // that lands on it (cost 50 + 20% = 60), never at the cost alone.
+  check("B: it sells at the charge, not at its cost (line total AED " + parked?.total + ", markup " + parked?.markup + "%)", parked?.total === 60 && Math.abs((parked?.markup ?? 0) - 20) < 1e-6);
 
   /* ---------- D. The fee button follows this job's fee choice ---------- */
   const own = await open(owner.id);

@@ -10,6 +10,7 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { aed } from "@/lib/quotes";
+import { flagBelowCost } from "@/lib/below-cost";
 
 /*
  * The parts desk prices an estimate's parts (30 October 2026). The car is not here yet, so there is no job and no part
@@ -75,6 +76,8 @@ export async function priceEstimatePart(quotationId: string, lineId: string, _st
     .eq("id", l.id);
   if (error) return { error: error.message, values };
   await refreshQuoteTotals(q.id, settings, staff.id, { reopen: true });
+  // A line this cost puts below its selling price is written down and stops the send (2 November 2026).
+  await flagBelowCost(q.id, [l.id], staff.id, `the parts desk priced it at ${aed(cost)} each`);
   await logQuoteEvent(q.id, null, staff.id, "part_priced", `${staff.display_name} priced ${l.title}: AED ${cost.toLocaleString("en-GB")} each from ${supplier}${wasAdvisor && previous !== null && Math.abs(previous - cost) > 0.005 ? ` (the advisor had AED ${previous.toLocaleString("en-GB")})` : ""}`);
   const advisors = await advisorsOf(q.id, q.created_by, q.number);
   if (wasAdvisor && previous !== null && Math.abs(previous - cost) > 0.005) {

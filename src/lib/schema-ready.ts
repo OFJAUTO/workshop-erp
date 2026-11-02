@@ -32,3 +32,9 @@ export const COMP_SELECT = "comp_reason, comp_original_job_id, comp_note, comp_s
 
 /** Record a payment any time (1 November 2026): unallocated advances, the car, the allocation. Migration 20261202090000_payments_anytime. */
 export const paymentsAnytimeReady = () => schemaReady("payments", "vehicle_id, allocated_at, allocated_by");
+
+/** Nothing below cost (2 November 2026): the owner's approval of one line below its cost, and the parts behind a
+ *  revision request. Migration 20261203090000_below_cost. Before it the owner cannot approve below cost (refused like everyone). */
+export const belowCostReady = () => schemaReady("quotation_lines", "below_cost_reason, below_cost_by, below_cost_at, below_cost_sell_aed, below_cost_cost_aed");
+export const BELOW_COST_SELECT = "id, below_cost_reason, below_cost_by, below_cost_at, below_cost_sell_aed, below_cost_cost_aed";
+export const revisionPartsReady = () => schemaReady("quotations", "revision_request_parts");

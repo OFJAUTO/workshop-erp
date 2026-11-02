@@ -262,9 +262,10 @@ await section("3 revision after approval", async () => {
   check("3: the new part is priced at AED 1,200", !!priced, JSON.stringify(priced));
   await sleep(3000);
   const asked = await until(async () => (await sql("select revision_requested_at, revision_request_kind, revision_request_reason from public.quotations where id = $1", [second.quotationId]))[0]?.revision_requested_at ? (await sql("select revision_request_kind, revision_request_reason from public.quotations where id = $1", [second.quotationId]))[0] : null, 40, 500);
-  check("3: a priced part from Parts asks the owner ('Peter added E2E ENGINE MOUNT, AED 1,200: allow revised quote?')", !!asked && asked.revision_request_kind === "parts" && /added E2E ENGINE MOUNT, AED 1,200/.test(asked.revision_request_reason ?? ""), JSON.stringify(asked));
+  // 2 November 2026: the figure is labelled as the COST (never a bare amount that reads like a selling price).
+  check("3: a priced part from Parts asks the owner ('Peter added E2E ENGINE MOUNT – cost AED 1,200.00: allow revised quote?')", !!asked && asked.revision_request_kind === "parts" && /added E2E ENGINE MOUNT – cost AED 1,200\.00/.test(asked.revision_request_reason ?? ""), JSON.stringify(asked));
   const n2 = (await sql("select title from public.notifications where job_id = $1 and type = 'revision_request' order by created_at desc limit 1", [second.jobId]))[0];
-  check("3: the owner's notification reads '… AED 1,200: allow revised quote?'", /AED 1,200: allow revised quote\?/.test(n2?.title ?? ""), n2?.title ?? "");
+  check("3: the owner's notification reads '… cost AED 1,200.00: allow revised quote?'", /cost AED 1,200\.00: allow revised quote\?/.test(n2?.title ?? ""), n2?.title ?? "");
   check("3: no new version was made without the owner", (await sql("select count(*)::int as n from public.quotations where job_id = $1 and kind = 'quotation'", [second.jobId]))[0].n === 1);
   await pb.close();
   const { browser: ob2, page: op2 } = await browserFor("owner", { viewport: { width: 1366, height: 1000 } });

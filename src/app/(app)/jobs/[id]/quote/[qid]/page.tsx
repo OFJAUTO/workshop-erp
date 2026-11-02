@@ -45,6 +45,8 @@ import { refuseRecord } from "@/lib/refusal";
 import { handbackOf, startersOf, staffNamesOf } from "@/lib/quote-lead";
 import { HandbackBanner } from "@/components/HandbackBanner";
 import { recoveryProviderList } from "@/lib/recovery-providers";
+import { requestPartsGone, revisionPreview } from "@/lib/quote-versions";
+import { belowCostReady } from "@/lib/schema-ready";
 
 export const dynamic = "force-dynamic";
 
@@ -136,12 +138,13 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const approverName = nameOf(q.owner_approved_by);
   const requesterName = nameOf(q.revision_requested_by);
   const revisionPending = !!q.revision_requested_at && !q.revision_allowed_at && !q.revision_declined_at;
+  const ownerSees = revisionPending && can(role, "approveQuotes") && !staff.viewingAs;
   // The owner's box sits in the right column under "Before sending": the approval above the limit, or a revision request.
   const discountBy = await discountByOf(q);
   // The owner's approval still covers what the quotation would ask now (the send's own rule).
   const approvalNow = approvalReasonsNow(bundle, settings, discountBy?.owner === true);
   const approvalStands = !!q.owner_approved_at && approvalCovers(q.owner_approval_reason ?? null, approvalNow);
-  const ownerBox = <OwnerApprovalBox q={q} mayApprove={can(role, "approveQuotes") && !staff.viewingAs} discountBy={discountBy} approveFocus={approve === "1"} revision={{ pending: revisionPending, requesterName, kind: q.revision_request_kind ?? null, reason: q.revision_request_reason ?? null }} />;
+  const ownerBox = <OwnerApprovalBox q={q} mayApprove={can(role, "approveQuotes") && !staff.viewingAs} discountBy={discountBy} approveFocus={approve === "1"} revision={{ pending: revisionPending, requesterName, kind: q.revision_request_kind ?? null, reason: q.revision_request_reason ?? null, preview: ownerSees ? await revisionPreview(q.id) : [], allGone: ownerSees ? !!(await requestPartsGone(q.id))?.allGone : false }} />;
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   // A revised quotation goes out with its own message ("has been updated").
   const template = (q.version > 1 ? settings.whatsapp_quote_revised_template : settings.whatsapp_quote_template)
@@ -191,6 +194,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     marginYellow: Number(settings.quote_margin_yellow_percent) || 30,
     marginRed: Number(settings.quote_margin_red_percent) || 20,
     clockedHours,
+    // 2 November 2026: the owner may approve a line below its cost (with a reason) once the database update is in.
+    belowCostReady: await belowCostReady(),
     lastPrices,
           packageCost,
   };

@@ -61,6 +61,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "parts_confirm_needed", label: "Parts listed for your car: confirm what you need", locked: true },
   { type: "parts_confirmed", label: "The technician confirmed or rejected parts", locked: true },
   { type: "quote_owner_approval", label: "A quotation needs the owner's approval", locked: true },
+  { type: "quote_below_cost", label: "A quotation line sells below its cost: raise the price or the owner approves it", locked: true },
   { type: "quote_opened", label: "Customer opened the quotation", locked: true },
   { type: "quote_approved", label: "Customer approved a quotation", locked: true },
   { type: "quote_declined", label: "Customer declined a quotation", locked: true },

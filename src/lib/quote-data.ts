@@ -1,5 +1,5 @@
 import { compApprovalReason, compCost, compLinesOf, type CompCost } from "./complimentary";
-import { COMP_SELECT, compReady } from "./schema-ready";
+import { BELOW_COST_SELECT, COMP_SELECT, belowCostReady, compReady } from "./schema-ready";
 import "server-only";
 import { createAdminClient } from "./supabase/admin";
 import { loadInspection, INSPECTION_BUCKET, type InspectionBundle, type InspectionMediaRow } from "./inspection-data";
@@ -70,6 +70,28 @@ export async function loadServices(staffId: string | null): Promise<{ categories
   };
 }
 
+/**
+ * The owner's below-cost approvals on these lines (2 November 2026), with his name, once the columns exist: the
+ * editor, "Before sending" and the owner's box read them; before the migration nothing is read.
+ */
+export async function attachBelowCost<T extends QuoteLine>(lines: T[]): Promise<T[]> {
+  if (!lines.length || !(await belowCostReady())) return lines;
+  const admin = createAdminClient();
+  const qids = Array.from(new Set(lines.map((l) => l.quotation_id)));
+  const { data } = await admin.from("quotation_lines").select(BELOW_COST_SELECT).in("quotation_id", qids).not("below_cost_at", "is", null);
+  const rows = (data ?? []) as { id: string; below_cost_reason: string | null; below_cost_by: string | null; below_cost_at: string | null; below_cost_sell_aed: number | string | null; below_cost_cost_aed: number | string | null }[];
+  if (!rows.length) return lines;
+  const ids = Array.from(new Set(rows.map((r) => r.below_cost_by).filter((x): x is string => !!x)));
+  const { data: people } = ids.length ? await admin.from("staff").select("id, display_name").in("id", ids) : { data: [] as { id: string; display_name: string }[] };
+  const names = new Map((people ?? []).map((p) => [p.id as string, p.display_name as string]));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  return lines.map((l) => {
+    const r = byId.get(l.id);
+    if (!r) return l;
+    return { ...l, below_cost_reason: r.below_cost_reason, below_cost_by: r.below_cost_by, below_cost_at: r.below_cost_at, below_cost_sell_aed: r.below_cost_sell_aed === null ? null : Number(r.below_cost_sell_aed), below_cost_cost_aed: r.below_cost_cost_aed === null ? null : Number(r.below_cost_cost_aed), below_cost_by_name: r.below_cost_by ? (names.get(r.below_cost_by) ?? null) : null };
+  });
+}
+
 /** One quotation or estimate with everything the builder and the customer page need. */
 export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
   const admin = createAdminClient();
@@ -100,7 +122,7 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
   const nameOf = new Map((people ?? []).map((p) => [p.id, p.display_name]));
   return {
     quotation,
-    lines: ((lines ?? []) as Record<string, unknown>[]).map(toLine),
+    lines: await attachBelowCost(((lines ?? []) as Record<string, unknown>[]).map(toLine)),
     parts: ((parts ?? []) as Record<string, unknown>[]).map(toPart),
     requests: (requests ?? []) as PartRequest[],
     events: ((events ?? []) as { id: number; event_type: string; note: string | null; created_at: string; created_by: string | null }[]).map((e) => ({ ...e, by_name: e.created_by ? (nameOf.get(e.created_by) ?? null) : null })),

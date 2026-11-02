@@ -83,7 +83,7 @@ try {
   await box.locator("[data-refuse-send]").click();
   const refused = await until(async () => (await sql("select refused_at, refused_reason, order_status, po_id from public.part_items where id = $1 and refused_at is not null", [mount.id]))[0]);
   check("B: the line is refused: reason kept, order status none, off the LPO", refused?.refused_reason === "Wrong supplier for this car" && refused?.order_status === "none" && !refused?.po_id);
-  const lpoB = (await sql("select status, total_cost_aed::float as total from public.purchase_orders where id = $1", [lpo.id]))[0];
+  const lpoB = await until(async () => { const r = (await sql("select status, total_cost_aed::float as total from public.purchase_orders where id = $1", [lpo.id]))[0]; return r && Math.abs(r.total - 200) < 0.01 ? r : null; }) ?? (await sql("select status, total_cost_aed::float as total from public.purchase_orders where id = $1", [lpo.id]))[0];
   check(`B: the rest of the LPO still waits (AED ${lpoB?.total})`, lpoB?.status === "pending_approval" && Math.abs(lpoB.total - 200) < 0.01);
   await own.page.waitForURL(/message=/, { timeout: 20000 }).catch(() => {});
   await sleep(800);
@@ -123,9 +123,9 @@ try {
   await desk.page.locator("body").click({ position: { x: 5, y: 5 } });
   const joined = await until(async () => (await sql("select order_status, po_id from public.part_items where id = $1 and po_id is not null", [repl.id]))[0], 60);
   check("C: once priced it is To order and on the LPO that waits", joined?.order_status === "to_order" && joined?.po_id === lpo.id);
-  const lpoC = (await sql("select status, total_cost_aed::float as total, supplier_name from public.purchase_orders where id = $1", [lpo.id]))[0];
+  const lpoC = await until(async () => { const r = (await sql("select status, total_cost_aed::float as total, supplier_name from public.purchase_orders where id = $1", [lpo.id]))[0]; return r && Math.abs(r.total - 1380) < 0.01 ? r : null; }) ?? (await sql("select status, total_cost_aed::float as total, supplier_name from public.purchase_orders where id = $1", [lpo.id]))[0];
   check(`C: the LPO total moved (AED ${lpoC?.total}, ${lpoC?.supplier_name})`, lpoC?.status === "pending_approval" && Math.abs(lpoC.total - 1380) < 0.01 && lpoC.supplier_name === "2 suppliers");
-  const addNote = (await sql("select title, body from public.notifications where staff_id = $1 and title = $2 order by created_at desc limit 1", [owner.id, `1 part added to ${lpo.number}`]))[0];
+  const addNote = await until(async () => (await sql("select title, body from public.notifications where staff_id = $1 and title = $2 order by created_at desc limit 1", [owner.id, `1 part added to ${lpo.number}`]))[0]);
   check(`C: the owner hears "1 part added to ${lpo.number}"`, !!addNote && /E2E TRANSMISSION MOUNT/i.test(addNote.body ?? ""));
   const pnLine = (await sql("select part_number from public.purchase_order_lines where po_id = $1 and part_item_id = $2 and is_active", [lpo.id, repl.id]))[0];
   check(`C: the LPO line carries the real part number (${pnLine?.part_number})`, pnLine?.part_number === "E2E-TM-RIGHT");

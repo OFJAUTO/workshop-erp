@@ -134,6 +134,15 @@ export type QuoteLine = {
   price_display?: "normal" | "complimentary" | "included" | null;
   /** Bodyshop services: the estimated installer hours (internal), from the service's default, editable. */
   installer_hours?: number | null;
+  /** 2 November 2026: the owner's approval of this line selling BELOW its cost, with the figures he saw (migration
+   *  20261203090000; read once the columns exist). A lower price or a higher cost later is no longer covered. */
+  below_cost_reason?: string | null;
+  below_cost_by?: string | null;
+  below_cost_at?: string | null;
+  below_cost_sell_aed?: number | null;
+  below_cost_cost_aed?: number | null;
+  /** The approver's name, filled in by the loader for the screen. */
+  below_cost_by_name?: string | null;
 };
 
 export type QuoteRow = {
@@ -549,13 +558,303 @@ export function isOutsideWork(l: Pick<QuoteLine, "line_type"> & { fee_kind?: str
 export function floorPrice(l: Pick<QuoteLine, "unit_cost" | "quantity">, minMarkup: number) {
   return round2((l.unit_cost ?? 0) * (1 + minMarkup / 100) * (l.quantity || 1));
 }
-/** Why a line with a cost breaks the floor, or null. A markup the owner set below the minimum (confirmed) is allowed. */
+/** Why a line with a cost breaks the floor, or null. A markup the owner set below the minimum (confirmed) is allowed.
+ *  A line below its COST is the below-cost rule's (belowCostOf): refused, or approved by the owner with a reason. */
 export function floorProblem(l: QuoteLine, minMarkup: number): string | null {
   if (!hasCostFloor(l) || isHidden(l) || isComplimentary(l)) return null;
+  if (belowCostOf(l)) return null;
   if (l.markup_confirmed && effectiveMarkupPercent(l) < minMarkup) return null;
   const net = lineTotal(l);
   const floor = floorPrice(l, minMarkup);
   if (net + 0.005 < floor) return `net price ${aed(net)} is below cost plus the minimum markup of ${minMarkup}% (${aed(floor)})`;
+  return null;
+}
+
+/* ------------------------------------------------------------------------------------------------------------------
+ * NOTHING BELOW COST (2 November 2026, Q-00039). THE price of a line is costPlusMarkup / linePrice / lineTotal above;
+ * THE cost is lineCost (plus a package's computed cost). No line on a quotation, estimate, revision or package sells
+ * below its cost unless the owner approved that line with a reason; his approval covers the figures he saw only.
+ * ---------------------------------------------------------------------------------------------------------------- */
+
+type BelowCostLine = Pick<QuoteLine, "line_type" | "quantity" | "unit_cost" | "markup_percent" | "unit_price" | "hours" | "labour_rate" | "discount_percent" | "visible_to_customer" | "title"> & {
+  price_display?: string | null; markup_mode?: MarkupMode | string | null; markup_aed?: number | null; fee_kind?: string | null; is_active?: boolean;
+  option_group?: string | null; chosen?: boolean; left_off?: boolean; package_key?: string | null; package_items?: unknown; installer_hours?: number | null;
+  outside_work?: boolean; hours_estimate?: number | null;
+  below_cost_reason?: string | null; below_cost_at?: string | null; below_cost_sell_aed?: number | string | null; below_cost_cost_aed?: number | string | null; below_cost_by_name?: string | null;
+};
+
+/** A line sold below its cost: the figures, and whether the owner's approval covers them. */
+export type BelowCost = { cost: number; sell: number; short: number; approved: boolean; reason: string | null; byName: string | null };
+
+/**
+ * What a line is judged with: a package's costing figures (film, tint, ceramic, consumables, installer hours), the
+ * bodyshop cost rate for a plain bodyshop service's installer hours, and the line's share of the quotation's header
+ * (labour / package) discount - what the line really sells for once that discount comes off.
+ */
+export type BelowCostOpts = { packageCosting?: PackageCosting | null; bodyshopRate?: number | null; headerDiscount?: number | null };
+
+/**
+ * THE cost a line's selling price is held against - the same figures the internal box counts for it: what the line
+ * costs us (lineCost: parts, other charges with a cost, recovery, a service's "our cost"); on a bodyshop service its
+ * installer hours at the bodyshop rate and, on a plain PPF line, its share of the film; a package's computed cost (film,
+ * tint, ceramic, consumables and installer hours) when the costing is given. Labour has its own floor (the standard rate).
+ */
+export function costOfLine(l: BelowCostLine, opts: BelowCostOpts = {}): number {
+  let cost = lineCost(l);
+  if (l.line_type === "package") {
+    const c = opts.packageCosting ?? null;
+    if (l.package_key && c) {
+      cost += packageLineCost({ title: l.title, itemLabels: packageItemLabels(l.package_items), installerHours: l.installer_hours ?? null }, c).total;
+    } else {
+      // quoteTotals: installer hours on a service line (or a package without the costing) cost the bodyshop rate.
+      cost += (Number(l.installer_hours) || 0) * Math.max(0, opts.bodyshopRate ?? c?.ratePerHour ?? 0);
+      // quoteTotals: a plain PPF line with no typed cost of its own uses its share of a whole car's film.
+      if (!l.package_key && c && !isOutsideWork(l) && !(lineCost(l) > 0) && lineIsPpf(l)) cost += plainPpfFilm(l, c);
+    }
+  }
+  return round2(cost);
+}
+
+/** Whether the quotation needs the package costing figures to judge its lines: a package, or a plain PPF service, that
+ *  is judged at all (not free, hidden or left out). */
+export function needsPackageCosting(lines: (Pick<QuoteLine, "is_active" | "line_type" | "package_key" | "left_off" | "option_group" | "chosen" | "title" | "package_items" | "visible_to_customer"> & { price_display?: string | null; fee_kind?: string | null })[]): boolean {
+  return lines.some((l) => l.is_active && !isUnchosen(l) && !isHidden(l) && !isComplimentary(l) && l.line_type === "package" && (!!l.package_key || lineIsPpf(l)));
+}
+
+/**
+ * Is the line selling below its cost? Null when it is not (or it is not judged: labour, a hidden or complimentary line,
+ * an option not used, a part left off, or a line still without its price - "enter the price" catches that one). The
+ * selling price is the line's own total LESS its share of the header discount (headerDiscountShares): a package
+ * discount can take a package below its cost as surely as a typed price.
+ */
+export function belowCostOf(l: BelowCostLine, opts: BelowCostOpts = {}): BelowCost | null {
+  if (l.line_type === "labour" || l.is_active === false) return null;
+  if (isHidden(l) || isComplimentary(l) || isUnchosen(l)) return null;
+  const costed = l.line_type === "part" || hasCostFloor(l);
+  if (costed ? l.unit_cost === null || l.unit_cost === undefined : !(Number(l.unit_price) > 0)) return null;
+  const cost = costOfLine(l, opts);
+  if (!(cost > 0)) return null;
+  const sell = round2(lineTotal(l) - Math.max(0, Number(opts.headerDiscount) || 0));
+  if (sell + 0.005 >= cost) return null;
+  const okSell = l.below_cost_sell_aed === null || l.below_cost_sell_aed === undefined ? null : Number(l.below_cost_sell_aed);
+  const okCost = l.below_cost_cost_aed === null || l.below_cost_cost_aed === undefined ? null : Number(l.below_cost_cost_aed);
+  // The owner's approval covers what he saw: never a lower price, never a higher cost.
+  const approved = !!l.below_cost_at && okSell !== null && sell + 0.005 >= okSell && (okCost === null || cost <= okCost + 0.005);
+  return { cost, sell, short: round2(cost - sell), approved, reason: approved ? (l.below_cost_reason ?? null) : null, byName: approved ? (l.below_cost_by_name ?? null) : null };
+}
+
+/**
+ * The header discount (labour / package discount) shared over the lines it comes off, in proportion to their price, the
+ * remainder on the largest: what each line really sells for once it is taken off. Empty when there is no discount.
+ */
+export function headerDiscountShares(lines: QuoteLine[], q: QuoteHeaderForTotals): Map<string, number> {
+  const out = new Map<string, number>();
+  const counted = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.left_off);
+  const { base, discount } = labourDiscountOf(counted, q);
+  if (!(discount > 0) || !(base > 0)) return out;
+  const takers = counted.filter((l) => (q.discount_kind ? takesLabourDiscount(l, q.discount_scope) : takesTotalDiscount(l)) && lineTotal(l) > 0);
+  let given = 0;
+  let largest: QuoteLine | null = null;
+  for (const l of takers) {
+    const share = round2((discount * lineTotal(l)) / base);
+    out.set(l.id, share);
+    given = round2(given + share);
+    if (!largest || lineTotal(l) > lineTotal(largest)) largest = l;
+  }
+  if (largest) out.set(largest.id, round2((out.get(largest.id) ?? 0) + discount - given));
+  return out;
+}
+
+/** Every line of a quotation below its cost (approved or not), each judged after its share of the header discount. */
+export function belowCostAll(lines: QuoteLine[], q: QuoteHeaderForTotals | null, opts: Omit<BelowCostOpts, "headerDiscount"> = {}): Map<string, BelowCost> {
+  const shares = q ? headerDiscountShares(lines, q) : new Map<string, number>();
+  const out = new Map<string, BelowCost>();
+  for (const l of lines) {
+    const b = belowCostOf(l, { ...opts, headerDiscount: shares.get(l.id) ?? 0 });
+    if (b) out.set(l.id, b);
+  }
+  return out;
+}
+
+/** Below cost now with no approval covering it, and worse than before (a lower price or a higher cost), else null. */
+export function worseBelowCost(was: BelowCost | null, now: BelowCost | null): BelowCost | null {
+  if (!now || now.approved) return null;
+  if (was && now.sell + 0.005 >= was.sell && now.cost <= was.cost + 0.005) return null;
+  return now;
+}
+
+/**
+ * A change that puts a line below its cost, or deeper below it, with no approval covering it: what the save refuses for
+ * everyone but the owner (who gives a reason). A line already below its cost (Parts raised the cost) can still be
+ * changed in any way that does not make it worse - the urgency, a note, a higher price.
+ */
+export function belowCostChange(before: BelowCostLine | null, after: BelowCostLine, opts: BelowCostOpts & { headerDiscountBefore?: number | null } = {}): BelowCost | null {
+  const was = before ? belowCostOf(before, { ...opts, headerDiscount: opts.headerDiscountBefore ?? opts.headerDiscount }) : null;
+  return worseBelowCost(was, belowCostOf(after, opts));
+}
+
+/**
+ * THE check of a change to a quotation (a line, a new line, the header discount): every line it puts below its cost or
+ * deeper below it, with no approval covering it - each line judged after its share of the header discount, so lowering
+ * a labour line under an AED discount can take a package below cost too. Empty when the change is fine.
+ */
+export function belowCostChangesIn(before: { lines: QuoteLine[]; q: QuoteHeaderForTotals | null }, after: { lines: QuoteLine[]; q: QuoteHeaderForTotals | null }, opts: Omit<BelowCostOpts, "headerDiscount"> = {}): { line: QuoteLine; below: BelowCost }[] {
+  const was = belowCostAll(before.lines, before.q, opts);
+  const now = belowCostAll(after.lines, after.q, opts);
+  const out: { line: QuoteLine; below: BelowCost }[] = [];
+  for (const l of after.lines) {
+    const w = worseBelowCost(was.get(l.id) ?? null, now.get(l.id) ?? null);
+    if (w) out.push({ line: l, below: w });
+  }
+  return out;
+}
+
+/**
+ * The fields of a line change that can never be refused for selling below cost: what the line COSTS (a cost is a fact -
+ * a typed "our cost", the installer hours, the package's items, the name a package is costed by) and plain words
+ * (notes, urgency, positions...). A change touching only these is saved; a line it puts below cost is written down and
+ * stops the send until the price is raised or the owner approves it. Every other field is price-side: refused when it
+ * makes a line sell below its cost (the owner: with his reason).
+ */
+export const NOT_PRICE_KEYS = new Set([
+  // cost-side
+  "unit_cost", "installer_hours", "package_items", "hours_estimate", "title",
+  // plain words and settings that never change a price or a cost
+  "details", "urgency", "positions", "group_label", "source_type", "source_key", "parent_line_id", "dangerous", "cut_method", "cut_note", "film_colour", "film_code", "tint_percent", "parts_note", "discount_reason", "recovery_provider", "service_id", "price_per",
+  // the request itself
+  "id", "below_cost_reason",
+]);
+export const priceSideKeys = (patch: Record<string, unknown>) => Object.keys(patch).filter((k) => !NOT_PRICE_KEYS.has(k));
+
+/** "FRONT RH HEAD LIGHT would sell at AED 5,000.00, below its cost of AED 5,502.73 (AED 502.73 under)". */
+export function belowCostWords(title: string | null | undefined, b: Pick<BelowCost, "cost" | "sell" | "short">): string {
+  return `${(title ?? "").trim() || "This line"} would sell at ${aed(b.sell)}, below its cost of ${aed(b.cost)} (${aed(b.short)} under)`;
+}
+
+/** The left/right words of a part name ("FRONT LH LIGHT"), for finding the same part on the other SIDE. Front and rear stay:
+ *  a front and a rear part are different parts (a rear brake disc is not the front one's twin). */
+const LEFT_RIGHT_WORDS = /\b(left|right|lh|rh|l\/h|r\/h|pair|both|all\s*4|all four)\b/gi;
+/** A part's name without its left/right side: "FRONT LH LIGHT" and "FRONT RH LIGHT" are both "front light"; "REAR
+ *  BRAKE DISCS" stays "rear brake discs". FL/FR read as front, RL/RR as rear. */
+export function sidelessName(title: string | null | undefined): string {
+  return String(title ?? "")
+    .toLowerCase()
+    .replace(/\b(fl|fr)\b/g, "front")
+    .replace(/\b(rl|rr)\b/g, "rear")
+    .replace(LEFT_RIGHT_WORDS, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+/** The markup a part gets when it joins a quotation after the first version, and why. */
+export type MarkupPick = { markup_mode: MarkupMode; markup_percent: number; markup_aed: number | null; source: "twin" | "quotation" | "minimum"; from: string | null };
+
+type MarkupSource = { title: string; partNumber?: string | null; unit_cost: number | null; markup_mode?: MarkupMode | string | null; markup_percent: number | null; markup_aed?: number | null };
+
+/** A cost under this is a placeholder (AED 1.00 typed to hold a line), never a figure a markup is learnt from. */
+export const REAL_COST_MIN_AED = 10;
+
+/**
+ * A part added after approval or by a revision takes the quotation's own markup, never silently the bare minimum: the
+ * matching part's (the same part number, or the same name on the other side), else the percentage markup used most on
+ * the quotation's parts (a tie goes to the LOWER one), else the minimum. Only parts with a real cost teach a markup: a
+ * placeholder cost (AED 1.00 + AED 870 is "87,000%") and AED markups never set the percentage for another part. Never
+ * below the minimum (so never below cost). Part numbers come compacted.
+ */
+export function markupForAddedPart(others: MarkupSource[], part: { title: string; partNumber?: string | null; cost: number | null }, minMarkup: number): MarkupPick {
+  const cost = Number(part.cost) || 0;
+  const costed = others.filter((o) => Number(o.unit_cost) >= REAL_COST_MIN_AED);
+  const pn = (part.partNumber ?? "").trim();
+  const name = sidelessName(part.title);
+  const twin = costed.find((o) => pn.length >= 4 && (o.partNumber ?? "").trim() === pn) ?? (name ? costed.find((o) => sidelessName(o.title) === name) : undefined);
+  if (twin) {
+    if (twin.markup_mode === "aed") {
+      const amt = Math.max(Number(twin.markup_aed) || 0, minimumMarkupAed(cost, minMarkup));
+      return { markup_mode: "aed", markup_percent: Number(twin.markup_percent) || minMarkup, markup_aed: round2(amt), source: "twin", from: twin.title };
+    }
+    return { markup_mode: "percent", markup_percent: Math.max(minMarkup, Number(twin.markup_percent) || 0), markup_aed: null, source: "twin", from: twin.title };
+  }
+  const counts = new Map<number, number>();
+  for (const o of costed) {
+    if (o.markup_mode === "aed") continue;
+    const p = Math.round(effectiveMarkupPercent(o) * 100) / 100;
+    if (Number.isFinite(p)) counts.set(p, (counts.get(p) ?? 0) + 1);
+  }
+  const best = Array.from(counts.entries()).sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
+  if (best && best[0] > minMarkup) return { markup_mode: "percent", markup_percent: best[0], markup_aed: null, source: "quotation", from: null };
+  return { markup_mode: "percent", markup_percent: minMarkup, markup_aed: null, source: "minimum", from: null };
+}
+
+/** "80% (same as FRONT LH LIGHT)", "30% (most used on this quotation)", "5% (the minimum)". */
+export function markupPickWords(p: MarkupPick, cost?: number | null): string {
+  const what = p.markup_mode === "aed" ? `AED ${round2(p.markup_aed ?? 0).toLocaleString("en-GB", { minimumFractionDigits: 2 })} each` : `${Math.round(p.markup_percent * 100) / 100}%`;
+  void cost;
+  return `${what} ${p.source === "twin" ? `(same as ${p.from})` : p.source === "quotation" ? "(most used on this quotation)" : "(the minimum)"}`;
+}
+
+/**
+ * A cost far under what the same part cost elsewhere (its twin on the job, the last price for the same part number):
+ * the first reference it is under HALF of, in words; null when none. The supplier's discount taken twice (Q-00039:
+ * list 12,228.30 already net, less 55% again) shows up here.
+ */
+export function cheapCostWarning(cost: number | null | undefined, refs: { label: string; cost: number | null | undefined }[]): string | null {
+  const c = Number(cost);
+  if (!(c > 0)) return null;
+  for (const r of refs) {
+    const rc = Number(r.cost);
+    if (rc > 0 && c < rc * 0.5) return `cost ${aed(c)} is ${Math.round((1 - c / rc) * 100)}% under ${r.label} (${aed(rc)})`;
+  }
+  return null;
+}
+
+export type LineForDiff = { unit_cost: number | string | null; quantity: number | string | null; part_type?: string | null; brand?: string | null; positions?: string[] | null };
+type PartForDiff = Pick<PartItem, "cost_aed" | "quantity" | "confirmed_quantity" | "part_type" | "brand" | "positions" | "is_active" | "confirm_status">;
+const posKey = (p: string[] | null | undefined) => (p ?? []).map((x) => String(x).trim().toLowerCase()).filter(Boolean).sort().join(",");
+const typeWord = (t: string | null | undefined) => (t ? (PART_TYPE_LABELS[t] ?? t).toUpperCase() : "NONE");
+
+/**
+ * How a part's line differs from the part itself: taken off (the line goes), the cost or quantity (money), and the
+ * type, brand or side the customer sees (in words). The owner's box and the new version follow the same answer. The
+ * name is left out: a line's customer name may be the owner's own words.
+ */
+export function partLineChanges(l: LineForDiff, p: PartForDiff): { gone: boolean; money: boolean; words: string[] } {
+  const gone = p.confirm_status === "rejected" || p.is_active === false;
+  const qty = Number(p.confirmed_quantity ?? p.quantity) || 1;
+  const money = Number(p.cost_aed ?? -1) !== Number(l.unit_cost ?? -1) || qty !== (Number(l.quantity) || 1);
+  const words: string[] = [];
+  if ((p.part_type ?? null) !== (l.part_type ?? null)) words.push(`type ${typeWord(l.part_type)} → ${typeWord(p.part_type)}`);
+  if (String(p.brand ?? "").trim().toLowerCase() !== String(l.brand ?? "").trim().toLowerCase()) words.push(`brand ${String(l.brand ?? "").trim().toUpperCase() || "NONE"} → ${String(p.brand ?? "").trim().toUpperCase() || "NONE"}`);
+  if (posKey(p.positions) !== posKey(l.positions)) words.push(`side ${(l.positions ?? []).join(", ").toUpperCase() || "NONE"} → ${(p.positions ?? []).join(", ").toUpperCase() || "NONE"}`);
+  return { gone, money, words };
+}
+
+/** One part (or early charge) the owner would let into a revised quotation: what it costs and what it would sell for (his box). */
+export type RevisionPreviewRow = {
+  /** The part's id, or the early charge's id for a charge row. */
+  partId: string;
+  kind: "added" | "changed" | "removed" | "charge";
+  /** For a changed part: what changed besides the cost and quantity, in words ("type OEM → GENUINE"). */
+  changes?: string[];
+  title: string;
+  supplier: string | null;
+  list: number | null;
+  discount: number | null;
+  cost: number | null;
+  /** The cost on the approved quotation, for a changed part. */
+  oldCost: number | null;
+  qty: number;
+  sell: number | null;
+  markupWords: string | null;
+  below: BelowCost | null;
+  cheap: string | null;
+};
+/** Red on the owner's box: it would sell below cost, or its cost is far under the same part elsewhere. */
+export const revisionRowRed = (r: Pick<RevisionPreviewRow, "below" | "cheap">) => !!(r.below && !r.below.approved) || !!r.cheap;
+/** The red words of a row, for the box, the bell and the event. */
+export function revisionRowWarning(r: Pick<RevisionPreviewRow, "title" | "below" | "cheap">): string | null {
+  if (r.below && !r.below.approved) return belowCostWords(r.title, r.below);
+  if (r.cheap) return `${r.title}: ${r.cheap} – check the Parts price before allowing`;
   return null;
 }
 
@@ -816,12 +1115,14 @@ export type SendBlocker = { key: string; label: string };
 
 /** What stops a quotation from being completed and sent. Empty means it can go. */
 export function sendBlockers(
-  q: Pick<QuoteRow, "kind" | "status">,
+  q: Pick<QuoteRow, "kind" | "status"> & Partial<QuoteHeaderForTotals>,
   lines: QuoteLine[],
   parts: PartItem[],
-  settings: { minMarkup: number; openRequests?: number; workshopEstimate?: { hours: number | null; agreed: boolean } | null; unquotedFindings?: number; confirmPercent?: number },
+  settings: { minMarkup: number; openRequests?: number; workshopEstimate?: { hours: number | null; agreed: boolean } | null; unquotedFindings?: number; confirmPercent?: number; /** A package's computed cost (the below-cost check). */ packageCosting?: PackageCosting | null; /** The bodyshop cost rate: a service's installer hours (the below-cost check). */ bodyshopRate?: number | null },
 ): SendBlocker[] {
   const out: SendBlocker[] = [];
+  // Nothing below cost: every line judged after its share of the header discount (THE rule, belowCostAll).
+  const belows = belowCostAll(lines, { discount_percent: Number(q.discount_percent) || 0, vat_percent: q.vat_percent ?? 5, discount_kind: q.discount_kind ?? null, discount_value: q.discount_value ?? null, discount_scope: q.discount_scope ?? null }, { packageCosting: settings.packageCosting, bodyshopRate: settings.bodyshopRate });
   const active = lines.filter((l) => l.is_active && !isUnchosen(l) && !l.fee_kind);
   if (active.length === 0) out.push({ key: "lines", label: "Add at least one line" });
   if (settings.openRequests) out.push({ key: "parts", label: `${settings.openRequests} part request${settings.openRequests === 1 ? "" : "s"} still with Parts` });
@@ -851,6 +1152,9 @@ export function sendBlockers(
     if (l.line_type === "recovery" && l.recovery_provider_kind !== "customer" && !comp && !isHidden(l) && !(l.unit_price && l.unit_price > 0)) out.push({ key: `line-${l.id}`, label: `${short}: enter the price per trip, or hide the line` });
     const floor = floorProblem(l, settings.minMarkup);
     if (floor) out.push({ key: `line-${l.id}`, label: `${short}: ${floor}` });
+    // Nothing goes out below its cost without the owner's approval of that line (2 November 2026).
+    const below = belows.get(l.id);
+    if (below && !below.approved) out.push({ key: `line-${l.id}`, label: `${short}: sells at ${aed(below.sell)}, below its cost of ${aed(below.cost)} – raise the price, or the owner approves it` });
   }
   // An estimate is never sent with a part still unpriced: "2 parts still waiting for the parts desk", the tap goes to
   // the first of them (send it, price it yourself, or remove the line).

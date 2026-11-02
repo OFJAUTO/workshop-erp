@@ -1,4 +1,5 @@
 import { compJobChoices } from "@/lib/quote-data";
+import { belowCostReady } from "@/lib/schema-ready";
 import { damagedPanelsOf } from "@/lib/damage-data";
 import Link from "next/link";
 import { installerHistoryFor } from "@/lib/bodyshop";
@@ -152,7 +153,8 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           bodyshopRate: Number(settings.bodyshop_cost_rate_aed) || 50,
     handcutSurcharge: Number(settings.ppf_handcut_surcharge_aed) || 0,
     // Section 7: the package cost estimate numbers (film, tint, ceramic, consumables, hours, rate).
-    costing: await packageCostingOf(settings, [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "), q.film_rolls_est, q.tint_spec, q.vehicle_id),
+    // The same car name the server costs a package with (make, model AND variant: "Range Rover LWB" is a big car).
+    costing: await packageCostingOf(settings, [vehicle?.make?.name, vehicle?.model?.name, (vehicle as { variant?: string | null } | null)?.variant].filter(Boolean).join(" "), q.film_rolls_est, q.tint_spec, q.vehicle_id),
           installerHistory: await installerHistoryFor(q.vehicle_id ?? null),
           goodMarginPercent: Number(settings.report_good_margin_percent) || 25,
           bankChargePercent: highestBankCharge(settings),
@@ -166,6 +168,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           today: dubaiDate(),
           workingTime: workingTimeOf(settings),
           reasons: { part_discount: reasonsFor(settings, "part_discount") },
+          belowCostReady: await belowCostReady(),
         }}
         readOnly={!canEdit}
         lockedBy={lockedBy}

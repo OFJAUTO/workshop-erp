@@ -31,6 +31,7 @@ import { CompBox } from "@/app/(app)/quotes/CompBox";
 import { PackageItemsToggle } from "@/components/PackageItemsToggle";
 import { damagePartSuggestions } from "@/lib/body-parts";
 import { compApprovalReason, compCost, compLinesOf, compProblem } from "@/lib/complimentary";
+import { NOT_PRICE_KEYS, belowCostAll, belowCostChangesIn, belowCostWords, type BelowCost } from "@/lib/quotes";
 import { INTERNAL_ONLY_LABEL, profitLines, approvalCovers, discountAgainstLimit, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
@@ -40,7 +41,7 @@ import { CommissionLine } from "./CommissionLine";
 type Op = Record<string, unknown>;
 
 /** Every change goes to the server at once, through a queue kept in the browser so nothing typed is lost. A 409 asks the person to confirm first. */
-function useQuoteAutosave(quotationId: string, onSaved: () => void, onConfirm: (op: Op, message: string) => void) {
+function useQuoteAutosave(quotationId: string, onSaved: () => void, onConfirm: (op: Op, message: string, data: Record<string, unknown>) => void) {
   const key = `erp-quote-queue-${quotationId}`;
   const queue = useRef<Op[]>([]);
   const busy = useRef(false);
@@ -67,7 +68,7 @@ function useQuoteAutosave(quotationId: string, onSaved: () => void, onConfirm: (
         if (res.status === 409 && data.confirm) {
           queue.current.shift();
           persist();
-          onConfirm(op, data.error ?? "Confirm?");
+          onConfirm(op, data.error ?? "Confirm?", data as Record<string, unknown>);
           continue;
         }
         if (!res.ok) {
@@ -139,7 +140,11 @@ function useQuoteAutosave(quotationId: string, onSaved: () => void, onConfirm: (
     },
     [flush, persist],
   );
-  return { save, state, error, failed, retryFailed };
+  /** A refused change of a line that is put back to the saved figure: its "Not saved" chip goes (nothing to retry). */
+  const dropFailedFor = useCallback((lineId: string) => {
+    setFailed((fl) => fl.filter((o) => (o.patchLine as { id?: string } | undefined)?.id !== lineId));
+  }, []);
+  return { save, state, error, failed, retryFailed, dropFailedFor };
 }
 
 export type EditorSettings = {
@@ -193,6 +198,8 @@ export type EditorSettings = {
   costing?: import("@/lib/quote-data").PackageCosting;
   /** Section 10: the optional hand-cut surcharge (Settings, 0 = none). */
   handcutSurcharge?: number;
+  /** 2 November 2026: the owner's approval below cost can be kept (the database update is in). */
+  belowCostReady?: boolean;
 };
 
 export type RecoveryType = { key: string; label: string; cost: number; price: number };
@@ -463,6 +470,20 @@ export function QuoteEditor({
   const [focusNewest, setFocusNewest] = useState<null | "name" | "amount">(null);
   const [stripOpen, toggleStrip] = useStripOpen();
   const [confirming, setConfirming] = useState<null | { op: Op; message: string }>(null);
+  // Nothing below cost (2 November 2026): the owner's reason windows, one at a time in the order the server asked
+  // (a figure he typed, a discount, or a line already below cost); an advisor's price-side figures kept on screen but
+  // not saved (held until a later change clears them, then sent together); the lines whose owner was asked; and a
+  // short word under a line whose unsaved figure was put back.
+  type BelowAsk = { lineId: string; title: string; below: Pick<BelowCost, "cost" | "sell" | "short">; more: number; op: Op | null; reason: string };
+  const [belowAsks, setBelowAsks] = useState<BelowAsk[]>([]);
+  const belowAsk = belowAsks[0] ?? null;
+  const setBelowAskReason = (reason: string) => setBelowAsks((a) => (a.length ? [{ ...a[0], reason }, ...a.slice(1)] : a));
+  const [belowHeld, setBelowHeld] = useState<Map<string, { fields: Partial<QuoteLine>; words: string }>>(() => new Map());
+  const [askedOwner, setAskedOwner] = useState<Set<string>>(() => new Set());
+  const [belowInfo, setBelowInfo] = useState<Map<string, string>>(() => new Map());
+  /** What this screen sent per line since the last answer from the server: the server's copy plus these is what the
+   *  quotation really holds (an advisor's change is judged against THAT, never against his own unsaved figure). */
+  const sentFields = useRef<Map<string, Record<string, unknown>>>(new Map());
   const [actionError, setActionError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -480,8 +501,17 @@ export function QuoteEditor({
       refreshWhenIdle(() => router.refresh());
     }, wait);
   }, [router]);
-  const onConfirm = useCallback((op: Op, message: string) => setConfirming({ op, message }), [setConfirming]);
-  const { save, state, error, failed, retryFailed } = useQuoteAutosave(quotation.id, refresh, onConfirm);
+  const onConfirm = useCallback((op: Op, message: string, data: Record<string, unknown>) => {
+    if (data.ask === "below_cost") {
+      const p = (op.patchLine ?? op.addLine) as { id?: string } | undefined;
+      const ask = { lineId: String(data.lineId ?? p?.id ?? ""), title: String(data.title ?? ""), below: { cost: Number(data.cost) || 0, sell: Number(data.sell) || 0, short: Number(data.short) || 0 }, more: Number(data.more) || 0, op, reason: "" };
+      // Several asks in a row (two figures typed quickly) wait their turn; none overwrites another.
+      setBelowAsks((a) => [...a, ask]);
+      return;
+    }
+    setConfirming({ op, message });
+  }, [setConfirming, setBelowAsks]);
+  const { save, state, error, failed, retryFailed, dropFailedFor } = useQuoteAutosave(quotation.id, refresh, onConfirm);
   /** New lines drawn on screen before the server answers: kept through refreshes until the server row arrives. */
   const pendingNew = useRef<Set<string>>(new Set());
   /** Section 11: the line order on screen while a reorder save is in flight (the merge keeps it until the server echoes it). */
@@ -516,14 +546,18 @@ export function QuoteEditor({
     setLines((cur) => {
       const known = new Map(cur.map((l) => [l.id, l]));
       const serverIds = new Set(initialLines.map((l) => l.id));
+      // The owner's below-cost approval is the server's alone: never a stale copy from the screen (2 November 2026).
+      const stampOf = (l: QuoteLine) => ({ below_cost_reason: l.below_cost_reason ?? null, below_cost_by: l.below_cost_by ?? null, below_cost_at: l.below_cost_at ?? null, below_cost_sell_aed: l.below_cost_sell_aed ?? null, below_cost_cost_aed: l.below_cost_cost_aed ?? null, below_cost_by_name: l.below_cost_by_name ?? null });
+      // An advisor's held figures (not saved, below cost) stay on the screen where he typed them.
+      const heldOn = (x: QuoteLine) => { const h = belowHeld.get(x.id); return h ? { ...x, ...h.fields } : x; };
       const out = initialLines.map((l) => {
         const k = known.get(l.id);
         if (!k || l.fee_kind) return l;
-        if (pendingNew.current.has(l.id)) return dirty.has(l.id) ? { ...l, ...k } : l;
-        if (dirty.has(l.id)) return { ...l, ...k };
-        const merged: QuoteLine = { ...l, ...k, unit_cost: l.part_item_id ? l.unit_cost : k.unit_cost, quantity: l.part_item_id ? l.quantity : k.quantity, discount_percent: l.discount_percent, markup_percent: l.markup_percent, markup_confirmed: l.markup_confirmed, hours: l.hours, chosen: l.chosen, left_off: l.left_off, parent_line_id: l.parent_line_id, dangerous: l.dangerous, title: l.part_item_id ? l.title : k.title };
+        if (pendingNew.current.has(l.id)) return dirty.has(l.id) ? heldOn({ ...l, ...k, ...stampOf(l) }) : l;
+        if (dirty.has(l.id)) return heldOn({ ...l, ...k, ...stampOf(l) });
+        const merged: QuoteLine = { ...l, ...k, unit_cost: l.part_item_id ? l.unit_cost : k.unit_cost, quantity: l.part_item_id ? l.quantity : k.quantity, discount_percent: l.discount_percent, markup_percent: l.markup_percent, markup_confirmed: l.markup_confirmed, hours: l.hours, chosen: l.chosen, left_off: l.left_off, parent_line_id: l.parent_line_id, dangerous: l.dangerous, title: l.part_item_id ? l.title : k.title, ...stampOf(l) };
         // An estimate part is priced elsewhere (the parts desk, or this screen's saved "I have a price"): its price fields come from the server.
-        return isEstimatePart(l) ? { ...merged, ...estPriceOf(l) } : merged;
+        return heldOn(isEstimatePart(l) ? { ...merged, ...estPriceOf(l) } : merged);
       });
       for (const l of cur) if (!serverIds.has(l.id) && pendingNew.current.has(l.id)) out.push(l);
       for (const id of Array.from(pendingNew.current)) if (serverIds.has(id)) pendingNew.current.delete(id);
@@ -614,9 +648,120 @@ export function QuoteEditor({
       }
       return;
     }
-    const op = () => ({ patchLine: { id, ...fields } });
+    if (belowInfo.has(id)) setBelowInfo((m) => { const n = new Map(m); n.delete(id); return n; });
+    // Nothing below cost (2 November 2026): an advisor's PRICE-side figure that would sell a line below its cost (or
+    // deeper below it) is kept on the screen in red and NOT saved - judged against what the quotation really holds
+    // (the server's copy plus what this screen sent), never against his own unsaved figure. What a line costs and plain
+    // words always go (a cost is a fact; the server writes a line it puts below cost down). A held figure waits: the
+    // next change of that line is judged together with it, and once the two clear the cost they are sent together.
+    // The owner's figures all go: the server asks him for the reason.
+    if (!isOwner && lines.some((l) => l.id === id)) {
+      const priceNow = Object.fromEntries(Object.entries(fields).filter(([k]) => !NOT_PRICE_KEYS.has(k))) as Partial<QuoteLine>;
+      const otherNow = Object.fromEntries(Object.entries(fields).filter(([k]) => NOT_PRICE_KEYS.has(k))) as Partial<QuoteLine>;
+      const held = belowHeld.get(id)?.fields ?? null;
+      if (Object.keys(priceNow).length || held) {
+        const priceAll = { ...(held ?? {}), ...priceNow } as Partial<QuoteLine>;
+        const basis = basisLines();
+        const sent = basis.map((l) => (l.id === id ? ({ ...l, ...otherNow } as QuoteLine) : l));
+        const hits = belowCostChangesIn({ lines: sent, q }, { lines: sent.map((l) => (l.id === id ? ({ ...l, ...priceAll } as QuoteLine) : l)), q }, { packageCosting: liveCosting, bodyshopRate: settings.bodyshopRate ?? 0 });
+        if (hits.length) {
+          // Only the timers of the held fields stop; a note or a cost typed a moment earlier still goes.
+          const heldKeys = Object.keys(priceAll);
+          for (const key of Object.keys(timers.current)) {
+            if (key.startsWith(`line-${id}-`) && key.slice(`line-${id}-`.length).split(",").some((k) => heldKeys.includes(k))) {
+              clearTimeout(timers.current[key]);
+              delete timers.current[key];
+              delete waiting.current[key];
+            }
+          }
+          const words = `${belowCostWords(hits[0].line.title, hits[0].below)}${hits.length > 1 ? `; and ${hits.length - 1} more` : ""}`;
+          setBelowHeld((m) => new Map(m).set(id, { fields: priceAll, words }));
+          if (Object.keys(otherNow).length) sendLine(id, otherNow, immediate);
+          return;
+        }
+        if (held) setBelowHeld((m) => { const n = new Map(m); n.delete(id); return n; });
+        sendLine(id, { ...priceAll, ...otherNow }, immediate);
+        return;
+      }
+    }
+    sendLine(id, fields, immediate);
+  };
+  /** A line change on its way to the server (debounced per field set); what was sent is remembered as the basis. */
+  const sendLine = (id: string, fields: Partial<QuoteLine>, immediate: boolean) => {
+    const op = () => {
+      sentFields.current.set(id, { ...(sentFields.current.get(id) ?? {}), ...fields });
+      return { patchLine: { id, ...fields } };
+    };
     if (immediate) save(op());
     else debounced(`line-${id}-${Object.keys(fields).join(",")}`, op);
+  };
+  /** What the quotation really holds now, line by line: the server's copy plus what this screen sent since (a sent field
+   *  the server refused does not count; one the server already shows is forgotten). Lines not on the server yet as drawn. */
+  const basisLines = (): QuoteLine[] => {
+    const refused = new Map<string, Set<string>>();
+    for (const o of failed) {
+      const p = o.patchLine as Record<string, unknown> | undefined;
+      if (p?.id) refused.set(String(p.id), new Set([...(refused.get(String(p.id)) ?? []), ...Object.keys(p)]));
+    }
+    const same = (a: unknown, b: unknown) => (typeof a === "number" || typeof b === "number" ? Number(a) === Number(b) : JSON.stringify(a ?? null) === JSON.stringify(b ?? null));
+    return lines.map((l) => {
+      const server = initialLines.find((x) => x.id === l.id);
+      if (!server) return l;
+      const sent = sentFields.current.get(l.id);
+      if (!sent) return server;
+      const keep: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(sent)) {
+        if (refused.get(l.id)?.has(k)) continue;
+        if (same((server as Record<string, unknown>)[k], v)) continue;
+        keep[k] = v;
+      }
+      return { ...server, ...keep } as QuoteLine;
+    });
+  };
+  /** Put the line back to what the quotation really holds (an unsaved figure below cost dropped). */
+  const putBack = (id: string, words: string | null) => {
+    const saved = basisLines().find((x) => x.id === id);
+    if (saved) setLines((cur) => cur.map((x) => (x.id === id ? { ...saved } : x)));
+    setBelowHeld((m) => { const n = new Map(m); n.delete(id); return n; });
+    dropFailedFor(id);
+    if (words) setBelowInfo((m) => new Map(m).set(id, words));
+  };
+  /** "Raise the price, or ask the owner": the answer decides what the line says - asked, or the saved price stands. */
+  const askOwner = async (id: string) => {
+    try {
+      const res = await fetch("/api/quote/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ quotationId: quotation.id, belowCostAsk: { id } }) });
+      const data = (await res.json().catch(() => ({}))) as { asked?: boolean; notBelow?: boolean; error?: string };
+      if (res.ok && data.asked) setAskedOwner((s0) => new Set(s0).add(id));
+      else if (res.ok && data.notBelow) putBack(id, "The saved price is not below cost: the unsaved figure was put back.");
+      else setBelowInfo((m) => new Map(m).set(id, data.error ?? "Couldn't ask the owner. Try again."));
+    } catch {
+      setBelowInfo((m) => new Map(m).set(id, "No connection: the owner was not asked. Try again."));
+    }
+  };
+  /** The red line under anything selling below its cost: approved (who and why), or what to do about it. */
+  const belowCostNote = (l: QuoteLine) => {
+    const info = belowInfo.get(l.id);
+    const held = belowHeld.get(l.id);
+    if (held) return (
+      <div className="flex flex-wrap items-center gap-2 rounded-control border border-red-bar bg-red-soft px-2 py-1 text-[11px] font-bold text-red" data-below-cost-held={l.id}>
+        <span>Not saved: {held.words}. Raise the price – only the owner can sell below cost.</span>
+        {disabled ? null : <button type="button" onClick={() => putBack(l.id, null)} className="min-h-9 rounded-control border border-red-bar bg-white px-2.5 font-bold" data-below-cost-put-back={l.id}>Put back the saved price</button>}
+      </div>
+    );
+    const b = belowMap.get(l.id) ?? null;
+    if (!b) return info ? <div className="px-1 text-[11px] font-semibold text-muted" data-below-cost-info={l.id}>{info}</div> : null;
+    if (b.approved) return <div className="px-1 text-[11px] font-semibold text-red" data-below-cost-line={l.id} data-below-cost-approved>Below cost: {aed(b.sell)} against a cost of {aed(b.cost)} · approved by {b.byName ?? "the owner"}{b.reason ? `: ${b.reason}` : ""}</div>;
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-control border border-red-bar bg-red-soft px-2 py-1 text-[11px] font-bold text-red" data-below-cost-line={l.id}>
+        <span>Below cost: sells at {aed(b.sell)}, costs {aed(b.cost)} ({aed(b.short)} under).</span>
+        {disabled ? null : isOwner ? (
+          settings.belowCostReady ? <button type="button" onClick={() => setBelowAsks((a) => [...a, { lineId: l.id, title: l.title, below: b, more: 0, op: null, reason: "" }])} className="min-h-9 rounded-control border border-red-bar bg-white px-2.5 font-bold" data-below-cost-approve={l.id}>Approve below cost…</button> : <span className="font-semibold">Raise the price (approving below cost opens once the database update is applied).</span>
+        ) : askedOwner.has(l.id) ? <span className="font-semibold" data-below-cost-asked={l.id}>The owner was asked.</span> : (
+          <button type="button" onClick={() => void askOwner(l.id)} className="min-h-9 rounded-control border border-red-bar bg-white px-2.5 font-bold" data-below-cost-ask-owner={l.id}>Raise the price, or ask the owner</button>
+        )}
+        {info ? <span className="font-semibold" data-below-cost-info={l.id}>{info}</span> : null}
+      </div>
+    );
   };
   const addLine = (fields: Partial<QuoteLine> & { service_id?: string | null }) => {
     const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : null;
@@ -720,6 +865,16 @@ export function QuoteEditor({
   const liveRate = expectedMethod === "link" ? (settings.bankRateLink ?? settings.bankChargePercent) : expectedMethod === "cash" || expectedMethod === "cheque" || expectedMethod === "transfer" ? 0 : (settings.bankRateCard ?? settings.bankChargePercent);
   const liveFixed = expectedMethod === "link" ? (settings.bankFixedLink ?? 0) : expectedMethod === "cash" || expectedMethod === "cheque" || expectedMethod === "transfer" ? 0 : (settings.bankFixedCard ?? 0);
   const liveCosting = settings.costing ? costingWithRolls(settings.costing, header.film_rolls_est === null || header.film_rolls_est === undefined ? null : Number(header.film_rolls_est)) : null;
+  // Nothing below cost: every line judged after its share of the header discount, against what the internal box counts.
+  const belowMap = belowCostAll(lines, q, { packageCosting: liveCosting, bodyshopRate: settings.bodyshopRate ?? 0 });
+  /** The discount window's check: a discount that takes a line below its cost (an advisor cannot; the owner is asked why). */
+  const discountBelowCost = (kind: "percent" | "aed", value: number, scope: "labour" | "labour_services") => {
+    const qAfter = { ...q, discount_kind: value > 0 ? kind : null, discount_value: value > 0 ? value : null, discount_percent: 0, discount_scope: scope };
+    const hits = belowCostChangesIn({ lines, q }, { lines, q: qAfter }, { packageCosting: liveCosting, bodyshopRate: settings.bodyshopRate ?? 0 });
+    if (!hits.length) return null;
+    const words = `${belowCostWords(hits[0].line.title, hits[0].below)}${hits.length > 1 ? `; and ${hits.length - 1} more` : ""}`;
+    return isOwner ? { block: false, words: `${words}. You will be asked why (logged).` } : { block: true, words: `Not saved: ${words}. Lower the discount – only the owner can sell below cost.` };
+  };
   const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, bankChargeFixed: liveFixed, clockedHours: settings.clockedHours ?? null, bodyshopRate: settings.bodyshopRate ?? 0, supplierCharges: settings.supplierCharges?.total ?? 0, packageCosting: liveCosting });
   // Section 5: what is free on this quotation and what it costs us, from the same calculation.
   const compFree = comp && !comp.decidedComeback ? compLinesOf(lines, q) : [];
@@ -808,7 +963,7 @@ export function QuoteEditor({
   const namedLabour = labourLines.filter((l) => l.title.trim());
   const labourDone = namedLabour.filter(finishedLine).length;
   const compBlock = compFree.length ? compProblem(q) : null;
-  const blockers = [...sendBlockers(q, lines, parts, { minMarkup: settings.minMarkup, openRequests: wait?.openRequests ?? 0, workshopEstimate, confirmPercent: settings.markupConfirm }), ...(compBlock ? [{ key: "comp", label: compBlock }] : [])];
+  const blockers = [...sendBlockers(q, lines, parts, { minMarkup: settings.minMarkup, openRequests: wait?.openRequests ?? 0, workshopEstimate, confirmPercent: settings.markupConfirm, packageCosting: liveCosting, bodyshopRate: settings.bodyshopRate ?? 0 }), ...(compBlock ? [{ key: "comp", label: compBlock }] : [])];
   // Who gave the discount (B3): changed on this screen and not saved back yet = the viewer; otherwise the stored giver.
   // An unknown giver counts as not the owner, exactly as the server does.
   const discountChangedHere = Number(header.discount_value ?? 0) !== Number(quotation.discount_value ?? 0) || (header.discount_kind ?? null) !== (quotation.discount_kind ?? null) || (header.discount_scope ?? "labour") !== (quotation.discount_scope ?? "labour");
@@ -984,6 +1139,7 @@ export function QuoteEditor({
     return (
       <div key={l.id} id={`item-line-${l.id}`} className="flex flex-col">
         {failChip(l.id)}
+        {belowCostNote(l)}
         <div className="flex flex-wrap items-center gap-2 py-1.5 px-2 text-sm">
           {!disabled && labourLines.length > 1 ? (
             <span
@@ -1191,6 +1347,7 @@ export function QuoteEditor({
     return (
       <div key={l.id} id={`item-line-${l.id}`} className={`flex flex-col gap-2 rounded-control border border-line px-3 py-2 ${paidBy === "us" ? "bg-chip" : "bg-white"}`}>
         {failChip(l.id)}
+        {belowCostNote(l)}
         <div className="flex flex-wrap items-end gap-3 text-sm">
           <span className="w-5 shrink-0 self-center text-right text-[11px] font-bold text-muted" aria-hidden>{index + 1}</span>
           <span className="font-bold self-center">Recovery</span>
@@ -1241,6 +1398,7 @@ export function QuoteEditor({
     return (
       <div key={l.id} id={`item-line-${l.id}`} className={`flex flex-col gap-1.5 rounded-control border border-line px-3 py-2 ${hidden ? "bg-chip" : "bg-white"}`}>
         {failChip(l.id)}
+        {belowCostNote(l)}
         <div className="flex flex-wrap items-end gap-3 text-sm">
           <span className="w-5 shrink-0 self-center text-right text-[11px] font-bold text-muted" aria-hidden>{index + 1}</span>
           <label className={`${boxLabel} flex-1 min-w-48`}>Charge<Input value={l.title} onChange={(e) => patch(l.id, { title: e.target.value })} disabled={disabled} placeholder="What is it for?" aria-label="Charge" className={`min-h-9 font-semibold ${blocked && !l.title.trim() ? "border-red-bar" : ""}`} textCase="sentence" /></label>
@@ -1564,6 +1722,7 @@ export function QuoteEditor({
                         <td className="py-2 pr-2 align-top min-w-0">
                           {/* Two fixed lines: the part, then its tags, so a row never changes height while the markup is typed */}
                           {failChip(l.id)}
+                          {belowCostNote(l)}
                           <div className="flex items-start gap-1.5">
                             {l.option_group ? <input type="radio" name={`opt-${l.option_group}`} checked={!optionOff} onChange={() => choose(l.option_group!, l.id)} disabled={disabled || leftOff} className="h-4 w-4 shrink-0 accent-ink" aria-label="Use this option" /> : null}
                             {renamePart?.lineId === l.id ? (
@@ -2061,7 +2220,48 @@ export function QuoteEditor({
           bases={discountBases}
           onClose={() => setDiscountOpen(false)}
           onApply={(kind, value, scope) => { setHeaderField({ discount_kind: value > 0 ? kind : null, discount_value: value > 0 ? value : null, discount_percent: 0, discount_scope: scope }, true); setDiscountOpen(false); }}
+          check={discountBelowCost}
         />
+      ) : null}
+      {belowAsk ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-below-cost-ask>
+          <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-3">
+            <span className="text-lg font-extrabold">Sell below cost?</span>
+            <p className="text-sm font-bold text-red" data-below-cost-figures>{belowCostWords(belowAsk.title, belowAsk.below)}{belowAsk.more ? `; and ${belowAsk.more} more line${belowAsk.more === 1 ? "" : "s"}` : ""}.</p>
+            <label className="flex flex-col gap-1 text-sm font-semibold">
+              Why (logged with the figures)
+              <Textarea value={belowAsk.reason} onChange={(e) => setBelowAskReason(e.target.value)} rows={2} placeholder="For example: goodwill for a regular customer" autoFocus data-below-cost-reason />
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="lg" disabled={belowAsk.reason.trim().length < 5} onClick={() => {
+                const reason = belowAsk.reason.trim();
+                const op = belowAsk.op as { patchLine?: Record<string, unknown>; addLine?: Record<string, unknown>; header?: Record<string, unknown> } | null;
+                if (op?.patchLine) save({ patchLine: { ...op.patchLine, below_cost_reason: reason } });
+                else if (op?.addLine) save({ addLine: { ...op.addLine, below_cost_reason: reason } });
+                else if (op?.header) save({ header: { ...op.header, below_cost_reason: reason } });
+                else save({ belowCostApprove: { id: belowAsk.lineId, reason } });
+                setBelowAsks((a) => a.slice(1));
+              }} data-below-cost-send>Approve below cost</Button>
+              <Button type="button" tone="secondary" size="lg" onClick={() => {
+                // Change: what was asked about goes back to what the quotation holds (the figure below cost was not saved).
+                const op = belowAsk.op as { patchLine?: Record<string, unknown>; addLine?: Record<string, unknown>; header?: Record<string, unknown> } | null;
+                if (op?.patchLine?.id) {
+                  const id = String(op.patchLine.id);
+                  const sent = sentFields.current.get(id);
+                  if (sent) for (const k of Object.keys(op.patchLine)) delete sent[k];
+                  putBack(id, null);
+                } else if (op?.addLine?.id) {
+                  const id = String(op.addLine.id);
+                  pendingNew.current.delete(id);
+                  setLines((cur) => cur.filter((x) => x.id !== id));
+                } else if (op?.header) {
+                  setHeader((hh) => ({ ...hh, discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, discount_scope: quotation.discount_scope ?? "labour", discount_percent: quotation.discount_percent }));
+                }
+                setBelowAsks((a) => a.slice(1));
+              }} data-below-cost-cancel>{belowAsk.op ? (belowAsk.op.header ? "Change the discount" : "Change the price") : "Not now"}</Button>
+            </div>
+          </div>
+        </div>
       ) : null}
       {confirming ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4">
@@ -2285,7 +2485,7 @@ function OwnerPartDiscount({ percent, reason, options = [], onChange }: { percen
  * "Discount": one box and a % | AED toggle. It comes off our own labour lines (hours) only, before VAT, before the
  * round-off; parts, outside fixed-price services and other charges are never discounted here.
  */
-function LabourDiscountDialog({ kind: initialKind, value: initialValue, scope: initialScope, bases, onClose, onApply }: { kind: "percent" | "aed"; value: number | null | undefined; scope: "labour" | "labour_services"; bases: { labour: number; labour_services: number }; onClose: () => void; onApply: (kind: "percent" | "aed", value: number, scope: "labour" | "labour_services") => void }) {
+function LabourDiscountDialog({ kind: initialKind, value: initialValue, scope: initialScope, bases, onClose, onApply, check }: { kind: "percent" | "aed"; value: number | null | undefined; scope: "labour" | "labour_services"; bases: { labour: number; labour_services: number }; onClose: () => void; onApply: (kind: "percent" | "aed", value: number, scope: "labour" | "labour_services") => void; /** Nothing below cost: words for a discount that takes a line below its cost; block = not applied (an advisor). */ check?: (kind: "percent" | "aed", value: number, scope: "labour" | "labour_services") => { block: boolean; words: string } | null }) {
   const [kind, setKind] = useState<"percent" | "aed">(initialKind);
   const [scope, setScope] = useState<"labour" | "labour_services">(initialScope);
   const base = bases[scope];
@@ -2295,6 +2495,14 @@ function LabourDiscountDialog({ kind: initialKind, value: initialValue, scope: i
   /** Apply reads the box itself: the number box hands its figure on a moment after typing stops, and a quick tap must not lose it. */
   const current = () => parseNumber(boxRef.current?.querySelector("input")?.value ?? text) ?? 0;
   const amount = kind === "percent" ? round2(base * (Math.min(100, Math.max(0, v)) / 100)) : round2(Math.min(base, Math.max(0, v)));
+  // The words appear next to Apply as the figure is typed; an advisor's Apply does nothing while they stand.
+  const [refused, setRefused] = useState<string | null>(null);
+  const live = check ? check(kind, v, scope) : null;
+  const apply = (value: number) => {
+    const r = check ? check(kind, value, scope) : null;
+    if (r?.block) { setRefused(r.words); return; }
+    onApply(kind, value, scope);
+  };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
@@ -2318,8 +2526,9 @@ function LabourDiscountDialog({ kind: initialKind, value: initialValue, scope: i
         </div>
         <p className="text-sm font-bold text-green" data-labour-discount-preview>{v > 0 ? `− ${aed(amount)} off ${scope === "labour" ? "the labour" : "labour and services"}${base > 0 ? ` (= ${((amount / base) * 100).toFixed(1)}% of ${aed(base)})` : ""}` : "No discount"}</p>
         {kind === "aed" && v > base && base > 0 ? <p className="text-xs font-semibold text-amber" data-discount-capped>The {scope === "labour" ? "labour" : "labour and services"} come to {aed(base)}: the discount stops there.</p> : null}
+        {live || refused ? <p className={`text-xs font-bold ${live?.block || (!live && refused) ? "text-red" : "text-amber"}`} data-discount-below-cost>{live?.words ?? refused}</p> : null}
         <div className="flex flex-wrap gap-2">
-          <Button type="button" size="md" onClick={() => onApply(kind, current(), scope)}>Apply</Button>
+          <Button type="button" size="md" onClick={() => apply(current())} data-discount-apply>Apply</Button>
           {initialValue ? <Button type="button" tone="secondary" size="md" onClick={() => onApply(kind, 0, scope)}>Remove the discount</Button> : null}
           <Button type="button" tone="ghost" size="md" onClick={onClose}>Cancel</Button>
         </div>
