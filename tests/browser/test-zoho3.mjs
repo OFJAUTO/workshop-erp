@@ -399,7 +399,8 @@ await section("8 switch simulation (rolled back)", async () => {
 
       // The switch runs once in the life of the books: after go-live it refuses for good (checked under its lock).
       await q("savepoint once");
-      await q("update public.settings set value = to_jsonb('2026-11-01T00:00:00Z'::text) where key = 'zoho_went_live_at'");
+      // An upsert: the test database copy may lack the row (live has it, seeded by the go-live migration as "").
+      await q("insert into public.settings (key, value, label) values ('zoho_went_live_at', to_jsonb('2026-11-01T00:00:00Z'::text), 'Zoho Books: went live at') on conflict (key) do update set value = excluded.value");
       let once = "";
       try { await q("select public.zoho_switch_org($1, $2, false, null, null)", [testOrg, SIM]); } catch (e) { once = e.message; }
       check("8: once the books went live, the switch refuses to run again", /already went live/.test(once), once || "went through");

@@ -315,6 +315,13 @@ await section("11-12 sign-off and going out", async () => {
   await op.locator("input[name='handover_confirmed']").check();
   const releaseBox = op.locator("[name='release_reason']");
   if (await releaseBox.count()) await releaseBox.fill("E2e test: released with the balance noted");
+  // 30 October 2026: the final km (never lower than at gate-in) and the photo of the instrument cluster come first.
+  if (await op.locator("[data-mileage-out]").count()) {
+    const giKm = (await sql("select mileage from public.gate_ins where job_id = $1 order by created_at desc limit 1", [jobId]))[0]?.mileage;
+    await op.locator("[data-mileage-out]").fill(String((Number(giKm) || 10000) + 5));
+    await op.locator("[data-final-mileage] input[type=file]").first().setInputFiles({ name: "cluster.png", mimeType: "image/png", buffer: HANDOVER_PNG });
+    await until(async () => (await sql("select id from public.job_files where job_id = $1 and kind = 'odometer_out' and removed_at is null", [jobId]))[0], 40, 500);
+  }
   await op.locator("button[type='submit']", { hasText: /Gate out/ }).click();
   await afterSubmit(op);
   const out = (await sql("select j.is_open, j.status, j.final_check_appointment_id, a.starts_at, a.reason from public.jobs j left join public.appointments a on a.id = j.final_check_appointment_id where j.id = $1", [jobId]))[0];

@@ -2248,8 +2248,9 @@ const cut100 = (s: string) => (s.length > 100 ? `${s.slice(0, 99)}…` : s);
 export async function retrySupplierRows(supplierId: string): Promise<number> {
   try {
     const admin = createAdminClient();
-    // The red rows are few: read them first, then keep the ones of this supplier (its vendor row, its LPOs).
-    const { data: rows } = await admin.from("zoho_outbox").select("id, kind, record_id, zoho_result").eq("status", "failed").in("kind", ["vendor", "bill", "billpayment"]);
+    // The red rows are few: read them first, then keep the ones of this supplier (its vendor row, its LPOs). Only rows
+    // that never reached Zoho: a posted bill flagged red after a VAT change is the accountant's, never re-run.
+    const { data: rows } = await admin.from("zoho_outbox").select("id, kind, record_id, zoho_result").eq("status", "failed").is("zoho_id", null).in("kind", ["vendor", "bill", "billpayment"]);
     const red = ((rows ?? []) as { id: string; kind: string; record_id: string; zoho_result: { hand_only?: boolean; manual?: boolean } | null }[]).filter((r) => r.zoho_result?.hand_only !== true && r.zoho_result?.manual !== true);
     const poIds = red.filter((r) => r.kind !== "vendor").map((r) => r.record_id);
     const { data: pos } = poIds.length ? await admin.from("purchase_orders").select("id").in("id", poIds).eq("supplier_id", supplierId) : { data: [] };

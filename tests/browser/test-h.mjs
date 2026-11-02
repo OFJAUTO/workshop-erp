@@ -7,7 +7,7 @@
 // Run against `npx next dev -p 3100`:  node --env-file=.env.test.local tests/browser/test-h.mjs
 import fs from "node:fs";
 import path from "node:path";
-import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, projectRoot, sleep, sql, pressYes } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 20 * 60 * 1000).unref();
@@ -104,7 +104,7 @@ await section("A pricing table and PDF import", async () => {
   // The job board shows Priced.
   const { browser: ob, page: op } = await browserFor("owner", { viewport: { width: 1366, height: 900 } });
   await go(op, `${base}/dashboard`);
-  const card = op.locator("a[href='/jobs/" + jobId + "']").first();
+  const card = op.locator("[data-car-card]").filter({ has: op.locator("a[href='/jobs/" + jobId + "']") }).first();
   check("6: the job board shows a green Priced chip on the car", /Priced/.test((await card.textContent().catch(() => "")) ?? ""), ((await card.textContent().catch(() => "")) ?? "").slice(0, 160));
   // Edit → change a price → Send updated prices.
   await page.locator("[data-pricing-edit]").click();
@@ -139,7 +139,9 @@ await section("A pricing table and PDF import", async () => {
     const h = await until(async () => { const r = (await sql("select hours_estimate from public.quotation_lines where quotation_id = $1 and line_type = 'labour' and is_active limit 1", [quotationId]))[0]; return Number(r?.hours_estimate) === 3 ? r : null; }, 30, 500);
     check("9: the estimate saves on the line", !!h);
     await sleep(800);
-    check("9: the internal box says 'Labour at cost (… estimate × AED …)'", /Labour at cost \(.*estimate/.test((await op.locator("[data-labour-cost-label]").textContent().catch(() => "")) ?? ""), (await op.locator("[data-labour-cost-label]").textContent().catch(() => "")) ?? "");
+    // The internal box: "Labour at cost" with "3 h estimate × AED …" on its own line under it.
+    const lab = (await op.locator('[data-profit-line="labour"]').textContent().catch(() => "")) ?? "";
+    check("9: the internal box says 'Labour at cost' with '3 h estimate × AED …' under it", /Labour at cost/.test(lab) && /3 h estimate × AED/.test(lab), lab);
   }
   // 14. Discount: 10% on the labour.
   await op.locator("[data-labour-discount]").click();
@@ -214,6 +216,7 @@ await section("C LPO flow", async () => {
   check("17: the main LPO is grouped by supplier with a subtotal and a grand total", (await op.locator("[data-lpo-group]").count()) === 1 && (await op.locator("[data-lpo-subtotal]").count()) === 1 && /200\.00/.test((await op.locator("[data-lpo-grand-total]").textContent()) ?? ""));
   if (await op.locator("textarea[name='override_reason']").count()) await op.locator("textarea[name='override_reason']").fill("E2e test: deposit override");
   await op.locator("button", { hasText: /^Approve$/ }).click();
+  await pressYes(op);
   await afterSubmit(op);
   const sub = (await sql("select id, number, status, parent_id, supplier_name, verify_token from public.purchase_orders where job_id = $1 and kind = 'supplier' and is_active order by created_at desc limit 1", [jobId]))[0];
   check("17: one Approve makes the supplier LPO numbered from the main one (LPO-xxxxx-1)", !!sub && sub.number === `${main.number}-1` && sub.status === "approved" && sub.parent_id === main.id && sub.supplier_name === "E2e Supplier", JSON.stringify(sub));
@@ -277,7 +280,8 @@ await section("C LPO flow", async () => {
   const logo = op.locator("aside img[alt='OFJ Automotive']").first();
   const cls = (await logo.getAttribute("class")) ?? "";
   const centred = await logo.evaluate((el) => getComputedStyle(el.parentElement.parentElement).justifyContent);
-  check("18: the sidebar logo is bigger (h-11 / md:h-15) and centred", /h-11/.test(cls) && /md:h-15/.test(cls) && centred === "center", `${cls} · ${centred}`);
+  // 29 October 2026: the sidebar shows only on wide screens (the top bar below), so the logo has one size, h-15.
+  check("18: the sidebar logo is the big one (h-15) and centred", /(^|\s)h-15(\s|$)/.test(cls) && centred === "center", `${cls} · ${centred}`);
   await browser.close();
   await ob.close();
 });

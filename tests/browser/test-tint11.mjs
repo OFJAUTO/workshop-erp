@@ -50,13 +50,25 @@ await page.locator('[data-tint-double="roof"]').check();
 const s2 = await until(async () => { const s = await specOf(qid); return s?.rows?.rear_window?.shade === 70 && s?.rows?.roof?.double === true ? s : null; });
 check("1: rear sides & rear screen 70, roof 70 double layer saved", !!s2);
 check("1: the split words: 'front sides 50% darkness · rear sides & rear screen 70% darkness'", /front sides 50% darkness · rear sides & rear screen 70% darkness \(above the legal limit – customer's request\) · roof 70% darkness, double layer/.test((await page.locator("[data-tint-box] [data-tint-summary]").textContent()) ?? ""), await page.locator("[data-tint-box] [data-tint-summary]").textContent());
-check("1: darker than the legal limit (50) says so: customer's request", /Rear side windows 70% darkness, Rear screen 70% darkness, Sunroof \/ panoramic roof 70% darkness/.test((await page.locator("[data-tint-above-limit]").textContent()) ?? ""));
+check("1: darker than the legal limit (50) says so: customer's request", /Rear side windows 70% darkness, Rear screen 70% darkness, Sunroof \/ glass roof 70% darkness/.test((await page.locator("[data-tint-above-limit]").textContent()) ?? ""));
 check("1: the double layer says double film and the extra hour", /1 window double layer: double film and 1 h more fitting/.test((await page.locator("[data-tint-double-note]").textContent()) ?? ""));
 await page.locator("[data-tint-box]").scrollIntoViewIfNeeded();
 await page.screenshot({ path: shot("tint11-1-box.png"), clip: (await page.locator("[data-tint-box]").boundingBox()) ?? undefined });
-// The package cost follows: tint × the windows (2 × a car with the doubled roof) and the double-layer hour.
-const costWords = await until(async () => { await go(page, `${base}/jobs/${jobId}/quote/${qid}`); const t = (await page.locator("[data-package-cost]").textContent().catch(() => "")) ?? ""; return /2 × a car/.test(t) ? t : null; }, 6, 1500);
-check("1: the package cost counts the windows and the double layer (double film, +1 h)", !!costWords && /incl\. 1 h double layer/.test(costWords), costWords ?? "");
+// The cost follows the windows (30 October 2026: one internal box, "Materials · tint AED x", "Labour at cost"): the roof's
+// double layer counts its window twice and adds its fitting hour, so unticking it lowers the tint cost and the labour.
+const box = async () => {
+  await go(page, `${base}/jobs/${jobId}/quote/${qid}`);
+  const mat = (await page.locator('[data-profit-line="materials"]').textContent().catch(() => "")) ?? "";
+  const lab = (await page.locator('[data-profit-line="labour"]').textContent().catch(() => "")) ?? "";
+  return { tint: Number((mat.match(/tint AED ([\d,.]+)/)?.[1] ?? "0").replace(/,/g, "")), lab };
+};
+const withDouble = await box();
+await page.locator('[data-tint-double="roof"]').uncheck();
+await until(async () => ((await specOf(qid))?.rows?.roof?.double === false ? 1 : null));
+const single = await box();
+check(`1: the internal box counts the windows and the double layer (tint ${withDouble.tint} -> ${single.tint} without the roof's double layer; labour changes)`, withDouble.tint > 0 && single.tint > 0 && Math.abs(withDouble.tint / single.tint - 1.2) < 0.02 && withDouble.lab !== single.lab, JSON.stringify({ withDouble, single }));
+await page.locator('[data-tint-double="roof"]').check();
+await until(async () => ((await specOf(qid))?.rows?.roof?.double === true ? 1 : null));
 // Roof only if fitted: "Car has none" drops it from the words.
 await page.locator('[data-tint-chip="roof:not-fitted"]').click();
 check("1: 'Car has none' takes the roof off", !!(await until(async () => ((await specOf(qid))?.roofFitted === false ? 1 : null))) && !/roof/.test((await page.locator("[data-tint-box] [data-tint-summary]").textContent()) ?? ""));

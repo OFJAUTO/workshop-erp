@@ -3,7 +3,7 @@
 // with the new document kinds and the accounts' Waiting wording. The worker itself is proven live
 // (test-zoho2-live.mjs); the REAL-org guard stays covered here too.
 //   node --env-file=.env.test.local tests/browser/test-zoho2.mjs   (dev server, no ZOHO_* values)
-import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, go, makeChecks, sleep, sql, confirmMoney, pressYes } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 15 * 60 * 1000).unref();
@@ -48,7 +48,7 @@ await section("2 credit note hook", async () => {
     await go(page, `${base}/invoices/${inv.id}`);
     await page.locator('input[placeholder="Amount before VAT"]').fill("100");
     await page.locator('textarea[placeholder*="corrected"], input[placeholder*="corrected"]').first().fill("E2e goodwill credit");
-    await page.getByRole("button", { name: /Issue a credit note/i }).click();
+    await page.getByRole("button", { name: /Issue a credit note/i }).click(); await pressYes(page);
     await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
     const cn = await until(async () => (await sql("select id, number from public.invoices where kind = 'credit_note' and credit_of = $1", [inv.id]))[0]);
     check("2: the credit note exists", !!cn && /^CN-\d{5}$/.test(cn.number), JSON.stringify(cn));
@@ -81,12 +81,18 @@ await section("3 supplier invoice and payment hooks", async () => {
     await page.locator('input[name="invoice_date"]').fill(TODAY);
     await page.locator("[data-save-invoice]").click();
     await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
+    // 1 November 2026 (Supplier invoices tab): the bill goes to Zoho when accounts (or the owner) CHECK the invoice.
+    await sleep(1500);
+    const early = (await sql("select status from public.zoho_outbox where kind = 'bill' and record_id = $1", [poId]))[0] ?? null;
+    check("3: entering the invoice does not post the bill yet (accounts check it first)", early === null, JSON.stringify(early));
+    await go(page, `${base}/supplier-invoices?open=${encodeURIComponent(`${supplierId}|E2EZ2INV77`)}`);
+    await page.locator("[data-si-check]").click();
     const billRow = await until(async () => (await sql("select status from public.zoho_outbox where kind = 'bill' and record_id = $1", [poId]))[0]);
-    check("3: entering the invoice queued the bill", billRow?.status === "pending", JSON.stringify(billRow));
+    check("3: Mark checked queued the bill", billRow?.status === "pending", JSON.stringify(billRow));
     // The scan on file (a row is enough for the gate), then Mark paid -> the payment joins the queue.
     await sql("insert into public.job_files (job_id, kind, ref_id, storage_path, content_type) values ($1, 'supplier_invoice', $2, $3, 'application/pdf')", [jobId, poId, `${jobId}/e2e-z2-scan.pdf`]);
     await go(page, `${base}/parts/orders/${po.id}`);
-    await page.locator("[data-mark-supplier-paid]").click();
+    await confirmMoney(page, "supplier-paid");
     await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
     const payRow = await until(async () => (await sql("select status from public.zoho_outbox where kind = 'billpayment' and record_id = $1", [poId]))[0]);
     check("3: Mark paid queued the supplier payment", payRow?.status === "pending", JSON.stringify(payRow));
@@ -155,7 +161,9 @@ await section("6 mapping screen and sync page", async () => {
     if (!zohoConfigured) {
       const stored = (await sql("select value from public.settings where key = 'zoho_account_map'"))[0]?.value;
       await go(page, `${base}/settings/zoho/mapping`);
-      check("6: the purchases/expenses card carries five boxes", (await page.locator("[data-map-purchases] select").count()) === 5);
+      // Parts, courier, commissions, recovery, paid from, and paid from per method (27 October 2026).
+      const boxes = await page.locator("[data-map-purchases] select").evaluateAll((els) => els.map((e) => e.getAttribute("name")));
+      check(`6: the purchases/expenses card carries its boxes (${boxes.length})`, ["map__purchase__parts", "map__purchase__courier", "map__expense__commission", "map__expense__recovery", "map__paid_from"].every((n) => boxes.includes(n)) && boxes.filter((n) => n?.startsWith("map__paid_by__")).length === 4, boxes.join(","));
       check("6: the reference card gained the advances-refund box", (await page.locator('[data-map-box="map__advances_refund"]').count()) === 1);
       await page.screenshot({ path: "tests/browser/shots/zoho2-mapping.png", fullPage: true });
       await page.locator("[data-map-save]").click();

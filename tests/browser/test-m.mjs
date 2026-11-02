@@ -4,7 +4,7 @@
 // pretend Network International gateway (the dev server must run with NGENIUS_ENV=mock NGENIUS_WEBHOOK_SECRET=e2e-hook);
 // the accounts screens. Run against `NGENIUS_ENV=mock NGENIUS_WEBHOOK_SECRET=e2e-hook npx next dev -p 3100`:
 //   node --env-file=.env.test.local tests/browser/test-m.mjs
-import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, pressRecord } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 18 * 60 * 1000).unref();
@@ -82,7 +82,7 @@ await section("2 counter cash by accounts", async () => {
   await ap.locator("[data-amount-partial]").click();
   await ap.locator("[data-amount-input]").fill("100");
   await ap.locator('[data-method="cash"]').click().catch(() => null);
-  await ap.locator("[data-record-payment]").click();
+  await pressRecord(ap);
   await ap.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
   const pay = await until(async () => (await sql("select number, method, amount_aed::float as amount, verified_at from public.payments where invoice_id = $1 and status = 'recorded'", [proformaId]))[0], 30, 500);
   check("2: the cash payment is recorded and verified at once (accounts took it)", pay?.method === "cash" && pay?.amount === 100 && !!pay?.verified_at, JSON.stringify(pay));
@@ -194,7 +194,7 @@ await section("6 pay now", async () => {
   check("6: the customer lands back on the proforma page with the thank-you", /paid=1/.test(cp.url()) && /Thank you, your payment was received/.test(back) && /Paid, thank you/i.test(back), cp.url());
   await cb.close();
   const pay = await until(async () => (await sql("select method, amount_aed::float as amount, bank_charge_aed::float as charge, received_by, reference from public.payments where job_id = $1 and status = 'recorded' and method = 'link'", [jobId]))[0], 30, 500);
-  check("6: the payment is recorded as a payment link at 1.75% with nobody behind it", pay?.amount === 945 && pay?.charge === 16.54 && pay?.received_by === null && /Paid online · card \*{4}\d{4}/.test(pay?.reference ?? ""), JSON.stringify(pay));
+  check("6: the payment is recorded as a payment link at 1.75% + AED 1.00 with nobody behind it", pay?.amount === 945 && pay?.charge === 17.54 && pay?.received_by === null && /Paid online · card \*{4}\d{4}/.test(pay?.reference ?? ""), JSON.stringify(pay));
   const tax = await until(async () => (await sql("select number from public.invoices where job_id = $1 and kind = 'tax_invoice' and status = 'issued'", [jobId]))[0], 30, 500);
   check("6: the tax invoice followed by itself", !!tax);
   const paidLink = (await sql("select paid_at, payment_id, state from public.payment_links where id = $1", [link?.id]))[0];
@@ -225,7 +225,7 @@ await section("7 pay now follows the balance", async () => {
   await page.locator('[data-method="cash"]').click();
   await page.locator("[data-amount-partial]").click();
   await page.locator("[data-amount-input]").fill("100");
-  await page.locator("[data-record-payment]").click();
+  await pressRecord(page);
   await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
   const cur = await until(async () => { const r = (await sql("select id, amount_aed::float as amount from public.payment_links where invoice_id = $1 and replaced_at is null and provider = 'ngenius'", [proformaId]))[0]; return r && r.id !== first?.id ? r : null; }, 30, 500);
   check("7: after a cash part payment the order is remade for the balance", first?.amount === 945 && cur?.amount === 845, JSON.stringify({ first, cur }));
@@ -234,11 +234,11 @@ await section("7 pay now follows the balance", async () => {
   // The pasted link always stays available: pasting one replaces the automatic order.
   await go(page, `${base}/jobs/${jobId}/invoice`);
   await page.locator("[data-payment-link-box] summary").click();
-  await page.locator('[data-payment-link-box] input[name="payment_link_url"]').fill("https://pay.example.test/abc");
+  await page.locator('[data-payment-link-box] input[name="payment_link_url"]').fill("https://paypage.sandbox.ngenius-payments.com/?code=e2eabc");
   await page.locator("[data-payment-link-box] button[type=submit]").click();
   await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
   const manual = await until(async () => (await sql("select provider, url from public.payment_links where invoice_id = $1 and replaced_at is null", [proformaId]))[0], 30, 500);
-  check("7: a pasted link replaces the automatic order", manual?.provider === "manual" && manual?.url === "https://pay.example.test/abc", JSON.stringify(manual));
+  check("7: a pasted link replaces the automatic order", manual?.provider === "manual" && manual?.url === "https://paypage.sandbox.ngenius-payments.com/?code=e2eabc", JSON.stringify(manual));
   await browser.close();
 });
 

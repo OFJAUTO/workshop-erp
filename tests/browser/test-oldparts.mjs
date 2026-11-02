@@ -36,15 +36,13 @@ check("the thumbnail shows with an X", (await page.locator("[data-old-parts-phot
 await page.screenshot({ path: `${shots}/old-parts-photo.png` });
 await adv.browser.close();
 
-// The job card history: with the gate-out recorded, the photo sits under it with time and name.
+// The car's history: with the gate-out recorded, the photo sits under it with time and name.
 await sql("insert into public.gate_outs (job_id, keys_returned, keychain_returned, keys_match, old_parts_handed) values ($1, 1, true, true, true)", [jobId]);
 const own = await browserFor("owner", { viewport: { width: 1500, height: 1600 } });
-await own.page.goto(`${base}/jobs/${jobId}`, { waitUntil: "load" });
+// 21 October 2026: the gate-in and gate-out record is its own page (Gate-in details), no longer a fold on the job card.
+await own.page.goto(`${base}/jobs/${jobId}/gate-in`, { waitUntil: "load" });
 await own.page.waitForTimeout(1800);
-// The gate-out record sits in the Gate-in details fold (a button, not a <details>): open it.
-await own.page.getByRole("button", { name: /Gate-in details/i }).click();
-await own.page.waitForTimeout(500);
-check("the job card history shows the old-parts photo block", (await own.page.locator("[data-old-parts-history]").count()) === 1);
+check("the Gate-in details page shows the old-parts photo block", (await own.page.locator("[data-old-parts-history]").count()) === 1);
 const histText = ((await own.page.locator("[data-old-parts-history]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
 check("with the time and the name", /Old parts handed over/i.test(histText) && /\d{1,2}:\d{2}/.test(histText), histText.slice(0, 140));
 const bodyText = ((await own.page.textContent("body")) ?? "").replace(/\s+/g, " ");

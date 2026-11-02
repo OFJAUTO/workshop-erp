@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ refused: false, error: "THE WRITE WENT THROUGH - the guard is broken." }, { status: 500 });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      return NextResponse.json({ refused: e instanceof ZohoError && /read-only until the owner declares go-live/.test(msg), message: msg });
+      return NextResponse.json({ refused: e instanceof ZohoError && /read-only until the owner declares go-live|test server never touches the REAL Zoho organization/.test(msg), message: msg });
     }
   }
   if (body.action === "write_org") {
