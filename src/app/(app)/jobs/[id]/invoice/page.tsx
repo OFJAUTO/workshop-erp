@@ -340,7 +340,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
           {credit.length ? (
             <Card className="flex flex-col gap-2 border-amber-bar" data-credit-offer>
               <SectionLabel right={`AED ${m(credit.filter((p) => p.status === "recorded").reduce((a, p) => a + p.amount_aed, 0))}`}>Customer credit, not allocated</SectionLabel>
-              <p className="text-xs text-muted">Money this customer paid earlier that is not on any job yet. Allocate it here and it comes off {live ? live.number : "this job’s invoice"} by itself.</p>
+              <p className="text-xs text-muted">Money this customer paid earlier that is not on any job yet. Allocate it here and it comes off {live ? <span className="whitespace-nowrap">{live.number}</span> : "this job’s invoice"} by itself.</p>
               <UnallocatedList rows={credit} canAllocate={mayPay} target={{ key: live ? `inv:${live.id}` : `job:${id}`, title: job.job_number, balance: live ? (bal?.balance ?? 0) : draft.lines.length ? balanceDue : null }} />
             </Card>
           ) : null}

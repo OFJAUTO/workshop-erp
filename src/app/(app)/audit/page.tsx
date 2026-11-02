@@ -46,7 +46,8 @@ function show(v: unknown): string {
   if (typeof v === "string" && ISO_TIME.test(v)) return formatDateTime(v);
   if (typeof v === "string" && ISO_DAY.test(v)) return formatDate(`${v}T12:00:00Z`);
   if (typeof v === "string" && (UUID.test(v) || (v.length > 24 && !/\s/.test(v)))) return `${v.slice(0, 8)}…`;
-  const s = typeof v === "string" ? v : JSON.stringify(v).replaceAll(',"', ', "').replaceAll('":', '": ');
+  // Ids inside a list or an object are shortened too (a whole id never fits a phone line, 2 November 2026).
+  const s = typeof v === "string" ? v : JSON.stringify(v).replaceAll(',"', ', "').replaceAll('":', '": ').replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, (m) => `${m.slice(0, 8)}…`);
   return s.length > 80 ? s.slice(0, 77) + "…" : s;
 }
 

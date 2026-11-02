@@ -905,7 +905,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       {credit.length && jobMoney ? (
         <Card className="flex flex-col gap-2 border-amber-bar" data-credit-offer>
           <SectionLabel right={`AED ${aedOf(credit.filter((p) => p.status === "recorded").reduce((a, p) => a + p.amount_aed, 0))}`}>Customer credit, not allocated</SectionLabel>
-          <p className="text-xs text-muted">Money this customer paid earlier that is not on any job yet. Allocate it here and it comes off this job{jobMoney.live ? `’s ${jobMoney.live.number}` : "’s invoice"} by itself.</p>
+          <p className="text-xs text-muted">Money this customer paid earlier that is not on any job yet. Allocate it here and it comes off this job’s {jobMoney.live ? <span className="whitespace-nowrap">{jobMoney.live.number}</span> : "invoice"} by itself.</p>
           <UnallocatedList rows={credit} canAllocate={mayPay} target={{ key: jobMoney.live ? `inv:${jobMoney.live.id}` : `job:${id}`, title: job.job_number, balance: jobMoney.balance }} />
         </Card>
       ) : null}

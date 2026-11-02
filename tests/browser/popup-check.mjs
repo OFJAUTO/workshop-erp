@@ -179,7 +179,12 @@ export async function runPopups() {
   if (await complete.count()) {
     await complete.click().catch(() => null);
     for (let round = 0; round < 6; round++) {
-      await sleep(1500);
+      // The check takes a few seconds ("Checking…"): wait for a question or the completion, never leave mid-way.
+      for (let w = 0; w < 20; w++) {
+        await sleep(750);
+        if ((await p.locator(asks.map(([root]) => root).join(",")).count()) > 0) break;
+        if ((await sql("select completed_at from public.quotations where id = $1", [quote.quotationId]))[0]?.completed_at) break;
+      }
       let opened = false;
       for (const [root, go] of asks) {
         if (await p.locator(root).count()) {

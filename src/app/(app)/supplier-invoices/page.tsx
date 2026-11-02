@@ -105,7 +105,9 @@ function InvoiceCard({ r, href, open }: { r: InvoiceRow; href: string; open: boo
         <span className="ml-auto text-sm font-extrabold" data-si-total>AED {money(r.total)}</span>
         <span className="basis-full text-xs text-muted">
           {r.trn ? `TRN ${r.trn} · ` : r.vatRegistered ? "No TRN on file · " : "Not VAT registered · "}
-          before VAT {money(r.beforeVat)} · VAT {money(r.vat)} · {r.shares.map((s) => s.poNumber).join(", ")} · {r.shares.map((s) => [s.jobNumber, s.plate].filter(Boolean).join(" ")).filter(Boolean).join(", ") || "stock order"} · {r.parts} part{r.parts === 1 ? "" : "s"}
+          before VAT {money(r.beforeVat)} · VAT {money(r.vat)} ·{" "}
+          {r.shares.map((s, i) => <span key={s.poId} className="whitespace-nowrap">{s.poNumber}{i < r.shares.length - 1 ? ", " : ""}</span>)} ·{" "}
+          {r.shares.some((s) => s.jobNumber || s.plate) ? r.shares.filter((s) => s.jobNumber || s.plate).map((s, i, all) => <span key={`car-${s.poId}`} className="whitespace-nowrap">{[s.jobNumber, s.plate].filter(Boolean).join(" ")}{i < all.length - 1 ? ", " : ""}</span>) : "stock order"} · {r.parts} part{r.parts === 1 ? "" : "s"}
         </span>
       </div>
     </Card>
