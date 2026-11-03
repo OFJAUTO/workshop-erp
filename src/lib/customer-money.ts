@@ -1,8 +1,9 @@
 import "server-only";
 import { loadChargeEntries } from "./charges";
 import { customerName } from "./customer-view";
-import { INVOICE_SELECT, PAYMENT_SELECT, buildInvoiceDraft, invoiceBalance, nextDocumentNumber, toInvoice, toPayment, type PaymentRow } from "./invoice-data";
+import { INVOICE_SELECT, PAYMENT_SELECT, creditsOnDocs, draftFrom, invoiceBalance, loadDraftInputs, nextDocumentNumber, toInvoice, toPayment, type DraftInputs, type InvoiceRow, type PaymentRow } from "./invoice-data";
 import { round2 } from "./money";
+import { pageAllIn } from "./page-all";
 import { notifyStaff, jobAdvisorIds } from "./notifications";
 import { paymentsAnytimeReady } from "./schema-ready";
 import type { Settings } from "./settings";
@@ -39,42 +40,88 @@ export type JobMoney = {
   /** What is still to pay; null while there is no total to measure against. */
   balance: number | null;
   pendingCheque: number;
+  /** What issued credit notes took off the live tax invoice (3 November 2026; 0 when none). */
+  credited: number;
 };
 
 /** A job's money now: the live invoice's figures, or (before the proforma) the approved total less every advance. */
 export async function jobMoneyOf(jobId: string, settings: Settings): Promise<JobMoney | null> {
-  const admin = createAdminClient();
-  const [{ data: job }, { data: invs }, { data: pays }] = await Promise.all([
-    admin.from("jobs").select(`id, job_number, status, is_open, gated_out_at, customer_id, vehicle_id, vehicle:vehicles(${VEH})`).eq("id", jobId).maybeSingle(),
-    admin.from("invoices").select(INVOICE_SELECT).eq("job_id", jobId).in("kind", ["tax_invoice", "proforma"]).eq("status", "issued").eq("is_active", true).is("converted_to", null).order("issued_at", { ascending: false }),
-    admin.from("payments").select(PAYMENT_SELECT).eq("job_id", jobId).eq("is_active", true),
-  ]);
-  if (!job) return null;
-  const v = (job.vehicle as unknown as Vehicle | null) ?? null;
-  const rows = ((invs ?? []) as Record<string, unknown>[]).map(toInvoice);
-  const liveInv = rows.find((i) => i.kind === "tax_invoice" && !i.deposit_for_quotation_id) ?? rows.find((i) => i.kind === "proforma" && !i.deposit_for_quotation_id) ?? null;
-  const payments = ((pays ?? []) as Record<string, unknown>[]).map(toPayment);
+  return (await jobMoneyMany([jobId], settings)).get(jobId) ?? null;
+}
+
+/** The job facts the money rule needs (the list loads more of them; these are the ones it reads). */
+export type JobMoneyFacts = { id: string; job_number: string; status: string; is_open: boolean; gated_out_at: string | null; customer_id: string; vehicle_id: string; vehicle: Vehicle | null };
+export const JOB_MONEY_COLS = `id, job_number, status, is_open, gated_out_at, customer_id, vehicle_id, vehicle:vehicles(${VEH})`;
+
+/** The live document a job's money goes against: its tax invoice, else its proforma (never a deposit document), newest first. */
+export function liveDocOf<T extends Pick<InvoiceRow, "kind" | "status" | "converted_to" | "deposit_for_quotation_id" | "issued_at">>(invoices: T[]): T | null {
+  const docs = invoices.filter((i) => i.status === "issued" && !i.converted_to && (i.kind === "tax_invoice" || i.kind === "proforma")).sort((a, b) => (a.issued_at < b.issued_at ? 1 : a.issued_at > b.issued_at ? -1 : 0));
+  return docs.find((i) => i.kind === "tax_invoice" && !i.deposit_for_quotation_id) ?? docs.find((i) => i.kind === "proforma" && !i.deposit_for_quotation_id) ?? null;
+}
+
+/**
+ * THE money of one job from its facts (3 November 2026, shared by the job card, the customer page, the Record payment
+ * window, the money page and the money list): with a live proforma or tax invoice, that document's balance (cleared money
+ * only, less what its credit notes took off: `creditOf` by document id, from `creditsOnDocs`); before it, the approved
+ * draft total less every cleared recorded payment on the job (advances, deposit documents).
+ */
+export function jobMoneyFrom(job: JobMoneyFacts, invoices: InvoiceRow[], payments: PaymentRow[], draftTotal: number | null, creditOf: Map<string, number> = new Map()): JobMoney {
+  const v = job.vehicle ?? null;
   const base = {
-    jobId,
+    jobId: job.id,
     jobNumber: String(job.job_number),
     status: String(job.status),
     isOpen: !!job.is_open,
-    gatedOutAt: (job.gated_out_at as string | null) ?? null,
+    gatedOutAt: job.gated_out_at ?? null,
     customerId: String(job.customer_id),
     vehicleId: String(job.vehicle_id),
     plate: v ? formatPlate(v) : "",
     car: carOf(v),
   };
+  const liveInv = liveDocOf(invoices);
   if (liveInv) {
-    const bal = invoiceBalance(liveInv, payments.filter((p) => p.invoice_id === liveInv.id));
-    return { ...base, live: { id: liveInv.id, number: liveInv.number, kind: liveInv.kind as "proforma" | "tax_invoice", total: liveInv.total_aed }, total: liveInv.total_aed, paid: bal.paid, balance: bal.balance, pendingCheque: bal.pendingAmount };
+    const bal = invoiceBalance(liveInv, payments.filter((p) => p.invoice_id === liveInv.id), creditOf.get(liveInv.id) ?? 0);
+    return { ...base, live: { id: liveInv.id, number: liveInv.number, kind: liveInv.kind as "proforma" | "tax_invoice", total: liveInv.total_aed }, total: liveInv.total_aed, paid: bal.paid, balance: bal.balance, pendingCheque: bal.pendingAmount, credited: bal.credited };
   }
-  const draft = await buildInvoiceDraft(jobId, settings);
-  const total = draft.lines.length ? draft.totals.total : null;
+  const total = draftTotal;
   const live = payments.filter((p) => p.status === "recorded");
   const paid = round2(live.filter((p) => p.method !== "cheque" || p.cheque_status === "cleared").reduce((a, p) => a + p.amount_aed, 0));
   const pendingCheque = round2(live.filter((p) => p.method === "cheque" && p.cheque_status === "pending").reduce((a, p) => a + p.amount_aed, 0));
-  return { ...base, live: null, total, paid, balance: total === null ? null : Math.max(0, round2(total - paid)), pendingCheque };
+  return { ...base, live: null, total, paid, balance: total === null ? null : Math.max(0, round2(total - paid)), pendingCheque, credited: 0 };
+}
+
+/**
+ * The money of many jobs in a few reads (3 November 2026): the jobs, their documents, their payments and (only for jobs
+ * with no live document) the approved draft totals, batched. The list may pass what it has already read.
+ */
+export async function jobMoneyMany(jobIds: string[], settings: Settings, pre: { jobs?: JobMoneyFacts[]; invoices?: InvoiceRow[]; payments?: PaymentRow[] } = {}): Promise<Map<string, JobMoney>> {
+  const admin = createAdminClient();
+  const ids = Array.from(new Set(jobIds.filter(Boolean)));
+  const out = new Map<string, JobMoney>();
+  if (!ids.length) return out;
+  // A read that fails counts as nothing (the job is left out), as the one-job reading always did.
+  const safe = <T,>(p: Promise<T[]>) => p.catch(() => [] as T[]);
+  const [jobs, invRows, payRows] = await Promise.all([
+    pre.jobs ?? safe(pageAllIn<JobMoneyFacts>(ids, (piece, a, b) => admin.from("jobs").select(JOB_MONEY_COLS).in("id", piece).order("id").range(a, b) as unknown as PromiseLike<{ data: JobMoneyFacts[] | null; error: { message: string } | null }>)),
+    pre.invoices ?? safe(pageAllIn<Record<string, unknown>>(ids, (piece, a, b) => admin.from("invoices").select(INVOICE_SELECT).in("job_id", piece).in("kind", ["tax_invoice", "proforma"]).eq("status", "issued").eq("is_active", true).is("converted_to", null).order("issued_at", { ascending: false }).order("id").range(a, b))).then((r) => r.map(toInvoice)),
+    pre.payments ?? safe(pageAllIn<Record<string, unknown>>(ids, (piece, a, b) => admin.from("payments").select(PAYMENT_SELECT).in("job_id", piece).eq("is_active", true).order("id").range(a, b))).then((r) => r.map(toPayment)),
+  ]);
+  const invOf = new Map<string, InvoiceRow[]>();
+  for (const i of invRows) if (i.job_id) invOf.set(i.job_id, [...(invOf.get(i.job_id) ?? []), i]);
+  const payOf = new Map<string, PaymentRow[]>();
+  for (const p of payRows) if (p.job_id) payOf.set(p.job_id, [...(payOf.get(p.job_id) ?? []), p]);
+  const known = jobs.filter((j) => ids.includes(j.id));
+  // The approved draft only where no live document stands (one batched reading for all of them); the credit notes only
+  // where a tax invoice stands (a proforma is never credited).
+  const needDraft = known.filter((j) => !liveDocOf(invOf.get(j.id) ?? [])).map((j) => j.id);
+  const taxDocs = known.map((j) => liveDocOf(invOf.get(j.id) ?? [])).filter((d): d is InvoiceRow => !!d && d.kind === "tax_invoice").map((d) => d.id);
+  const [inputs, credits] = await Promise.all([needDraft.length ? loadDraftInputs(needDraft) : Promise.resolve(new Map<string, DraftInputs>()), creditsOnDocs(taxDocs)]);
+  for (const j of known) {
+    const inp = inputs.get(j.id);
+    const draft = inp ? draftFrom(inp, settings) : null;
+    out.set(j.id, jobMoneyFrom(j, invOf.get(j.id) ?? [], payOf.get(j.id) ?? [], draft && draft.lines.length ? draft.totals.total : null, credits));
+  }
+  return out;
 }
 
 export type PayTarget = {
@@ -164,7 +211,8 @@ export async function paymentChoices(input: { customerId?: string | null; vehicl
   const jobRows = (jobs ?? []) as { id: string; vehicle_id: string; is_open: boolean }[];
   // Open jobs, plus the 12 newest that left (money may still be owed on them), plus the asked-for one.
   const pick = jobRows.filter((j) => j.is_open || j.id === input.jobId).concat(jobRows.filter((j) => !j.is_open && j.id !== input.jobId).slice(0, 12));
-  const figures = (await Promise.all(pick.map((j) => jobMoneyOf(j.id, settings)))).filter((x): x is JobMoney => !!x);
+  const many = await jobMoneyMany(pick.map((j) => j.id), settings);
+  const figures = pick.map((j) => many.get(j.id)).filter((x): x is JobMoney => !!x);
   const targets: PayTarget[] = [];
   for (const m of figures) {
     const owed = m.balance === null || m.balance > 0.005;
@@ -293,7 +341,7 @@ export async function payerRows(q: string, settings: Settings): Promise<PayerRow
   const candidates = (g: Group) => (g.asked ? g.jobs : [...g.jobs.filter((j) => j.is_open).slice(0, 3), ...g.jobs.filter((j) => !j.is_open).slice(0, 3)]);
   const wanted: string[] = [];
   for (const g of groups.slice(0, 16)) for (const j of candidates(g)) if (!wanted.includes(j.id) && wanted.length < 30) wanted.push(j.id);
-  const moneyOf = new Map((await Promise.all(wanted.map((id) => jobMoneyOf(id, settings)))).filter((x): x is JobMoney => !!x).map((m) => [m.jobId, m]));
+  const moneyOf = await jobMoneyMany(wanted, settings);
   const owing = (m: JobMoney | undefined) => !!m && m.balance !== null && m.balance > 0.005;
 
   // The rows: one per job shown; the car alone when it has nothing open and nothing still owing.

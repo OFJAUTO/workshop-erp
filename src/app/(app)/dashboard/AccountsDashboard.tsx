@@ -1,33 +1,39 @@
+import Link from "next/link";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { HomeHeader } from "@/components/HomeHeader";
 import { MoneyRow } from "@/components/MoneyRow";
 import { WaitingPanel } from "@/components/WaitingPanel";
 import { accountsWaitingExtra } from "@/lib/accounts-waiting";
-import { Card, LinkButton, SectionLabel } from "@/components/ui";
+import { LinkButton, SectionLabel } from "@/components/ui";
 import { PaymentReportsCard } from "@/components/PaymentReportsCard";
 import { paymentReportsReady } from "@/lib/schema-ready";
 import type { CurrentStaff } from "@/lib/auth";
-import { formatDayTime } from "@/lib/format";
-import { METHOD_LABELS } from "@/lib/invoice-data";
-import { loadMoneyRows, loadMoneyTiles, type MoneyTiles } from "@/lib/money-data";
-import { depositsNotInvoiced } from "@/lib/deposits";
+import { loadMoneyList, loadMoneyTiles, type MoneyTiles } from "@/lib/money-data";
+import { AWAITING_GROUPS, awaitingGroupOf, inFilter } from "@/lib/money-list";
 import type { Settings } from "@/lib/settings";
 
-const money = (n: number) => `AED ${Math.round(n).toLocaleString("en-GB")}`;
+/** Whole dirhams, "AED" kept on the same line as its figure. */
+const money = (n: number) => `AED ${Math.round(n).toLocaleString("en-GB")}`;
+const exact = (n: number) => n.toFixed(2);
 
-/** The figures across the top of the accounts screens. */
+/**
+ * The figures across the top of the accounts screens (3 November 2026): each money tile is the sum of the list its link
+ * opens on Invoices and payments (Awaiting payment, Collected today, Tax invoices today), made from the same rows.
+ */
 export function MoneyTilesRow({ t }: { t: MoneyTiles }) {
+  const cars = t.awaitingCount - t.awaitingChargeCount;
+  const who = `${cars} car${cars === 1 ? "" : "s"}${t.awaitingChargeCount ? ` + ${t.awaitingChargeCount} pending charge${t.awaitingChargeCount === 1 ? "" : "s"}` : ""}`;
   const tiles = [
-    { label: "Awaiting payment", value: money(t.awaitingAed), sub: `${t.awaitingCount} car${t.awaitingCount === 1 ? "" : "s"}`, href: "/invoices?show=awaiting", tone: t.awaitingCount ? "border-ink" : "" },
-    { label: "Collected today", value: money(t.collectedToday), sub: `this month ${money(t.collectedMonth)}`, href: "/invoices?show=paid" },
-    { label: "Tax invoices today", value: String(t.taxInvoicesToday), sub: "issued today", href: "/invoices?show=tax" },
-    { label: "LPOs waiting approval", value: String(t.lposWaiting), sub: "to approve", href: "/parts/orders", tone: t.lposWaiting ? "border-amber-bar" : "" },
-    { label: "Supplier invoices to check", value: String(t.supplierInvoicesToCheck), sub: "new, waiting for invoice or price differs", href: "/supplier-invoices", tone: t.supplierInvoicesToCheck ? "border-amber-bar" : "" },
+    { label: "Awaiting payment", value: money(t.awaitingAed), sub: `${who} · ${money(t.dueNowAed)} due now · ${money(t.wipAed)} work in progress`, href: "/invoices?show=awaiting", tone: t.awaitingCount ? "border-ink" : "", amount: exact(t.awaitingAed), count: t.awaitingCount },
+    { label: "Collected today", value: money(t.todayAed), sub: `${t.todayPayments} payment${t.todayPayments === 1 ? "" : "s"} · this month ${money(t.collectedMonth)}`, href: "/invoices?show=today", tone: "", amount: exact(t.todayAed), count: t.todayPayments },
+    { label: "Tax invoices today", value: String(t.taxTodayCount), sub: "issued today", href: "/invoices?show=tax_today", tone: "", amount: "", count: t.taxTodayCount },
+    { label: "LPOs waiting approval", value: String(t.lposWaiting), sub: "to approve", href: "/parts/orders", tone: t.lposWaiting ? "border-amber-bar" : "", amount: "", count: t.lposWaiting },
+    { label: "Supplier invoices to check", value: String(t.supplierInvoicesToCheck), sub: "new, waiting for invoice or price differs", href: "/supplier-invoices", tone: t.supplierInvoicesToCheck ? "border-amber-bar" : "", amount: "", count: t.supplierInvoicesToCheck },
   ];
   return (
     <div className="grid grid-cols-2 md:grid-cols-5 gap-3" data-money-tiles>
       {tiles.map((x) => (
-        <a key={x.label} href={x.href} className={`rounded-card border bg-white px-4 py-3 flex flex-col gap-0.5 hover:border-ink ${x.tone || "border-line"}`} data-tile={x.label}>
+        <a key={x.label} href={x.href} className={`rounded-card border bg-white px-4 py-3 flex flex-col gap-0.5 hover:border-ink ${x.tone || "border-line"}`} data-tile={x.label} data-tile-amount={x.amount} data-tile-count={x.count}>
           <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">{x.label}</span>
           <span className="text-xl font-extrabold">{x.value}</span>
           <span className="text-xs text-muted">{x.sub}</span>
@@ -37,45 +43,57 @@ export function MoneyTilesRow({ t }: { t: MoneyTiles }) {
   );
 }
 
-/** The accounts dashboard: money only. Tiles, the payments advisors sent to record, and every open car from Ready onwards with its money step. */
+/**
+ * The accounts dashboard: money only. Tiles, the payments advisors sent to record, then every balance due grouped by
+ * where it stands (due now, proforma to send, in work with an advance, in work with nothing paid) - the same rows as
+ * Invoices and payments - and the other money today or at the money steps. Pending charges are never rows here (the
+ * owner's rule of 31 October: cars not in the workshop stay off the dashboard); the tile counts them, so one plain
+ * line under Awaiting payment says how much of it they are and links to Pending charges.
+ */
 export async function AccountsDashboard({ staff, settings }: { staff: CurrentStaff; settings: Settings }) {
-  const rows = await loadMoneyRows(settings, { scope: "open" });
-  const tiles = await loadMoneyTiles(rows);
-  const awaiting = rows.filter((r) => r.state.current === "payment");
-  const others = rows.filter((r) => r.state.current !== "payment");
-  const deposits = await depositsNotInvoiced();
+  const all = await loadMoneyList(settings, { scope: "now" });
+  const tiles = await loadMoneyTiles(all);
+  // Not here: pending charges (one line below) and cars that left paid in full lately (Invoices and payments has them).
+  const rows = all.filter((r) => r.kind !== "charge" && !r.recentPaidOnly);
+  const awaiting = rows.filter((r) => inFilter("awaiting", r));
+  const others = rows.filter((r) => !inFilter("awaiting", r));
+  const advances = rows.filter((r) => inFilter("advance", r));
+  const reportsOn = await paymentReportsReady();
   return (
     <>
-      <LiveRefresh tables={["invoices", "payments", "jobs", "purchase_orders", ...((await paymentReportsReady()) ? ["payment_reports"] : [])]} />
+      {/* No "quotations": approvals write the job too, and the editor's heartbeat would re-render this page (3 Nov). */}
+      <LiveRefresh tables={["invoices", "payments", "jobs", "purchase_orders", ...(reportsOn ? ["payment_reports"] : [])]} />
       <HomeHeader staff={staff} actions={<LinkButton href="/invoices" tone="secondary" size="lg">Invoices and payments</LinkButton>} />
       <MoneyTilesRow t={tiles} />
       <WaitingPanel staff={staff} extra={await accountsWaitingExtra()} />
       {/* 2 November 2026: the advisors' payments to record (where the old counter-payments card was; advisors never record). */}
       <PaymentReportsCard staff={staff} settings={settings} />
-      {deposits.length ? (
-        <section className="flex flex-col gap-3" data-deposits-not-invoiced>
-          <SectionLabel right={`${deposits.length}`}>Deposits received, not yet on an invoice</SectionLabel>
-          <Card className="flex flex-col divide-y divide-line">
-            {deposits.map((d) => (
-              <div key={d.id} className="py-2 flex flex-wrap items-center gap-3 text-sm" data-deposit-not-invoiced={d.number}>
-                <span className="font-bold">{d.plate}</span>
-                <span className="text-muted">{d.customer}</span>
-                <span>{d.number} · {METHOD_LABELS[d.method]} · {formatDayTime(d.received_at)}</span>
-                <span className="ml-auto font-semibold">{money(d.amount_aed)}</span>
-                <LinkButton href={`/jobs/${d.job_id}/invoice`} tone="secondary" size="md">Money page</LinkButton>
-              </div>
-            ))}
-          </Card>
-          <p className="text-xs text-muted">A deposit lands on the proforma the moment it is prepared, and on the tax invoice as &quot;Less deposit received&quot;.</p>
-        </section>
-      ) : null}
       <section className="flex flex-col gap-3" data-awaiting-payment>
-        <SectionLabel right={`${awaiting.length}`}>Awaiting payment</SectionLabel>
-        {awaiting.length === 0 ? <p className="text-sm text-muted">Nothing outstanding.</p> : awaiting.map((r) => <MoneyRow key={r.jobId} r={r} />)}
+        <SectionLabel right={`${awaiting.length} · ${money(tiles.awaitingAed - tiles.awaitingChargeAed)}`}>Awaiting payment</SectionLabel>
+        {tiles.awaitingChargeCount ? (
+          <p className="text-sm text-muted" data-pending-charges-line>
+            Plus {tiles.awaitingChargeCount} pending charge{tiles.awaitingChargeCount === 1 ? "" : "s"} (cars not in the workshop) · {money(tiles.awaitingChargeAed)} ·{" "}
+            <Link href="/pending-charges" className="inline-flex min-h-11 items-center font-bold text-ink underline underline-offset-4">Pending charges</Link>
+          </p>
+        ) : null}
+        {awaiting.length === 0 ? <p className="text-sm text-muted">Nothing outstanding.</p> : null}
+        {AWAITING_GROUPS.map((g) => {
+          const list = awaiting.filter((r) => awaitingGroupOf(r) === g.key);
+          if (!list.length) return null;
+          return (
+            <div key={g.key} className="flex flex-col gap-2" data-awaiting-group={g.key}>
+              <span className="flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-[0.08em] text-muted">
+                {g.label} · {list.length} · {money(list.reduce((a, r) => a + (r.balance ?? 0), 0))}
+                {g.key === "wip_advance" && advances.length ? <Link href="/invoices?show=advance" className="min-h-11 inline-flex items-center normal-case tracking-normal underline underline-offset-4" data-advances-link>Every advance ({advances.length})</Link> : null}
+              </span>
+              {list.map((r) => <MoneyRow key={r.key} r={r} />)}
+            </div>
+          );
+        })}
       </section>
       <section className="flex flex-col gap-3" data-other-money>
-        <SectionLabel right={`${others.length}`}>Other cars at the money steps</SectionLabel>
-        {others.length === 0 ? <p className="text-sm text-muted">None.</p> : others.map((r) => <MoneyRow key={r.jobId} r={r} />)}
+        <SectionLabel right={`${others.length}`}>Other money: paid, today, customer credit</SectionLabel>
+        {others.length === 0 ? <p className="text-sm text-muted">None.</p> : others.map((r) => <MoneyRow key={r.key} r={r} />)}
       </section>
     </>
   );

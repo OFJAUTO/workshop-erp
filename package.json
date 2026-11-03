@@ -154,7 +154,8 @@
     "test:pricechanges": "node --env-file=.env.test.local tests/browser/test-price-changes.mjs",
     "test:s1-price": "node --env-file=.env.test.local tests/browser/test-s1-price.mjs",
     "test:s2-costs": "node --env-file=.env.test.local tests/browser/test-s2-costs.mjs",
-    "test:s3-payreport": "node --env-file=.env.test.local tests/browser/test-s3-payreport.mjs"
+    "test:s3-payreport": "node --env-file=.env.test.local tests/browser/test-s3-payreport.mjs",
+    "test:s4-moneylist": "node --env-file=.env.test.local tests/browser/test-s4-moneylist.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

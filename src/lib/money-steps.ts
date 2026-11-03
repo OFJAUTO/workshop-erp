@@ -64,6 +64,11 @@ export type MoneyInput = {
   waitingHours?: number;
   /** An advisor sent a payment he took to accounts and it waits to be recorded (2 November 2026, section 3). */
   reported?: { by: string } | null;
+  /**
+   * Money paid before any proforma or tax invoice (3 November 2026): what came in, and what is left of the approved total
+   * (null while nothing is approved). Only read while there is no invoice yet; leaving it out changes nothing.
+   */
+  advance?: { paid: number; left: number | null } | null;
 };
 
 export type MoneyAction = "prepare_proforma" | "send_proforma" | "record_payment" | "send_tax_invoice" | "gate_out" | "none";
@@ -95,7 +100,9 @@ export function moneyState(i: MoneyInput): MoneyState {
 
   // Released: the car has gone out (or the job is closed).
   if (!i.isOpen || i.gatedOutAt || i.jobStatus === "closed") {
-    return { current: "released", done: [...MONEY_STEPS.map((s) => s.key)], chip: { text: onCredit ? `Released on credit · ${money(i.balance)} due` : "Released", tone: onCredit ? "amber" : "green" }, action: "none", actionLabel: "", waitingHours: null, live };
+    // A car that left with its invoice still owing says so (3 November 2026), with or without credit terms.
+    const owing = !!live && i.balance > 0.005;
+    return { current: "released", done: [...MONEY_STEPS.map((s) => s.key)], chip: { text: onCredit ? `Released on credit · ${money(i.balance)} due` : owing ? `Left owing · ${money(i.balance)} due` : "Released", tone: owing ? "amber" : "green" }, action: "none", actionLabel: "", waitingHours: null, live };
   }
   // A tax invoice exists.
   if (i.taxInvoice) {
@@ -123,9 +130,19 @@ export function moneyState(i: MoneyInput): MoneyState {
   // No invoice yet.
   if (i.declinedOut) return { current: "released", done: ["job_done", "proforma_sent", "payment", "tax_invoice"], chip: { text: "Declined, leaves free", tone: "neutral" }, action: "gate_out", actionLabel: "Gate out", waitingHours: null, live: null };
   const ready = ["ready", "pending_payment", "in_delivery"].includes(i.jobStatus);
-  if (ready && i.needsInvoice) return { current: "job_done", done: [], chip: { text: "Proforma to prepare", tone: "ink" }, action: "prepare_proforma", actionLabel: "Prepare the proforma", waitingHours: null, live: null };
+  // An advance before the proforma: the chip says what came in and what is left ("Advance AED 30,000 · AED 7,930 to pay").
+  const adv = i.advance && i.advance.paid > 0.005 ? i.advance : null;
+  const advChip = adv ? { text: advanceWords(adv.paid, adv.left), tone: "amber" as const } : null;
+  if (ready && i.needsInvoice) return { current: "job_done", done: [], chip: advChip ?? { text: "Proforma to prepare", tone: "ink" }, action: "prepare_proforma", actionLabel: "Prepare the proforma", waitingHours: null, live: null };
+  if (advChip && !ready) return { current: "job_done", done: [], chip: advChip, action: "none", actionLabel: "", waitingHours: null, live: null };
   if (ready) return { current: "released", done: ["job_done", "proforma_sent", "payment", "tax_invoice"], chip: { text: "Nothing to pay", tone: "neutral" }, action: "gate_out", actionLabel: "Gate out", waitingHours: null, live: null };
   return { current: "job_done", done: [], chip: { text: "Work in progress", tone: "neutral" }, action: "none", actionLabel: "", waitingHours: null, live: null };
+}
+
+/** "Advance AED 30,000 · AED 7,930 to pay" (or "· paid in full", or nothing after it while no total is approved). */
+export function advanceWords(paid: number, left: number | null): string {
+  const tail = left === null ? "" : left > 0.005 ? ` · ${money(left)} to pay` : " · paid in full";
+  return `Advance ${money(paid)}${tail}`;
 }
 
 /** "Confirm full payment …" text for the final step: one wording everywhere. */

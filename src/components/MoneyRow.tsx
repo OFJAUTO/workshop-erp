@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { CarThumb } from "./CarThumb";
+import { PaidSoFar } from "./PaidSoFar";
 import { Badge } from "./ui";
 import { MONEY_STEPS, type MoneyState, type MoneyStepKey } from "@/lib/money-steps";
 import { formatDayTime } from "@/lib/format";
-import type { MoneyRowData } from "@/lib/money-data";
+import type { MoneyRowData } from "@/lib/money-list";
 
 const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -22,14 +23,66 @@ export function MoneyStepLine({ state, compact = false }: { state: MoneyState; c
   );
 }
 
-/** One car on the accounts screens: money only, no workshop detail. The row opens the money page; "Job card" opens the
- *  car's job card (accounts have no Jobs menu, 2 November 2026). */
+/** "Today AED 30,000.00" (and how many payments), green, on a row with money in today. */
+function TodayLine({ r }: { r: MoneyRowData }) {
+  if (r.paidToday <= 0.005) return null;
+  return <span className="text-xs font-bold text-green" data-money-today-line>Today {money(r.paidToday)}{r.paidTodayCount > 1 ? ` · ${r.paidTodayCount} payments` : ""}</span>;
+}
+
+/** Every tax invoice issued today on the row, when they are more than the one number the row already shows. */
+function TaxTodayLine({ r, shown }: { r: MoneyRowData; shown: string | null }) {
+  if (!r.taxToday.length || (r.taxToday.length === 1 && r.taxToday[0] === shown)) return null;
+  return <span className="text-xs text-muted" data-money-tax-today-line>Tax invoice{r.taxToday.length === 1 ? "" : "s"} issued today: {r.taxToday.join(", ")}</span>;
+}
+
+/**
+ * One row on the accounts screens (3 November 2026: every job with money paid or owed). A job: the car, the money step,
+ * "Paid so far · Balance", today's money; the row opens the money page and "Job card" the car's job card (accounts have no
+ * Jobs menu). A customer's credit not allocated opens the customer's page; a pending charge opens Pending charges.
+ */
 export function MoneyRow({ r, href }: { r: MoneyRowData; href?: string }) {
   const doc = r.taxInvoice ?? r.proforma;
-  const to = href ?? `/jobs/${r.jobId}/invoice`;
+  const to = href ?? r.href;
   const tone = r.state.chip.tone === "ink" ? "ink" : r.state.chip.tone;
+  const hooks = {
+    "data-money-row": r.key,
+    "data-money-kind": r.kind,
+    "data-money-step": r.state.current,
+    "data-money-total": r.total === null ? "" : r.total.toFixed(2),
+    "data-money-paid": r.paid.toFixed(2),
+    "data-money-balance": r.balance === null ? "" : r.balance.toFixed(2),
+    "data-money-today": r.paidToday.toFixed(2),
+    "data-money-today-count": String(r.paidTodayCount),
+    "data-money-tax-today": r.taxToday.join(","),
+  };
+  if (r.kind !== "job") {
+    const credit = r.kind === "credit";
+    return (
+      <div className={`rounded-card border bg-white flex flex-wrap items-stretch hover:border-ink ${credit && r.ageDays >= 7 ? "border-red-bar" : "border-line"}`} {...hooks}>
+        <Link href={to} className="min-w-0 flex-1 px-4 py-3 flex flex-wrap items-center gap-3" data-money-row-open>
+          <div className="flex flex-col min-w-44">
+            <span className="font-extrabold">{credit ? r.customer : r.plate || r.customer}</span>
+            <span className="text-xs text-muted">{credit ? `Credit · not allocated${r.plate ? ` · ${r.plate}` : ""}` : `Pending charge · ${r.what ?? ""}`}</span>
+            {!credit && r.plate ? <span className="text-xs text-muted">{r.customer}</span> : null}
+          </div>
+          <div className="flex flex-col gap-1 flex-1 min-w-64">
+            <span className="flex flex-wrap items-center gap-2">
+              <Badge tone={tone}>{r.state.chip.text}</Badge>
+              {r.docNumber ? <span className="text-xs text-muted">{r.docNumber}</span> : null}
+              {credit ? <span className={`text-xs ${r.ageDays >= 7 ? "font-bold text-red" : "text-muted"}`}>{r.ageDays === 0 ? "today" : `${r.ageDays} day${r.ageDays === 1 ? "" : "s"} old`}</span> : null}
+            </span>
+            {credit && r.what ? <span className="text-xs text-muted">{r.what}</span> : null}
+          </div>
+          <div className="flex flex-col items-end text-right ml-auto">
+            {credit ? <span className="font-semibold">{money(r.paid)}</span> : <><span className="font-semibold">{money(r.total ?? 0)}</span><PaidSoFar m={r} showTotal={false} /></>}
+            <TodayLine r={r} />
+          </div>
+        </Link>
+      </div>
+    );
+  }
   return (
-    <div className={`rounded-card border bg-white flex flex-wrap items-stretch hover:border-ink ${r.state.waitingHours ? "border-red-bar" : "border-line"}`} data-money-row={r.jobId} data-money-step={r.state.current}>
+    <div className={`rounded-card border bg-white flex flex-wrap items-stretch hover:border-ink ${r.state.waitingHours ? "border-red-bar" : "border-line"}`} {...hooks}>
       <Link href={to} className="min-w-0 flex-1 px-4 py-3 flex flex-wrap items-center gap-3" data-money-row-open>
         <CarThumb url={r.pictureUrl} alt={r.plate} size="sm" />
         <div className="flex flex-col min-w-44">
@@ -44,10 +97,13 @@ export function MoneyRow({ r, href }: { r: MoneyRowData; href?: string }) {
             {doc ? <span className="text-xs text-muted">{doc.number}{doc.sent_at ? ` · sent ${formatDayTime(doc.sent_at)}` : ""}</span> : null}
             {r.state.waitingHours ? <span className="text-xs font-bold text-red">Waiting {r.state.waitingHours} h</span> : null}
           </span>
+          <TaxTodayLine r={r} shown={doc?.number ?? null} />
         </div>
-        <div className="flex flex-col items-end ml-auto">
-          {doc ? <span className="font-semibold">{money(r.total)}</span> : <span className="text-xs text-muted">No proforma yet</span>}
-          {doc && r.balance > 0.005 ? <span className="text-xs font-bold text-red">{money(r.balance)} due</span> : doc ? <span className="text-xs font-bold text-green">Paid{r.paidAt ? ` ${formatDayTime(r.paidAt)}` : ""}</span> : null}
+        <div className="flex flex-col items-end text-right ml-auto">
+          {r.total !== null ? <span className="font-semibold">{money(r.total)}</span> : null}
+          {r.total !== null || r.paid > 0.005 ? <PaidSoFar m={r} showTotal={false} /> : <span className="text-xs text-muted">No approved total yet</span>}
+          {r.balance !== null && r.balance <= 0.005 && r.paidAt ? <span className="text-xs text-green">{formatDayTime(r.paidAt)}</span> : null}
+          <TodayLine r={r} />
         </div>
       </Link>
       <Link href={`/jobs/${r.jobId}`} className="shrink-0 min-h-11 w-full px-4 flex items-center justify-center text-xs font-bold underline underline-offset-4 border-t border-line sm:w-auto sm:border-t-0 sm:border-l" data-money-row-job-card>Job card</Link>

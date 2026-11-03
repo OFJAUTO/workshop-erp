@@ -3,7 +3,7 @@ import { DEFAULT_UNDO_MINUTES, mayUndo } from "./money-undo";
 import { afterPendingChargePayment } from "./charges";
 import { SAVE_FAILED, logAppError } from "@/lib/app-errors";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
-import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment, type PaymentRow } from "./invoice-data";
+import { INVOICE_SELECT, PAYMENT_SELECT, creditsOnDocs, invoiceBalance, toInvoice, toPayment, type PaymentRow } from "./invoice-data";
 import { round2 } from "./money";
 import { notifyRoles, notifyStaff } from "./notifications";
 import { bankFeesOf, getSettings, type Settings } from "./settings";
@@ -59,7 +59,9 @@ export async function settleJob(jobId: string, invoiceId: string, by: string | n
   ]);
   if (!inv || !job || !job.is_open) return;
   const invoice = toInvoice(inv as Record<string, unknown>);
-  const bal = invoiceBalance(invoice, ((pays ?? []) as Record<string, unknown>[]).map(toPayment));
+  // 3 November 2026: credit notes on a tax invoice lower what is owed (the one money rule).
+  const credit = invoice.kind === "tax_invoice" ? ((await creditsOnDocs([invoice.id])).get(invoice.id) ?? 0) : 0;
+  const bal = invoiceBalance(invoice, ((pays ?? []) as Record<string, unknown>[]).map(toPayment), credit);
   // A proforma paid in full becomes the tax invoice; the job is Ready.
   if (invoice.kind === "proforma" && !invoice.converted_to && bal.balance <= 0.005) {
     const tax = await convertProformaIfPaid(jobId, by, settings ?? (await getSettings()));
@@ -112,7 +114,8 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     customerId = invoice.customer_id;
     const { data: pays } = await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", invoice.id).eq("is_active", true);
     const rows = ((pays ?? []) as Record<string, unknown>[]).map(toPayment);
-    balance = invoiceBalance(invoice, rows).balance;
+    const credit = invoice.kind === "tax_invoice" ? ((await creditsOnDocs([invoice.id])).get(invoice.id) ?? 0) : 0;
+    balance = invoiceBalance(invoice, rows, credit).balance;
     // Recorded twice: same amount and method on this invoice within a minute.
     const dup = rows.find((p) => p.status === "recorded" && p.method === method && Math.abs(p.amount_aed - amount) < 0.005 && Date.now() - Date.parse(p.received_at) < 60000);
     if (dup) return { error: `${dup.number} for ${money(amount)} by ${method} was recorded a moment ago. Not recorded twice.` };

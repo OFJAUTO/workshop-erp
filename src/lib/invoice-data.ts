@@ -1,11 +1,13 @@
 import "server-only";
 import { capsText } from "./text-case";
-import { chargesToInvoice } from "./charges";
-import { chargeNet } from "./charge-rules";
+import { chargesToInvoiceMany } from "./charges";
+import { chargeNet, type ChargeLineRow } from "./charge-rules";
 import { packageDetailsText } from "./packages";
 import { cutWords, lineIsPpf } from "./ppf-cut";
 import { round2 } from "./money";
-import { LINE_SELECT, PART_SELECT, approvedQuotations, toLine, toPart } from "./quote-data";
+import { pageAllIn } from "./page-all";
+import { creditTakenOff, type CreditNoteFacts } from "./money-list";
+import { LINE_SELECT, PART_SELECT, approvedQuotations, approvedQuotationsMany, toLine, toPart, type ApprovedQuote } from "./quote-data";
 import { discountLabelOf, isHidden, isUnchosen, labourDiscountOf, lineCost, lineTotal, lineUnitPrice, partTypeText, takesTotalDiscount, type QuoteLine } from "./quotes";
 import { getSettings, type Settings } from "./settings";
 import { noChargeJob } from "./comp-data";
@@ -155,17 +157,36 @@ export const toInvoiceLine = (r: Record<string, unknown>) => {
 };
 export const toPayment = (r: Record<string, unknown>) => num(r as unknown as PaymentRow, ["amount_aed", "bank_charge_aed", "actual_fee_aed"]);
 
-/** How much is paid against an invoice; cheques count only once cleared. */
-export function invoiceBalance(invoice: Pick<InvoiceRow, "total_aed">, payments: PaymentRow[]) {
+/**
+ * How much is paid against an invoice; cheques count only once cleared. `credited` (3 November 2026) is what issued credit
+ * notes take off a tax invoice (`creditsOnDocs`): it lowers what is still owed, never what was paid.
+ */
+export function invoiceBalance(invoice: Pick<InvoiceRow, "total_aed">, payments: PaymentRow[], credited = 0) {
   const live = payments.filter((p) => p.status === "recorded");
   const cleared = live.filter((p) => p.method !== "cheque" || p.cheque_status === "cleared");
   const pending = live.filter((p) => p.method === "cheque" && p.cheque_status === "pending");
   const paid = round2(cleared.reduce((a, p) => a + p.amount_aed, 0));
   const pendingAmount = round2(pending.reduce((a, p) => a + p.amount_aed, 0));
-  const balance = round2(invoice.total_aed - paid);
+  const balance = round2(invoice.total_aed - paid - credited);
   const paidAt = cleared.length ? cleared.map((p) => p.cleared_at ?? p.received_at).sort().at(-1) ?? null : null;
   const state: "paid" | "part_paid" | "unpaid" | "cheque_pending" = balance <= 0.005 ? "paid" : paid > 0 ? "part_paid" : pendingAmount > 0 ? "cheque_pending" : "unpaid";
-  return { paid, pendingAmount, balance: Math.max(0, balance), state, paidAt };
+  return { paid, pendingAmount, balance: Math.max(0, balance), state, paidAt, credited: round2(credited) };
+}
+
+const CREDIT_NOTE_COLS = "id, kind, status, is_active, credit_of, total_aed, refund_amount_aed, refund_paid_at";
+
+/** What credit notes take off each of these documents (THE rule `creditTakenOff`; a missing entry = nothing). One paged read. */
+export async function creditsOnDocs(docIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const ids = Array.from(new Set(docIds.filter(Boolean)));
+  if (!ids.length) return out;
+  const admin = createAdminClient();
+  const notes = await pageAllIn<CreditNoteFacts>(ids, (piece, a, b) => admin.from("invoices").select(CREDIT_NOTE_COLS).eq("kind", "credit_note").eq("status", "issued").eq("is_active", true).in("credit_of", piece).order("id").range(a, b) as unknown as PromiseLike<{ data: CreditNoteFacts[] | null; error: { message: string } | null }>).catch(() => [] as CreditNoteFacts[]);
+  for (const id of ids) {
+    const off = creditTakenOff(id, notes);
+    if (off > 0.005) out.set(id, off);
+  }
+  return out;
 }
 
 export const PAYMENT_STATE_LABELS = { paid: "Paid in full", part_paid: "Part paid", unpaid: "Unpaid", cheque_pending: "Cheque pending clearance" } as const;
@@ -247,26 +268,78 @@ export type InvoiceDraft = { lines: DraftLine[]; totals: DraftTotals; quotationN
  * come off; the inspection fee is added when no work was approved; a free comeback ends at zero.
  */
 export async function buildInvoiceDraft(jobId: string, settings: Settings): Promise<InvoiceDraft> {
+  const inputs = await loadDraftInputs([jobId]);
+  return draftFrom(inputs.get(jobId) ?? emptyDraftInputs(), settings);
+}
+
+/** What a job's draft is made of: the job's fee and comeback flags, its approved quotations with their lines, its parts and its charges to invoice. */
+export type DraftPart = ReturnType<typeof toPart> & { final_cost_aed: number | null; return_status: string; replacement_part_id: string | null };
+export type DraftInputs = {
+  job: { inspection_fee_due: boolean | null; inspection_fee_aed?: number | string | null; comeback_free: boolean | null } | null;
+  quotes: ApprovedQuote[];
+  /** Every active line of those quotations, in position order. */
+  lines: QuoteLine[];
+  parts: DraftPart[];
+  charges: ChargeLineRow[];
+};
+const emptyDraftInputs = (): DraftInputs => ({ job: null, quotes: [], lines: [], parts: [], charges: [] });
+
+/**
+ * The draft's inputs for many jobs in a handful of reads (3 November 2026): the money list measures every job's approved
+ * total with the same rule as the job card, without six reads per job. A read that fails counts as nothing, as it always did.
+ */
+export async function loadDraftInputs(jobIds: string[]): Promise<Map<string, DraftInputs>> {
   const admin = createAdminClient();
-  const [{ data: job }, quotes] = await Promise.all([
-    admin.from("jobs").select("id, inspection_fee_due, inspection_fee_aed, comeback_free").eq("id", jobId).maybeSingle(),
-    approvedQuotations(jobId),
+  const ids = Array.from(new Set(jobIds.filter(Boolean)));
+  const out = new Map<string, DraftInputs>(ids.map((id) => [id, emptyDraftInputs()]));
+  if (!ids.length) return out;
+  type JobRaw = { id: string; inspection_fee_due: boolean | null; inspection_fee_aed?: number | string | null; comeback_free: boolean | null };
+  const safe = <T,>(p: Promise<T[]>) => p.catch(() => [] as T[]);
+  const [jobs, quotesByJob, partRows, chargesByJob] = await Promise.all([
+    safe(pageAllIn<JobRaw>(ids, (piece, a, b) => admin.from("jobs").select("id, inspection_fee_due, inspection_fee_aed, comeback_free").in("id", piece).order("id").range(a, b) as unknown as PromiseLike<{ data: JobRaw[] | null; error: { message: string } | null }>)),
+    approvedQuotationsMany(ids),
+    safe(pageAllIn<Record<string, unknown>>(ids, (piece, a, b) => admin.from("part_items").select(PART_SELECT + ", final_cost_aed, label_code, return_status, replacement_part_id").in("job_id", piece).eq("is_active", true).order("id").range(a, b) as unknown as PromiseLike<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>)),
+    chargesToInvoiceMany(ids),
   ]);
-  const qs = quotes;
+  const quoteIds = Array.from(quotesByJob.values()).flat().map((q) => q.id);
+  const lineRows = await safe(pageAllIn<Record<string, unknown>>(quoteIds, (piece, a, b) => admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", piece).eq("is_active", true).order("position").order("id").range(a, b)));
+  const jobOfQuote = new Map<string, string>();
+  for (const [jobId, qs] of quotesByJob) for (const q of qs) jobOfQuote.set(q.id, jobId);
+  for (const j of jobs) {
+    const d = out.get(j.id);
+    if (d) d.job = { inspection_fee_due: j.inspection_fee_due, inspection_fee_aed: j.inspection_fee_aed, comeback_free: j.comeback_free };
+  }
+  for (const [jobId, qs] of quotesByJob) {
+    const d = out.get(jobId);
+    if (d) d.quotes = qs;
+  }
+  // Lines keep their position order across the pieces (each quotation's lines sit in one piece).
+  const lines = lineRows.map(toLine).sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  for (const l of lines) {
+    const d = out.get(jobOfQuote.get(l.quotation_id) ?? "");
+    if (d) d.lines.push(l);
+  }
+  for (const r of partRows) {
+    const d = out.get(String(r.job_id));
+    if (d) d.parts.push({ ...toPart(r), final_cost_aed: r.final_cost_aed === null || r.final_cost_aed === undefined ? null : Number(r.final_cost_aed), return_status: String(r.return_status ?? "none"), replacement_part_id: (r.replacement_part_id as string | null | undefined) ?? null });
+  }
+  for (const [jobId, cs] of chargesByJob) {
+    const d = out.get(jobId);
+    if (d) d.charges = cs;
+  }
+  return out;
+}
+
+/** THE draft from its inputs: pure, so one rule serves the job card, the money page, the money list and the invoice. */
+export function draftFrom(inp: DraftInputs, settings: Settings): InvoiceDraft {
+  const { job, quotes: qs, parts } = inp;
   const vatPercent = qs.length ? Number(qs[0].vat_percent) || 5 : 5;
-  const [{ data: lineRows }, { data: partRows }, { data: quoteRows }] = await Promise.all([
-    qs.length ? admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", qs.map((q) => q.id)).eq("is_active", true).order("position") : Promise.resolve({ data: [] }),
-    admin.from("part_items").select(PART_SELECT + ", final_cost_aed, label_code, return_status, replacement_part_id").eq("job_id", jobId).eq("is_active", true),
-    qs.length ? admin.from("quotations").select("id, rounded_total_aed, total_aed").in("id", qs.map((q) => q.id)) : Promise.resolve({ data: [] }),
-  ]);
-  const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...toPart(r), final_cost_aed: r.final_cost_aed === null || r.final_cost_aed === undefined ? null : Number(r.final_cost_aed), return_status: String(r.return_status ?? "none"), replacement_part_id: (r.replacement_part_id as string | null | undefined) ?? null }));
   // A refused or exchanged part hands its line to its replacement (1 November 2026): the cost is the part ordered.
   const partOf = (id: string | null) => {
     const p = id ? parts.find((x) => x.id === id) : undefined;
     const r = p?.replacement_part_id ? parts.find((x) => x.id === p.replacement_part_id) : undefined;
     return r ?? p;
   };
-  const roundedOf = new Map(((quoteRows ?? []) as { id: string; rounded_total_aed: number | string | null; total_aed: number | string }[]).map((q) => [q.id, q.rounded_total_aed === null ? null : Number(q.rounded_total_aed)]));
   const lines: DraftLine[] = [];
   let discount = 0;
   let discountBase = 0;
@@ -275,7 +348,7 @@ export async function buildInvoiceDraft(jobId: string, settings: Settings): Prom
   let anyRounded = false;
   for (const q of qs) {
     // Parts returned to the supplier come off the bill.
-    const qLines = ((lineRows ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => l.quotation_id === q.id && !isHidden(l) && !isUnchosen(l) && partOf(l.part_item_id)?.return_status !== "returned");
+    const qLines = inp.lines.filter((l) => l.quotation_id === q.id && !isHidden(l) && !isUnchosen(l) && partOf(l.part_item_id)?.return_status !== "returned");
     // The labour discount as the quotation had it (our own labour lines; older quotations: labour and services).
     const { base, discount: d } = labourDiscountOf(qLines, { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, discount_kind: q.discount_kind, discount_value: q.discount_value, discount_scope: q.discount_scope });
     if (d > 0 && !discountLabel) discountLabel = discountLabelOf({ discount_kind: q.discount_kind, discount_value: q.discount_value, discount_percent: Number(q.discount_percent) || 0, discount_scope: q.discount_scope }, { hasPackage: qLines.some((l) => !!l.package_key) });
@@ -284,13 +357,13 @@ export async function buildInvoiceDraft(jobId: string, settings: Settings): Prom
     for (const l of qLines) lines.push(draftLineOf(l, partOf(l.part_item_id)));
     // The quotation's own total, rounded when the advisor rounded it on sending.
     const net = round2(qLines.reduce((a, l) => a + lineTotal(l), 0) - d);
-    const rounded = roundedOf.get(q.id);
+    const rounded = q.rounded_total_aed;
     if (rounded !== null && rounded !== undefined) anyRounded = true;
     quotedTotal += rounded ?? round2(net + round2(net * (vatPercent / 100)));
   }
   const out = lines;
   if (job?.inspection_fee_due && !qs.length) {
-    const fee = Number((job as { inspection_fee_aed?: number | string | null }).inspection_fee_aed ?? settings.inspection_fee_aed) || 0;
+    const fee = Number(job.inspection_fee_aed ?? settings.inspection_fee_aed) || 0;
     if (fee > 0) {
       out.push({ section: "fees", description: "Inspection fee", details: "No work was approved after the inspection", part_number: null, quantity: 1, hours: null, unit_price: fee, amount_aed: fee, cost_aed: 0, quotation_line_id: null, part_item_id: null, takesDiscount: false });
       quotedTotal += round2(fee + round2(fee * (vatPercent / 100)));
@@ -298,7 +371,7 @@ export async function buildInvoiceDraft(jobId: string, settings: Settings): Prom
   }
   // 1 November 2026 (B2): every charge agreed on the vehicle check-in, exactly once (a charge added after the approval
   // is a quotation line already). The provider and the cost stay internal.
-  for (const c of await chargesToInvoice(jobId)) {
+  for (const c of inp.charges) {
     const net = chargeNet(c);
     out.push({ section: "services", description: capsText(c.description), details: null, part_number: null, quantity: 1, hours: null, unit_price: net, amount_aed: net, cost_aed: c.cost_aed, quotation_line_id: null, part_item_id: null, takesDiscount: false, price_display: c.free ? "complimentary" : "normal", charge_line_id: c.id });
     quotedTotal += round2(net + round2(net * (vatPercent / 100)));

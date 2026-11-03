@@ -4,7 +4,8 @@ import { MoneyRow } from "@/components/MoneyRow";
 import { Button, Card, Empty, Input, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { dubaiDate } from "@/lib/jobs";
-import { loadMoneyRows, loadMoneyTiles } from "@/lib/money-data";
+import { loadMoneyList, loadMoneyTiles, type MoneyRowData } from "@/lib/money-data";
+import { MONEY_FILTERS, RECENT_PAID_HINT, chipCountOf, inFilter, rowMatches } from "@/lib/money-list";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings, bankFeeValuesOf, bankFeesOf } from "@/lib/settings";
 import { MoneyTilesRow } from "@/app/(app)/dashboard/AccountsDashboard";
@@ -19,20 +20,13 @@ import { unallocatedOf } from "@/lib/customer-money";
 
 export const dynamic = "force-dynamic";
 
-const FILTERS = [
-  { key: "", label: "All" },
-  { key: "awaiting", label: "Awaiting payment" },
-  { key: "says_paid", label: "Customer says paid / reported" },
-  { key: "part", label: "Part paid" },
-  { key: "paid", label: "Paid" },
-  { key: "proforma", label: "Proformas" },
-  { key: "tax", label: "Tax invoices" },
-  { key: "released", label: "Released" },
-] as const;
+const FILTERS = MONEY_FILTERS;
 
 /**
- * Invoices and payments: money only. The tiles, the counter payments to confirm, then one row per car with its
- * money step, filtered by state, dates or a search.
+ * Invoices and payments: money only (3 November 2026: every job with money paid or owed). The tiles, the payments
+ * advisors sent, then one row per job (and per customer credit, per pending charge) with "Paid so far · Balance", filtered
+ * by the chips. The tiles and the chips come from the SAME list, so a tile is the sum of the list its link opens. Dates
+ * show history (every job with a document issued between them); a search also finds older cars.
  */
 export default async function InvoicesPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; show?: string; from?: string; to?: string; q?: string }> }) {
   const staff = await requirePermission("viewInvoices");
@@ -40,32 +34,37 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const settings = await getSettings();
   const { message, error, show = "", from = "", to = "", q = "" } = await searchParams;
   const ranged = !!(from || to);
-  const rows = await loadMoneyRows(settings, ranged ? { scope: "range", from: from || "2020-01-01", to: to || dubaiDate() } : { scope: "range", from: "2020-01-01", to: dubaiDate() });
-  const openRows = await loadMoneyRows(settings, { scope: "open" });
-  const tiles = await loadMoneyTiles(openRows);
+  const needle = q.trim();
+  // THE list (now) feeds the tiles always; dates show history instead; a search adds older cars that match.
+  const nowRows = await loadMoneyList(settings, { scope: "now" });
+  const tiles = await loadMoneyTiles(nowRows);
+  let all: MoneyRowData[] = nowRows;
+  // What the search found on the server (by mobile, VIN, contact name, any document number too) stays: the page never
+  // filters those rows again (review, 3 November 2026); the other rows must match the words themselves.
+  const found = needle ? await loadMoneyList(settings, { scope: "search", q: needle }) : [];
+  const foundKeys = new Set(found.map((r) => r.key));
+  if (ranged) all = await loadMoneyList(settings, { scope: "range", from: from || "2020-01-01", to: to || dubaiDate() });
+  else if (needle) all = [...nowRows, ...found.filter((r) => !nowRows.some((x) => x.key === r.key))];
   // 1 November 2026: money on customers' accounts, not allocated yet (with its age), and Record payment for anyone.
   const mayPay = can(role, "recordPayments") && !staff.viewingAs;
   const viewPay = can(role, "recordPayments") && !!staff.viewingAs;
   const reportsOn = await paymentReportsReady();
   const unallocated = await unallocatedOf();
-  // Open cars without an invoice yet sit at the top of "All" and "Awaiting": they come from the open scope.
-  const all = [...openRows.filter((r) => !rows.some((x) => x.jobId === r.jobId)), ...rows];
-  const needle = q.trim().toLowerCase();
-  const searched = needle ? all.filter((r) => [r.plate, r.jobNumber, r.customer, r.car, r.proforma?.number, r.taxInvoice?.number].some((v) => (v ?? "").toLowerCase().includes(needle))) : all;
-  const match = (key: string) => (r: (typeof all)[number]) => {
-    switch (key) {
-      case "awaiting": return r.state.current === "payment" && r.balance > 0.005 && !r.proforma?.customer_says_paid_at && !r.reportedBy;
-      case "says_paid": return !!r.proforma?.customer_says_paid_at || !!r.reportedBy;
-      case "part": return r.paid > 0 && r.balance > 0.005;
-      case "paid": return !!(r.taxInvoice ?? r.proforma) && r.balance <= 0.005;
-      case "proforma": return !!r.proforma && !r.taxInvoice;
-      case "tax": return !!r.taxInvoice;
-      case "released": return r.state.current === "released" && !r.isOpen;
-      default: return true;
-    }
-  };
-  const counts = Object.fromEntries(FILTERS.map((f) => [f.key, searched.filter(match(f.key)).length]));
-  const filtered = searched.filter(match(show));
+  const searched = needle ? all.filter((r) => foundKeys.has(r.key) || rowMatches(r, needle)) : all;
+  const counts = Object.fromEntries(FILTERS.map((f) => [f.key, chipCountOf(f.key, searched)]));
+  const filtered = searched.filter((r) => inFilter(show, r));
+  // What the list adds up to, under its heading (the same figures as the tile that opened it).
+  const sumOf = (f: (r: MoneyRowData) => number) => filtered.reduce((a, r) => a + f(r), 0);
+  const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const taxCount = sumOf((r) => r.taxToday.length);
+  const listSum =
+    show === "today" ? `${filtered.length} · ${aed(sumOf((r) => r.paidToday))} in ${plural(sumOf((r) => r.paidTodayCount), "payment", "payments")}`
+    : show === "awaiting" || show === "part" ? `${filtered.length} · ${aed(sumOf((r) => r.balance ?? 0))} due`
+    : show === "credit" || show === "advance" ? `${filtered.length} · ${aed(sumOf((r) => r.paid))}`
+    // The tile counts tax invoices: the heading says the same number (and the cars when one has two).
+    : show === "tax_today" ? `${plural(taxCount, "tax invoice", "tax invoices")}${taxCount !== filtered.length ? ` on ${plural(filtered.length, "car", "cars")}` : ""}`
+    : `${filtered.length}`;
   const keep = (next: Record<string, string>) => {
     const p = new URLSearchParams();
     for (const [k, v] of Object.entries({ show, from, to, q, ...next })) if (v) p.set(k, v);
@@ -75,10 +74,12 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
+      {/* No "quotations": an approval or a decline always writes the job too, and the editor's heartbeat would re-render
+          this page every minute while anyone edits a quotation (review, 3 November 2026). */}
       <LiveRefresh tables={["invoices", "payments", "jobs", ...(reportsOn ? ["payment_reports"] : [])]} />
       <PageHeader
         title="Invoices and payments"
-        subtitle={`${counts[""]} car${counts[""] === 1 ? "" : "s"}${ranged ? ` · invoices from ${from || "the start"} to ${to || "today"}` : ""}`}
+        subtitle={`${counts[""]} row${counts[""] === 1 ? "" : "s"} with money paid or owed${ranged ? ` · documents from ${from || "the start"} to ${to || "today"}` : ""}`}
         actions={can(role, "exportAccounts") || mayPay || viewPay ? <>{mayPay || viewPay ? <RecordPaymentButton size="lg" readOnly={viewPay} /> : null}{can(role, "exportAccounts") ? <a href="/api/export/accounts" className="inline-flex items-center justify-center rounded-control font-bold bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">Export for the accountant</a> : null}</> : undefined}
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
@@ -90,7 +91,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
       <Card className="flex flex-col gap-3">
         <form method="get" action="/invoices" className="flex flex-wrap items-end gap-2">
           {show ? <input type="hidden" name="show" value={show} /> : null}
-          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Search<Input name="q" defaultValue={q} placeholder="Plate, job number, customer or invoice number" className="w-72" data-money-search /></label>
+          <label className="flex flex-col gap-1 text-xs font-semibold text-muted w-80 max-w-full">Search<Input name="q" defaultValue={q} placeholder="Plate, VIN, name, mobile or number" data-money-search /></label>
           <label className="flex flex-col gap-1 text-xs font-semibold text-muted">From<Input name="from" type="date" defaultValue={from} className="w-40" /></label>
           <label className="flex flex-col gap-1 text-xs font-semibold text-muted">To<Input name="to" type="date" defaultValue={to} className="w-40" /></label>
           <Button type="submit" size="md" tone="secondary">Show</Button>
@@ -101,6 +102,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
             <Link key={f.key} href={keep({ show: f.key })} className={`min-h-11 inline-flex items-center rounded-control px-3 ${show === f.key ? "bg-ink text-white" : "bg-chip"}`} data-filter={f.key}>{f.label} · {counts[f.key]}</Link>
           ))}
         </div>
+        {!ranged && !needle ? <p className="text-xs text-muted" data-money-list-hint>{RECENT_PAID_HINT}</p> : null}
       </Card>
 
       {unallocated.length ? (
@@ -111,8 +113,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
         </Card>
       ) : null}
       <section className="flex flex-col gap-3" data-money-list>
-        <SectionLabel right={`${filtered.length}`}>{FILTERS.find((f) => f.key === show)?.label ?? "All"}</SectionLabel>
-        {filtered.length === 0 ? <Empty title="Nothing here" /> : filtered.map((r) => <MoneyRow key={r.jobId} r={r} />)}
+        <SectionLabel right={<span data-money-list-sum>{listSum}</span>}>{FILTERS.find((f) => f.key === show)?.label ?? "All"}</SectionLabel>
+        {filtered.length === 0 ? <Empty title="Nothing here" /> : filtered.map((r) => <MoneyRow key={r.key} r={r} />)}
       </section>
 
       {can(role, "cardSettlements") ? (

@@ -1,5 +1,5 @@
 import "server-only";
-import { PAYMENT_SELECT, toPayment, type PaymentRow } from "./invoice-data";
+import { PAYMENT_SELECT, toPayment } from "./invoice-data";
 import { round2 } from "./money";
 import { notifyRoles } from "./notifications";
 import { approvedQuotations } from "./quote-data";
@@ -104,21 +104,9 @@ export async function depositsWaiting(): Promise<DepositWaiting[]> {
   return out.sort((a, b) => b.hours - a.hours);
 }
 
-export type DepositNotInvoiced = PaymentRow & { jobNumber: string; plate: string; customer: string };
-
-/** Deposits recorded on the job before any proforma or invoice exists (accounts: still to be applied to an invoice). */
-export async function depositsNotInvoiced(): Promise<DepositNotInvoiced[]> {
-  const admin = createAdminClient();
-  const { data: pays } = await admin.from("payments").select(PAYMENT_SELECT).is("invoice_id", null).eq("is_active", true).eq("status", "recorded").not("job_id", "is", null).order("received_at", { ascending: false });
-  const rows = ((pays ?? []) as Record<string, unknown>[]).map(toPayment);
-  if (!rows.length) return [];
-  const { data: jobs } = await admin.from("jobs").select(`id, job_number, customer:customers(full_name, company_name), vehicle:vehicles(${PLATE_SELECT})`).in("id", Array.from(new Set(rows.map((p) => p.job_id as string))));
-  const byId = new Map(((jobs ?? []) as unknown as { id: string; job_number: string; customer: { full_name: string; company_name: string | null } | null; vehicle: PlateRow | null }[]).map((j) => [j.id, j]));
-  return rows.map((p) => {
-    const j = byId.get(p.job_id as string);
-    return { ...p, jobNumber: j?.job_number ?? "", plate: j?.vehicle ? formatPlate(j.vehicle) : (j?.job_number ?? ""), customer: j?.customer?.company_name ?? j?.customer?.full_name ?? "Customer" };
-  });
-}
+// The deposits recorded before any invoice (the old "Deposits received, not yet on an invoice" list) are the money list's
+// advance rows since 3 November 2026: Invoices and payments ?show=advance, and the accounts dashboard's
+// "In work, advance received" group (loadMoneyList in money-data.ts).
 
 /** An LPO sent for approval while the deposit has not arrived: the owner is told once, with the override on the LPO page. */
 export async function warnOwnerIfDepositShort(jobId: string, poId: string, poNumber: string) {

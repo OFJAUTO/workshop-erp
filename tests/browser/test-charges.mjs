@@ -142,7 +142,11 @@ try {
   check("E: the proforma link is ready to send", (await page.locator("[data-pc-send]").count()) === 1);
   await page.screenshot({ path: shot("e2-pending-charge-opened.png"), fullPage: true });
   const dash = await (await fetch(`${base}/dashboard`, { headers: { cookie: (await accB.context.cookies()).map((c) => `${c.name}=${c.value}`).join("; ") } })).text();
-  check("E: it is not on the dashboard", !dash.includes("E2E PENDING CUSTOMER"));
+  // The owner's rule of 31 October: a pending charge is not on the dashboard (no customer, no car, no row). Since 3 November
+  // the Awaiting payment tile counts it, so one plain line says "Plus n pending charges · AED x" with a link to the page.
+  check("E: it is not on the dashboard (no customer, no row)", !dash.includes("E2E PENDING CUSTOMER") && !dash.includes(`charge:${entry?.id}`) && !dash.includes('data-money-kind="charge"'));
+  const plain = dash.replace(/<!-- -->/g, ""); // React splits text around {values} with empty comments
+  check("E: the dashboard only says how much of Awaiting payment is pending charges, linking to the page", /data-pending-charges-line[^>]*>[^<]*Plus \d+ pending charges?/.test(plain) && /data-pending-charges-line[\s\S]{0,600}href="\/pending-charges"/.test(plain));
   // A part payment, then the rest, through the Record payment window.
   const pay = async (amount) => {
     await go(page, `${base}/pending-charges?open=${entry.id}`);

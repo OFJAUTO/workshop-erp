@@ -4,7 +4,7 @@ import { PositionsLine } from "@/components/PositionsLine";
 import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { detailsWithoutHours, formatDate, formatDateTime, hoursQty } from "@/lib/format";
-import { METHOD_LABELS, PAYMENT_STATE_LABELS, invoiceBalance, loadInvoice, nextDocumentNumber } from "@/lib/invoice-data";
+import { METHOD_LABELS, PAYMENT_STATE_LABELS, creditsOnDocs, invoiceBalance, loadInvoice, nextDocumentNumber } from "@/lib/invoice-data";
 import { methodsFor } from "@/lib/money-steps";
 import { paymentLinksOf } from "@/lib/payment-links";
 import { can, type RoleId } from "@/lib/roles";
@@ -41,7 +41,9 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const { invoice, lines, payments, customer, vehicle, job, creditNotes } = bundle;
   const paymentLinks = invoice.kind === "credit_note" ? [] : await paymentLinksOf(invoice.id);
   const live = payments.filter((p) => p.status === "recorded");
-  const bal = invoiceBalance(invoice, live);
+  // 3 November 2026: what credit notes took off a tax invoice is not owed (less any refund paid out on them).
+  const creditOff = invoice.kind === "tax_invoice" ? ((await creditsOnDocs([invoice.id])).get(invoice.id) ?? 0) : 0;
+  const bal = invoiceBalance(invoice, live, creditOff);
   const canPay = can(role, "recordPayments") && !staff.viewingAs && invoice.kind === "tax_invoice" && invoice.status === "issued";
   const canVoid = (role === "owner" || (role === "accounts" && staff.is_head_accountant)) && !staff.viewingAs;
   const undoMinutes = Number((settings as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES;
@@ -91,6 +93,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
         <Card className={`flex flex-wrap items-center gap-x-8 gap-y-2 ${bal.state === "paid" ? "border-green" : "border-ink"}`}>
           <span className="text-lg font-extrabold">Invoice AED {m(invoice.total_aed)}</span>
           <span className="text-lg font-extrabold">Paid AED {m(bal.paid)}</span>
+          {bal.credited ? <span className="text-sm font-semibold text-muted" data-credit-note-off>Credit notes AED {m(bal.credited)} off</span> : null}
           <span className={`text-lg font-extrabold ${bal.balance > 0 ? "text-red" : "text-green"}`}>Balance AED {m(bal.balance)}</span>
           {bal.pendingAmount ? <span className="text-sm font-semibold text-amber">Cheque of AED {m(bal.pendingAmount)} pending clearance</span> : null}
           {pendingOwner.length ? <span className="text-sm font-semibold text-amber">{pendingOwner.length} payment{pendingOwner.length === 1 ? "" : "s"} waiting for the owner</span> : null}

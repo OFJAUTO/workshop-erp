@@ -6,7 +6,7 @@ import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { detailsWithoutHours, formatDateTime, formatDayTime, hoursQty } from "@/lib/format";
-import { INVOICE_SELECT, METHOD_LABELS, PAYMENT_SELECT, buildInvoiceDraft, invoiceBalance, nextDocumentNumber, toInvoice, toPayment, type PaymentRow } from "@/lib/invoice-data";
+import { INVOICE_SELECT, METHOD_LABELS, PAYMENT_SELECT, buildInvoiceDraft, creditsOnDocs, invoiceBalance, nextDocumentNumber, toInvoice, toPayment, type PaymentRow } from "@/lib/invoice-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { STATUS_LABELS } from "@/lib/jobs";
 import { PAYMENT_METHOD_LABELS, methodsFor, moneyState, type MoneyInvoice, type MoneyStepKey } from "@/lib/money-steps";
@@ -79,10 +79,11 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const live = taxInvoice ?? proforma;
   const { data: livePays } = live ? await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", live.id).eq("is_active", true).order("received_at") : { data: [] };
   const payments = ((livePays ?? []) as Record<string, unknown>[]).map(toPayment);
-  const bal = live ? invoiceBalance(live, payments) : null;
+  // 3 November 2026: what credit notes took off the tax invoice is not owed (the same rule as the job card and the list).
+  const liveCredit = taxInvoice ? ((await creditsOnDocs([taxInvoice.id])).get(taxInvoice.id) ?? 0) : 0;
+  const bal = live ? invoiceBalance(live, payments, live === taxInvoice ? liveCredit : 0) : null;
   const allDeposits = ((deposits ?? []) as Record<string, unknown>[]).map(toPayment);
   const depositRows = allDeposits.filter((p) => p.status === "recorded");
-  const depositTotal = depositRows.reduce((a, p) => a + p.amount_aed, 0);
   // The client keys already spent on this job (any status): a payment form still holding one starts a new key, so the
   // next payment is never taken for the one already recorded.
   const spentKeys = [...payments, ...allDeposits].map((p) => p.client_key).filter((k): k is string => !!k && !k.startsWith("ngenius:"));
@@ -109,6 +110,9 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const reportsOn = await paymentReportsReady();
   const jobReports = reportsOn ? await loadReports({ jobId: id, settings }) : [];
   const waitingReport = jobReports.find((r) => r.status === "waiting") ?? null;
+  // THE job money (3 November 2026): before the proforma "Paid so far · Balance" is the approved total less every cleared
+  // payment on the job (deposit documents included, a cheque only once cleared) - the same figures as the job card.
+  const jobMoney = await jobMoneyOf(id, settings);
   const money = moneyState({
     jobStatus: job.status,
     isOpen: job.is_open,
@@ -124,6 +128,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
     declinedOut: !!stepJob?.declined_out_at,
     waitingHours: Number(settings.payment_waiting_hours) || 24,
     reported: waitingReport ? { by: firstName(waitingReport.reporter) } : null,
+    advance: !live && jobMoney ? { paid: jobMoney.paid, left: jobMoney.balance } : null,
   });
   const links = live ? await paymentLinksOf(live.id) : [];
   const payLink = currentPaymentLink(links);
@@ -143,7 +148,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const viewPay = can(role, "recordPayments") && !!staff.viewingAs;
   const mayReport = role === "service_advisor" && !staff.viewingAs && reportsOn;
   // THE rule for the advisor's button, the same as the job card's: something is owed (open or gone alike).
-  const reportMoney = mayReport ? await jobMoneyOf(id, settings) : null;
+  const reportMoney = mayReport ? jobMoney : null;
   const reportBalance = reportMoney?.balance ?? null;
   const reportOwes = stillOwes(reportMoney);
   // A report waits: every other Record button on this page names itself "a different payment" (the report has its own).
@@ -181,8 +186,9 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   ];
 
   const totalDue = live ? live.total_aed : draft.totals.total;
-  const paidSoFar = live ? (bal?.paid ?? 0) : depositTotal;
-  const balanceDue = live ? (bal?.balance ?? 0) : Math.max(0, Math.round((draft.totals.total - depositTotal) * 100) / 100);
+  const paidSoFar = live ? (bal?.paid ?? 0) : (jobMoney?.paid ?? 0);
+  const balanceDue = live ? (bal?.balance ?? 0) : (jobMoney?.balance ?? 0);
+  const chequeClearing = live ? (bal?.pendingAmount ?? 0) : (jobMoney?.pendingCheque ?? 0);
   const atMoneyStage = !!live || ["ready", "pending_payment", "in_delivery"].includes(job.status);
   const balTone = balanceDue <= 0.005 && paidSoFar > 0 ? "text-green" : balanceDue > 0.005 && atMoneyStage ? "text-red" : "";
   const outstandingDeposit = Math.max(0, Math.round((dep.required - dep.received) * 100) / 100);
@@ -259,7 +265,8 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
               <div className="flex flex-col"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Paid so far</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(paidSoFar)}</span></div>
               <div className="flex flex-col"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Balance due</span><span className={`text-xl sm:text-2xl font-extrabold ${balTone}`} data-balance>{live && !unpaid ? "Paid in full" : `AED ${m(balanceDue)}`}</span></div>
             </div>
-            {bal?.pendingAmount ? <p className="text-sm font-semibold text-amber">Cheque of AED {m(bal.pendingAmount)} pending clearance.</p> : null}
+            {chequeClearing ? <p className="text-sm font-semibold text-amber">Cheque of AED {m(chequeClearing)} pending clearance.</p> : null}
+            {bal?.credited ? <p className="text-sm font-semibold text-muted" data-credit-note-off>Credit notes AED {m(bal.credited)} taken off the balance.</p> : null}
             {live && !unpaid ? <p className="text-sm font-bold text-green">Paid in full{bal?.paidAt ? ` · ${formatDayTime(bal.paidAt)}` : ""}{taxInvoice && !taxInvoice.sent_at ? " · gate-out opens after the tax invoice is sent." : ""}</p> : null}
             {taxInvoice && unpaid ? <p className="text-sm font-semibold text-amber">Tax invoice issued before full payment{taxInvoice.issue_reason ? `: ${taxInvoice.issue_reason}` : ""}. The balance is still due.</p> : null}
           </Card>
@@ -472,7 +479,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
               <dt className="text-muted">Taxable amount</dt><dd className="text-right">AED {m(draft.totals.taxable)}</dd>
               <dt className="text-muted">VAT {draft.vatPercent}%</dt><dd className="text-right">AED {m(draft.totals.vat)}</dd>
               <dt className="text-lg font-extrabold">Total</dt><dd className="text-right text-lg font-extrabold">AED {m(draft.totals.total)}</dd>
-              {depositTotal && !live ? <><dt className="text-muted">Deposits received, applied on issue</dt><dd className="text-right">AED {m(depositTotal)}</dd></> : null}
+              {paidSoFar && !live ? <><dt className="text-muted">Paid so far (advances), applied on issue</dt><dd className="text-right">AED {m(paidSoFar)}</dd></> : null}
             </dl>
           </Card>
         </div>

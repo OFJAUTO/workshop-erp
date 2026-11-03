@@ -13,6 +13,7 @@ import { loadPricingRows, pricingPartSelect, valuesOfPart, type PricingPart } fr
 import { costChecksFor } from "./part-cost-history";
 import { rowState } from "./parts-rows";
 import { costingWithRolls, type PackageCostingBase } from "./package-cost";
+import { pageAllIn } from "./page-all";
 
 export const PARTS_BUCKET = "parts-diagrams";
 
@@ -141,16 +142,27 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
  * The approved quotations of a job that count for work, parts and the invoice: one per quotation
  * number, the newest approved version. An older approved version that was revised is not counted twice.
  */
-export type ApprovedQuote = { id: string; number: string; version: number; discount_percent: number; vat_percent: number; deposit_aed: number; total_aed: number; discount_kind: "percent" | "aed" | null; discount_value: number | null; discount_scope: "labour" | "labour_services" | null };
+export type ApprovedQuote = { id: string; number: string; version: number; discount_percent: number; vat_percent: number; deposit_aed: number; total_aed: number; discount_kind: "percent" | "aed" | null; discount_value: number | null; discount_scope: "labour" | "labour_services" | null; /** The total rounded on sending (null when it was not rounded). */ rounded_total_aed?: number | null };
 export async function approvedQuotations(jobId: string): Promise<ApprovedQuote[]> {
-  const { data } = await createAdminClient().from("quotations").select("id, number, version, discount_percent, vat_percent, deposit_aed, total_aed, created_at, discount_kind, discount_value, discount_scope").eq("job_id", jobId).eq("kind", "quotation").eq("is_active", true).eq("status", "approved").order("created_at");
-  const best = new Map<string, ApprovedQuote>();
-  for (const q of (data ?? []) as { id: string; number: string; version: number | string; discount_percent: number | string; vat_percent: number | string; deposit_aed: number | string | null; total_aed?: number | string | null; discount_kind?: string | null; discount_value?: number | string | null; discount_scope?: string | null }[]) {
-    const row: ApprovedQuote = { id: q.id, number: q.number, version: Number(q.version) || 1, discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, deposit_aed: Number(q.deposit_aed) || 0, total_aed: Number(q.total_aed) || 0, discount_scope: q.discount_scope === "labour_services" ? "labour_services" : "labour", discount_kind: q.discount_kind === "percent" || q.discount_kind === "aed" ? q.discount_kind : null, discount_value: q.discount_value === null || q.discount_value === undefined ? null : Number(q.discount_value) };
+  return (await approvedQuotationsMany([jobId])).get(jobId) ?? [];
+}
+
+/** The same rule for many jobs at once (3 November 2026: the money list counts every job's approved total in one go). */
+export async function approvedQuotationsMany(jobIds: string[]): Promise<Map<string, ApprovedQuote[]>> {
+  type Raw = { id: string; job_id: string; number: string; version: number | string; discount_percent: number | string; vat_percent: number | string; deposit_aed: number | string | null; total_aed?: number | string | null; rounded_total_aed?: number | string | null; discount_kind?: string | null; discount_value?: number | string | null; discount_scope?: string | null };
+  const admin = createAdminClient();
+  // A read that fails counts as "nothing approved", as it always did (never a crash in the middle of a flow).
+  const rows = await pageAllIn<Raw>(jobIds, (ids, a, b) => admin.from("quotations").select("id, job_id, number, version, discount_percent, vat_percent, deposit_aed, total_aed, rounded_total_aed, created_at, discount_kind, discount_value, discount_scope").in("job_id", ids).eq("kind", "quotation").eq("is_active", true).eq("status", "approved").order("created_at").order("id").range(a, b) as unknown as PromiseLike<{ data: Raw[] | null; error: { message: string } | null }>).catch(() => [] as Raw[]);
+  const byJob = new Map<string, Map<string, ApprovedQuote>>();
+  for (const id of jobIds) byJob.set(id, new Map());
+  for (const q of rows) {
+    const best = byJob.get(q.job_id) ?? new Map<string, ApprovedQuote>();
+    byJob.set(q.job_id, best);
+    const row: ApprovedQuote = { id: q.id, number: q.number, version: Number(q.version) || 1, discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, deposit_aed: Number(q.deposit_aed) || 0, total_aed: Number(q.total_aed) || 0, discount_scope: q.discount_scope === "labour_services" ? "labour_services" : "labour", discount_kind: q.discount_kind === "percent" || q.discount_kind === "aed" ? q.discount_kind : null, discount_value: q.discount_value === null || q.discount_value === undefined ? null : Number(q.discount_value), rounded_total_aed: q.rounded_total_aed === null || q.rounded_total_aed === undefined ? null : Number(q.rounded_total_aed) };
     const have = best.get(q.number);
     if (!have || have.version < row.version) best.set(q.number, row);
   }
-  return Array.from(best.values());
+  return new Map(Array.from(byJob.entries()).map(([id, best]) => [id, Array.from(best.values())]));
 }
 
 export async function loadQuoteSummary(jobId: string): Promise<QuoteSummary> {

@@ -117,6 +117,7 @@ import { loadJobQuotes } from "@/lib/quote-history-data";
 import { anyApproved } from "@/lib/quote-history";
 import { refuseRecord } from "@/lib/refusal";
 import { RecordPaymentButton } from "@/components/RecordPaymentHost";
+import { PaidSoFar } from "@/components/PaidSoFar";
 import { UnallocatedList } from "@/components/UnallocatedList";
 import { PaymentLinkSend } from "./PaymentLinkSend";
 import { jobMoneyOf, unallocatedOf } from "@/lib/customer-money";
@@ -323,6 +324,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const reportsOn = await paymentReportsReady();
   const jobReports = reportsOn && can(role, "viewInvoices") ? await loadReports({ jobId: id, settings }) : [];
   const waitingReport = jobReports.find((r) => r.status === "waiting") ?? null;
+  // 1 November 2026: a payment can ALWAYS be recorded (owner and accounts, any stage, open or gone) and a payment link for
+  // any amount sent (advisors). "Paid so far · Balance" before the proforma is the approved total less every advance; the
+  // chip says so too ("Advance AED 30,000 · AED 7,930 to pay", 3 November 2026).
+  const jobMoney = can(role, "viewInvoices") ? await jobMoneyOf(id, settings) : null;
   const money = moneyState({
     jobStatus: job.status,
     isOpen: job.is_open,
@@ -338,12 +343,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     declinedOut: !!stepJob?.declined_out_at,
     waitingHours: Number(settings.payment_waiting_hours) || 24,
     reported: waitingReport ? { by: firstName(waitingReport.reporter) } : null,
+    advance: jobMoney && !jobMoney.live ? { paid: jobMoney.paid, left: jobMoney.balance } : null,
   });
   const payNowOn = money.live ? !!currentPaymentLink(await paymentLinksOf(money.live.id)) : false;
   const bankCharges = bankFeesOf(settings);
-  // 1 November 2026: a payment can ALWAYS be recorded (owner and accounts, any stage, open or gone) and a payment link for
-  // any amount sent (advisors). "Paid so far · Balance" before the proforma is the approved total less every advance.
-  const jobMoney = can(role, "viewInvoices") ? await jobMoneyOf(id, settings) : null;
   const mayPay = can(role, "recordPayments") && !staff.viewingAs;
   // 2 November 2026, section 3: the owner in View as sees the same Record payment button, greyed ("View as is
   // read-only"); advisors send a payment they took to accounts ("Payment received – send to accounts").
@@ -898,7 +901,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {money.live ? <span className="text-sm font-semibold">{money.live.number}</span> : null}
             <Badge tone={money.chip.tone === "ink" ? "ink" : money.chip.tone}>{money.chip.text}</Badge>
           </span>
-          {jobMoney && (jobMoney.total !== null || jobMoney.paid > 0) ? <span className="text-xs text-muted" data-paid-so-far>{jobMoney.total !== null ? `Total AED ${aedOf(jobMoney.total)} · ` : ""}Paid so far AED {aedOf(jobMoney.paid)}{jobMoney.balance !== null ? <> · <span className={jobMoney.balance > 0.005 ? "font-bold text-ink" : "font-bold text-green"} data-balance-left>{jobMoney.balance > 0.005 ? `Balance AED ${aedOf(jobMoney.balance)}` : "Paid in full"}</span></> : null}{jobMoney.pendingCheque ? ` · cheque AED ${aedOf(jobMoney.pendingCheque)} clearing` : ""}</span> : null}
+          {jobMoney && (jobMoney.total !== null || jobMoney.paid > 0) ? <PaidSoFar m={jobMoney} /> : null}
           {jobReports.length ? <PaymentReportLines reports={jobReports} viewerId={staff.id} canRecord={can(role, "recordPayments")} canReport={role === "service_advisor" || role === "owner"} readOnly={!!staff.viewingAs} balance={jobMoney?.balance ?? null} expected={liveProforma?.expected_payment_method ?? null} isOwner={role === "owner"} reasons={reasonsFor(settings, "payment_query")} /> : null}
           {job.ready_sent_at ? <span className="text-xs text-muted">Proforma sent {formatDayTime(job.ready_sent_at)}</span> : null}
           {money.waitingHours ? <span className="text-xs font-bold text-red" data-money-waiting>Waiting {money.waitingHours} h for payment</span> : null}

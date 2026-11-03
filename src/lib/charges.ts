@@ -10,6 +10,7 @@ import { flagBelowCost } from "./below-cost";
 import { schemaReady } from "./schema-ready";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
+import { pageAllIn } from "./page-all";
 import { capsText } from "./text-case";
 import { formatPlate } from "./types";
 import { tryEnqueueZoho } from "./zoho-sync";
@@ -185,9 +186,25 @@ export async function agreeChargesOnApproval(jobId: string, approvalRequestId: s
   return listed.length;
 }
 
+/** THE rule: agreed on the check-in, not a quotation line, not on an invoice yet. */
+const chargeToInvoiceNow = (l: ChargeLineRow) => !!l.agreed_at && !l.quotation_line_id && !l.invoice_id;
+
 /** The agreed charges still to invoice (agreed on the check-in, not on a quotation): every one exactly once. */
 export async function chargesToInvoice(jobId: string): Promise<ChargeLineRow[]> {
-  return (await loadCharges({ jobId })).filter((l) => l.agreed_at && !l.quotation_line_id && !l.invoice_id);
+  return (await loadCharges({ jobId })).filter(chargeToInvoiceNow);
+}
+
+/** The same for many jobs at once (3 November 2026, the money list), in the order the lines were made. */
+export async function chargesToInvoiceMany(jobIds: string[]): Promise<Map<string, ChargeLineRow[]>> {
+  const out = new Map<string, ChargeLineRow[]>();
+  if (!jobIds.length || !(await chargesReady())) return out;
+  const admin = createAdminClient();
+  const rows = await pageAllIn<Record<string, unknown>>(jobIds, (ids, a, b) => admin.from("charge_lines").select(LINE_COLS).in("job_id", ids).eq("is_active", true).order("created_at").order("id").range(a, b)).catch(() => [] as Record<string, unknown>[]);
+  for (const l of rows.map(toRow).filter(chargeToInvoiceNow)) {
+    if (!l.job_id) continue;
+    out.set(l.job_id, [...(out.get(l.job_id) ?? []), l]);
+  }
+  return out;
 }
 
 /** Once on an invoice a charge is locked (corrections by credit note only). */

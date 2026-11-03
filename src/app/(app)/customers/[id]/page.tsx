@@ -15,6 +15,7 @@ import type { QuoteFamily } from "@/lib/quote-history";
 import { refuseRecord } from "@/lib/refusal";
 import { RecordPaymentButton } from "@/components/RecordPaymentHost";
 import { UnallocatedList } from "@/components/UnallocatedList";
+import { PaidSoFar } from "@/components/PaidSoFar";
 import { paymentChoices, unallocatedOf } from "@/lib/customer-money";
 
 export default async function CustomerPage({
@@ -109,14 +110,15 @@ export default async function CustomerPage({
         ) : null;
       })() : null}
       {seesMoney && (owing.length || credit.length) ? (
-        <Card className="flex flex-col gap-2" data-customer-money>
+        <Card id="money" className="flex flex-col gap-2" data-customer-money>
           <SectionLabel right={creditTotal > 0 ? `Credit AED ${creditTotal.toLocaleString("en-GB", { minimumFractionDigits: 2 })} (not allocated)` : undefined}>Money</SectionLabel>
           {owing.length ? (
             <ul className="flex flex-col divide-y divide-line">
               {owing.map((t) => (
                 <li key={t.key} className="py-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" data-customer-job-money={t.jobId ?? ""}>
-                  <Link href={`/jobs/${t.jobId}/invoice`} className="font-bold uppercase underline underline-offset-4">{t.title}</Link>
-                  <span className="text-xs text-muted">{t.total !== null ? `Total AED ${t.total.toLocaleString("en-GB", { minimumFractionDigits: 2 })} · ` : ""}Paid so far AED {t.paid.toLocaleString("en-GB", { minimumFractionDigits: 2 })}{t.balance !== null ? ` · Balance AED ${t.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : " · no approved total yet"}{t.gone ? " · the car has left" : ""}</span>
+                  <Link href={t.jobId ? `/jobs/${t.jobId}/invoice` : "/pending-charges"} className="font-bold uppercase underline underline-offset-4">{t.title}</Link>
+                  <PaidSoFar m={t} />
+                  {t.gone ? <span className="text-xs text-muted">the car has left</span> : null}
                 </li>
               ))}
             </ul>

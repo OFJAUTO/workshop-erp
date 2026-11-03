@@ -3,6 +3,7 @@ import { DEFAULT_UNDO_MINUTES, heldForUndo } from "./money-undo";
 import { logAppError } from "@/lib/app-errors";
 import { INVOICE_LINE_SELECT, INVOICE_SELECT, PAYMENT_SELECT, toInvoice, toInvoiceLine, toPayment, type InvoiceLineRow, type InvoiceRow, type PaymentRow } from "@/lib/invoice-data";
 import { round2 } from "@/lib/money";
+import { pageAll } from "@/lib/page-all";
 import { getSettings, type Settings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ZOHO_REAL_ORG_ID, ZohoError, listAccounts, listTaxes, zohoBooksNow, zohoConfigured, zohoFetch, zohoTestOrgId } from "@/lib/zoho";
@@ -2083,17 +2084,8 @@ export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
   return report;
 }
 
-/** Reads a whole table page by page: PostgREST caps one answer at 1,000 rows, which would blind the backfill. */
-export async function pageAll<T>(fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
-  const out: T[] = [];
-  const size = 1000;
-  for (let from = 0; ; from += size) {
-    const { data, error } = await fetchPage(from, from + size - 1);
-    if (error) throw new Error(error.message);
-    out.push(...(data ?? []));
-    if (!data || data.length < size) return out;
-  }
-}
+/** Reads a whole table page by page (the one helper lives in page-all.ts since 3 November 2026; kept here for its callers). */
+export { pageAll };
 
 /**
  * The owner's backfill: everything already in the ERP joins the queue — phase 1 money and phase 2 purchases/expenses.
