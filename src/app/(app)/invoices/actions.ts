@@ -9,7 +9,7 @@ import { PAYMENT_SELECT, loadInvoice, nextDocumentNumber, toPayment } from "@/li
 import { newToken } from "@/lib/media";
 import { round2 } from "@/lib/money";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
-import { decideOverpayment, settleJob, undoPayment, verifyPayment, voidPayment, type Actor, tellDepositCovered } from "@/lib/payments";
+import { addAuthCode, decideOverpayment, settleJob, undoPayment, verifyPayment, voidPayment, type Actor, tellDepositCovered } from "@/lib/payments";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { validateGatewayUrl } from "@/lib/pay-page";
@@ -159,6 +159,24 @@ export async function undoPaymentAction(paymentId: string, back: string) {
   const { data: p } = await createAdminClient().from("payments").select("job_id, invoice_id").eq("id", paymentId).maybeSingle();
   refresh(p?.job_id ?? null, p?.invoice_id ?? undefined);
   redirect(`${to}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? `${r.message} Nothing went to Zoho Books.`)}`);
+}
+
+/**
+ * "Add auth code" (3 November 2026, section 5): the owner or accounts type the real code of a card or payment-link
+ * payment saved with its code missing. Nothing is recorded again; the answer shows next to the button.
+ */
+export async function addAuthCodeAction(_prev: { ok?: boolean; error?: string; message?: string; at?: number } | null, formData: FormData): Promise<{ ok?: boolean; error?: string; message?: string; at?: number }> {
+  const staff = await requirePermission("recordPayments");
+  const at = Date.now();
+  if (staff.viewingAs) return { error: "You are viewing as someone else: switch back (or use Act as) to add the auth code.", at };
+  const paymentId = String(formData.get("payment_id") ?? "");
+  if (!/^[0-9a-f-]{36}$/.test(paymentId)) return { error: "Receipt not found.", at };
+  const r = await addAuthCode(paymentId, String(formData.get("auth_code") ?? ""), actorOf(staff), { kind: "hand" });
+  if (r.error) return { error: r.error, at };
+  const { data: p } = await createAdminClient().from("payments").select("job_id, invoice_id").eq("id", paymentId).maybeSingle();
+  refresh(p?.job_id ?? null, p?.invoice_id ?? undefined);
+  revalidatePath("/card-settlements");
+  return { ok: true, message: r.message, at };
 }
 
 /** Accounts tick a payment once the money is confirmed. */

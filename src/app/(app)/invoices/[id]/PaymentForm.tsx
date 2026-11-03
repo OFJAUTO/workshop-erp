@@ -6,7 +6,7 @@ import { PAYMENT_METHOD_LABELS, confirmFullText } from "@/lib/money-steps";
 import { JobFileUpload, markFormSent, useFormKey, useRenewAfterAnswer, type FilesWaiting, type JobFile } from "@/components/JobFileUpload";
 import { feeRuleWords, feesFor, type BankFees } from "@/lib/bank-fees";
 import { AuthCodeInput } from "@/components/AuthCodeInput";
-import { needsAuthCode } from "@/lib/auth-code";
+import { authConfirmWords, needsAuthCode, realAuthCode } from "@/lib/auth-code";
 
 const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -80,7 +80,8 @@ export function PaymentForm({
   const [mode, setMode] = useState<"full" | "partial">(prefill ? (prefillFull ? "full" : "partial") : balance && balance > 0 ? "full" : "partial");
   const [amount, setAmount] = useState(prefill && !prefillFull ? prefill.amount.toFixed(2) : "");
   const [reference, setReference] = useState(prefill?.reference ?? "");
-  const [authCode, setAuthCode] = useState(prefill?.authCode ?? "");
+  // A made-up code the advisor typed is never carried into accounts' box (3 November 2026): it counts as no code.
+  const [authCode, setAuthCode] = useState(realAuthCode(prefill?.authCode) ?? "");
   const [confirming, setConfirming] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   // The form's own key ties the proof to the payment. It stays the same across a reload or a new version (a proof still
@@ -216,7 +217,7 @@ export function PaymentForm({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label={settles && invoiceId ? "Confirm full payment" : "Confirm the payment"} data-confirm-full>
           <div className="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-4 shadow-xl">
             <h2 className="text-lg font-extrabold">{settles && invoiceId ? "Confirm full payment" : "Confirm the payment"}</h2>
-            <p className="text-sm leading-relaxed" data-confirm-text>{settles && invoiceId ? confirmFullText({ amount: value, method, reference: needsAuthCode(method) ? (authCode ? `auth ${authCode}` : null) : reference || null, invoiceNumber, isProforma, nextTaxNumber }) : [`Record payment of ${money(value)}`, invoiceNumber ? `against ${invoiceNumber}` : jobId ? "as an advance on the job" : "on the customer's account", PAYMENT_METHOD_LABELS[method] ?? method, needsAuthCode(method) ? (authCode ? `auth ${authCode}` : "") : reference ? `ref ${reference}` : "", method === "card" || method === "transfer" ? "proof attached ✓" : ""].filter(Boolean).join(" · ")}</p>
+            <p className="text-sm leading-relaxed" data-confirm-text>{settles && invoiceId ? confirmFullText({ amount: value, method, reference: needsAuthCode(method) ? (realAuthCode(authCode) ? `auth ${realAuthCode(authCode)}` : null) : reference || null, authMissing: needsAuthCode(method) && !realAuthCode(authCode), invoiceNumber, isProforma, nextTaxNumber }) : [`Record payment of ${money(value)}`, invoiceNumber ? `against ${invoiceNumber}` : jobId ? "as an advance on the job" : "on the customer's account", PAYMENT_METHOD_LABELS[method] ?? method, authConfirmWords(method, authCode) ?? (reference ? `ref ${reference}` : ""), method === "card" || method === "transfer" ? "proof attached ✓" : ""].filter(Boolean).join(" · ")}</p>
             <Button
               type="button"
               size="lg"

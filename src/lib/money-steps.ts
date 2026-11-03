@@ -146,9 +146,9 @@ export function advanceWords(paid: number, left: number | null): string {
 }
 
 /** "Confirm full payment …" text for the final step: one wording everywhere. */
-export function confirmFullText(opts: { amount: number; method: string; reference?: string | null; invoiceNumber: string; isProforma: boolean; nextTaxNumber: string | null }) {
+export function confirmFullText(opts: { amount: number; method: string; reference?: string | null; invoiceNumber: string; isProforma: boolean; nextTaxNumber: string | null; /** A card or link payment without a real auth code (3 November 2026): said, never blocked. */ authMissing?: boolean }) {
   const m = PAYMENT_METHOD_LABELS[opts.method] ?? opts.method;
-  const ref = opts.reference ? ` (ref ${opts.reference})` : "";
+  const ref = opts.reference ? ` (ref ${opts.reference})` : opts.authMissing ? " (auth code missing – flagged until it is added)" : "";
   const amount = `AED ${opts.amount.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   if (opts.isProforma) {
     return `Confirm full payment: ${amount} received by ${m}${ref}. This completes the payment and creates tax invoice ${opts.nextTaxNumber ?? "INV-…"}. A tax invoice can't be cancelled or deleted. Corrections are only possible by credit note, approved by the owner.`;

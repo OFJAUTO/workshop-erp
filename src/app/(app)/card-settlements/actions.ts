@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { recordReport, uploadSettlementReport } from "@/lib/settlement-import";
+import { fillAuthFromReport, recordReport, uploadSettlementReport } from "@/lib/settlement-import";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { terminalList } from "@/lib/bank-fees";
 import { requirePermission } from "@/lib/auth";
@@ -115,8 +115,29 @@ export async function recordReportAction(reportId: string, _prev: FormState, for
     const m = /^pick_(\d+)$/.exec(k);
     if (m && String(v)) picks[Number(m[1])] = String(v);
   }
-  const res = await recordReport(reportId, { picks, settledOn: String(formData.get("settled_on") ?? "").slice(0, 10), statementRef: blank(formData.get("statement_ref")), note: blank(formData.get("note")), flagsSeen: formData.get("flags_seen") === "1" }, staff.id);
+  const res = await recordReport(reportId, { picks, settledOn: String(formData.get("settled_on") ?? "").slice(0, 10), statementRef: blank(formData.get("statement_ref")), note: blank(formData.get("note")), flagsSeen: formData.get("flags_seen") === "1" }, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
   if (!res.ok) return { error: res.error };
   revalidatePath("/card-settlements");
-  return { success: `${res.numbers.join(" and ")} recorded from the bank's report: each payment carries its exact MSF, fee and VAT, and each job now shows the actual fee.` };
+  revalidatePath("/invoices");
+  const parts = [
+    res.numbers.length ? `${res.numbers.join(" and ")} recorded from the bank's report: each payment carries its exact MSF, fee and VAT, and each job now shows the actual fee.` : "Nothing new to record: every payment on this report was already settled.",
+    res.settledBefore.length ? `Already settled before: ${res.settledBefore.join(", ")}.` : "",
+    res.codesSaved.length ? `Auth code saved from the report: ${res.codesSaved.join(", ")}.` : "",
+  ];
+  return { success: parts.filter(Boolean).join(" ") };
+}
+
+/**
+ * Confirm a SUGGESTED match on the bank report (3 November 2026, section 5): one tap saves the line's auth code on the
+ * payment whose code was missing (logged with the report's file and line); the answer shows beside the button.
+ */
+export async function confirmSuggestionAction(reportId: string, index: number, paymentId: string): Promise<{ ok?: boolean; error?: string; message?: string; settledIn?: string | null }> {
+  const staff = await requirePermission("cardSettlements");
+  if (staff.viewingAs) return { error: "You are viewing as someone else: switch back to confirm a match." };
+  if (!/^[0-9a-f-]{36}$/.test(reportId) || !/^[0-9a-f-]{36}$/.test(paymentId) || !Number.isInteger(index)) return { error: "That line or payment was not found. Reload the page." };
+  const r = await fillAuthFromReport(reportId, index, paymentId, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+  if (!r.ok) return { error: r.error };
+  revalidatePath("/card-settlements");
+  revalidatePath("/invoices");
+  return { ok: true, settledIn: r.settledIn, message: `Auth ${r.code} saved on ${r.number}${r.settledIn ? ` · already settled in ${r.settledIn}` : ""}.` };
 }

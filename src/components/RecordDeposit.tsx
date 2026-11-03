@@ -11,7 +11,7 @@ import { Button, Input } from "./ui";
 import { reloadIfStale } from "@/lib/app-version";
 import { feeRuleWords, feesFor, type BankFees } from "@/lib/bank-fees";
 import { AuthCodeInput } from "@/components/AuthCodeInput";
-import { needsAuthCode } from "@/lib/auth-code";
+import { authCodeProblem, authConfirmWords, needsAuthCode } from "@/lib/auth-code";
 
 const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const METHODS = [
@@ -231,7 +231,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
                 {error ? <p className="text-sm font-semibold text-red" data-deposit-error>{error}</p> : null}
                 {confirming ? (
                   <div className="flex flex-col gap-2 rounded-control border-2 border-ink bg-canvas p-3" data-deposit-confirm>
-                    <p className="text-sm font-bold">Record {aed(value)} by {METHODS.find(([v]) => v === method)?.[1].toLowerCase()} as the deposit on {d.plate}? A receipt is made at once.</p>
+                    <p className="text-sm font-bold" data-deposit-confirm-text>Record {aed(value)} by {METHODS.find(([v]) => v === method)?.[1].toLowerCase()}{authConfirmWords(method, authCode) ? ` (${authConfirmWords(method, authCode)})` : ""} as the deposit on {d.plate}? A receipt is made at once.</p>
                     <div className="flex gap-2">
                       <Button type="button" size="md" disabled={busy} onClick={() => void record()} data-deposit-confirm-yes>{busy ? "Recording…" : "Yes, record it"}</Button>
                       <Button type="button" tone="ghost" size="md" onClick={() => setConfirming(false)}>Back</Button>
@@ -239,7 +239,13 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
                   </div>
                 ) : (
                   <div>
-                    <Button type="button" size="lg" disabled={!clientKey || !(value > 0) || (needsProof && files.length === 0)} onClick={() => setConfirming(true)} data-deposit-record>
+                    <Button type="button" size="lg" disabled={!clientKey || !(value > 0) || (needsProof && files.length === 0)} onClick={() => {
+                        // A code of the wrong length is refused before the question (the panel has no form to stop it).
+                        const problem = needsAuthCode(method) ? authCodeProblem(method, authCode) : null;
+                        if (problem) return setError(problem);
+                        setError(null);
+                        setConfirming(true);
+                      }} data-deposit-record>
                       Record {value > 0 ? aed(value) : "the deposit"}
                     </Button>
                     {/* Only a proof the server has counts: one still on the device holds the button with plain words. */}

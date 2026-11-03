@@ -14,7 +14,7 @@ import { approvedQuotations } from "./quote-data";
 import { formatPlate } from "./types";
 import { createAdminClient } from "./supabase/admin";
 import { flagZohoAttention, reopenZoho, tryEnqueueZoho, zohoPostedSomewhere } from "./zoho-sync";
-import { AUTH_CODE_RE, authCodeProblem, cleanAuthCode, needsAuthCode } from "./auth-code";
+import { AUTH_CODE_RE, authCodeMissing, authCodeProblem, authCodeRefusal, authCodeWhere, cleanAuthCode, isFakeAuthCode, needsAuthCode, realAuthCode } from "./auth-code";
 import { jobMoneyOf } from "./customer-money";
 import { newToken } from "./media";
 import { paymentsAnytimeReady } from "./schema-ready";
@@ -27,7 +27,10 @@ export type PaymentInput = {
   method: string;
   amount: number;
   reference?: string | null;
-  /** The bank's 6-character auth code (card machine and payment link): required when staff record one. */
+  /**
+   * The bank's 6-character auth code (card machine and payment link). Optional since 3 November 2026: left empty or made
+   * up ("111111"), the payment is saved with no code and flagged "Auth code missing"; a wrong length is refused.
+   */
   authCode?: string | null;
   cheque?: { number: string | null; bank: string | null; date: string | null } | null;
   notes?: string | null;
@@ -90,11 +93,12 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   const amount = round2(input.amount);
   if (!Number.isFinite(amount) || amount <= 0) return { error: "Enter the amount received." };
   // The auth code (29 October 2026): staff type it from the slip or the confirmation; the gateway may send its own.
-  const authCode = input.authCode ? cleanAuthCode(input.authCode) : null;
-  if (needsAuthCode(method) && actor.id) {
-    const problem = authCodeProblem(method, authCode ?? "");
-    if (problem) return { error: problem };
-  } else if (authCode && !AUTH_CODE_RE.test(authCode)) return { error: authCodeProblem(method, authCode) ?? "Check the auth code." };
+  // Optional since 3 November 2026 (RCT-00040 "111111"): empty or made up is stored as no code ("Auth code missing",
+  // flagged); only a typed code of the wrong length is refused.
+  const typedCode = cleanAuthCode(input.authCode);
+  if (typedCode && !AUTH_CODE_RE.test(typedCode)) return { error: authCodeProblem(method, typedCode) ?? "Check the auth code: 6 letters or digits." };
+  const authCode = needsAuthCode(method) ? realAuthCode(typedCode) : null;
+  const codeMissing = needsAuthCode(method) && !authCode;
   // The same tap twice: the second one is the same payment.
   if (input.clientKey) {
     const { data: same } = await admin.from("payments").select("id, number, amount_aed, method").eq("client_key", input.clientKey).maybeSingle();
@@ -145,11 +149,10 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     if (dup) return { error: `${dup.number} for ${money(amount)} by ${method} was recorded a moment ago. Not recorded twice.` };
   }
   if (!customerId) return { error: "Choose where the payment goes: a job, its invoice, or the customer's account." };
-  // One transaction, one auth code: the same code on another live receipt of this method (last 60 days) is a slip.
-  if (authCode && needsAuthCode(method) && !input.clientKey?.startsWith("ngenius:")) {
-    const since = new Date(Date.now() - 60 * 86400000).toISOString();
-    const { data: twin } = await admin.from("payments").select("number, amount_aed, received_at").eq("auth_code", authCode).eq("method", method).eq("is_active", true).neq("status", "voided").gte("received_at", since).limit(1).maybeSingle();
-    if (twin) return { error: `Auth code ${authCode} is already on ${twin.number} (${money(Number(twin.amount_aed) || 0)}). Check the ${method === "link" ? "payment confirmation" : "card slip"}.` };
+  // One transaction, one auth code: the same REAL code on another live receipt of this method (last 60 days) is a slip.
+  if (authCode && !input.clientKey?.startsWith("ngenius:")) {
+    const twin = await authCodeTwin(authCode, method, null);
+    if (twin) return { error: twin };
   }
   const cheque = method === "cheque" ? { cheque_number: input.cheque?.number ?? null, cheque_bank: input.cheque?.bank ?? null, cheque_date: input.cheque?.date ?? null, cheque_status: "pending" as const } : {};
   if (method === "cheque" && (!cheque.cheque_number || !cheque.cheque_date)) return { error: "A cheque needs its number and date." };
@@ -175,7 +178,8 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   }
   // The receipt is written: what follows never turns it into a "failed" save for staff (logged instead).
   try {
-    if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: ${money(amount)} by ${method}${method === "cheque" ? " (pending clearance)" : ""}${input.invoiceId ? "" : " as an advance"} received by ${actor.display_name}${over ? ` (above the balance of ${money(balance ?? 0)}: ${overNote})` : ""}`, created_by: actor.id });
+    const codeWords = codeMissing ? ` · auth code missing${isFakeAuthCode(typedCode) ? ` (${typedCode} typed, not a real code)` : ""}` : "";
+    if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: ${money(amount)} by ${method}${method === "cheque" ? " (pending clearance)" : ""}${input.invoiceId ? "" : " as an advance"} received by ${actor.display_name}${over ? ` (above the balance of ${money(balance ?? 0)}: ${overNote})` : ""}${codeWords}`, created_by: actor.id });
     // Money arrived: "Customer says paid" is answered.
     if (input.invoiceId) await admin.from("invoices").update({ customer_says_paid_at: null, updated_by: actor.id }).eq("id", input.invoiceId).not("customer_says_paid_at", "is", null);
     if (input.invoiceId && jobId) await settleJob(jobId, input.invoiceId, actor.id, settings);
@@ -189,13 +193,71 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     // the same amount and method (recorded another way). Its advisor hears "Recorded ✓ RCT-…".
     if (jobId) {
       const { afterReceiptForReports } = await import("./payment-reports");
-      await afterReceiptForReports({ id: String(created.id), number: String(created.number), amount, method, jobId, authCode: needsAuthCode(method) ? authCode : null, reference: input.reference ?? (method === "cheque" ? (input.cheque?.number ?? null) : null) }, input.reportId ?? null, { id: actor.id, display_name: actor.display_name }).catch((e) => logAppError(`record payment: report after ${created.number}`, e, { staffId: actor.id, jobId }));
+      await afterReceiptForReports({ id: String(created.id), number: String(created.number), amount, method, jobId, authCode, reference: input.reference ?? (method === "cheque" ? (input.cheque?.number ?? null) : null) }, input.reportId ?? null, { id: actor.id, display_name: actor.display_name }).catch((e) => logAppError(`record payment: report after ${created.number}`, e, { staffId: actor.id, jobId }));
     }
     if (over && !isOwner) await notifyRoles(["owner"], { type: "payment_void", title: `Payment above the balance recorded · ${created.number}`, body: `${money(amount)} by ${method} against a balance of ${money(balance ?? 0)}, by ${actor.display_name}: ${overNote}`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : jobId ? `/jobs/${jobId}/invoice` : "/invoices" });
   } catch (err) {
     await logAppError(`record payment: after ${created.number}`, err, { staffId: actor.id, jobId, detail: { paymentId: created.id } });
   }
-  return { ok: true, number: created.number, paymentId: created.id, token, message: `${created.number} recorded${jobId ? "" : " on the customer's account (not allocated)"}.${method === "cheque" ? " The cheque counts as unpaid until it clears." : ""}` };
+  return { ok: true, number: created.number, paymentId: created.id, token, message: `${created.number} recorded${jobId ? "" : " on the customer's account (not allocated)"}.${method === "cheque" ? " The cheque counts as unpaid until it clears." : ""}${codeMissing ? " Auth code missing: it is flagged until it is added." : ""}` };
+}
+
+/**
+ * THE duplicate rule of a real auth code (one transaction, one code): the same code on another live receipt of the same
+ * method in the last 60 days is a slip. Used when a payment is recorded and when a missing code is added later. Null =
+ * no twin; otherwise the refusal in words.
+ */
+export async function authCodeTwin(code: string, method: string, exceptId: string | null): Promise<string | null> {
+  const since = new Date(Date.now() - 60 * 86400000).toISOString();
+  let q = createAdminClient().from("payments").select("number, amount_aed").eq("auth_code", code).eq("method", method).eq("is_active", true).neq("status", "voided").gte("received_at", since);
+  if (exceptId) q = q.neq("id", exceptId);
+  const { data: twin } = await q.limit(1).maybeSingle();
+  return twin ? `Auth code ${code} is already on ${twin.number} (${money(Number(twin.amount_aed) || 0)}). Check ${authCodeWhere(method)}.` : null;
+}
+
+/** Where an added auth code came from: typed by hand, or the bank's settlement report (its file and line). */
+export type AuthCodeSource = { kind: "hand" } | { kind: "report"; reportId: string; fileName: string; line: number };
+
+/**
+ * "Add auth code" (3 November 2026, section 5): a card or payment-link payment saved with its code missing gets the real
+ * one later - typed by the owner or accounts, or confirmed from the bank's settlement report - WITHOUT recording it
+ * again. Only the code moves: the receipt number, the settlement, the bank fees, the balances and Zoho (which never
+ * receives auth codes) stay as they are. Logged in the change log (who, what it was, where it came from) and on the job.
+ */
+export async function addAuthCode(paymentId: string, raw: string, actor: Actor, source: AuthCodeSource): Promise<PaymentResult> {
+  if (!actor.id || !(actor.role_id === "owner" || actor.role_id === "accounts")) return { error: "Only the owner or accounts add an auth code." };
+  const code = cleanAuthCode(raw);
+  if (!AUTH_CODE_RE.test(code)) return { error: `The auth code is 6 letters or digits${code ? `; "${code}" has ${code.length}` : ""}.` };
+  const admin = createAdminClient();
+  const { data: raw2 } = await admin.from("payments").select("id, number, method, status, is_active, auth_code, job_id, amount_aed").eq("id", paymentId).maybeSingle();
+  const p = raw2 as { id: string; number: string; method: string; status: string; is_active: boolean; auth_code: string | null; job_id: string | null; amount_aed: number | string } | null;
+  if (!p || !p.is_active) return { error: "Receipt not found." };
+  if (!needsAuthCode(p.method)) return { error: `${p.number} is not a card or payment-link payment: it has no auth code.` };
+  if (!(p.status === "recorded" || p.status === "pending_owner")) return { error: `${p.number} is ${p.status === "voided" ? "voided" : p.status}: nothing to add.` };
+  // A code typed by hand must be a real one; the bank's own code is the truth even when it looks made up.
+  const refused = source.kind === "hand" ? authCodeRefusal(p.method, code) : null;
+  if (refused) return { error: refused };
+  if (!authCodeMissing(p)) return { error: `${p.number} already has auth ${p.auth_code}.` };
+  const twin = await authCodeTwin(code, p.method, p.id);
+  if (twin) return { error: twin };
+  // Compare and swap: only while the code is still what was read (two people adding at once: the second is told).
+  let upd = admin.from("payments").update({ auth_code: code, updated_by: actor.id }).eq("id", p.id);
+  upd = p.auth_code === null ? upd.is("auth_code", null) : upd.eq("auth_code", p.auth_code);
+  const { data: changed, error } = await upd.select("id");
+  if (error) {
+    await logAppError("add auth code", error, { staffId: actor.id, jobId: p.job_id, detail: { paymentId } });
+    return { error: SAVE_FAILED };
+  }
+  if (!changed?.length) return { error: `Someone else changed ${p.number} a moment ago – reload the page.` };
+  const from = source.kind === "report" ? `from the bank report ${source.fileName}, line ${source.line}` : "by hand";
+  const was = p.auth_code ? `was missing: ${p.auth_code} typed` : "was missing";
+  try {
+    await admin.from("audit_log").insert({ table_name: "payments", record_id: p.id, action: "update", old_data: { auth_code: p.auth_code }, new_data: { auth_code_added: code, was: p.auth_code, number: p.number, job_id: p.job_id, source: source.kind === "report" ? { kind: "report", report_id: source.reportId, file: source.fileName, line: source.line } : { kind: "hand" }, by: actor.display_name }, changed_by: actor.id });
+    if (p.job_id) await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment", note: `${p.number}: auth code ${code} added ${from} by ${actor.display_name} (${was})`, created_by: actor.id });
+  } catch (e) {
+    await logAppError("add auth code: log", e, { staffId: actor.id, jobId: p.job_id, detail: { paymentId } });
+  }
+  return { ok: true, number: p.number, paymentId: p.id, message: `Auth ${code} saved on ${p.number}.` };
 }
 
 /**

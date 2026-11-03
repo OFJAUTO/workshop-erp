@@ -4,7 +4,7 @@
  * opens the Record payment window pre-filled) or query back. These are the pure rules of it - the one wording of a
  * report line, the input checks, the working-hours reminder - shared by the screens, the server and the tests.
  */
-import { AUTH_CODE_RE, cleanAuthCode, needsAuthCode } from "./auth-code";
+import { authCodeProblem, cleanAuthCode, needsAuthCode, realAuthCode } from "./auth-code";
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS } from "./money-steps";
 import { workingHoursBetween, type WorkingTime } from "./working-time";
 
@@ -63,7 +63,8 @@ export type CleanReport = { amount: number; method: string; authCode: string | n
 /**
  * The advisor's form, checked the same way on the screen and on the server: an amount above zero, one of the five
  * methods, an auth code that is 6 letters or digits when given (optional here - accounts type it when they record if
- * it is missing), a short reference and note.
+ * it is missing; a made-up one such as 111111 is kept as NO code, 3 November 2026, so it never fills accounts' box), a
+ * short reference and note.
  */
 export function checkReportInput(i: ReportInput): { error: string } | { ok: CleanReport } {
   const amount = Math.round(Number(String(i.amount ?? "").replace(/,/g, "").trim()) * 100) / 100;
@@ -73,12 +74,13 @@ export function checkReportInput(i: ReportInput): { error: string } | { ok: Clea
   if (!(PAYMENT_METHODS as readonly string[]).includes(method)) return { error: "Choose how the customer paid." };
   const code = cleanAuthCode(i.authCode);
   if (code && !needsAuthCode(method)) return { error: "An auth code is only for card and payment-link payments – write it as the reference." };
-  if (code && !AUTH_CODE_RE.test(code)) return { error: `The auth code is 6 letters or digits; "${code}" has ${code.length}. Leave it empty if you don't have it.` };
+  const problem = code ? authCodeProblem(method, code) : null;
+  if (problem) return { error: problem };
   const reference = String(i.reference ?? "").trim();
   if (reference.length > REPORT_REFERENCE_MAX) return { error: `The reference is too long (${REPORT_REFERENCE_MAX} characters at most).` };
   const note = String(i.note ?? "").trim();
   if (note.length > REPORT_NOTE_MAX) return { error: `The note is too long (${REPORT_NOTE_MAX} characters at most).` };
-  return { ok: { amount, method, authCode: code || null, reference: reference || null, note: note || null } };
+  return { ok: { amount, method, authCode: realAuthCode(code), reference: reference || null, note: note || null } };
 }
 
 /** The status words on the job card and in the window. */
@@ -111,6 +113,8 @@ export function slipKind(contentType: string | null | undefined, path: string | 
 
 /** Codes and references compared without spaces, dashes or letter case. */
 const codeOf = (s: string | null | undefined) => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+/** An auth code as THE rule reads it: a made-up one (111111) counts as no code at all (3 November 2026). */
+const authOf = (s: string | null | undefined) => realAuthCode(codeOf(s)) ?? "";
 /** Two references of the same transfer: the same, or one inside the other (a bank's "FT2611…" against the advisor's "2611…"). */
 const refsAgree = (a: string, b: string) => a === b || (a.length >= 4 && b.length >= 4 && (a.includes(b) || b.includes(a)));
 
@@ -124,13 +128,13 @@ export type ReportCandidate = { id: string; amount: number; status: ReportStatus
  * queried, then the oldest. Null = no report is answered by this receipt.
  */
 export function pickReportForReceipt(reports: ReportCandidate[], receipt: { amount: number; authCode?: string | null; reference?: string | null }): string | null {
-  const ra = codeOf(receipt.authCode);
+  const ra = authOf(receipt.authCode);
   const rr = codeOf(receipt.reference);
   const scored: { r: ReportCandidate; rank: number }[] = [];
   for (const r of reports) {
     if (!(r.status === "waiting" || r.status === "queried")) continue;
     if (Math.abs((Number(r.amount) || 0) - receipt.amount) >= 0.005) continue;
-    const a = codeOf(r.authCode);
+    const a = authOf(r.authCode);
     const ref = codeOf(r.reference);
     if (a && ra && a !== ra) continue;
     if (ref && rr && !refsAgree(ref, rr)) continue;

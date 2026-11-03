@@ -22,6 +22,8 @@ import { ChoiceButtons } from "@/components/ui";
 import { PaymentForm } from "./PaymentForm";
 import { refuseRecord } from "@/lib/refusal";
 import { realPartNumber } from "@/lib/parts-rows";
+import { AuthCodeMissing } from "@/components/AuthCodeMissing";
+import { authCodeMissing, realAuthCode } from "@/lib/auth-code";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +50,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const canVoid = (role === "owner" || (role === "accounts" && staff.is_head_accountant)) && !staff.viewingAs;
   const undoMinutes = Number((settings as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES;
   const canVerify = can(role, "verifyPayments") && !staff.viewingAs;
+  // "Add auth code" on a payment saved without one (3 November 2026): owner and accounts, never while viewing as.
+  const canAddAuth = can(role, "recordPayments") && !staff.viewingAs;
   const seesCost = role === "owner" || role === "accounts";
   const cost = lines.reduce((a, l) => a + l.cost_aed, 0);
   const credited = creditNotes.filter((c) => c.status === "issued").reduce((a, c) => a + c.total_aed, 0);
@@ -113,7 +117,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                       <span className="font-semibold">{p.number}</span>
                       <span>{formatDateTime(p.received_at)}</span>
                       <Badge tone={p.status === "pending_owner" ? "amber" : p.method === "cheque" && p.cheque_status === "pending" ? "amber" : p.status === "voided" || p.status === "reversed" ? "red" : "neutral"}>{METHOD_LABELS[p.method]}{p.method === "cheque" ? ` · ${p.cheque_status}` : ""}{p.is_deposit ? " · deposit" : ""}{p.status === "pending_owner" ? " · waiting for the owner" : ""}</Badge>
-                      <span className="text-muted">{p.method === "cheque" ? [p.cheque_number, p.cheque_bank, p.cheque_date].filter(Boolean).join(" · ") : p.auth_code ? `Auth ${p.auth_code}` : p.reference}</span>
+                      {p.status !== "voided" && p.status !== "reversed" && authCodeMissing(p) ? <AuthCodeMissing paymentId={p.id} number={p.number} method={p.method} code={p.auth_code ?? null} canAdd={canAddAuth} /> : <span className="text-muted">{p.method === "cheque" ? [p.cheque_number, p.cheque_bank, p.cheque_date].filter(Boolean).join(" · ") : realAuthCode(p.auth_code) ? `Auth ${realAuthCode(p.auth_code)}` : p.reference}</span>}
                       <span className="text-muted">by {nameOf.get(p.received_by ?? "") ?? ""}</span>
                       <span className="ml-auto font-semibold">AED {m(p.amount_aed)}</span>
                       {(p.actual_fee_aed ?? p.bank_charge_aed) && seesCost ? <span className="text-xs text-muted" data-fee-line>{p.settlement_id && p.actual_fee_aed !== null && p.actual_fee_aed !== undefined ? `bank fee ${m(p.actual_fee_aed)} (actual)` : `charge ${m(p.bank_charge_aed)}${p.method === "card" || p.method === "link" ? " (est.)" : ""}`}</span> : null}

@@ -86,14 +86,14 @@ export async function AccountsDashboard({ staff, settings }: { staff: CurrentSta
                 {g.label} · {list.length} · {money(list.reduce((a, r) => a + (r.balance ?? 0), 0))}
                 {g.key === "wip_advance" && advances.length ? <Link href="/invoices?show=advance" className="min-h-11 inline-flex items-center normal-case tracking-normal underline underline-offset-4" data-advances-link>Every advance ({advances.length})</Link> : null}
               </span>
-              {list.map((r) => <MoneyRow key={r.key} r={r} />)}
+              {list.map((r) => <MoneyRow key={r.key} r={r} canAddAuth={!staff.viewingAs} />)}
             </div>
           );
         })}
       </section>
       <section className="flex flex-col gap-3" data-other-money>
         <SectionLabel right={`${others.length}`}>Other money: paid, today, customer credit</SectionLabel>
-        {others.length === 0 ? <p className="text-sm text-muted">None.</p> : others.map((r) => <MoneyRow key={r.key} r={r} />)}
+        {others.length === 0 ? <p className="text-sm text-muted">None.</p> : others.map((r) => <MoneyRow key={r.key} r={r} canAddAuth={!staff.viewingAs} />)}
       </section>
     </>
   );

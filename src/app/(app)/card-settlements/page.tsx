@@ -47,7 +47,7 @@ export default async function CardSettlementsPage({ searchParams }: { searchPara
 
       <Card className="flex flex-col gap-4">
         <SectionLabel>Record a settlement</SectionLabel>
-        <SettlementForm rows={rows.map((r) => ({ id: r.id, number: r.number, method: r.method, amount: r.amount, estimate: r.estimate, est: r.est, authCode: r.authCode, receivedAt: r.receivedAt, plate: r.plate, isDeposit: r.isDeposit, late: r.late }))} today={today} initialMethod={initialMethod} canSave={!staff.viewingAs} rules={{ card: bankFeesOf(settings).card, link: bankFeesOf(settings).link }} action={recordSettlementAction} />
+        <SettlementForm rows={rows.map((r) => ({ id: r.id, number: r.number, method: r.method, amount: r.amount, estimate: r.estimate, est: r.est, authCode: r.authCode, codeMissing: r.codeMissing, receivedAt: r.receivedAt, plate: r.plate, isDeposit: r.isDeposit, late: r.late }))} today={today} initialMethod={initialMethod} canSave={!staff.viewingAs} rules={{ card: bankFeesOf(settings).card, link: bankFeesOf(settings).link }} action={recordSettlementAction} />
       </Card>
 
       <Card className="flex flex-col gap-3" data-settle-upload id="report">
@@ -55,6 +55,7 @@ export default async function CardSettlementsPage({ searchParams }: { searchPara
         <ReportUpload action={uploadReportAction} canSave={!staff.viewingAs} />
         {review ? (
           <ReportReview
+            reportId={review.report.id}
             report={{ ...review.report.parsed, fileName: review.report.fileName }}
             matches={review.matches}
             payments={review.payments}

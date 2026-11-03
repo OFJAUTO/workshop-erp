@@ -11,6 +11,7 @@ import { Image, Path, Svg, Text, View, renderToBuffer } from "@react-pdf/rendere
 import { detailsWithoutHours, formatDate, formatDateTime } from "@/lib/format";
 import { METHOD_LABELS, invoiceBalance, type InvoiceBundle, type InvoiceLineRow, type PaymentRow } from "@/lib/invoice-data";
 import { amountInWords, round2 } from "@/lib/money";
+import { realAuthCode } from "@/lib/auth-code";
 import type { PoBundle } from "@/lib/parts-data";
 import type { Settings } from "@/lib/settings";
 import { PRODUCTION_SITE_URL } from "@/lib/site";
@@ -284,7 +285,8 @@ export async function renderReceiptPdf(data: ReceiptData, settings: Settings): P
       title: "Paid by",
       strong: METHOD_LABELS[payment.method] ?? payment.method,
       rows: [
-        ["Auth code", payment.auth_code ?? null],
+        // Only a real code is printed: a missing or made-up one (111111) is an internal flag, never on the customer's receipt.
+        ["Auth code", realAuthCode(payment.auth_code)],
         ["Reference", payment.reference],
         ["Cheque no.", payment.cheque_number],
         ["Bank", payment.cheque_bank],

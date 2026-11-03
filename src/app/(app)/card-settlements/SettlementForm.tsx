@@ -7,7 +7,7 @@ import { feesFor, type FeeRule } from "@/lib/bank-fees";
 import { checkFigures, CLEARING_LABEL, preTicked, receivedAfter, splitFigures, vatOnFees, type ClearingMethod } from "@/lib/card-settlement-rules";
 import { initialFormState, type FormState } from "@/lib/form-state";
 
-export type SettleRow = { id: string; number: string; method: ClearingMethod; amount: number; estimate: number; est: { msf: number; txn: number; vat: number } | null; authCode: string | null; receivedAt: string; plate: string; isDeposit: boolean; late: boolean };
+export type SettleRow = { id: string; number: string; method: ClearingMethod; amount: number; estimate: number; est: { msf: number; txn: number; vat: number } | null; authCode: string | null; codeMissing?: boolean; receivedAt: string; plate: string; isDeposit: boolean; late: boolean };
 
 const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fig = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -115,7 +115,7 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
                   <input type="checkbox" name="ids" value={r.id} checked={on} disabled={after} onChange={() => toggle(r.id)} className="h-5 w-5 accent-ink" data-settle-tick={r.number} />
                   <span className="font-bold">{r.number}</span>
                 </label>
-                <span className="text-muted">{dayText(r.receivedAt)} · {r.plate}{r.isDeposit ? " · deposit" : ""}{r.authCode ? ` · auth ${r.authCode}` : ""}</span>
+                <span className="text-muted">{dayText(r.receivedAt)} · {r.plate}{r.isDeposit ? " · deposit" : ""}{r.authCode ? ` · auth ${r.authCode}` : ""}</span>{r.codeMissing ? <span className="text-xs font-semibold text-amber-bar" data-settle-auth-missing>auth missing</span> : null}
                 {after ? <span className="text-xs font-semibold text-muted" data-settle-after>Taken after this settlement date</span> : null}
                 {r.late ? <span className="rounded-full bg-amber-soft px-2 text-xs font-bold text-amber" data-settle-late>Not settled after 3 working days</span> : null}
                 <span className="ml-auto font-extrabold">{aed(r.amount)}</span>

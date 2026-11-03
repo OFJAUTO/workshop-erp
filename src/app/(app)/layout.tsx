@@ -13,6 +13,7 @@ import { IdleLock } from "./IdleLock";
 import { ModeGuard, type TabMode } from "./ModeGuard";
 import { CustomerPanelHost } from "@/components/CustomerPanel";
 import { RecordPaymentHost } from "@/components/RecordPaymentHost";
+import { AuthAddedWindow } from "@/components/AuthCodeMissing";
 import { SpellHost } from "@/components/SpellHost";
 import { getCurrentDevice } from "@/lib/devices";
 
@@ -112,6 +113,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       {can(role, "viewCustomers") ? <CustomerPanelHost /> : null}
       {/* 1 November 2026: THE Record payment window, for the people who record money (opened from any car, customer, job or search result). */}
       {can(role, "recordPayments") && !staff.viewingAs ? <Suspense fallback={null}><RecordPaymentHost /></Suspense> : null}
+      {can(role, "recordPayments") && !staff.viewingAs ? <AuthAddedWindow /> : null}
       {can(role, "recordPayments") && !staff.viewingAs ? <meta name="erp-can-pay" content="1" /> : null}
       <meta name="erp-known-words" content={((settings.known_words ?? []) as string[]).join("|")} />
       {/* Who is signed in, for the send queue: a sending permit is only ever kept and used for this person. */}

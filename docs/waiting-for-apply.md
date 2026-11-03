@@ -11,12 +11,21 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-The newest backup, taken read-only before these changes, is `backups/2026-11-02T21-55-08` (109 tables, 242,811 rows; the one before it is `backups/2026-11-02T20-42-18`). A fresh one is taken again right before applying.
+Nothing is waiting.
 
-| # | Migration | Task | What it switches on | Backup |
-|---|---|---|---|---|
-| 1 | `20261203101000_stock_test_leftover.sql` | Section 2 review fixes | Switches off one made-up stock item that a browser test left on live on 16 October: "Rear brake discs · E2E-DISC-1 · 8 on hand · AED 49.00". It is guarded: it touches only that exact row (same id, part number and name), only while the item is still on, and only if no part uses it. Nothing else changes, and it adds no new table or column. Until it is applied, the item still shows in "From our stock…". Its cost counts as typed, so it gets the "Is this the real price?" question like any typed cost. | `backups/2026-11-02T20-42-18` |
-| 2 | `20261203110000_payment_reports.sql` | Section 3: payment hand-over | Adds the table of payments advisors send to accounts ("Payment received – send to accounts": amount, method, auth code or reference, the slip photo, a note, who recorded or queried it). Logged-in owner, accounts and advisors may read it, for the live job card and lists; only the server writes it; anon has nothing. It joins the live feed. Also adds the photo kind `payment_report` and the setting "remind after 4 working hours" (with its label). It changes no existing row. Until it is applied, the advisors' button is not shown and nothing reads the table. The View as greyed button, the Job card links, the window's search rows and the plate search work already. | `backups/2026-11-02T21-55-08` |
+## Applied on 3 November 2026, morning
+
+The owner replied "apply" in manual mode (07:50 Dubai). A fresh backup was taken first: `backups/2026-11-03T03-47-11` (109 tables, 242,890 rows). Then:
+
+1. the live rows each file touches were read;
+2. each file was run with `scripts/db-sql.mjs` and recorded with `scripts/db-record-migration.mjs`, in order;
+3. the same rows were read again;
+4. `npm run check:live` was run (33 passed, 0 failed).
+
+| # | Migration | What it did on live |
+|---|---|---|
+| 1 | `20261203101000_stock_test_leftover.sql` (section 2 review fixes) | The made-up stock item "Rear brake discs · E2E-DISC-1" (left by a browser test on 16 October, used by no part) is switched off. It no longer shows in "From our stock…". Nothing else changed. |
+| 2 | `20261203110000_payment_reports.sql` (section 3: payment hand-over) | Added the payment reports table: RLS on, read for owner, accounts and advisors, select-only for logged-in staff, nothing for anon. It has the audit, stamp and no-delete triggers and is in the live feed. Also added the photo kind `payment_report` (the 13 existing kinds kept; no existing file changed) and the setting "remind after 4 working hours" with its label. The advisors' "Payment received – send to accounts" button switches itself on within a minute (`paymentReportsReady`). |
 
 ## Applied on 2 November 2026, evening
 

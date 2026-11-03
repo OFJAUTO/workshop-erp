@@ -244,6 +244,19 @@ export async function runPopups() {
     await check(p, "Query a reported payment", "[data-report-query-dialog]", async () => { await onReport(); await click(p, "[data-report-banner] [data-report-query-open]"); }, findings, shots);
     await sql("update public.payment_reports set status = 'withdrawn', withdrawn_reason = 'Pop-up check', withdrawn_at = now() where id = $1", [repId]);
   } else notReached.push("Record payment window (reported payment): no report could be seeded");
+  // 3 November 2026 (section 5 review): the centre window "Auth code saved ✓" after Add auth code on a money list row
+  // (the save takes the row away under the "Auth code missing" chip). Each opening flags a fresh test payment.
+  const ownerId = (await sql("select id::text as id from public.staff where role_id = 'owner' and is_active order by display_name limit 1"))[0]?.id;
+  const authAdded = async () => {
+    const pay = (await sql("insert into public.payments (job_id, customer_id, method, amount_aed, bank_charge_aed, auth_code, is_deposit, status, received_by, created_by, updated_by, received_at, verified_at, verified_by) select j.id, j.customer_id, 'link', 101 + floor(random() * 800), 0, null, true, 'recorded', $2, $2, $2, now(), now(), $2 from public.jobs j where j.id = $1 returning number", [dep.jobId, ownerId]))[0];
+    await goto(p, "/invoices?show=auth_missing");
+    await click(p, `[data-auth-add="${pay.number}"]`);
+    await p.locator(`[data-auth-add-form="${pay.number}"] [data-auth-code]`).fill(`PU${crypto.randomUUID().replace(/-/g, "").toUpperCase().replace(/[^A-F0-9]/g, "").slice(0, 4)}`);
+    await sleep(5200);
+    await click(p, `[data-auth-add-form="${pay.number}"] [data-auth-add-save]`);
+  };
+  if (ownerId) await check(p, "Auth code saved (money list)", "[data-auth-added-window]", authAdded, findings, shots);
+  else notReached.push("Auth code saved (money list): no owner to record the test payment");
 
   const ready = (await api("/api/e2e/stage", { stage: "ready" })).json;
   const iUrl = `/jobs/${ready.jobId}/invoice`;

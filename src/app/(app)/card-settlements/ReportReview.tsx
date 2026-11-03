@@ -1,15 +1,23 @@
 "use client";
 
 import { Fragment, useActionState, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Button, Input, Notice } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { initialFormState, type FormState } from "@/lib/form-state";
+import { realAuthCode } from "@/lib/auth-code";
+import { reloadIfStale } from "@/lib/app-version";
 import type { LineMatch, ParsedReport } from "@/lib/settlement-report";
+import { confirmSuggestionAction } from "./actions";
 
-export type ReviewPaymentOption = { id: string; number: string; method: string; amount: number; receivedDay: string; authCode: string | null; plate: string };
+export type ReviewPaymentOption = { id: string; number: string; method: string; amount: number; receivedDay: string; authCode: string | null; codeMissing?: boolean; settledIn?: string | null; plate: string };
+
+/** The pick of a line whose payment was settled by hand before: handled, never settled twice. */
+const SETTLED = "settled:";
 
 const fig = (n: number | null | undefined) => (n === null || n === undefined ? "–" : n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
-const day = (d: string | null) => (d ? new Date(`${d}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "–");
+// A date stored before the reader checked the calendar ("2026-24-10") shows as it is, never "Invalid Date".
+const day = (d: string | null) => (!d ? "–" : Number.isFinite(Date.parse(`${d}T12:00:00Z`)) ? new Date(`${d}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : d);
 const METHOD = { card: "Card machine", link: "Payment link" } as const;
 
 /** Upload the bank's report: PDF, CSV or Excel; the answer shows right under the button. */
@@ -33,9 +41,26 @@ export function ReportUpload({ action, canSave }: { action: (s: FormState, f: Fo
  * add up), and the check that the lines add up to the net payable. Record makes one settlement per method with each
  * payment's exact MSF, fee and VAT.
  */
-export function ReportReview({ report, matches, payments, today, recorded, canSave, action }: { report: ParsedReport & { fileName: string }; matches: LineMatch[]; payments: ReviewPaymentOption[]; today: string; recorded: boolean; canSave: boolean; action: (s: FormState, f: FormData) => Promise<FormState> }) {
+export function ReportReview({ reportId, report, matches, payments, today, recorded, canSave, action }: { reportId: string; report: ParsedReport & { fileName: string }; matches: LineMatch[]; payments: ReviewPaymentOption[]; today: string; recorded: boolean; canSave: boolean; action: (s: FormState, f: FormData) => Promise<FormState> }) {
+  const router = useRouter();
   const [state, formAction, pending] = useActionState(action, initialFormState);
-  const [picks, setPicks] = useState<Record<number, string>>(() => Object.fromEntries(matches.map((m) => [m.index, m.paymentId ?? ""])));
+  // A suggested match is not picked until accounts confirm it; a payment settled by hand before is handled already.
+  const [picks, setPicks] = useState<Record<number, string>>(() => Object.fromEntries(matches.map((m) => [m.index, m.status === "settled" && m.paymentId ? `${SETTLED}${m.paymentId}` : m.status === "suggested" ? "" : (m.paymentId ?? "")])));
+  const [confirming, setConfirming] = useState<number | null>(null);
+  const [answers, setAnswers] = useState<Record<number, { ok?: boolean; error?: string; message?: string }>>({});
+  // "Confirm": the bank's code is saved on the payment whose code was missing; the line becomes Matched (or Already settled).
+  const confirmSuggestion = async (m: LineMatch) => {
+    if (!m.paymentId) return;
+    setConfirming(m.index);
+    const r = await confirmSuggestionAction(reportId, m.index, m.paymentId).catch((e) => ({ error: reloadIfStale(e) ? "A new version is loading – tap Confirm again in a moment." : "No connection – try again." }) as { ok?: boolean; error?: string; message?: string; settledIn?: string | null });
+    setConfirming(null);
+    setAnswers((x) => ({ ...x, [m.index]: r }));
+    if (r.ok && m.paymentId) {
+      const id = m.paymentId;
+      setPicks((x) => ({ ...x, [m.index]: r.settledIn ? `${SETTLED}${id}` : id }));
+      router.refresh();
+    }
+  };
   const [seen, setSeen] = useState(false);
   const h = report.header;
   const s = report.summary;
@@ -66,8 +91,20 @@ export function ReportReview({ report, matches, payments, today, recorded, canSa
             {report.lines.map((l) => {
               const m = matches.find((x) => x.index === l.index);
               const pick = picks[l.index] ?? "";
-              const picked = pick && pick !== "none" ? byId.get(pick) : null;
-              const options = [...(m?.candidates ?? []).map((id) => byId.get(id)).filter((p): p is ReviewPaymentOption => !!p), ...payments.filter((p) => (!l.method || p.method === l.method) && !(m?.candidates ?? []).includes(p.id))];
+              const settledPick = pick.startsWith(SETTLED);
+              const picked = pick && pick !== "none" ? byId.get(settledPick ? pick.slice(SETTLED.length) : pick) : null;
+              // Payments settled before are never offered to settle again: one that fits the line (its code missing) is
+              // offered as "already settled" - picked, the line counts as handled and the bank's code is saved on it.
+              const cands = m?.candidates ?? [];
+              const options = [...cands.map((id) => byId.get(id)).filter((p): p is ReviewPaymentOption => !!p), ...payments.filter((p) => (!l.method || p.method === l.method) && !cands.includes(p.id))].filter((p) => !p.settledIn || cands.includes(p.id));
+              const lineCode = realAuthCode(l.authCode);
+              const answer = answers[l.index];
+              // Matched: auth + amount + date, or a suggestion just confirmed (the code is saved on it).
+              const exact = !!pick && m?.paymentId === pick && (m.status === "matched" || !!answer?.ok);
+              const willFill = !!picked && !!picked.codeMissing && !!lineCode && !answer?.ok && !payments.some((p) => p.authCode === lineCode);
+              // Settled by an exact match or a confirmed suggestion: nothing to choose. Picked by hand: the choice stays open.
+              const settledAuto = settledPick && (m?.status === "settled" || !!answer?.ok);
+              const status = l.kind !== "sale" ? "flagged" : pick === "none" ? "not_ours" : settledPick ? "settled" : exact ? "matched" : pick ? "picked" : m?.status === "suggested" ? "suggested" : "unmatched";
               const rowTone = l.kind !== "sale" || !l.adds ? "bg-red-soft" : "";
               return (
                 <Fragment key={l.index}>
@@ -85,19 +122,33 @@ export function ReportReview({ report, matches, payments, today, recorded, canSa
                   <td className="px-2 py-2 whitespace-nowrap">{l.method ? METHOD[l.method] : "unknown"}{l.methodBy === "description" ? <span className="block text-xs text-muted">from {l.desp}</span> : null}</td>
                 </tr>
                 <tr className={`${rowTone} border-t-0`} data-report-line-match={l.index}>
-                  <td colSpan={11} className="px-2 pb-3 pt-0" data-report-status={l.kind !== "sale" ? "flagged" : pick === "none" ? "not_ours" : pick && m?.paymentId === pick ? "matched" : pick ? "picked" : "unmatched"}>
+                  <td colSpan={11} className="px-2 pb-3 pt-0" data-report-status={status}>
                     {l.kind !== "sale" ? (
                       <span className="text-xs font-bold text-red">Not a sale: settle with the bank by hand</span>
                     ) : done ? (
-                      <span className="text-xs font-semibold">{picked ? `${picked.number} · ${picked.plate}` : "Not ours"}</span>
+                      <span className="text-xs font-semibold">{picked ? `${picked.number} · ${picked.plate}${settledPick ? ` · already settled in ${picked.settledIn}` : ""}` : "Not ours"}</span>
+                    ) : settledAuto ? (
+                      <span className="text-xs font-bold text-green" data-report-settled={l.index}>Already settled in {picked?.settledIn ?? "a settlement"} ✓ {picked?.number} · {picked?.plate}{answer?.ok ? ` · ${answer.message}` : ""}</span>
                     ) : (
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        {pick && m?.paymentId === pick ? <span className="text-xs font-bold text-green" data-report-matched>Matched ✓ {picked?.number} · {picked?.plate}</span> : !pick ? <span className="text-xs font-semibold text-amber">{m?.why ?? "Not matched"}</span> : null}
+                        {exact ? <span className="text-xs font-bold text-green" data-report-matched>Matched ✓ {picked?.number} · {picked?.plate}{answer?.ok ? ` · ${answer.message}` : ""}</span> : settledPick ? <span className="w-full text-xs font-bold text-green" data-report-settled-pick={l.index}>Already settled in {picked?.settledIn ?? "a settlement"} ✓ {picked?.number} · {picked?.plate}: nothing new is recorded for this line.</span> : !pick && m?.status !== "suggested" ? <span className="text-xs font-semibold text-amber">{m?.why ?? "Not matched"}</span> : null}
+                        {!pick && m?.status === "suggested" && m.paymentId ? (
+                          // 3 November 2026: a payment saved with its auth code missing fits this line - one tap saves the bank's code on it.
+                          // Words above the button: on a narrow screen the table scrolls sideways, and the button must stay in sight.
+                          <span className="flex w-full max-w-xl flex-col items-start gap-2 rounded-control border-2 border-amber-bar bg-amber-soft p-2" data-report-suggested={l.index}>
+                            <span className="text-xs font-semibold">{m.why}</span>
+                            <Button type="button" size="md" disabled={!canSave || confirming === l.index} onClick={() => void confirmSuggestion(m)} className="!whitespace-normal" data-report-confirm-suggested={l.index}>
+                              {confirming === l.index ? "Saving…" : `Confirm – save auth ${m.fillCode ?? ""} on ${byId.get(m.paymentId)?.number ?? "it"}`}
+                            </Button>
+                            {answer?.error ? <span className="w-full text-xs font-semibold text-red" data-report-confirm-error>{answer.error}</span> : null}
+                          </span>
+                        ) : null}
                         <select value={pick} onChange={(e) => setPicks((x) => ({ ...x, [l.index]: e.target.value }))} className="min-h-11 w-full max-w-md rounded-control border border-line-strong bg-white px-2 text-sm" data-report-pick={l.index}>
-                          <option value="">Pick the payment…</option>
-                          {options.map((p) => <option key={p.id} value={p.id}>{p.number} · AED {fig(p.amount)} · {p.plate}{p.authCode ? ` · auth ${p.authCode}` : ""}</option>)}
+                          <option value="">{m?.status === "suggested" ? "Or pick another payment…" : "Pick the payment…"}</option>
+                          {options.map((p) => <option key={p.id} value={p.settledIn ? `${SETTLED}${p.id}` : p.id}>{p.number} · AED {fig(p.amount)} · {p.plate}{p.authCode ? ` · auth ${p.authCode}` : p.codeMissing ? " · auth missing" : ""}{p.settledIn ? ` · already settled in ${p.settledIn}` : ""}</option>)}
                           <option value="none">Not ours</option>
                         </select>
+                        {willFill ? <span className="w-full text-xs font-semibold text-amber-bar" data-report-will-fill={l.index}>Auth {lineCode} will be saved on {picked?.number} when you record (its code is missing).</span> : null}
                       </div>
                     )}
                     <input type="hidden" name={`pick_${l.index}`} value={pick} />

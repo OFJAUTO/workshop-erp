@@ -62,6 +62,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
     show === "today" ? `${filtered.length} · ${aed(sumOf((r) => r.paidToday))} in ${plural(sumOf((r) => r.paidTodayCount), "payment", "payments")}`
     : show === "awaiting" || show === "part" ? `${filtered.length} · ${aed(sumOf((r) => r.balance ?? 0))} due`
     : show === "credit" || show === "advance" ? `${filtered.length} · ${aed(sumOf((r) => r.paid))}`
+    // 3 November 2026: the rows, and the payments on them without a real auth code.
+    : show === "auth_missing" ? `${filtered.length} · ${plural(sumOf((r) => r.authMissing.length), "payment", "payments")} without an auth code`
     // The tile counts tax invoices: the heading says the same number (and the cars when one has two).
     : show === "tax_today" ? `${plural(taxCount, "tax invoice", "tax invoices")}${taxCount !== filtered.length ? ` on ${plural(filtered.length, "car", "cars")}` : ""}`
     : `${filtered.length}`;
@@ -114,7 +116,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
       ) : null}
       <section className="flex flex-col gap-3" data-money-list>
         <SectionLabel right={<span data-money-list-sum>{listSum}</span>}>{FILTERS.find((f) => f.key === show)?.label ?? "All"}</SectionLabel>
-        {filtered.length === 0 ? <Empty title="Nothing here" /> : filtered.map((r) => <MoneyRow key={r.key} r={r} />)}
+        {filtered.length === 0 ? <Empty title="Nothing here" /> : filtered.map((r) => <MoneyRow key={r.key} r={r} canAddAuth={mayPay} />)}
       </section>
 
       {can(role, "cardSettlements") ? (

@@ -9,6 +9,7 @@ import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
 import { recordOwnerReport } from "./owner-report";
 import { reopenZoho, tryEnqueueZoho } from "./zoho-sync";
+import { authCodeMissing, realAuthCode } from "./auth-code";
 
 /** A card or payment-link payment still in the clearing account (no settlement yet). */
 export type UnsettledPayment = {
@@ -19,7 +20,10 @@ export type UnsettledPayment = {
   estimate: number;
   /** The estimate in the bank's parts (null on payments recorded before 29 October 2026). */
   est: { msf: number; txn: number; vat: number } | null;
+  /** The real auth code (a missing or made-up one reads as null, 3 November 2026). */
   authCode: string | null;
+  /** "Auth code missing": shown in amber instead of a code. */
+  codeMissing: boolean;
   receivedAt: string;
   jobId: string | null;
   plate: string;
@@ -84,7 +88,8 @@ export async function loadUnsettled(settledOn?: string): Promise<UnsettledPaymen
       amount: round2(Number(p.amount_aed) || 0),
       estimate: round2(Number(p.bank_charge_aed) || 0),
       est: p.fee_msf_aed === null ? null : { msf: Number(p.fee_msf_aed) || 0, txn: Number(p.fee_txn_aed) || 0, vat: Number(p.fee_vat_aed) || 0 },
-      authCode: p.auth_code,
+      authCode: realAuthCode(p.auth_code),
+      codeMissing: authCodeMissing(p),
       receivedAt: p.received_at,
       jobId: p.job_id,
       plate: p.job?.vehicle ? formatPlate(p.job.vehicle) : (p.job?.job_number ?? "No job"),

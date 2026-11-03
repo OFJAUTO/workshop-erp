@@ -5,7 +5,8 @@ import { INVOICE_SELECT, PAYMENT_SELECT, creditsOnDocs, toInvoice, toPayment, ty
 import { dubaiDate } from "./jobs";
 import { round2 } from "./money";
 import { moneyState, type MoneyInvoice, type MoneyState } from "./money-steps";
-import { countsAsCollected, moneyTilesOf, recentlyPaid, rowMatches, type CollectedPayment, type MoneyListTiles, type MoneyRowData } from "./money-list";
+import { countsAsCollected, moneyTilesOf, recentlyPaid, rowMatches, type AuthMissingPayment, type CollectedPayment, type MoneyListTiles, type MoneyRowData } from "./money-list";
+import { authCodeMissing, authMissingFilter } from "./auth-code";
 import { jobMoneyMany, liveDocOf, unallocatedOf, type JobMoneyFacts } from "./customer-money";
 import { customerName } from "./customer-view";
 import { loadChargeEntries } from "./charges";
@@ -38,6 +39,8 @@ const toListInvoice = (r: Record<string, unknown>): ListInvoice => ({ ...toInvoi
 type LightPay = CollectedPayment & { id: string; job_id: string | null; invoice_id: string | null; customer_id: string; amount_aed: number | string };
 const LIGHT_PAY = "id, job_id, invoice_id, customer_id, amount_aed, method, cheque_status, status, is_active, received_at, cleared_at";
 type Page<T> = PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
+type MissingPay = { id: string; number: string; job_id: string | null; invoice_id: string | null; customer_id: string; method: string; amount_aed: number | string; received_at: string; auth_code: string | null };
+const MISSING_PAY = "id, number, job_id, invoice_id, customer_id, method, amount_aed, received_at, auth_code";
 
 /** Dubai midnight of a date as an ISO instant. */
 export function dayStartIso(date: string) {
@@ -73,12 +76,27 @@ export async function loadMoneyList(settings: Settings, opts: MoneyListScope = {
   ]);
   const collected = todayPays.filter((p) => countsAsCollected(p, todayStart));
 
+  // 3 November 2026 (section 5): every card or payment-link payment saved without a real auth code (empty or made up),
+  // by job, by invoice (a pending charge) and by customer (money not allocated). Its row carries the amber flag, and in the
+  // list without dates its job is a row until the code is added.
+  const missingPays = (await safe(pageAll<MissingPay>((a, b) => admin.from("payments").select(MISSING_PAY).eq("is_active", true).in("status", ["recorded", "pending_owner"]).in("method", ["card", "link"]).or(authMissingFilter()).order("id").range(a, b) as unknown as Page<MissingPay>))).filter((p) => authCodeMissing(p));
+  const missingOfJob = new Map<string, AuthMissingPayment[]>();
+  const missingOfInvoice = new Map<string, AuthMissingPayment[]>();
+  const missingOfCustomer = new Map<string, AuthMissingPayment[]>();
+  const into = (m: Map<string, AuthMissingPayment[]>, k: string, p: MissingPay) => m.set(k, [...(m.get(k) ?? []), { id: p.id, number: p.number, method: p.method, amount: round2(Number(p.amount_aed) || 0), receivedAt: p.received_at, code: p.auth_code }]);
+  for (const p of missingPays) {
+    if (p.job_id) into(missingOfJob, p.job_id, p);
+    else if (p.invoice_id) into(missingOfInvoice, p.invoice_id, p);
+    else into(missingOfCustomer, p.customer_id, p);
+  }
+
   // The candidate jobs of the scope, with what is already read about them. Today's money and tax invoices make a job a
   // candidate in the "now" list only: the history list keeps to its dates, the search to what it found (review, 3 Nov).
   const candidates = new Set<string>();
   if (opts.scope === "now") {
     for (const p of collected) if (p.job_id) candidates.add(p.job_id);
     for (const t of taxTodayRows) if (t.job_id) candidates.add(t.job_id);
+    for (const jobId of missingOfJob.keys()) candidates.add(jobId);
   }
   let preInvoices: ListInvoice[] = [];
   let prePayments: PaymentRow[] = [];
@@ -196,10 +214,12 @@ export async function loadMoneyList(settings: Settings, opts: MoneyListScope = {
     const today = todayOfJob.get(job.id) ?? { aed: 0, count: 0 };
     const taxToday = taxTodayOf.get(job.id) ?? [];
     const report = reported.get(job.id) ?? null;
+    const authMissing = missingOfJob.get(job.id) ?? [];
     // A job that left is a row while it still owes, when today's money or tax invoice is on it, or for
-    // RECENT_PAID_DAYS after it was paid in full (Paid, Tax invoices and Released keep the recent ones).
+    // RECENT_PAID_DAYS after it was paid in full (Paid, Tax invoices and Released keep the recent ones) - and after that
+    // while a payment of it still has its auth code missing (3 November 2026).
     const leftWithMoney = (jm.balance ?? 0) > 0.005 || today.aed > 0.005 || taxToday.length > 0 || (!doc && jm.paid > 0.005);
-    const recentPaidOnly = opts.scope === "now" && !job.is_open && !leftWithMoney && recentPaid.has(job.id);
+    const recentPaidOnly = opts.scope === "now" && !job.is_open && !leftWithMoney && (recentPaid.has(job.id) || authMissing.length > 0);
     if (opts.scope === "now" && !job.is_open && !leftWithMoney && !recentPaidOnly) continue;
     const state = moneyState({
       jobStatus: job.status,
@@ -254,6 +274,7 @@ export async function loadMoneyList(settings: Settings, opts: MoneyListScope = {
       reportedBy: report?.by ?? null,
       ageDays: 0,
       what: null,
+      authMissing,
     });
   }
 
@@ -300,6 +321,7 @@ export async function loadMoneyList(settings: Settings, opts: MoneyListScope = {
         reportedBy: null,
         ageDays: age,
         what: list.map((p) => p.notes).filter(Boolean).join(" · ") || null,
+        authMissing: (missingOfCustomer.get(customerId) ?? []).filter((m) => list.some((p) => p.id === m.id)),
       };
       // A search keeps the credit of a customer it found (name or mobile), of a car it found, or that matches itself.
       if (opts.scope === "search" && !(found.customerIds.has(customerId) || list.some((p) => !!p.vehicle_id && found.vehicleIds.has(p.vehicle_id)) || rowMatches(row, opts.q))) continue;
@@ -314,7 +336,8 @@ export async function loadMoneyList(settings: Settings, opts: MoneyListScope = {
     if (!docIds.length || e.status === "cancelled") continue;
     const todayList = collected.filter((p) => !p.job_id && p.invoice_id && docIds.includes(p.invoice_id));
     const taxToday = taxTodayRows.filter((t) => !t.job_id && t.id === e.tax_invoice_id).map((t) => t.number);
-    const keep = opts.scope === "range" ? docIds.some((id) => rangeInvoiceIds.has(id)) : opts.scope === "search" ? true : (e.status === "pending" && e.balance > 0.005) || todayList.length > 0 || taxToday.length > 0;
+    const authMissing = docIds.flatMap((id) => missingOfInvoice.get(id) ?? []);
+    const keep = opts.scope === "range" ? docIds.some((id) => rangeInvoiceIds.has(id)) : opts.scope === "search" ? true : (e.status === "pending" && e.balance > 0.005) || todayList.length > 0 || taxToday.length > 0 || authMissing.length > 0;
     if (!keep) continue;
     const row: MoneyRowData = {
       kind: "charge",
@@ -349,6 +372,7 @@ export async function loadMoneyList(settings: Settings, opts: MoneyListScope = {
       reportedBy: null,
       ageDays: Math.max(0, Math.floor((now - Date.parse(e.created_at)) / 86400000)),
       what: e.what,
+      authMissing,
     };
     // A search keeps the charges of a customer or car it found, or one that matches itself (its PRO-/INV- number).
     if (opts.scope === "search" && !(found.customerIds.has(e.customer_id) || (!!e.vehicle_id && found.vehicleIds.has(e.vehicle_id)) || rowMatches(row, opts.q))) continue;

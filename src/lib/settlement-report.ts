@@ -1,6 +1,7 @@
 /**
  * Network International's "Merchant Transaction Report" (29 October 2026, section 5): ONE reader for the payment link
- * and the card machine, from PDF, CSV or Excel. Pure (no imports but types), so the tests run it straight on a file.
+ * and the card machine, from PDF, CSV or Excel. Pure (no imports but types and the pure auth-code rule), so the tests run it
+ * straight on a file (through tests/unit/register.mjs).
  *
  *   header   – the report period (FROM … TO …), merchant no., chain ID, report date
  *   lines    – TRANSACTION DETAILS: DTOF TRN, TRMNL ID, CARD NUMBER, TRXN TYPE, ACQ_REF_NBR, AUTH CODE, TRAN AMT,
@@ -11,10 +12,12 @@
  * The method of a line: its terminal ID from Settings, else the TRXN DESP hint ("E/…" = the card machine, "M/…" = the
  * payment link). Anything that is not a plain sale - a refund, an adjustment, a chargeback, a suspended amount - is
  * flagged for the accountant, never quietly dropped. A line is matched to our payments by auth code + amount + the
- * date within three days.
+ * date within three days; a line whose code is on no payment is SUGGESTED for a payment saved with its code missing
+ * (3 November 2026), and accounts confirm it in one tap.
  */
 import type { BankFees } from "./bank-fees";
 import type { PosCell } from "./price-import";
+import { realAuthCode } from "./auth-code";
 
 export type ReportMethod = "card" | "link";
 export type ReportLine = {
@@ -86,13 +89,33 @@ const MONTHS: Record<string, string> = { JAN: "01", FEB: "02", MAR: "03", APR: "
 export function reportDate(raw: unknown): string | null {
   const t = String(raw ?? "").trim().toUpperCase();
   let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(t);
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  if (m) return dayOf(m[1], m[2], m[3]);
   m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})/.exec(t);
-  if (m) return `${m[3].length === 2 ? `20${m[3]}` : m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+  // Day first, as the bank prints it; a "month" above 12 can only be a day (10/24/26, the US order a spreadsheet may
+  // print), and a date that is not on the calendar is no date at all (review, 3 November 2026: "2026-24-10" crashed).
+  if (m) return dayOf(m[3], m[2], m[1]) ?? (Number(m[2]) > 12 ? dayOf(m[3], m[1], m[2]) : null);
   m = /^(\d{1,2})[\s/.-]?([A-Z]{3})[A-Z]*[\s/.-]?(\d{2,4})/.exec(t);
-  if (m && MONTHS[m[2]]) return `${m[3].length === 2 ? `20${m[3]}` : m[3]}-${MONTHS[m[2]]}-${m[1].padStart(2, "0")}`;
+  if (m && MONTHS[m[2]]) return dayOf(m[3], MONTHS[m[2]], m[1]);
   return null;
 }
+
+/** "YYYY-MM-DD" when the year, month and day make a real calendar date, else null (two-digit years are 20xx). */
+function dayOf(year: string, month: string, day: string): string | null {
+  const y = Number(year.length === 2 ? `20${year}` : year);
+  const mo = Number(month);
+  const d = Number(day);
+  if (!Number.isInteger(y) || !Number.isInteger(mo) || !Number.isInteger(d) || mo < 1 || mo > 12 || d < 1) return null;
+  const at = new Date(Date.UTC(y, mo - 1, d));
+  if (at.getUTCFullYear() !== y || at.getUTCMonth() !== mo - 1 || at.getUTCDate() !== d) return null;
+  return `${String(y).padStart(4, "0")}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/**
+ * How an Excel report is read (one rule, used by the server and the reader's own test): real date cells come out as
+ * "2026-10-24" instead of the US "10/24/26" a spreadsheet prints them in (review, 3 November 2026).
+ */
+export const REPORT_XLSX_READ = { cellDates: true, dateNF: "yyyy-mm-dd" } as const;
+export const REPORT_SHEET_ROWS = { header: 1, raw: false, defval: "", dateNF: "yyyy-mm-dd" } as const;
 
 /** The report's column headings, as the bank prints them (and the few ways a spreadsheet export may write them). */
 const COLUMNS: { key: keyof ColumnIdx; names: string[] }[] = [
@@ -323,17 +346,81 @@ export function parseReportPdf(cellPages: PosCell[][][], fees: BankFees): Parsed
 
 /* ------------------------------------------------------------------ matching ------------------------------------------------------------------ */
 
-export type MatchPayment = { id: string; number: string; method: string; amount: number; receivedDay: string; authCode: string | null };
-export type LineMatch = { index: number; status: "matched" | "unmatched"; paymentId: string | null; why: string; candidates: string[] };
+export type MatchPayment = {
+  id: string;
+  number: string;
+  method: string;
+  amount: number;
+  receivedDay: string;
+  /** The payment's REAL auth code (a missing or made-up one is null). */
+  authCode: string | null;
+  /** "Auth code missing" (3 November 2026): the report's line may fill it in. */
+  codeMissing?: boolean;
+  /** Already in a settlement recorded by hand: its STL number. Shown as "Already settled", never settled twice. */
+  settledIn?: string | null;
+};
+export type LineMatch = {
+  index: number;
+  /**
+   * matched   - auth code + amount + date: the line's payment, waiting for a settlement;
+   * settled   - the same, but the payment was already settled by hand ("Already settled in STL-… ✓"): handled;
+   * suggested - the line's code is on no payment, and exactly ONE payment with its code missing has the same amount,
+   *             method and a date within three days: accounts confirm in one tap and the bank's code is saved on it;
+   * unmatched - picked by hand (the likely payments first) or marked not ours.
+   */
+  status: "matched" | "settled" | "suggested" | "unmatched";
+  paymentId: string | null;
+  why: string;
+  candidates: string[];
+  /** A suggested match: the bank's code to save on the payment. */
+  fillCode?: string | null;
+  /** A suggested match: days between the payment and the line. */
+  daysApart?: number;
+};
 
 const dayDiff = (a: string, b: string) => Math.abs(Date.parse(`${a}T12:00:00Z`) - Date.parse(`${b}T12:00:00Z`)) / 86400000;
+const METHOD_WORDS: Record<string, string> = { card: "card machine", link: "payment link" };
+const aedWords = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const daysWords = (n: number) => (n === 0 ? "the same day" : `${n} day${n === 1 ? "" : "s"} apart`);
 
 /**
- * Each sale line against our unsettled card/link payments: auth code + amount (to the fils) + the date within three
- * days = matched. Otherwise unmatched, with the likely payments to pick by hand (same method and amount first).
- * A payment is matched to one line only.
+ * THE rule of a suggested match, the same on the review screen and on the server when accounts confirm it: a sale line
+ * whose code is a real one, against a payment with its code missing, the same amount to the fils, the same method (or
+ * the line's method unknown) and the line's date within three days of the day the payment was recorded.
+ */
+export function suggestionStands(l: ReportLine, p: MatchPayment): boolean {
+  return l.kind === "sale" && !!realAuthCode(l.authCode) && !!p.codeMissing && Math.abs(p.amount - l.amount) < 0.005 && (!l.method || p.method === l.method) && !!l.date && dayDiff(p.receivedDay, l.date) <= 3;
+}
+
+/** The words of a suggested match: "Suggested match: RCT-00040 · AED 30,000.00 · payment link · 1 day apart · its auth code is missing". */
+export function suggestionWords(l: ReportLine, p: MatchPayment): string {
+  const days = l.date ? Math.round(dayDiff(p.receivedDay, l.date)) : 0;
+  return [`Suggested match: ${p.number}`, aedWords(p.amount), METHOD_WORDS[p.method] ?? p.method, daysWords(days), "its auth code is missing", p.settledIn ? `settled in ${p.settledIn}` : null].filter(Boolean).join(" · ") + (l.method ? "" : " (the method is not on the report line)");
+}
+
+/**
+ * Each sale line against our card/link payments, in line order (a payment answers one line only):
+ *  1. auth code + amount (to the fils) + the date within three days = matched (or "settled" when it was settled by hand);
+ *  2. a real code no payment carries, and a payment with its code missing that fits = suggested - ONE TO ONE only: the
+ *     line fits exactly one such payment AND that payment fits no other line of the report (review, 3 November 2026: the
+ *     first line in the file must never win a coin toss and put another payment's bank code on a receipt for good);
+ *     otherwise unmatched, every fitting payment first to pick from - a payment settled by hand included, picked as
+ *     "already settled" (never settled twice);
+ *  3. otherwise unmatched, with the likely payments to pick by hand (same method and amount first).
+ * Payments already settled are offered only as exact, suggested or fitting matches, never to settle again.
  */
 export function matchLines(lines: ReportLine[], payments: MatchPayment[]): LineMatch[] {
+  // Which payments with their code missing fit which lines whose real code no payment carries (decided before the loop,
+  // so the answer never depends on the order of the lines).
+  const carries = (l: ReportLine) => payments.some((p) => !!l.authCode && p.authCode === l.authCode);
+  const fitsOf = new Map<number, MatchPayment[]>();
+  const linesOf = new Map<string, number[]>();
+  for (const l of lines) {
+    if (l.kind !== "sale" || carries(l)) continue;
+    const fits = payments.filter((p) => suggestionStands(l, p));
+    fitsOf.set(l.index, fits);
+    for (const p of fits) linesOf.set(p.id, [...(linesOf.get(p.id) ?? []), l.index]);
+  }
   const used = new Set<string>();
   const out: LineMatch[] = [];
   for (const l of lines) {
@@ -341,20 +428,41 @@ export function matchLines(lines: ReportLine[], payments: MatchPayment[]): LineM
       out.push({ index: l.index, status: "unmatched", paymentId: null, why: `${l.type}: not a sale, never matched by itself.`, candidates: [] });
       continue;
     }
-    const sameAuth = payments.filter((p) => l.authCode && p.authCode === l.authCode && !used.has(p.id));
+    const nearest = (a: MatchPayment, b: MatchPayment) => (l.date ? dayDiff(a.receivedDay, l.date) - dayDiff(b.receivedDay, l.date) : 0);
+    const carrying = payments.filter((p) => !!l.authCode && p.authCode === l.authCode);
+    const sameAuth = carrying.filter((p) => !used.has(p.id));
     const exact = sameAuth.find((p) => Math.abs(p.amount - l.amount) < 0.005 && (!l.date || dayDiff(p.receivedDay, l.date) <= 3) && (!l.method || p.method === l.method));
     if (exact) {
       used.add(exact.id);
-      out.push({ index: l.index, status: "matched", paymentId: exact.id, why: `Auth ${l.authCode}, ${exact.number}`, candidates: [] });
+      out.push(exact.settledIn
+        ? { index: l.index, status: "settled", paymentId: exact.id, why: `Already settled in ${exact.settledIn} ✓ ${exact.number} (auth ${l.authCode})`, candidates: [] }
+        : { index: l.index, status: "matched", paymentId: exact.id, why: `Auth ${l.authCode}, ${exact.number}`, candidates: [] });
       continue;
     }
-    const near = payments.filter((p) => !used.has(p.id) && (!l.method || p.method === l.method) && Math.abs(p.amount - l.amount) < 0.005).sort((a, b) => (l.date ? dayDiff(a.receivedDay, l.date) - dayDiff(b.receivedDay, l.date) : 0));
-    const why = sameAuth.length
-      ? `Auth ${l.authCode} is on ${sameAuth.map((p) => p.number).join(", ")}, but the amount or the date does not agree.`
-      : l.authCode
-        ? `No payment in the ERP carries auth ${l.authCode}.`
-        : "The report line has no auth code.";
-    out.push({ index: l.index, status: "unmatched", paymentId: null, why, candidates: [...sameAuth, ...near].map((p) => p.id).filter((id, i, a) => a.indexOf(id) === i).slice(0, 8) });
+    // The bank's code is on no payment: a payment saved with its code missing may be this one.
+    const missing = (fitsOf.get(l.index) ?? []).filter((p) => !used.has(p.id)).sort(nearest);
+    const otherLines = missing.length === 1 ? (linesOf.get(missing[0].id) ?? []).filter((i) => i !== l.index) : [];
+    if (missing.length === 1 && !otherLines.length) {
+      const p = missing[0];
+      used.add(p.id);
+      out.push({ index: l.index, status: "suggested", paymentId: p.id, why: suggestionWords(l, p), candidates: [p.id], fillCode: l.authCode, daysApart: l.date ? Math.round(dayDiff(p.receivedDay, l.date)) : 0 });
+      continue;
+    }
+    const named = (p: MatchPayment) => (p.settledIn ? `${p.number} (already settled in ${p.settledIn})` : p.number);
+    const near = payments.filter((p) => !used.has(p.id) && !p.settledIn && (!l.method || p.method === l.method) && Math.abs(p.amount - l.amount) < 0.005).sort(nearest);
+    const why = missing.length > 1
+      ? `${missing.length} payments without an auth code could be this one (${missing.map(named).join(", ")}): pick the right one.`
+      : missing.length === 1
+        ? `${named(missing[0])} has its auth code missing and fits this line and line ${otherLines.join(", line ")} alike (the same amount, method and days): pick it by hand on the right line.`
+        : sameAuth.length
+        ? `Auth ${l.authCode} is on ${sameAuth.map((p) => p.number).join(", ")}, but the amount or the date does not agree.`
+        : carrying.length
+          ? `Auth ${l.authCode} is on ${carrying.map((p) => p.number).join(", ")}, already matched to another line.`
+          : l.authCode
+            ? `No payment in the ERP carries auth ${l.authCode}.`
+            : "The report line has no auth code.";
+    // Every fitting payment first (a settled one too: the screen offers it as "already settled", never to settle again).
+    out.push({ index: l.index, status: "unmatched", paymentId: null, why, candidates: [...missing, ...sameAuth.filter((p) => !p.settledIn), ...near].map((p) => p.id).filter((id, i, a) => a.indexOf(id) === i).slice(0, 8) });
   }
   return out;
 }

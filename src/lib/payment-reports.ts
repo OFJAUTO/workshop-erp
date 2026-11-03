@@ -2,6 +2,7 @@ import "server-only";
 import type { ExtraWaiting } from "@/components/WaitingPanel";
 import type { JobFile } from "@/components/JobFileUpload";
 import { customerName } from "./customer-view";
+import { realAuthCode } from "./auth-code";
 import { jobMoneyOf } from "./customer-money";
 import { workingTimeOf } from "./jobs";
 import { thumbsFor } from "./media-urls";
@@ -132,7 +133,8 @@ export async function loadReports(opts: { jobId?: string; ids?: string[]; status
       car: carWords(v),
       amount: Number(r.amount_aed) || 0,
       method: String(r.method),
-      authCode: (r.auth_code as string | null) ?? null,
+      // A made-up code (111111) reads as no code: it never pre-fills accounts' box (3 November 2026).
+      authCode: realAuthCode(r.auth_code),
       reference: (r.reference as string | null) ?? null,
       note: (r.note as string | null) ?? null,
       status,

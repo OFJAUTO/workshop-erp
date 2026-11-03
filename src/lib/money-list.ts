@@ -10,6 +10,9 @@ import type { MoneyInvoice, MoneyState } from "./money-steps";
 
 export type MoneyRowKind = "job" | "credit" | "charge";
 
+/** A card or payment-link payment on the row saved without a real auth code (3 November 2026, section 5). */
+export type AuthMissingPayment = { id: string; number: string; method: string; amount: number; receivedAt: string; code: string | null };
+
 export type MoneyRowData = {
   kind: MoneyRowKind;
   /** The row's own key: the job id for a job, "credit:<customer id>", "charge:<entry id>". */
@@ -39,7 +42,10 @@ export type MoneyRowData = {
   pendingCheque: number;
   /** What credit notes took off the live tax invoice (0 when none): the balance already counts it. */
   credited: number;
-  /** A car that left paid in full, on the list without dates only for RECENT_PAID_DAYS (counts in no tile, not on the dashboard). */
+  /**
+   * A car that left paid in full, on the list without dates only for RECENT_PAID_DAYS - or, after that, only while one of
+   * its payments still has its auth code missing (counts in no tile, not on the dashboard).
+   */
   recentPaidOnly: boolean;
   /** Money in before any proforma or tax invoice (0 once a document stands). */
   advance: number;
@@ -58,6 +64,8 @@ export type MoneyRowData = {
   /** Credit rows: days since the oldest payment not allocated. Charge rows: what the charge is for. */
   ageDays: number;
   what: string | null;
+  /** Its card and payment-link payments with the auth code missing (the "Auth code missing" chip, an amber flag each). */
+  authMissing: AuthMissingPayment[];
 };
 
 export const MONEY_FILTERS = [
@@ -69,6 +77,7 @@ export const MONEY_FILTERS = [
   { key: "today", label: "Collected today" },
   { key: "tax_today", label: "Tax invoices today" },
   { key: "credit", label: "Customer credit" },
+  { key: "auth_missing", label: "Auth code missing" },
   { key: "paid", label: "Paid" },
   { key: "proforma", label: "Proformas" },
   { key: "tax", label: "Tax invoices" },
@@ -109,6 +118,8 @@ export function inFilter(key: string, r: MoneyRowData): boolean {
     case "today": return r.paidToday > 0.005;
     case "tax_today": return r.taxToday.length > 0;
     case "credit": return r.kind === "credit";
+    // 3 November 2026: a row with a card or payment-link payment saved without a real auth code (it stays until added).
+    case "auth_missing": return (r.authMissing ?? []).length > 0;
     case "paid": return r.kind !== "credit" && r.total !== null && r.balance !== null && r.balance <= 0.005 && r.paid > 0.005;
     case "proforma": return !!r.proforma && !r.taxInvoice;
     case "tax": return !!r.taxInvoice;

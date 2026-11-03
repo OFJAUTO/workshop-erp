@@ -113,7 +113,7 @@ function ReportDialog({ jobId, balance, expected, replaces, onClose }: { jobId: 
               </div>
             </div>
             {needsAuthCode(method) ? (
-              <AuthCodeInput method={method} value={authCode} onChange={setAuthCode} optional />
+              <AuthCodeInput method={method} value={authCode} onChange={setAuthCode} />
             ) : method === "cash" ? null : (
               <Input name="reference" value={reference} onChange={(e) => setReference(e.target.value)} maxLength={80} placeholder={method === "cheque" ? "Cheque number and bank (optional)" : "Transfer reference (optional)"} className="max-w-sm" data-report-reference />
             )}

@@ -40,6 +40,8 @@ import { loadReports } from "@/lib/payment-reports";
 import { firstName, stillOwes } from "@/lib/payment-report-rules";
 import { paymentReportsReady } from "@/lib/schema-ready";
 import { reasonsFor } from "@/lib/reasons";
+import { AuthCodeMissing } from "@/components/AuthCodeMissing";
+import { authCodeMissing, realAuthCode } from "@/lib/auth-code";
 
 export const dynamic = "force-dynamic";
 
@@ -210,7 +212,8 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
         <span className="font-semibold">{p.number}</span>
         <span className="text-muted">{formatDayTime(p.received_at)}</span>
         <Badge tone={p.status === "pending_owner" ? "amber" : p.method === "cheque" && p.cheque_status === "pending" ? "amber" : struck ? "red" : "neutral"}>{METHOD_LABELS[p.method]}{p.method === "cheque" && p.cheque_status ? ` · ${p.cheque_status}` : ""}{isDeposit ? " · deposit" : ""}</Badge>
-        {p.auth_code ? <span className="text-xs text-muted" data-auth-shown>Auth {p.auth_code}</span> : p.reference ? <span className="text-xs text-muted">{p.reference}</span> : null}
+        {/* 3 November 2026: a card or link payment with no real auth code is flagged; owner and accounts add it here. */}
+        {!struck && authCodeMissing(p) ? <AuthCodeMissing paymentId={p.id} number={p.number} method={p.method} code={p.auth_code ?? null} canAdd={mayPay} /> : realAuthCode(p.auth_code) ? <span className="text-xs text-muted" data-auth-shown>Auth {realAuthCode(p.auth_code)}</span> : p.reference ? <span className="text-xs text-muted">{p.reference}</span> : null}
         {/* Only the actual method ever shows; a payment with no recorder came through Pay now. */}
         {by?.display_name ? <span className="text-xs text-muted" data-paid-by>by {by.display_name}</span> : p.client_key?.startsWith("ngenius:") ? <span className="text-xs text-muted" data-paid-by>paid online (Pay now)</span> : null}
         <span className="ml-auto font-semibold">AED {m(p.amount_aed)}</span>

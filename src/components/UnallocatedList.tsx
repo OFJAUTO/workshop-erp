@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { AllocatePayment } from "./AllocatePayment";
+import { AuthCodeMissing } from "./AuthCodeMissing";
+import { authCodeMissing, needsAuthCode, realAuthCode } from "@/lib/auth-code";
 import { Badge } from "./ui";
 import { METHOD_LABELS } from "@/lib/invoice-data";
 import { formatDayTime } from "@/lib/format";
@@ -11,6 +13,8 @@ export const ageWords = (days: number) => (days === 0 ? "unallocated today" : `u
 /**
  * Money on a customer's account, not allocated yet (1 November 2026, 1.8): one line each with its age, what it is for,
  * the receipt, and one-step Allocate for accounts and the owner. `target` makes Allocate a single tap to that job.
+ * A card or payment-link payment without a real auth code carries the amber "Auth code missing" flag here too, with
+ * "Add auth code" for the same people (review, 3 November 2026); once added, its code shows in the same place.
  */
 export function UnallocatedList({ rows, canAllocate, showCustomer = false, target = null }: { rows: UnallocatedPayment[]; canAllocate: boolean; showCustomer?: boolean; target?: { key: string; title: string; balance: number | null } | null }) {
   if (!rows.length) return null;
@@ -22,6 +26,7 @@ export function UnallocatedList({ rows, canAllocate, showCustomer = false, targe
           <span className="font-bold">{money(p.amount_aed)}</span>
           <Badge tone={p.ageDays >= 7 ? "red" : "amber"}>{ageWords(p.ageDays)}</Badge>
           <span className="text-xs text-muted">{METHOD_LABELS[p.method]}{p.method === "cheque" && p.cheque_status ? ` · ${p.cheque_status}` : ""} · {formatDayTime(p.received_at)}</span>
+          {needsAuthCode(p.method) ? (authCodeMissing(p) ? <AuthCodeMissing paymentId={p.id} number={p.number} method={p.method} code={p.auth_code ?? null} canAdd={canAllocate} /> : <span className="text-xs text-muted" data-auth-shown>Auth {realAuthCode(p.auth_code)}</span>) : null}
           {showCustomer ? <Link href={`/customers/${p.customer_id}`} className="text-xs font-bold uppercase underline underline-offset-4">{p.customerName}</Link> : null}
           {p.plate ? <span className="text-xs text-muted">{[p.plate, p.car].filter(Boolean).join(" · ")}</span> : null}
           {p.notes ? <span className="basis-full text-xs text-muted">For: {p.notes}</span> : null}
