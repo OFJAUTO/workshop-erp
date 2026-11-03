@@ -204,6 +204,10 @@ export type EditorSettings = {
   handcutSurcharge?: number;
   /** 2 November 2026: the owner's approval below cost can be kept (the database update is in). */
   belowCostReady?: boolean;
+  /** 8.2 (3 November 2026): recoveries already on this car elsewhere (another quotation, the job card), in words. */
+  recoveryElsewhere?: string[];
+  /** An estimate's recovery not copied onto this quotation because the car already had one (the History's words). */
+  recoveryLeftOut?: string[];
 };
 
 export type RecoveryType = { key: string; label: string; cost: number; price: number };
@@ -775,7 +779,7 @@ export function QuoteEditor({
       </div>
     );
   };
-  const addLine = (fields: Partial<QuoteLine> & { service_id?: string | null }) => {
+  const addLine = (fields: Partial<QuoteLine> & { service_id?: string | null; different_trip?: boolean }) => {
     const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : null;
     if (!id) {
       save({ addLine: fields });
@@ -1903,9 +1907,18 @@ export function QuoteEditor({
               return otherRow(l, idx);
             })}
           </div>
+          {!disabled && settings.recoveryElsewhere?.length && !otherLines.some((l) => l.line_type === "recovery") ? (
+            <div className="flex flex-col gap-2 rounded-control border border-amber-bar bg-amber-soft p-3 text-sm" data-recovery-elsewhere>
+              <p className="font-bold">Recovery already on this car:</p>
+              <ul className="flex flex-col gap-0.5">{settings.recoveryElsewhere.map((w) => <li key={w} className="break-words">{w}</li>)}</ul>
+              {settings.recoveryLeftOut?.length ? <ul className="flex flex-col gap-0.5" data-recovery-left-out>{settings.recoveryLeftOut.map((w) => <li key={w} className="break-words">{w}</li>)}</ul> : null}
+              <p>Another recovery here charges the customer twice – add it only for a different trip.</p>
+              <div><Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "recovery", different_trip: true })} data-recovery-different>+ Recovery – a different trip</Button></div>
+            </div>
+          ) : null}
           {!disabled ? (
             <div className="flex flex-wrap gap-2 border-t border-line pt-3">
-              {!otherLines.some((l) => l.line_type === "recovery") ? <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "recovery" })}>+ Recovery</Button> : null}
+              {!otherLines.some((l) => l.line_type === "recovery") && !settings.recoveryElsewhere?.length ? <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "recovery" })}>+ Recovery</Button> : null}
               <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "other", title: "" })}>+ Other charge</Button>
               <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "other", title: "", visible_to_customer: false, quantity: 1 })} title={INTERNAL_ONLY_LABEL} data-add-internal>+ Internal cost</Button>
               {!otherLines.some((l) => /consumables/i.test(l.title)) ? <Button type="button" tone="secondary" size="md" onClick={() => addLine({ line_type: "other", title: "Consumables", unit_price: settings.consumablesDefault || null })}>+ Consumables</Button> : null}

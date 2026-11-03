@@ -104,8 +104,8 @@ import { TEAM_LABELS, sideOfPerson, teamOf } from "@/lib/teams";
 import { setJobDepartment, setLineTeam } from "../team-actions";
 import { TeamsCard } from "./TeamsCard";
 import { ChargesCard } from "./ChargesCard";
-import { addJobChargesAction, decideFreeChargeAction } from "../charge-actions";
-import { chargesReady, loadCharges } from "@/lib/charges";
+import { addJobChargesAction, decideFreeChargeAction, saveQuoteChargeCostAction } from "../charge-actions";
+import { chargesReady, loadJobChargeItems } from "@/lib/charges";
 import { loadSupplierInvoices } from "@/lib/supplier-invoices";
 import { lineChange, profitChangeWords } from "@/lib/price-change";
 import { STATUS_WORDS as SI_STATUS_WORDS, invWords } from "@/lib/supplier-invoice-rows";
@@ -133,10 +133,10 @@ const MONEY_EVENTS = new Set(["payment", "invoice_issued", "proforma_issued", "r
 
 type MoveRequestRow = { id: string; reason: string; status: "pending" | "approved" | "refused"; to_status: string | null; decision_reason: string | null; decided_at: string | null; created_at: string; requester: { display_name: string } | null; decider: { display_name: string } | null };
 
-export default async function JobPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string; link?: string; req?: string }> }) {
+export default async function JobPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string; link?: string; req?: string; charge_message?: string; charge_error?: string }> }) {
   const staff = await requirePermission("viewJobs");
   const { id } = await params;
-  const { message, error, link, req } = await searchParams;
+  const { message, error, link, req, charge_message: chargeMessage, charge_error: chargeError } = await searchParams;
   const role = staff.role_id as RoleId;
 
   const supabase = await createClient();
@@ -246,12 +246,14 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const teamLines = job.is_open && ["owner", "service_advisor", "workshop_manager", "accounts"].includes(role) ? await lineTeamsOfJob(id, job.department) : [];
   const linesReady = await teamsReady();
   // Early charges (1 November 2026, B2): recovery, fuel and other costs/charges before or after the check-in approval.
+  // 3 November 2026 (section 8, J-00969): the section lists the quotation's charges too, each once (charge-items.ts).
   const chargesOn = ["owner", "service_advisor", "accounts"].includes(role) && (await chargesReady());
   const mayAddCharges = chargesOn && !staff.viewingAs && job.is_open;
-  const chargeLines = chargesOn ? await loadCharges({ jobId: id }) : [];
+  const jobCharges = chargesOn ? await loadJobChargeItems(id) : null;
+  const chargeItemsList = jobCharges?.items ?? [];
   const chargeFiles: Record<string, JobFile[]> = {};
-  if (chargeLines.length) {
-    const { data: cf } = await admin.from("job_files").select("id, storage_path, content_type, caption, ref_id").eq("job_id", id).eq("kind", "supplier_invoice").in("ref_id", chargeLines.map((l) => l.id)).is("removed_at", null);
+  if (chargeItemsList.length) {
+    const { data: cf } = await admin.from("job_files").select("id, storage_path, content_type, caption, ref_id").eq("job_id", id).eq("kind", "supplier_invoice").in("ref_id", chargeItemsList.map((l) => l.billRefId)).is("removed_at", null);
     const cfUrls = await signJobFiles(((cf ?? []) as { storage_path: string }[]).map((x) => x.storage_path));
     for (const x of (cf ?? []) as { id: string; storage_path: string; content_type: string | null; caption: string | null; ref_id: string }[]) (chargeFiles[x.ref_id] ??= []).push({ id: x.id, path: x.storage_path, url: cfUrls[x.storage_path] ?? null, caption: x.caption, contentType: x.content_type, refId: x.ref_id });
   }
@@ -706,8 +708,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </section>
       </div>
 
-      {chargesOn && (chargeLines.length || mayAddCharges) ? (
-        <ChargesCard lines={chargeLines} canAdd={mayAddCharges} approved={!!job.first_approval_at} onAdd={addJobChargesAction.bind(null, id)} onDecide={(lineId: string) => decideFreeChargeAction.bind(null, id, lineId)} isOwner={role === "owner" && !staff.viewingAs} jobId={id} files={chargeFiles} recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]} providers={(settings.recovery_companies ?? []) as string[]} />
+      {chargesOn && jobCharges && (chargeItemsList.length || mayAddCharges) ? (
+        <ChargesCard items={chargeItemsList} costs={jobCharges.costs} costReady={jobCharges.costReady} canAdd={mayAddCharges} canCost={chargesOn && !staff.viewingAs} approved={!!job.first_approval_at} onAdd={addJobChargesAction.bind(null, id)} onDecide={(lineId: string) => decideFreeChargeAction.bind(null, id, lineId)} onSaveCost={(lineId: string) => saveQuoteChargeCostAction.bind(null, id, lineId)} isOwner={role === "owner" && !staff.viewingAs} seesTripPrices={role === "owner" || role === "accounts"} jobId={id} files={chargeFiles} recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]} providers={(settings.recovery_companies ?? []) as string[]} quoteHref={(quotationId: string) => `/jobs/${id}/quote/${quotationId}`} mayOpenQuote={seesQuote} message={chargeMessage ?? null} error={chargeError ?? null} />
       ) : null}
       {jobSupplierInvoices.length ? (
         <Card className="flex flex-col gap-2" data-job-supplier-invoices>

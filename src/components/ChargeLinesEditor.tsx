@@ -5,9 +5,9 @@ import { Input } from "@/components/ui";
 import { CHARGE_KINDS, type ChargeKind } from "@/lib/charge-rules";
 
 type RecoveryType = { key: string; label: string; cost: number; price: number };
-type Row = { kind: ChargeKind; description: string; provider: string; recovery_type: string; trips: string; litres: string; cost: string; trn: string; charge: string; free: boolean };
+type Row = { kind: ChargeKind; description: string; provider: string; recovery_type: string; trips: string; litres: string; cost: string; trn: string; charge: string; free: boolean; different: boolean };
 
-const blank = (kind: ChargeKind = "recovery"): Row => ({ kind, description: "", provider: "", recovery_type: "", trips: "1", litres: "", cost: "", trn: "", charge: "", free: false });
+const blank = (kind: ChargeKind = "recovery"): Row => ({ kind, description: "", provider: "", recovery_type: "", trips: "1", litres: "", cost: "", trn: "", charge: "", free: false, different: false });
 const num = (s: string) => {
   const n = Number(String(s).replace(/,/g, "").trim());
   return Number.isFinite(n) ? n : 0;
@@ -18,8 +18,11 @@ const num = (s: string) => {
  * Each line: Recovery (provider from the saved list or typed, type, trips) / Fuel (litres) / Other (what it is), its
  * COST (what we pay, the supplier's TRN) and its CHARGE (what the customer pays, before VAT) or Free. The lines travel
  * as one hidden field ("lines", JSON) with the form around it.
+ *
+ * 8.2 (3 November 2026): when the car already has a recovery (on a quotation, or typed on the job card), a Recovery row
+ * shows it in amber and asks once - "Yes, it is a different trip" must be ticked to save it (the server checks again).
  */
-export function ChargeLinesEditor({ name = "lines", recoveryTypes, providers, startKind = "recovery" }: { name?: string; recoveryTypes: RecoveryType[]; providers: string[]; startKind?: ChargeKind }) {
+export function ChargeLinesEditor({ name = "lines", recoveryTypes, providers, startKind = "recovery", recoveryAlready = [] }: { name?: string; recoveryTypes: RecoveryType[]; providers: string[]; startKind?: ChargeKind; /** The recoveries already on the car, in words ("RECOVERY, FULL DOWN, TWO WAYS · AED 400.00 · on Q-00039 · approved"). */ recoveryAlready?: string[] }) {
   const [rows, setRows] = useState<Row[]>([blank(startKind)]);
   const set = (i: number, patch: Partial<Row>) => setRows((p) => p.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const pickType = (i: number, key: string) => {
@@ -27,7 +30,7 @@ export function ChargeLinesEditor({ name = "lines", recoveryTypes, providers, st
     const trips = Math.max(1, Math.round(num(rows[i].trips) || 1));
     set(i, { recovery_type: key, ...(t ? { cost: rows[i].cost || String(t.cost * trips), charge: rows[i].charge || String(t.price * trips) } : {}) });
   };
-  const value = JSON.stringify(rows.map((r) => ({ kind: r.kind, description: r.description.trim(), provider: r.provider.trim() || null, recovery_type: r.recovery_type || null, trips: r.kind === "recovery" ? Math.max(1, Math.round(num(r.trips) || 1)) : null, litres: r.kind === "fuel" ? num(r.litres) || null : null, cost_aed: num(r.cost), supplier_trn: r.trn.trim() || null, charge_aed: r.free ? 0 : num(r.charge), free: r.free })));
+  const value = JSON.stringify(rows.map((r) => ({ kind: r.kind, description: r.description.trim(), provider: r.provider.trim() || null, recovery_type: r.recovery_type || null, trips: r.kind === "recovery" ? Math.max(1, Math.round(num(r.trips) || 1)) : null, litres: r.kind === "fuel" ? num(r.litres) || null : null, cost_aed: num(r.cost), supplier_trn: r.trn.trim() || null, charge_aed: r.free ? 0 : num(r.charge), free: r.free, different_trip: r.kind === "recovery" && recoveryAlready.length > 0 && r.different })));
   return (
     <div className="flex flex-col gap-3" data-charge-editor>
       <input type="hidden" name={name} value={value} />
@@ -82,6 +85,14 @@ export function ChargeLinesEditor({ name = "lines", recoveryTypes, providers, st
             <label className="flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={r.free} onChange={(e) => set(i, { free: e.target.checked })} className="h-5 w-5 accent-ink" data-charge-free />Free</label>
           </div>
           {r.free ? <p className="text-xs text-muted">Free follows the complimentary rule: the owner approves it (his own are approved at once).</p> : null}
+          {r.kind === "recovery" && recoveryAlready.length ? (
+            <div className="flex flex-col gap-2 rounded-control border border-amber-bar bg-amber-soft p-3 text-sm text-ink" data-charge-recovery-warning>
+              <p className="font-bold">Recovery already on this car:</p>
+              <ul className="flex flex-col gap-0.5">{recoveryAlready.map((w) => <li key={w} className="break-words" data-charge-recovery-already>{w}</li>)}</ul>
+              <p>Adding another recovery charges the customer twice – unless it is a different trip.</p>
+              <label className="flex min-h-11 items-center gap-2 font-semibold"><input type="checkbox" required checked={r.different} onChange={(e) => set(i, { different: e.target.checked })} className="h-5 w-5 shrink-0 accent-ink" data-charge-recovery-different />Yes, it is a different trip – add it</label>
+            </div>
+          ) : null}
         </div>
       ))}
       <button type="button" onClick={() => setRows((p) => [...p, blank("other")])} className="self-start min-h-11 rounded-control border border-dashed border-line-strong px-4 text-sm font-bold" data-charge-add-row>+ Another charge</button>

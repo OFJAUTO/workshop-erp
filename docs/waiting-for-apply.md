@@ -11,7 +11,7 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Nothing is waiting.
+1. `20261203150000_quote_charge_costs.sql` (section 8: the Charges section shows the quotation's charges). Backup: `backups/2026-11-03T05-32-02` (110 tables, 243,843 rows). It adds `charge_lines.origin`, so the real cost of a charge typed on a quotation (from the supplier's bill) can be saved on the job card. No existing row changes (every row takes "charge"). Already working without it: the list of quotation charges in the Charges section, attaching their bills, the second-recovery question, and counting each charge once (trips matched to the charge they are). Waiting for it: only the "Cost & bill" cost box, which says "opens once the database update is applied".
 
 ## Applied on 3 November 2026, morning
 

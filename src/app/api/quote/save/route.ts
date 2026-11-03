@@ -3,6 +3,7 @@ import { refuseIfLocked } from "@/lib/quote-lock-server";
 import { handBack, keepBaseline } from "@/lib/quote-lead";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { dropParts } from "@/lib/drop-parts";
+import { recoveryElsewhere } from "@/lib/charges";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { LINE_TYPES, belowCostAll, belowCostChangesIn, belowCostWords, effectiveMarkupPercent, floorProblem, minimumMarkupAed, needsPackageCosting, parseHours, priceSideKeys, recoveryTitle, round2, worseBelowCost, type BelowCost, type BelowCostOpts, type LineType, type QuoteHeaderForTotals, type QuoteLine } from "@/lib/quotes";
@@ -82,7 +83,7 @@ type Body = {
   quotationId?: string;
   /** Set by the editor on every change; the same key twice is the same change (a retry), not a second row. */
   opId?: string;
-  addLine?: LinePatch & { service_id?: string | null };
+  addLine?: LinePatch & { service_id?: string | null; /** 8.2: a recovery while one is already on the car - the advisor said it is a different trip. */ different_trip?: boolean };
   patchLine?: { id: string } & LinePatch;
   /** keepParts: the job goes but its parts stay on the quotation, unlinked. */
   /** withParts: the parts under the job go too (off the parts list; Parts asked when one was already ordered). */
@@ -526,6 +527,11 @@ export async function POST(request: NextRequest) {
       if (same) return NextResponse.json({ ok: true, id: same.id });
     }
     if (String(a.title ?? "").trim().length > LINE_TEXT_MAX) return NextResponse.json({ error: tooLongWords(String(a.title ?? "").trim().length) }, { status: 400 });
+    // 8.2 (3 November 2026): a recovery while the car already has one (another quotation, or the job card) only as a different trip.
+    if (type === "recovery" && !a.service_id && q.job_id && a.different_trip !== true) {
+      const elsewhere = await recoveryElsewhere(q.job_id, q.number);
+      if (elsewhere.length) return NextResponse.json({ error: `Recovery already on this car: ${elsewhere.join("; ")}. Add it with "+ Recovery – a different trip" only if it is another trip.` }, { status: 400 });
+    }
     const row: Record<string, unknown> = { quotation_id: q.id, line_type: type, source_type: "manual", client_key: body.opId ? String(body.opId).slice(0, 80) : null, created_by: staff.id, ...stamp, title: String(a.title ?? "").trim(), group_label: a.group_label ? String(a.group_label).slice(0, 200) : null };
     // Parts a service asks for; they go to the Parts desk once the line is safely in.
     let linked: { rows: Record<string, unknown>[]; name: string } | null = null;

@@ -1,5 +1,7 @@
 import "server-only";
 import { chargeNet, chargeProblem, chargeTitle, chargeTotals, type ChargeInput, type ChargeLineRow } from "./charge-rules";
+import { chargeCostsOnce, chargeItems, rootLineOf, recoveryAlready, recoveryAlreadyWords, recoveryWords, type ChargeCostRow, type ChargeCosts, type ChargeItem, type ChargeQuoteVersion, type ChargeTrip } from "./charge-items";
+import { LINE_SELECT, toLine } from "./quote-data";
 import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, nextDocumentNumber, toInvoice, toPayment, type InvoiceRow } from "./invoice-data";
 import { newToken } from "./media";
 import { jobAdvisorIds, notifyRoles, notifyStaff } from "./notifications";
@@ -7,10 +9,10 @@ import { quoteTargetFor } from "./quote-versions";
 import { refreshQuoteTotals } from "./quote-data";
 import { markupFromSell } from "./quotes";
 import { flagBelowCost } from "./below-cost";
-import { schemaReady } from "./schema-ready";
+import { BELOW_COST_SELECT, belowCostReady, schemaReady } from "./schema-ready";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
-import { pageAllIn } from "./page-all";
+import { pageAll, pageAllIn } from "./page-all";
 import { capsText } from "./text-case";
 import { formatPlate } from "./types";
 import { tryEnqueueZoho } from "./zoho-sync";
@@ -18,7 +20,7 @@ import { tryEnqueueZoho } from "./zoho-sync";
 /** Migration 20261202150000_charges: charge lines (early charges on a job, pending charges with no gate-in). */
 export const chargesReady = () => schemaReady("charge_lines", "id, job_id, entry_id, kind, cost_aed, charge_aed, agreed_at, quotation_line_id, invoice_id");
 
-const LINE_COLS = "id, job_id, entry_id, kind, description, provider, recovery_type, trips, litres, cost_aed, supplier_trn, bill_path, charge_aed, free, free_status, service_date, agreed_at, quotation_line_id, invoice_id, created_at, is_active";
+const LINE_COLS = "id, job_id, entry_id, kind, description, provider, recovery_type, trips, litres, cost_aed, supplier_trn, bill_path, charge_aed, free, free_status, service_date, agreed_at, quotation_line_id, invoice_id, created_at, created_by, is_active";
 type Actor = { id: string; display_name: string; role_id: string };
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const vatOf = (settings: Settings) => Number((settings as unknown as Record<string, unknown>).vat_percent) || 5;
@@ -32,10 +34,18 @@ const toRow = (r: Record<string, unknown>): ChargeLineRow => ({
   trips: r.trips === null || r.trips === undefined ? null : Number(r.trips),
 });
 
-/** The charge lines of a job or of a pending-charge entry (active ones). */
+/**
+ * Migration 20261203150000_quote_charge_costs (3 November 2026, section 8): the real cost of a charge typed on a
+ * quotation (charge_lines with origin 'quotation'). Before it the quotation's charges are listed and their bills attach,
+ * but the cost box waits.
+ */
+export const quoteChargeCostsReady = () => schemaReady("charge_lines", "origin");
+
+/** The charge lines of a job or of a pending-charge entry (active ones; never the cost rows of quotation charges). */
 export async function loadCharges(where: { jobId?: string; entryId?: string }): Promise<ChargeLineRow[]> {
   if (!(await chargesReady())) return [];
   let q = createAdminClient().from("charge_lines").select(LINE_COLS).eq("is_active", true).order("created_at");
+  if (await quoteChargeCostsReady()) q = q.eq("origin", "charge");
   if (where.jobId) q = q.eq("job_id", where.jobId);
   if (where.entryId) q = q.eq("entry_id", where.entryId);
   const { data } = await q;
@@ -87,13 +97,21 @@ export async function addCharges(home: { jobId?: string; entryId?: string }, inp
     if (!data) return { error: "Job not found." };
     job = data as unknown as JobLite;
   }
+  // 8.2 (3 November 2026): a recovery while one is already on the car - on a quotation or on the job card - asks once.
+  // The screen asks with the words and a tick; this is the same check on the server (someone may have added one meanwhile).
+  let alreadyNote = "";
+  if (job && inputs.some((c) => c.kind === "recovery")) {
+    const already = recoveryAlready((await loadJobChargeItems(job.id)).items);
+    if (already.length && inputs.some((c) => c.kind === "recovery" && !c.different_trip)) return { error: `${recoveryAlreadyWords(already)} Tick "Yes, it is a different trip" to add it, or leave it out.` };
+    if (already.length) alreadyNote = ` (a different trip from ${already.map(recoveryWords).join("; ")}, confirmed by ${staff.display_name})`;
+  }
   const owner = staff.role_id === "owner";
   const rows = inputs.map((c) => ({ ...lineRecord(c, settings), job_id: home.jobId ?? null, entry_id: home.entryId ?? null, free_status: c.free ? (owner ? "approved" : "pending_owner") : null, created_by: staff.id, updated_by: staff.id }));
   const { data: made, error } = await admin.from("charge_lines").insert(rows).select(LINE_COLS);
   if (error || !made) return { error: "Couldn't save the charges. Try again." };
   const lines = (made as Record<string, unknown>[]).map(toRow);
   const where = job ? job.job_number : "a pending charge";
-  if (job) await admin.from("job_events").insert({ job_id: job.id, event_type: "charge_added", note: `${lines.map((l) => `${l.description}: cost ${money(l.cost_aed)}, charge ${l.free ? "free" : money(l.charge_aed)}${l.provider ? ` (${l.provider})` : ""}`).join("; ")} added by ${staff.display_name}`, created_by: staff.id });
+  if (job) await admin.from("job_events").insert({ job_id: job.id, event_type: "charge_added", note: `${lines.map((l) => `${l.description}: cost ${money(l.cost_aed)}, charge ${l.free ? "free" : money(l.charge_aed)}${l.provider ? ` (${l.provider})` : ""}`).join("; ")} added by ${staff.display_name}${alreadyNote}`, created_by: staff.id });
   const above = lines.filter((l) => !l.free && l.cost_aed > l.charge_aed + 0.005);
   if (above.length && !owner) await notifyRoles(["owner"], { type: "owner_approval_needed", title: `Charge below its cost · ${where}`, body: above.map((l) => `${l.description}: cost ${money(l.cost_aed)}, charged ${money(l.charge_aed)}`).join("; "), jobId: job?.id ?? null, href: job ? `/jobs/${job.id}#charges` : "/pending-charges" });
   const free = lines.filter((l) => l.free && l.free_status === "pending_owner");
@@ -213,13 +231,133 @@ export async function markChargesInvoiced(ids: string[], invoiceId: string): Pro
   await createAdminClient().from("charge_lines").update({ invoice_id: invoiceId }).in("id", ids).is("invoice_id", null);
 }
 
-/** What the job's charges cost us and are not yet on an invoice or a quotation line (the profit counts it at once). */
-export async function chargeCostsNotInvoiced(jobIds: string[]): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
-  if (!jobIds.length || !(await chargesReady())) return out;
-  const { data } = await createAdminClient().from("charge_lines").select("job_id, cost_aed").in("job_id", jobIds).eq("is_active", true).is("invoice_id", null).is("quotation_line_id", null);
-  for (const r of (data ?? []) as { job_id: string; cost_aed: number | string }[]) out.set(r.job_id, r2((out.get(r.job_id) ?? 0) + (Number(r.cost_aed) || 0)));
+/* ---------------------------------------------------------------------------
+   THE CAR'S CHARGES, WHEREVER THEY WERE TYPED (3 November 2026, section 8).
+   --------------------------------------------------------------------------- */
+
+/** A job's charges: THE list (charge-items.ts), its recovery trips, and THE cost rule's figures. */
+export type JobCharges = { items: ChargeItem[]; trips: ChargeTrip[]; costs: ChargeCosts; costReady: boolean; /** Every quotation line (any version) of a listed charge: an invoice or hidden line carrying one is counted by the rule, never again. */ lineIds: Set<string> };
+type Page<T> = PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
+const COST_COLS = "id, job_id, quotation_line_id, cost_aed, provider, supplier_trn, updated_by";
+
+/**
+ * Every charge of these jobs, each once: the job-card charges, the charges on their quotations (every version read, so a
+ * revision is traced back to its first line), the costs typed from the bills and the recovery trips. One batch of reads
+ * for the job card, the profit and the 8.2 check alike.
+ *
+ * Review fixes (3 November 2026): the trips carry their company (a trip replaces only the charge of whoever did it),
+ * the job's open/closed state decides whether a trip never recorded is still waited for, the owner's below-cost
+ * approvals on the charge lines and the owner's own entries are read so the screen says only what really happened.
+ */
+export async function loadChargeItemsMany(jobIds: string[]): Promise<Map<string, JobCharges>> {
+  const ids = Array.from(new Set(jobIds.filter(Boolean)));
+  const out = new Map<string, JobCharges>();
+  for (const id of ids) out.set(id, { items: [], trips: [], costs: chargeCostsOnce([], []), costReady: false, lineIds: new Set<string>() });
+  if (!ids.length) return out;
+  const ready = await chargesReady();
+  const costReady = ready && (await quoteChargeCostsReady());
+  const admin = createAdminClient();
+  // A read that fails counts as nothing (the page still opens; the server log says why), as the invoice draft does.
+  const safe = (p: Promise<Record<string, unknown>[]>) => p.catch((e) => { console.error("charges: a read failed", e); return [] as Record<string, unknown>[]; });
+  const [rowsRaw, costRaw, versionRaw, tripRaw, jobRaw, ownerRaw] = await Promise.all([
+    ready ? safe(pageAllIn<Record<string, unknown>>(ids, (p, a, b) => (costReady ? admin.from("charge_lines").select(LINE_COLS).in("job_id", p).eq("is_active", true).eq("origin", "charge") : admin.from("charge_lines").select(LINE_COLS).in("job_id", p).eq("is_active", true)).order("created_at").order("id").range(a, b) as unknown as Page<Record<string, unknown>>)) : Promise.resolve([] as Record<string, unknown>[]),
+    costReady ? safe(pageAllIn<Record<string, unknown>>(ids, (p, a, b) => admin.from("charge_lines").select(COST_COLS).in("job_id", p).eq("is_active", true).eq("origin", "quotation").order("id").range(a, b) as unknown as Page<Record<string, unknown>>)) : Promise.resolve([] as Record<string, unknown>[]),
+    safe(pageAllIn<Record<string, unknown>>(ids, (p, a, b) => admin.from("quotations").select("id, job_id, number, version, status").in("job_id", p).eq("kind", "quotation").eq("is_active", true).is("deleted_at", null).neq("status", "cancelled").order("id").range(a, b) as unknown as Page<Record<string, unknown>>)),
+    safe(pageAllIn<Record<string, unknown>>(ids, (p, a, b) => admin.from("recovery_trips").select("id, job_id, price_aed, company").in("job_id", p).eq("is_active", true).order("id").range(a, b) as unknown as Page<Record<string, unknown>>)),
+    safe(pageAllIn<Record<string, unknown>>(ids, (p, a, b) => admin.from("jobs").select("id, is_open").in("id", p).order("id").range(a, b) as unknown as Page<Record<string, unknown>>)),
+    safe(pageAll<Record<string, unknown>>((a, b) => admin.from("staff").select("id").eq("role_id", "owner").order("id").range(a, b) as unknown as Page<Record<string, unknown>>)),
+  ]);
+  const versions = versionRaw.map((v) => ({ id: String(v.id), job_id: String(v.job_id), number: String(v.number), version: Number(v.version) || 1, status: String(v.status) }));
+  const jobOfQuote = new Map(versions.map((v) => [v.id, v.job_id]));
+  const openOf = new Map(jobRaw.map((j) => [String(j.id), j.is_open !== false]));
+  const owners = ownerRaw.map((o) => String(o.id));
+  const ownerSet = new Set(owners);
+  const lineRaw = versions.length ? await safe(pageAllIn<Record<string, unknown>>(versions.map((v) => v.id), (p, a, b) => admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", p).in("line_type", ["recovery", "other"]).order("id").range(a, b) as unknown as Page<Record<string, unknown>>)) : [];
+  // The owner's below-cost approvals on these lines (2 November 2026), once the columns exist.
+  const belowRaw = lineRaw.length && (await belowCostReady()) ? await safe(pageAllIn<Record<string, unknown>>(lineRaw.map((l) => String(l.id)), (p, a, b) => admin.from("quotation_lines").select(BELOW_COST_SELECT).in("id", p).not("below_cost_at", "is", null).order("id").range(a, b) as unknown as Page<Record<string, unknown>>)) : [];
+  const belowOf = new Map(belowRaw.map((r) => [String(r.id), r]));
+  const lines = lineRaw.map(toLine).map((l) => {
+    const b = belowOf.get(l.id);
+    return b ? { ...l, below_cost_reason: (b.below_cost_reason as string | null) ?? null, below_cost_at: (b.below_cost_at as string | null) ?? null, below_cost_sell_aed: b.below_cost_sell_aed === null || b.below_cost_sell_aed === undefined ? null : Number(b.below_cost_sell_aed), below_cost_cost_aed: b.below_cost_cost_aed === null || b.below_cost_cost_aed === undefined ? null : Number(b.below_cost_cost_aed) } : l;
+  });
+  for (const id of ids) {
+    const rows = rowsRaw.filter((r) => r.job_id === id).map(toRow);
+    const costRows: ChargeCostRow[] = costRaw.filter((r) => r.job_id === id).map((r) => ({ id: String(r.id), quotation_line_id: String(r.quotation_line_id), cost_aed: Number(r.cost_aed) || 0, provider: (r.provider as string | null) ?? null, supplier_trn: (r.supplier_trn as string | null) ?? null, by_owner: ownerSet.has(String(r.updated_by ?? "")) }));
+    const vs: ChargeQuoteVersion[] = versions.filter((v) => v.job_id === id).map(({ id: vid, number, version, status }) => ({ id: vid, number, version, status }));
+    const ls = lines.filter((l) => jobOfQuote.get(l.quotation_id) === id);
+    const trips: ChargeTrip[] = tripRaw.filter((t) => t.job_id === id).map((t) => ({ id: String(t.id), price_aed: t.price_aed === null || t.price_aed === undefined ? null : Number(t.price_aed), company: (t.company as string | null) ?? null }));
+    const items = chargeItems({ rows, costRows, versions: vs, lines: ls, owners });
+    const parentOf = new Map(ls.map((l) => [l.id, l.revised_from_line_id ?? null]));
+    const roots = new Set(items.map((i) => i.rootLineId).filter((x): x is string => !!x));
+    const lineIds = new Set(ls.filter((l) => roots.has(rootLineOf(l.id, parentOf))).map((l) => l.id));
+    out.set(id, { items, trips, costs: chargeCostsOnce(items, trips, { open: openOf.get(id) ?? true }), costReady, lineIds });
+  }
   return out;
+}
+
+/** One job's charges (the job card, the 8.2 check). */
+export async function loadJobChargeItems(jobId: string): Promise<JobCharges> {
+  return (await loadChargeItemsMany([jobId])).get(jobId) ?? { items: [], trips: [], costs: chargeCostsOnce([], []), costReady: false, lineIds: new Set<string>() };
+}
+
+/** 8.2 from the quotation side: the recoveries already on the car, except on the quotation `exceptNumber` (its own editor). */
+export async function recoveryElsewhere(jobId: string | null | undefined, exceptNumber: string | null): Promise<string[]> {
+  if (!jobId) return [];
+  return recoveryAlready((await loadJobChargeItems(jobId)).items, { exceptNumber }).map(recoveryWords);
+}
+
+const MAY_COST = ["owner", "service_advisor", "accounts"];
+
+/**
+ * The REAL cost of a charge typed on a quotation (from the supplier's bill) and its supplier, typed on the job card by the
+ * owner, an advisor or accounts. Kept on the charge side (the quotation line is locked and keeps its quoted estimate): one
+ * row per charge, keyed to the line's first version, so it follows every revision. An empty cost goes back to the estimate.
+ * A recovery on a car with recovery trips is costed from the trips - its bill is attached for the paper only.
+ */
+export async function saveQuoteChargeCost(jobId: string, lineId: string, input: { cost: string; provider: string; trn: string }, staff: Actor): Promise<{ error?: string; message?: string }> {
+  if (!MAY_COST.includes(staff.role_id)) return { error: "Only the owner, an advisor or accounts type the cost of a charge." };
+  if (!(await chargesReady()) || !(await quoteChargeCostsReady())) return { error: "Typing the cost of a quotation's charge needs the database update first (waiting for apply). The bill can be attached already." };
+  const { items, costs } = await loadJobChargeItems(jobId);
+  const item = items.find((i) => i.source === "quotation" && (i.rootLineId === lineId || i.id === lineId));
+  if (!item || !item.rootLineId) return { error: "That charge is no longer on a quotation of this car. Refresh the page." };
+  // Only a recovery whose own trips are on the Recovery page (our trucks, or that same company) is costed from them; an
+  // outside company's tow with no trip of its own keeps the cost from its bill (review fix, 3 November 2026).
+  if (item.kind === "recovery" && costs.tripKeys.includes(item.key)) return { error: "This recovery is costed from its trips (the drivers' and companies' prices on the Recovery page). Attach the bill for the paper only." };
+  const admin = createAdminClient();
+  // Money as the screens print it: "1,250.00" is thousands, "2,5" is 2.5 (the NumericInput rule).
+  const typed = String(input.cost ?? "").trim();
+  const raw = /^\d{1,3}(,\d{3})+(\.\d*)?$/.test(typed) ? typed.replace(/,/g, "") : typed.replace(",", ".");
+  const provider = String(input.provider ?? "").trim().slice(0, 200) || null;
+  const trn = String(input.trn ?? "").replace(/\s+/g, "").slice(0, 30) || null;
+  const label = `${item.description || "Charge"} (${item.where?.number ?? "quotation"})`;
+  if (!raw) {
+    if (!item.costRowId) return { error: "Type the cost from the supplier's bill (AED, before VAT)." };
+    await admin.from("charge_lines").update({ is_active: false, updated_by: staff.id }).eq("id", item.costRowId).eq("origin", "quotation");
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "charge_cost", note: `${label}: the typed cost was taken off by ${staff.display_name} – the quoted estimate ${money(item.quotedCost ?? 0)} counts again`, created_by: staff.id });
+    return { message: `Cost taken off – the quoted estimate ${money(item.quotedCost ?? 0)} counts again.` };
+  }
+  const cost = Number(raw);
+  if (!Number.isFinite(cost) || cost < 0) return { error: "The cost must be a number (0 or more), before VAT." };
+  if (cost > 10_000_000) return { error: "That cost is too large. Check the figure." };
+  const fields = { cost_aed: r2(cost), provider, supplier_trn: trn, charge_aed: r2(item.charge), free: item.free || item.hidden, updated_by: staff.id };
+  let saved = false;
+  if (item.costRowId) saved = !(await admin.from("charge_lines").update(fields).eq("id", item.costRowId).eq("origin", "quotation")).error;
+  else {
+    const { error } = await admin.from("charge_lines").insert({ ...fields, job_id: jobId, origin: "quotation", quotation_line_id: item.rootLineId, kind: item.kind, description: capsText(item.description || "Charge"), created_by: staff.id });
+    saved = !error;
+    // Two people saving at once: the one cost row (unique per line) takes the later figure.
+    if (error) {
+      const { data: had } = await admin.from("charge_lines").select("id").eq("quotation_line_id", item.rootLineId).eq("origin", "quotation").eq("is_active", true).maybeSingle();
+      if (had) saved = !(await admin.from("charge_lines").update(fields).eq("id", had.id)).error;
+    }
+  }
+  if (!saved) return { error: "Couldn't save the cost – nothing was changed. Try again." };
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "charge_cost", note: `${label}: cost ${money(cost)} from the bill${provider ? ` (${provider})` : ""} typed by ${staff.display_name}${item.quotedCost !== null ? ` – quoted estimate ${money(item.quotedCost)}` : ""}`, created_by: staff.id });
+  if (staff.role_id !== "owner" && !item.hidden && !item.free && cost > item.charge + 0.005) {
+    const { data: job } = await admin.from("jobs").select("job_number").eq("id", jobId).maybeSingle();
+    await notifyRoles(["owner"], { type: "owner_approval_needed", title: `Charge below its cost · ${job?.job_number ?? "a car"}`, body: `${label}: cost ${money(cost)} from the bill, charged ${money(item.charge)}.`, jobId, href: `/jobs/${jobId}#charges` });
+  }
+  return { message: `Cost ${money(cost)} saved ✓ – it counts in the job's profit instead of the quoted estimate.` };
 }
 
 /* ---------------------------------------------------------------------------

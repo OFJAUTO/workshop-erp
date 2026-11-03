@@ -5,6 +5,8 @@ import { isQuickJob } from "@/lib/inspection-fee";
 import { cleanPartNumber, dateFromDays, isOurStock } from "@/lib/parts-rows";
 import { costConfirmReady, lineCostConfirmReady } from "@/lib/schema-ready";
 import { dubaiDate } from "@/lib/jobs";
+import { recoveryElsewhere } from "@/lib/charges";
+import { isQuoteCharge } from "@/lib/charge-items";
 import { invoicesForLock, loadQuoteLock, refuseIfLocked } from "@/lib/quote-lock-server";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { liveInvoicesOf } from "@/lib/quote-lock";
@@ -127,7 +129,8 @@ export async function startQuotation(jobId: string) {
 
   let lines: Record<string, unknown>[] = [];
   if (job!.estimate_id) {
-    lines = await estimateLineRows(job!.estimate_id, created!.id, staff!.id, jobId);
+    // 8.2: the estimate's recovery is not copied when the car already has one (typed on the job card at gate-in).
+    lines = await leaveOutRepeatedRecovery(await estimateLineRows(job!.estimate_id, created!.id, staff!.id, jobId), jobId, { id: created!.id, number: created!.number }, job!.estimate_id, staff!);
     await carryEstimateHeader(job!.estimate_id, { id: created!.id, number: created!.number }, jobId, staff!.id);
   } else {
     // The labour list is the advisor's own: nothing from the report is pre-filled. The parts list comes from the approved report through the part requests below.
@@ -202,18 +205,23 @@ export async function startQuotation(jobId: string) {
       }
     }
   }
-  // A car that came on our recovery truck: the recovery line is suggested, the advisor fills in the price or hides it.
-  const { data: gateIn } = await admin.from("gate_ins").select("arrived_by, recovery_type").eq("job_id", jobId).maybeSingle();
-  if (gateIn?.arrived_by === "our_recovery" && !lines.some((l) => l.line_type === "recovery")) {
-    const types = (settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[];
-    const rt = types.find((t) => t.key === gateIn.recovery_type) ?? types[0] ?? null;
-    await admin.from("quotation_lines").insert({ quotation_id: created!.id, position: lines.length + 1, line_type: "recovery", title: recoveryTitle(rt?.label ?? null, 1), details: null, source_type: "manual", quantity: 1, recovery_trips: 1, recovery_type: rt?.key ?? null, unit_cost: rt ? Number(rt.cost) || 0 : null, unit_price: rt ? Number(rt.price) || 0 : null, recovery_provider_kind: "ours", markup_percent: minMarkup, visible_to_customer: true, created_by: staff!.id, updated_by: staff!.id });
-  }
   await ensurePartRequests(jobId, staff!.id);
   await syncPartLines(created!.id, jobId, staff!.id, minMarkup);
   await refreshQuoteTotals(created!.id, settings, staff!.id);
   await logQuoteEvent(created!.id, jobId, staff!.id, "quote_started", `Quotation ${created!.number} started by ${staff!.display_name}${job!.estimate_id ? " from the estimate" : ""}`);
   await quotationsFromCarriedEstimates({ id: jobId, customer_id: job!.customer_id, vehicle_id: job!.vehicle_id, estimate_id: job!.estimate_id }, staff!, settings);
+  // A car that came on our recovery truck: the recovery line is suggested, the advisor fills in the price or hides it -
+  // unless that recovery is already on the car (an early charge on the job card, another quotation): never twice (8.2).
+  // Decided AFTER the carried estimates became quotations (review fix, 3 November 2026): an additional estimate's own
+  // recovery counts as the car's recovery, so the automatic line never sits next to it unasked.
+  const { data: gateIn } = await admin.from("gate_ins").select("arrived_by, recovery_type").eq("job_id", jobId).maybeSingle();
+  if (gateIn?.arrived_by === "our_recovery" && !lines.some((l) => l.line_type === "recovery") && !(await recoveryElsewhere(jobId, created!.number)).length) {
+    const types = (settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[];
+    const rt = types.find((t) => t.key === gateIn.recovery_type) ?? types[0] ?? null;
+    const { count: onIt } = await admin.from("quotation_lines").select("id", { count: "exact", head: true }).eq("quotation_id", created!.id);
+    await admin.from("quotation_lines").insert({ quotation_id: created!.id, position: (onIt ?? lines.length) + 1, line_type: "recovery", title: recoveryTitle(rt?.label ?? null, 1), details: null, source_type: "manual", quantity: 1, recovery_trips: 1, recovery_type: rt?.key ?? null, unit_cost: rt ? Number(rt.cost) || 0 : null, unit_price: rt ? Number(rt.price) || 0 : null, recovery_provider_kind: "ours", markup_percent: minMarkup, visible_to_customer: true, created_by: staff!.id, updated_by: staff!.id });
+    await refreshQuoteTotals(created!.id, settings, staff!.id);
+  }
   refresh(jobId, created!.id);
   redirect(`/jobs/${jobId}/quote/${created!.id}`);
 }
@@ -272,6 +280,24 @@ async function estimateLineRows(estimateId: string, quotationId: string, by: str
 }
 
 /**
+ * 8.2 on the automatic paths (review fix, 3 November 2026): an estimate's recovery line is not copied onto a quotation
+ * of a car that already has a recovery - on another quotation of the job or typed on the job card - because two
+ * recoveries charge the customer twice and nobody was asked. It is written down on the quotation (its History and the
+ * amber "Recovery already on this car" box in the editor, which offers "+ Recovery – a different trip").
+ */
+async function leaveOutRepeatedRecovery(rows: Record<string, unknown>[], jobId: string, to: { id: string; number: string }, estimateId: string, staff: { id: string }): Promise<Record<string, unknown>[]> {
+  // The rows are about to be inserted (active); THE charge rule decides (a recovery the customer arranges is no charge).
+  const recoveries = rows.filter((r) => r.line_type === "recovery" && isQuoteCharge({ ...r, title: String(r.title ?? ""), is_active: true, fee_kind: r.fee_kind ?? null, chosen: r.chosen !== false, left_off: !!r.left_off } as unknown as Parameters<typeof isQuoteCharge>[0]));
+  if (!recoveries.length) return rows;
+  const already = await recoveryElsewhere(jobId, to.number);
+  if (!already.length) return rows;
+  const { data: est } = await createAdminClient().from("quotations").select("number").eq("id", estimateId).maybeSingle();
+  const what = recoveries.map((r) => String(r.title ?? "").trim() || "RECOVERY").join("; ");
+  await logQuoteEvent(to.id, jobId, staff.id, "recovery_not_copied", `${what} from estimate ${est?.number ?? ""} was not copied to ${to.number}: the car already has ${already.join("; ")}. If it is a different trip, add it with "+ Recovery – a different trip".`);
+  return rows.filter((r) => !recoveries.includes(r));
+}
+
+/**
  * The estimate's header choices that travel to the job's quotation: the tint spec, and the commission. ONE commission
  * per job: a commission on the estimate moves onto the quotation whole and the estimate keeps a tombstone; when the
  * job already carries one (an additional estimate with its own), the estimate keeps it and it is written down.
@@ -316,7 +342,9 @@ async function quotationsFromCarriedEstimates(job: { id: string; customer_id: st
       await admin.from("job_events").insert({ job_id: job.id, event_type: "estimate_attached", note: `Estimate ${e.number} could not become a quotation: ${error?.message ?? "unknown"}. Start it with New quotation.`, created_by: staff.id });
       continue;
     }
-    const rows = await estimateLineRows(e.id, q.id, staff.id, job.id);
+    // 8.2: an additional estimate's recovery is not copied when the car already has one (the original quotation, an
+    // earlier carried estimate or the job card) - the advisor adds it back with "+ Recovery – a different trip".
+    const rows = await leaveOutRepeatedRecovery(await estimateLineRows(e.id, q.id, staff.id, job.id), job.id, { id: q.id, number: q.number }, e.id, staff);
     if (rows.length) {
       const { error: lineError } = await admin.from("quotation_lines").insert(rows);
       if (lineError) await logQuoteEvent(q.id, job.id, staff.id, "quote_started", `The lines of estimate ${e.number} could not all be copied: ${lineError.message}`);

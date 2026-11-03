@@ -10,6 +10,9 @@ import { feeOf, isClearing } from "./card-settlement-rules";
 import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment, type InvoiceRow, type PaymentRow } from "./invoice-data";
 import { LINE_SELECT, toLine, toQuote } from "./quote-data";
 import { hasPackageLine, quoteTotals, type QuoteLine } from "./quotes";
+import { chargeLineCosts, type ChargeItem } from "./charge-items";
+import { chargeNet } from "./charge-rules";
+import { loadChargeItemsMany } from "./charges";
 import { sideOfDepartment } from "./inspection";
 
 /** The hourly cost rate for a job's department: the department's own figure, else its side's, else the base rate. */
@@ -73,7 +76,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
   const ids = invoices.map((i) => i.invoice.id);
   const jobIds = Array.from(new Set(invoices.map((i) => i.invoice.job_id).filter((x): x is string => !!x)));
   const [{ data: lines }, { data: payments }, { data: sessions }, { data: stock }, { data: pos }, { data: credits }, { data: hiddenRows }, { data: trips }, { data: clockings }, { data: quotes }, { data: comRows }] = await Promise.all([
-    admin.from("invoice_lines").select("invoice_id, section, cost_aed, amount_aed, description").in("invoice_id", ids).eq("is_active", true),
+    admin.from("invoice_lines").select("invoice_id, section, cost_aed, amount_aed, description, quotation_line_id, part_item_id").in("invoice_id", ids).eq("is_active", true),
     admin.from("payments").select(PAYMENT_SELECT).in("invoice_id", ids).eq("is_active", true),
     jobIds.length ? admin.from("work_sessions").select("job_id, minutes, started_at, ended_at").in("job_id", jobIds).eq("is_active", true) : Promise.resolve({ data: [] }),
     jobIds.length ? admin.from("stock_issues").select("job_id, quantity, unit_cost").in("job_id", jobIds).eq("is_active", true) : Promise.resolve({ data: [] }),
@@ -91,6 +94,9 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     jobIds.length ? admin.from("quotations").select("job_id, commission_aed, commission_status, version, created_at, commission_to, commission_paid_at").in("job_id", jobIds).eq("kind", "quotation").eq("is_active", true).not("commission_to", "is", null) : Promise.resolve({ data: [] }),
   ]);
   const chargeTotals = await chargeTotalsByJob(jobIds);
+  // 3 November 2026 (section 8): the car's recovery, fuel and other charges - on the job card or on a quotation - each
+  // counted ONCE by THE cost rule (charge-items.ts), never again through an invoice line or a hidden quotation line.
+  const chargeMap = await loadChargeItemsMany(jobIds);
   const { recheckCostsFor } = await import("./recheck");
   const rechecks = await recheckCostsFor(jobIds, settings);
   // ONE profit calculation (30 October 2026, section 3): the packages' film, tint, ceramic, consumables and installer
@@ -107,23 +113,29 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
   // The comebacks of these jobs (our fault), to take their losses off the original job.
   const { data: cbJobs } = jobIds.length && !filter.noComebacks ? await admin.from("jobs").select("id, comeback_of").in("comeback_of", jobIds).in("comeback_cause", ["workmanship", "faulty_part"]) : { data: [] as { id: string; comeback_of: string }[] };
   const cbProfits = (cbJobs ?? []).length ? await jobProfits(settings, { jobIds: (cbJobs ?? []).map((c) => c.id), noComebacks: true }) : [];
-  const byInvoice = (id: string) => ((lines ?? []) as { invoice_id: string; section: string; cost_aed: number | string; amount_aed: number | string; description: string | null }[]).filter((l) => l.invoice_id === id);
+  const byInvoice = (id: string) => ((lines ?? []) as { invoice_id: string; section: string; cost_aed: number | string; amount_aed: number | string; description: string | null; quotation_line_id: string | null; part_item_id: string | null }[]).filter((l) => l.invoice_id === id);
   return invoices.map(({ invoice, job }) => {
     const ls = byInvoice(invoice.id);
     const partsCost = round2(ls.filter((l) => l.section === "parts").reduce((a, l) => a + Number(l.cost_aed), 0));
-    type HiddenRow = { line_type: string; quantity: number | string; unit_cost: number | string | null; visible_to_customer: boolean; fee_kind: string | null; option_group: string | null; chosen: boolean; quotation: { job_id: string; status: string } | null };
+    // The job's charges (section 8): their quotation lines and the job-card charges on the invoice are counted by THE
+    // cost rule below, once - so neither their invoice lines nor their hidden quotation lines are counted again.
+    const jc = invoice.job_id ? chargeMap.get(invoice.job_id) ?? null : null;
+    const chargeLineIds = jc?.lineIds ?? new Set<string>();
+    const chargeRowWords = new Set((jc?.items ?? []).filter((i) => i.source === "charge" && !i.lineId).map((i) => i.description.trim().toUpperCase()));
+    const isChargeLine = (l: { section: string; description: string | null; quotation_line_id: string | null; part_item_id: string | null }) => (l.quotation_line_id ? chargeLineIds.has(l.quotation_line_id) : !l.part_item_id && l.section !== "parts" && chargeRowWords.has(String(l.description ?? "").trim().toUpperCase()));
+    type HiddenRow = { id: string; line_type: string; quantity: number | string; unit_cost: number | string | null; visible_to_customer: boolean; fee_kind: string | null; option_group: string | null; chosen: boolean; quotation: { job_id: string; status: string } | null };
     const hidden = ((hiddenRows ?? []) as unknown as HiddenRow[])
       .filter((l) => l.quotation?.job_id === invoice.job_id && !isUnchosen(l) && isHidden({ line_type: l.line_type as LineType, visible_to_customer: l.visible_to_customer, fee_kind: l.fee_kind }))
-      .map((l) => ({ line_type: l.line_type as LineType, fee_kind: l.fee_kind, quantity: Number(l.quantity) || 1, unit_cost: l.unit_cost === null ? null : Number(l.unit_cost) }));
-    const hiddenCost = round2(hidden.filter((l) => !l.fee_kind && l.line_type !== "recovery").reduce((a, l) => a + lineCost(l), 0));
+      .map((l) => ({ id: l.id, line_type: l.line_type as LineType, fee_kind: l.fee_kind, quantity: Number(l.quantity) || 1, unit_cost: l.unit_cost === null ? null : Number(l.unit_cost) }));
+    const hiddenCost = round2(hidden.filter((l) => !l.fee_kind && l.line_type !== "recovery" && !(jc && chargeLineIds.has(l.id))).reduce((a, l) => a + lineCost(l), 0));
     // The suppliers' own charges on the job's parts (courier, freight) are an internal cost too.
     const inspectionOnly = isInspectionOnly(invoice.job_id, ls);
-    const otherCost = round2((inspectionOnly ? 0 : ls.filter((l) => l.section !== "parts").reduce((a, l) => a + Number(l.cost_aed), 0)) + hiddenCost + (invoice.job_id ? chargeTotals.get(invoice.job_id) ?? 0 : 0));
-    // The recovery cost: the drivers' real prices once any trip carries one; the quotation's hidden recovery lines until then.
+    // A declined car keeps its charges' costs (a recovery paid to an outside company is real): they come from the rule.
+    const otherCost = round2((inspectionOnly ? 0 : ls.filter((l) => l.section !== "parts" && !(jc && isChargeLine(l))).reduce((a, l) => a + Number(l.cost_aed), 0)) + hiddenCost + (invoice.job_id ? chargeTotals.get(invoice.job_id) ?? 0 : 0) + (jc?.costs.other ?? 0));
+    // The recovery cost: THE rule - the drivers' and companies' prices once the car has trips (trip for trip), each
+    // recovery charge's cost (the bill, else its estimate) until then. A job-less invoice (a pending charge) has none.
     const jobTrips = ((trips ?? []) as { job_id: string; price_aed: number | string | null; delivered_at: string | null; status: string }[]).filter((t) => t.job_id === invoice.job_id);
-    const tripCost = round2(jobTrips.reduce((a, t) => a + (Number(t.price_aed) || 0), 0));
-    const hiddenRecovery = round2(hidden.filter((l) => !l.fee_kind && l.line_type === "recovery").reduce((a, l) => a + lineCost(l), 0));
-    const recoveryCost = tripCost > 0 ? tripCost : hiddenRecovery;
+    const recoveryCost = jc ? jc.costs.recovery : 0;
     const jobQuotes = ((quotes ?? []) as { job_id: string; materials_cost_aed: number | string | null; version: number; created_at: string; expected_payment_method: string | null }[]).filter((x) => x.job_id === invoice.job_id);
     // The bank fee before a payment is recorded: the invoice total at the rule of the way the customer is expected to
     // pay (newest approved quotation), without the reclaimable VAT (29 October 2026). The quotation's own hidden fee
@@ -162,7 +174,8 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     if (pending.length) why.push("cheque pending clearance");
     if (!recorded.length && feeEstimate > 0) why.push("bank charge estimated until payment");
     if (unsettledCards) why.push("card fee estimated until the bank settles");
-    if (jobTrips.some((t) => t.delivered_at && t.price_aed === null)) why.push("the driver's recovery price to come");
+    if (jc?.costs.provisional.length) why.push(...jc.costs.provisional);
+    else if (jobTrips.some((t) => t.delivered_at && t.price_aed === null)) why.push("the driver's recovery price to come");
     if (pkg?.estimated.length) why.push(`package ${pkg.estimated.join(", ")} estimated until recorded`);
     if (packageLabourEstimated) why.push("installer time not clocked: the package's hours are counted");
     const bal = invoiceBalance(invoice, pays);
@@ -291,15 +304,17 @@ export async function approvedNotInvoicedProfit(settings: Settings): Promise<num
   if (!open.length) return 0;
   const { data: lineRows } = await admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", open.map((r) => String(r.id))).eq("is_active", true);
   const charges = await chargeTotalsByJob(Array.from(new Set(open.map((r) => r.job.id))));
+  const jobCharges = await loadChargeItemsMany(Array.from(new Set(open.map((r) => r.job.id))));
   let total = 0;
   // A job with an original and an additional quotation: the suppliers' charges on its parts count once, not per quotation.
   const charged = new Set<string>();
   for (const r of open) {
     const lines = ((lineRows ?? []) as Record<string, unknown>[]).filter((l) => l.quotation_id === r.id).map(toLine);
-    const supplierCharges = charged.has(r.job.id) ? 0 : (charges.get(r.job.id) ?? 0);
+    const firstOfJob = !charged.has(r.job.id);
+    const supplierCharges = firstOfJob ? (charges.get(r.job.id) ?? 0) : 0;
     charged.add(r.job.id);
     const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job.department), supplierCharges, ...feeOpts(settings, r.expected_payment_method), packageCosting: await costingOf(settings, r, lines) });
-    total += totals.profit;
+    total += totals.profit + chargeAdjustment(jobCharges.get(r.job.id)?.items ?? [], lines, firstOfJob);
   }
   return round2(total);
 }
@@ -334,12 +349,34 @@ export async function approvedQuoteProfits(settings: Settings, fromIso: string):
   const { data: firsts } = jobIds.length ? await admin.from("quotations").select("id, job_id, responded_at").in("job_id", jobIds).eq("kind", "quotation").eq("status", "approved").eq("is_active", true).order("responded_at") : { data: [] as { id: string; job_id: string; responded_at: string }[] };
   const firstOf = new Map<string, string>();
   for (const f of (firsts ?? []) as { id: string; job_id: string }[]) if (!firstOf.has(f.job_id)) firstOf.set(f.job_id, f.id);
+  // Section 8: a quotation charge's cost typed from the bill replaces its quoted estimate (once, never added to it).
+  const jobCharges = await loadChargeItemsMany(jobIds);
   return Promise.all(rows.map(async (r) => {
     const lines = ((lineRows ?? []) as Record<string, unknown>[]).filter((l) => l.quotation_id === r.id).map(toLine);
     const supplierCharges = r.job?.id && firstOf.get(r.job.id) === String(r.id) ? (charges.get(r.job.id) ?? 0) : 0;
     const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job?.department), supplierCharges, ...feeOpts(settings, r.expected_payment_method), packageCosting: await costingOf(settings, r, lines) });
-    return { id: String(r.id), jobId: r.job?.id ?? null, respondedAt: String(r.responded_at), sentBy: (r.sent_by as string | null) ?? null, profit: totals.profit, net: totals.net };
+    const adjust = chargeAdjustment(r.job?.id ? jobCharges.get(r.job.id)?.items ?? [] : [], lines, false);
+    return { id: String(r.id), jobId: r.job?.id ?? null, respondedAt: String(r.responded_at), sentBy: (r.sent_by as string | null) ?? null, profit: round2(totals.profit + adjust), net: totals.net };
   }));
+}
+
+/**
+ * Section 8 (3 November 2026): the job's charges on a quotation-based profit, counted once. A charge line whose real
+ * cost is known (the bill typed on the job card, or the job-card charge it came from) costs that instead of its quoted
+ * estimate; and once per job (`withJobCard`, on its first quotation) the job-card charges on no quotation line add what
+ * they bill (agreed on the check-in) less what they cost.
+ */
+function chargeAdjustment(items: ChargeItem[], lines: QuoteLine[], withJobCard: boolean): number {
+  if (!items.length) return 0;
+  const actual = chargeLineCosts(items);
+  let adjust = 0;
+  for (const l of lines) {
+    const real = actual.get(l.id);
+    if (real === undefined || !l.is_active || isUnchosen(l)) continue;
+    adjust += lineCost(l) - real;
+  }
+  if (withJobCard) for (const i of items) if (i.source === "charge" && !i.lineId && i.row) adjust += (i.row.agreed_at ? chargeNet(i.row) : 0) - i.cost;
+  return round2(adjust);
 }
 
 /** ONE profit calculation (30 October 2026, section 3): a quotation with a package is costed with the same figures as the editor. */

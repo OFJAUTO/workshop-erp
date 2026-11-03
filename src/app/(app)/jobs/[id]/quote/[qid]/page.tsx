@@ -47,6 +47,7 @@ import { HandbackBanner } from "@/components/HandbackBanner";
 import { recoveryProviderList } from "@/lib/recovery-providers";
 import { requestPartsGone, revisionPreview } from "@/lib/quote-versions";
 import { belowCostReady } from "@/lib/schema-ready";
+import { recoveryElsewhere } from "@/lib/charges";
 import { costLimitsOf } from "@/lib/part-cost-check";
 
 export const dynamic = "force-dynamic";
@@ -198,6 +199,10 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     clockedHours,
     // 2 November 2026: the owner may approve a line below its cost (with a reason) once the database update is in.
     belowCostReady: await belowCostReady(),
+    // 8.2 (3 November 2026): the recoveries already on the car (another quotation, the job card) - "+ Recovery" asks once.
+    recoveryElsewhere: await recoveryElsewhere(q.job_id, q.number),
+    // ... and an estimate's recovery that was left out when this quotation was made from it (review fix, 3 November 2026).
+    recoveryLeftOut: bundle.events.filter((e) => e.event_type === "recovery_not_copied" && e.note).map((e) => e.note as string),
     lastPrices,
           packageCost,
   };

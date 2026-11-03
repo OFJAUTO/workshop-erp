@@ -4,15 +4,17 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/auth";
 import type { ChargeInput } from "@/lib/charge-rules";
-import { addCharges, chargesReady } from "@/lib/charges";
+import { addCharges, chargesReady, saveQuoteChargeCost } from "@/lib/charges";
+import { formValues, type FormState } from "@/lib/form-state";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 const MAY_ADD = ["owner", "service_advisor", "accounts"];
 
+/** Back to the Charges section, the answer shown there - next to the button that was tapped (3 November 2026). */
 function back(jobId: string, words: { message?: string; error?: string }): never {
   revalidatePath(`/jobs/${jobId}`);
-  const q = words.error ? `error=${encodeURIComponent(words.error)}` : `message=${encodeURIComponent(words.message ?? "")}`;
+  const q = words.error ? `charge_error=${encodeURIComponent(words.error)}` : `charge_message=${encodeURIComponent(words.message ?? "")}`;
   redirect(`/jobs/${jobId}?${q}#charges`);
 }
 
@@ -20,7 +22,7 @@ function back(jobId: string, words: { message?: string; error?: string }): never
 function linesOf(formData: FormData): ChargeInput[] | null {
   try {
     const raw = JSON.parse(String(formData.get("lines") ?? "[]")) as ChargeInput[];
-    return Array.isArray(raw) ? raw.map((l) => ({ ...l, description: String(l.description ?? "") })) : null;
+    return Array.isArray(raw) ? raw.map((l) => ({ ...l, description: String(l.description ?? ""), different_trip: l.different_trip === true })) : null;
   } catch {
     return null;
   }
@@ -29,7 +31,8 @@ function linesOf(formData: FormData): ChargeInput[] | null {
 /**
  * Early charges on a car (1 November 2026, B2): recovery, fuel and other costs/charges, before or after the check-in
  * approval, by the owner, an advisor or accounts. Before the approval they are listed on the vehicle check-in; after
- * it they go into the quotation for the customer's approval.
+ * it they go into the quotation for the customer's approval. A recovery while one is already on the car is refused
+ * unless the person ticked that it is a different trip (8.2, 3 November 2026; the rule lives in addCharges).
  */
 export async function addJobChargesAction(jobId: string, formData: FormData) {
   const staff = await requireStaff();
@@ -54,4 +57,18 @@ export async function decideFreeChargeAction(jobId: string, lineId: string, form
   const ok = formData.get("decision") === "approve";
   await createAdminClient().from("charge_lines").update({ free_status: ok ? "approved" : "refused", updated_by: staff.id }).eq("id", lineId).eq("free_status", "pending_owner");
   return back(jobId, { message: ok ? "Free charge approved ✓" : "Refused: change it to a charged line or remove it." });
+}
+
+/**
+ * 8.1 (3 November 2026): the real cost of a charge on a quotation (from the supplier's bill) and its supplier, typed in
+ * the Charges section. The answer appears in the box itself. The quotation line is never touched.
+ */
+export async function saveQuoteChargeCostAction(jobId: string, lineId: string, _state: FormState, formData: FormData): Promise<FormState> {
+  const values = formValues(formData);
+  const staff = await requireStaff();
+  if (!MAY_ADD.includes(staff.role_id) || staff.viewingAs) return { error: "Only the owner, an advisor or accounts type the cost of a charge.", values };
+  const r = await saveQuoteChargeCost(jobId, lineId, { cost: values.cost ?? "", provider: values.provider ?? "", trn: values.trn ?? "" }, staff);
+  if (r.error) return { error: r.error, values };
+  revalidatePath(`/jobs/${jobId}`);
+  return { success: r.message, values };
 }

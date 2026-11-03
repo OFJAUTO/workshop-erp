@@ -23,6 +23,8 @@ export type ChargeInput = {
   charge_aed: number;
   free?: boolean;
   service_date?: string | null;
+  /** 3 November 2026 (8.2): a recovery added while one is already on the car - the person said it is a different trip. */
+  different_trip?: boolean;
 };
 
 export type ChargeLineRow = ChargeInput & {
@@ -36,6 +38,8 @@ export type ChargeLineRow = ChargeInput & {
   invoice_id: string | null;
   created_at: string;
   is_active: boolean;
+  /** Who saved it (3 November 2026: a charge entered by the owner himself never says "the owner was told"). */
+  created_by?: string | null;
 };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
