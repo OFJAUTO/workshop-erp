@@ -121,7 +121,8 @@ export type PartFull = PartItem & {
   not_needed_at: string | null;
   not_needed_by: string | null;
   not_needed_reason: string | null;
-  disposition: "returned" | "stock" | "fit_pending" | "fit_approved" | null;
+  /** "cancelled" and "return_pending": the endings of an ordered part not needed (part-endings.ts, 3 November 2026). */
+  disposition: "returned" | "stock" | "fit_pending" | "fit_approved" | "scrap" | "cancelled" | "return_pending" | null;
   disposition_at: string | null;
   disposition_by: string | null;
   disposition_note: string | null;

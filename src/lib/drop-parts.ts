@@ -6,8 +6,9 @@ export type DropActor = { id: string | null; display_name: string };
 /**
  * Parts that leave a quotation: the customer declined their job, the advisor took them off, or a revised quotation
  * dropped them. A part not yet ordered goes off the parts list (it stays listed as removed, with Put back). A part
- * already ordered or received is never removed quietly: it is marked not needed and Parts are asked "return or keep
- * in stock?" on the Parts without a home page.
+ * already ordered or received is never removed quietly: it is marked not needed and Parts are asked for its ending on
+ * Returns and leftovers (or the Parts table's menu), which runs THE ending function (src/lib/part-endings-server.ts):
+ * Cancelled with the supplier, Return to supplier, or Keep in stock.
  */
 export async function dropParts(jobId: string, partIds: string[], actor: DropActor, why: "declined" | "revised" | "removed"): Promise<{ removed: number; asked: number }> {
   const admin = createAdminClient();
@@ -31,7 +32,9 @@ export async function dropParts(jobId: string, partIds: string[], actor: DropAct
       await admin.from("part_items").update({ is_active: false, removed_at: now, removed_by: actingId, removed_reason: reason, updated_by: actingId }).eq("id", p.id);
       removed++;
     } else if (!p.not_needed_at && actingId) {
-      const question = why === "declined" ? `${p.description}: customer declined, part already ordered: return or keep in stock?` : `${p.description}: removed from the quote, part already ordered: return or keep in stock?`;
+      // The question names the endings that fit (3 November 2026): nothing delivered yet = cancel it with the supplier.
+      const ask = Number(p.received_qty) > 0 ? "return it to the supplier or keep it in stock?" : "cancel it with the supplier?";
+      const question = why === "declined" ? `${p.description}: customer declined, part already ordered: ${ask}` : `${p.description}: removed from the quote, part already ordered: ${ask}`;
       const r = await partNotNeeded(jobId, p.id, { id: actingId, display_name: actor.display_name, role_id: "service_advisor" }, reason, { question });
       if (!r.error) asked++;
     }

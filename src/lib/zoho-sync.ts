@@ -8,6 +8,8 @@ import { getSettings, type Settings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ZOHO_REAL_ORG_ID, ZohoError, listAccounts, listTaxes, zohoBooksNow, zohoConfigured, zohoFetch, zohoTestOrgId } from "@/lib/zoho";
 import { positionsWords } from "@/lib/parts-list";
+import { returnCreditOf } from "@/lib/part-endings";
+import { schemaReady } from "@/lib/schema-ready";
 
 /**
  * Zoho Books, phase 1 (26 October 2026, docs/zoho-plan.md): customers, tax invoices, payments and deposits post to
@@ -1531,12 +1533,14 @@ async function zohoVendorCreditById(org: string, id: string): Promise<ZohoVendor
  */
 async function syncVendorCreditRow(org: string, accounts: Resolved, partId: string): Promise<HandlerOut> {
   const admin = createAdminClient();
+  // The supplier credit note's own amount, once migration 20261203140000_part_endings is applied (3 November 2026).
+  const typedAmount = await schemaReady("part_items", "credit_note_amount_aed");
   const { data } = await admin
     .from("part_items")
-    .select("id, job_id, description, quantity, confirmed_quantity, received_qty, returned_qty, cost_aed, final_cost_aed, supplier, po_id, disposition, disposition_note, disposition_at, return_status, zoho_vendorcredit_id")
+    .select(`id, job_id, description, quantity, confirmed_quantity, received_qty, returned_qty, cost_aed, final_cost_aed, supplier, po_id, po_line_id, disposition, disposition_note, disposition_at, return_status, zoho_vendorcredit_id${typedAmount ? ", credit_note_amount_aed" : ""}`)
     .eq("id", partId)
     .maybeSingle();
-  const part = data as { id: string; job_id: string | null; description: string; quantity: number; confirmed_quantity: number | null; received_qty: number | null; returned_qty: number | null; cost_aed: number | null; final_cost_aed: number | null; supplier: string | null; po_id: string | null; disposition: string | null; disposition_note: string | null; disposition_at: string | null; return_status: string | null; zoho_vendorcredit_id: string | null } | null;
+  const part = data as unknown as { id: string; job_id: string | null; description: string; quantity: number; confirmed_quantity: number | null; received_qty: number | null; returned_qty: number | null; cost_aed: number | null; final_cost_aed: number | null; supplier: string | null; po_id: string | null; po_line_id: string | null; disposition: string | null; disposition_note: string | null; disposition_at: string | null; return_status: string | null; zoho_vendorcredit_id: string | null; credit_note_amount_aed?: number | string | null } | null;
   if (!part) throw new ZohoError("The part no longer exists in the ERP.");
   // ONLY a return to the supplier is a supplier credit. return_status "returned" alone means "back with Parts"
   // (a part handed back, later kept in stock, scrapped or fitted as goodwill) — never money from the supplier.
@@ -1582,9 +1586,18 @@ async function syncVendorCreditRow(org: string, accounts: Resolved, partId: stri
   }
 
   const qty = Number(part.returned_qty) || Number(part.received_qty) || Number(part.confirmed_quantity) || Number(part.quantity) || 0;
-  const rate = round2(Number(part.final_cost_aed) > 0 ? Number(part.final_cost_aed) : Number(part.cost_aed) || 0);
-  const amount = round2(qty * rate);
+  // Credit what the supplier billed (3 November 2026): the typed credit note amount, else the invoice price on the
+  // part's LPO line, else the LPO price - an ending sets the job's cost of the part to 0, and a price corrected later
+  // lives on the line, never on the part's first cost. ONE rule with the "to be credited" figure (returnCreditOf).
+  const { data: lineRow } = part.po_line_id ? await admin.from("purchase_order_lines").select("unit_cost, invoice_unit_cost").eq("id", part.po_line_id).maybeSingle() : { data: null };
+  const numOrNull = (v: unknown) => (v === null || v === undefined || v === "" ? null : Number(v));
+  const credit = returnCreditOf({ qty, creditNoteAmount: numOrNull(part.credit_note_amount_aed), invoiceUnit: numOrNull(lineRow?.invoice_unit_cost), lineUnit: numOrNull(lineRow?.unit_cost), finalCost: numOrNull(part.final_cost_aed), cost: numOrNull(part.cost_aed) });
+  const amount = credit.amount;
   if (amount <= 0) throw new ZohoError(`The returned part "${part.description}" has no cost recorded, so there is nothing to credit.`);
+  // A typed credit note amount may not divide evenly by the quantity: then one line of the whole amount (qty in words).
+  const evenly = Math.abs(round2(qty * credit.unit) - amount) < 0.005;
+  const lineQty = evenly ? qty : 1;
+  const rate = evenly ? credit.unit : amount;
   const reference = `RET-${part.id.replace(/-/g, "").slice(0, 12)}`;
   const expectedTotal = taxed ? round2(amount + round2(amount * 0.05)) : amount;
   const matches = (z: ZohoVendorCredit) => near(z.total, expectedTotal);
@@ -1606,7 +1619,7 @@ async function syncVendorCreditRow(org: string, accounts: Resolved, partId: stri
       reference_number: reference,
       notes: cut([po ? `ERP ${po.number}` : null, part.disposition_note ? `Supplier credit note: ${part.disposition_note}` : "Supplier credit note to follow", "The scan stays in the ERP (Zoho vendor credits take no attachments)."].filter(Boolean).join("\n"), 2000),
       tax_treatment: taxed ? "vat_registered" : "vat_not_registered",
-      line_items: [{ name: cut(`${part.description} · returned`, 100), quantity: qty, rate, account_id: needAccounts(accounts.purchases, accounts.purchasesError).parts, ...(taxed ? { tax_id: accounts.taxId } : {}) }],
+      line_items: [{ name: cut(`${part.description} · returned${evenly ? "" : ` × ${qty}`}`, 100), quantity: lineQty, rate, account_id: needAccounts(accounts.purchases, accounts.purchasesError).parts, ...(taxed ? { tax_id: accounts.taxId } : {}) }],
     };
     try {
       const j = await zohoFetch<{ vendor_credit?: ZohoVendorCredit }>("/vendorcredits?ignore_auto_number_generation=true", { org, method: "POST", body });
@@ -1647,7 +1660,7 @@ async function syncVendorCreditRow(org: string, accounts: Resolved, partId: stri
       lpo: po?.number ?? null,
       qty,
       zoho: { total: after.total, unapplied: after.balance },
-      erp: { total: expectedTotal, net: amount },
+      erp: { total: expectedTotal, net: amount, priced_from: credit.source === "credit_note" ? "the supplier's credit note" : credit.source === "invoice" ? "the supplier's invoice price" : credit.source === "lpo" ? "the LPO price" : "the part's cost" },
       applied_now: appliedNow,
       ...(billBalanceAfter != null ? { bill_balance_after: billBalanceAfter } : {}),
       supplier_credit_note: part.disposition_note ?? "to follow",
@@ -2177,7 +2190,9 @@ export async function enqueueBackfill(by: string | null): Promise<{ contacts: nu
     out.recoveries++;
   }
   // Phase 3: parts returned TO THE SUPPLIER (disposition; "back with Parts" alone is not a credit) and customer refunds.
-  const returned = await pageAll<{ id: string; job_id: string | null; disposition_at: string | null }>((a, b) => admin.from("part_items").select("id, job_id, disposition_at").eq("is_active", true).eq("disposition", "returned").order("id").range(a, b));
+  // Active or not (3 November 2026): an ordered part given its ending leaves the job (is_active false) - a return is
+  // still a supplier credit. The same test as the handler, which reads disposition only.
+  const returned = await pageAll<{ id: string; job_id: string | null; disposition_at: string | null }>((a, b) => admin.from("part_items").select("id, job_id, disposition_at").eq("disposition", "returned").order("id").range(a, b));
   for (const pt of returned) {
     if (!consider("vendorcredit", pt.id, pt.job_id, pt.disposition_at)) continue;
     put.push({ kind: "vendorcredit", record_id: pt.id, job_id: pt.job_id, created_by: by });

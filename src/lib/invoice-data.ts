@@ -298,7 +298,9 @@ export async function loadDraftInputs(jobIds: string[]): Promise<Map<string, Dra
   const [jobs, quotesByJob, partRows, chargesByJob] = await Promise.all([
     safe(pageAllIn<JobRaw>(ids, (piece, a, b) => admin.from("jobs").select("id, inspection_fee_due, inspection_fee_aed, comeback_free").in("id", piece).order("id").range(a, b) as unknown as PromiseLike<{ data: JobRaw[] | null; error: { message: string } | null }>)),
     approvedQuotationsMany(ids),
-    safe(pageAllIn<Record<string, unknown>>(ids, (piece, a, b) => admin.from("part_items").select(PART_SELECT + ", final_cost_aed, label_code, return_status, replacement_part_id").in("job_id", piece).eq("is_active", true).order("id").range(a, b) as unknown as PromiseLike<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>)),
+    // 3 November 2026 (section 7): a part given its ending (cancelled, returned, kept in stock) is off the job but its
+    // approved line may still be on the bill until the customer approves a revision - the line's cost is then 0.
+    safe(pageAllIn<Record<string, unknown>>(ids, (piece, a, b) => admin.from("part_items").select(PART_SELECT + ", final_cost_aed, label_code, return_status, replacement_part_id, disposition_at").in("job_id", piece).or("is_active.eq.true,disposition_at.not.is.null").order("id").range(a, b) as unknown as PromiseLike<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>)),
     chargesToInvoiceMany(ids),
   ]);
   const quoteIds = Array.from(quotesByJob.values()).flat().map((q) => q.id);
@@ -347,8 +349,10 @@ export function draftFrom(inp: DraftInputs, settings: Settings): InvoiceDraft {
   let quotedTotal = 0;
   let anyRounded = false;
   for (const q of qs) {
-    // Parts returned to the supplier come off the bill.
-    const qLines = inp.lines.filter((l) => l.quotation_id === q.id && !isHidden(l) && !isUnchosen(l) && partOf(l.part_item_id)?.return_status !== "returned");
+    // 3 November 2026 (section 7, the owner's rule): a line leaves the bill only through a revised quotation the customer
+    // approved - never because its part went back to the supplier (that used to drop the line silently and change the
+    // customer's approved price). Its cost is the part's own: 0 once the part was given its ending.
+    const qLines = inp.lines.filter((l) => l.quotation_id === q.id && !isHidden(l) && !isUnchosen(l));
     // The labour discount as the quotation had it (our own labour lines; older quotations: labour and services).
     const { base, discount: d } = labourDiscountOf(qLines, { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, discount_kind: q.discount_kind, discount_value: q.discount_value, discount_scope: q.discount_scope });
     if (d > 0 && !discountLabel) discountLabel = discountLabelOf({ discount_kind: q.discount_kind, discount_value: q.discount_value, discount_percent: Number(q.discount_percent) || 0, discount_scope: q.discount_scope }, { hasPackage: qLines.some((l) => !!l.package_key) });

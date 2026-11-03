@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { PositionsLine } from "@/components/PositionsLine";
 import { useRouter } from "next/navigation";
 import { Button, Input } from "@/components/ui";
@@ -14,7 +15,10 @@ import { ReasonChips } from "@/components/ReasonChips";
 import { PartPicker } from "@/components/PartPicker";
 import { type CatalogueRow } from "@/lib/parts-list";
 import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, closePartRequest, confirmPartCost, coverRequest, markRequestUnavailable, noteCustomPartNames, replaceRefusedPart, splitPart } from "../actions";
-import { notNeededFromParts, putBackPart, removeNotNeeded } from "../remove-actions";
+import { endPartFromParts, putBackPart, removeNotNeeded } from "../remove-actions";
+import type { EndingChoices, EndingKey } from "@/lib/part-endings";
+import type { EndResult } from "@/lib/part-endings-server";
+import { CopyText } from "@/components/CopyText";
 import { bulkDeleteParts, undoBulkDelete } from "../bulk-actions";
 import { FloatingMenu } from "@/components/FloatingMenu";
 import { TyreBuilder } from "@/components/TyreBuilder";
@@ -63,6 +67,12 @@ export type TableRow = {
   replaceable?: boolean;
   /** Marked not needed before it was ordered. */
   notNeeded?: boolean;
+  /** An ordered part given its ending: "Removed – Cancelled with the supplier by Omar" (never Put back). */
+  ended?: string | null;
+  /** Returned to the supplier, the credit note still awaited (tracked on Returns and leftovers). */
+  creditAwaited?: boolean;
+  /** Ordered (locked) and not ended yet: which endings fit, for "Remove: not needed (ordered: choose its ending)". */
+  endings?: EndingChoices | null;
   /** A supplier discount above the owner's limit, waiting for his approval. */
   waitingApproval: boolean;
   /** A new row from the picker: its positions go to the server with the first save. */
@@ -384,7 +394,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
         </div>
         <div className="flex flex-col gap-1.5 pt-1.5">
           {shown.map((r) => (
-            <Row key={r.key} jobId={jobId} row={r} suppliers={suppliers} types={types} catalogue={catalogue} tyreBrands={tyreBrands} tyreModels={tyreModels} tyreSizes={tyreSizes} canPrice={canPrice} pricingLocked={pricingLocked} attempted={attempted} removeReasons={removeReasons} selected={selected.has(r.key)} onSelect={(on) => setSelected((s) => { const n = new Set(s); if (on) n.add(r.key); else n.delete(r.key); return n; })} onValues={(name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, name, values } : x)))} onSaved={(partId, name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, partId, name, values } : x)))} onAddOption={() => addOption(r)} onAddSupplier={addSupplier} onRemovedLocal={() => setRows((p) => p.filter((x) => x.key !== r.key))} />
+            <Row key={r.key} jobId={jobId} row={r} suppliers={suppliers} types={types} catalogue={catalogue} tyreBrands={tyreBrands} tyreModels={tyreModels} tyreSizes={tyreSizes} canPrice={canPrice} pricingLocked={pricingLocked} attempted={attempted} removeReasons={removeReasons} selected={selected.has(r.key)} onSelect={(on) => setSelected((s) => { const n = new Set(s); if (on) n.add(r.key); else n.delete(r.key); return n; })} onValues={(name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, name, values } : x)))} onSaved={(partId, name, values) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, partId, name, values } : x)))} onAddOption={() => addOption(r)} onAddSupplier={addSupplier} onRemovedLocal={() => setRows((p) => p.filter((x) => x.key !== r.key))} onEnded={(words, reason, creditAwaited) => setRows((p) => p.map((x) => (x.key === r.key ? { ...x, removed: { by: "", reason }, ended: words, creditAwaited, orderLabel: null, endings: null, settledFix: null } : x)))} />
           ))}
           {shown.length === 0 ? <p className="py-3 text-sm text-muted">{onlyUnpriced ? "Every part has a price." : "No parts on this job yet."}</p> : null}
         </div>
@@ -452,7 +462,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
   );
 }
 
-function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, tyreSizes, canPrice, pricingLocked, attempted, removeReasons, selected, onSelect, onValues, onSaved, onAddOption, onAddSupplier, onRemovedLocal }: { jobId: string; row: TableRow; suppliers: SupplierOption[]; types: string[]; catalogue: CatalogueRow[]; tyreBrands: string[]; tyreModels: Record<string, string[]>; tyreSizes: { front: string; rear: string }; canPrice: boolean; pricingLocked: boolean; selected: boolean; onSelect: (on: boolean) => void; attempted: boolean; removeReasons: readonly string[]; onValues: (name: string, values: RowValues) => void; onSaved: (partId: string | null, name: string, values: RowValues) => void; onAddOption: () => void; onAddSupplier: () => Promise<SupplierOption | null>; onRemovedLocal: () => void }) {
+function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, tyreSizes, canPrice, pricingLocked, attempted, removeReasons, selected, onSelect, onValues, onSaved, onAddOption, onAddSupplier, onRemovedLocal, onEnded }: { jobId: string; row: TableRow; suppliers: SupplierOption[]; types: string[]; catalogue: CatalogueRow[]; tyreBrands: string[]; tyreModels: Record<string, string[]>; tyreSizes: { front: string; rear: string }; canPrice: boolean; pricingLocked: boolean; selected: boolean; onSelect: (on: boolean) => void; attempted: boolean; removeReasons: readonly string[]; onValues: (name: string, values: RowValues) => void; onSaved: (partId: string | null, name: string, values: RowValues) => void; onAddOption: () => void; onAddSupplier: () => Promise<SupplierOption | null>; onRemovedLocal: () => void; /** The ending saved: the row greys at once ("Removed – … by …"). */ onEnded: (words: string, reason: string, creditAwaited: boolean) => void }) {
   const router = useRouter();
   const [v, setV] = useState<RowValues>(row.values);
   const [name, setName] = useState(row.name);
@@ -690,24 +700,42 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
   };
   const readOnly = row.unavailable || !canPrice || row.locked || !!row.removed || !!row.refused || pricingLocked;
   const removeTarget = partId ? { partId } : { requestId: row.requestId };
-  const doRemove = (kind: "part" | "request" | "ordered", reason: string, disposition?: "returned" | "stock") => {
+  const doRemove = (kind: "part" | "request", reason: string) => {
     const fd = new FormData();
     fd.set("reason", reason);
-    if (disposition) fd.set("disposition", disposition);
     run(async () => {
-      const r = kind === "ordered" && partId ? await notNeededFromParts(jobId, partId, fd) : await removeNotNeeded(jobId, removeTarget, fd);
+      const r = await removeNotNeeded(jobId, removeTarget, fd);
       if (r.error) setError(r.error);
-      else if (kind !== "ordered") {
+      else {
         setUndo(true);
         setTimeout(() => setUndo(false), 6000);
       }
     });
   };
+  /**
+   * An ordered part's ending (3 November 2026): the dialog waits for this answer and shows it, the error included; on
+   * success the row greys at once ("Removed – Cancelled with the supplier by …") and the page catches up.
+   */
+  const endNow = async (ending: EndingKey, reason: string): Promise<EndResult> => {
+    if (!partId) return { error: "This part is not saved yet." };
+    try {
+      const r = await endPartFromParts(jobId, partId, { ending, reason });
+      if (r.ok) {
+        setError(null);
+        onEnded(r.words ?? "Removed", reason, r.state === "return_pending");
+        start(() => refreshWhenIdle(() => router.refresh()));
+      }
+      return r;
+    } catch (e) {
+      if (reloadIfStale(e)) return { error: "A new version of the app is loading: the page reloads by itself, then choose the ending again." };
+      return { error: "Not saved: no connection. Nothing was changed – try again." };
+    }
+  };
   const box = (f: string, extra = "") => `h-9 min-h-9 text-sm ${extra} ${missingField(f) ? "border-red-bar" : ""}`;
   const select = (f: string) => `h-9 w-full min-w-0 rounded-control border bg-white px-1.5 text-sm ${missingField(f) ? "border-red-bar" : "border-line-strong"}`;
   const textCell = (t: string, extra = "") => <span className={`h-9 flex items-center min-w-0 truncate text-sm ${extra}`} title={t}>{t}</span>;
   const wrote = row.original ?? (row.requestId ? origin : null);
-  const notes = [row.removed ? `Removed by ${row.removed.by}: ${row.removed.reason}` : "", row.info, standardNote, wrote && wrote !== name ? `Technician wrote: ${wrote}` : "", qtyChanged ? `Technician asked for ${row.techQty}, Parts changed to ${qty}` : "", row.question ? `Asked the manager: ${row.question}${row.answer ? ` · ${row.answer}` : " · waiting"}` : "", row.unavailable && row.closedReason ? row.closedReason : ""].filter(Boolean).join(" · ");
+  const notes = [row.removed && !row.ended ? `Removed by ${row.removed.by}: ${row.removed.reason}` : "", row.info, standardNote, wrote && wrote !== name ? `Technician wrote: ${wrote}` : "", qtyChanged ? `Technician asked for ${row.techQty}, Parts changed to ${qty}` : "", row.question ? `Asked the manager: ${row.question}${row.answer ? ` · ${row.answer}` : " · waiting"}` : "", row.unavailable && row.closedReason ? row.closedReason : ""].filter(Boolean).join(" · ");
   const detailsInPartNumber = isGenericTyreName(name) && /\s/.test(v.part_number.trim());
   const tag = error ? { text: error, cls: "font-semibold text-red" } : saving ? { text: "Saving…", cls: "text-muted" } : unsaved ? { text: "Not saved yet", cls: "font-semibold text-amber" } : detailsInPartNumber ? { text: "Add the details to the name (tap Tyre details). Part numbers aren't shown to customers.", cls: "font-semibold text-amber" } : red ? { text: missing.map((m) => m.short).join(" · "), cls: "font-bold text-red" } : partial && !row.unavailable ? { text: `Not finished: ${missing.map((m) => m.long).join(", ")}`, cls: "text-muted" } : { text: "", cls: "" };
 
@@ -843,7 +871,8 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
                   {partId && !row.locked && !row.removed ? <MenuItem label="Remove: not needed" red onClick={() => { setMenu(null); setRemoving("part"); }} /> : null}
                   {!partId && row.requestId && !row.removed ? <MenuItem label="Remove: not needed" red onClick={() => { setMenu(null); setRemoving("request"); }} /> : null}
                   {partId && row.locked && !row.removed ? <MenuItem label="Remove: not needed (ordered: choose its ending)" red onClick={() => { setMenu(null); setRemoving("ordered"); }} /> : null}
-                  {row.removed ? <MenuItem label="Put back" onClick={() => { setMenu(null); run(() => putBackPart(jobId, removeTarget)); }} /> : null}
+                  {row.removed && !row.ended ? <MenuItem label="Put back" onClick={() => { setMenu(null); run(() => putBackPart(jobId, removeTarget)); }} /> : null}
+                  {row.creditAwaited && partId ? <MenuItem label="Record the credit note" onClick={() => { setMenu(null); router.push(`/parts/no-home#cn-${partId}`); }} /> : null}
                   {!partId && !row.requestId ? <MenuItem label="Remove this row" red onClick={() => { setMenu(null); onRemovedLocal(); }} /> : null}
               </FloatingMenu>
             ) : null}
@@ -858,6 +887,9 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
       {/* The status line: always there, always one line high, so the row never grows or shrinks */}
       <div className={`${STATUS_LINE} min-h-5 flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 text-[11px] leading-tight`} data-status-line>
         {row.removed ? <Chip tone="outline">Removed</Chip> : null}
+        {row.ended ? <span className="min-w-0 break-words text-[11px] font-bold text-ink" data-part-ended>{row.ended}{row.removed?.reason ? `: ${row.removed.reason}` : ""}</span> : null}
+        {/* A tag, not a tap target (the status line is 20 px high): "Record the credit note" is in the ⋯ menu, 44 px. */}
+        {row.creditAwaited ? <span className="inline-flex min-h-5 shrink-0 items-center rounded-full border border-amber-bar bg-amber-soft px-2 text-[10px] font-bold text-amber" data-credit-awaited>Credit note awaited · ⋯ to record it</span> : null}
         {row.refused ? <span className="inline-flex min-h-5 shrink-0 items-center rounded-full border border-red-bar bg-white px-2 text-[10px] font-bold text-red" data-refused-chip>Refused by {row.refused.by}{row.refused.reason ? ` – ${row.refused.reason}` : ""}</span> : null}
         {row.notNeeded && !row.removed ? <Chip tone="outline">Not needed</Chip> : null}
         {row.replaces ? <span className="inline-flex min-h-5 shrink-0 items-center rounded-full border border-ink px-2 text-[10px] font-bold" data-replaces-chip>{row.replaces}</span> : null}
@@ -904,38 +936,116 @@ function Row({ jobId, row, suppliers, types, catalogue, tyreBrands, tyreModels, 
         ) : null}
         {v.cost_note && !row.removed ? <span className="max-w-full break-words text-[11px] font-semibold text-amber" data-cost-note>{v.cost_note}</span> : null}
         <span className="min-w-0 flex-1 break-words text-muted">{notes}</span>
-        {row.removed && canPrice ? <button type="button" onClick={() => run(() => putBackPart(jobId, removeTarget))} className="shrink-0 h-5 rounded-control border border-line-strong bg-white px-2 text-[10px] font-bold">{undo ? "Undo" : "Put back"}</button> : null}
+        {row.removed && !row.ended && canPrice ? <button type="button" onClick={() => run(() => putBackPart(jobId, removeTarget))} className="shrink-0 h-5 rounded-control border border-line-strong bg-white px-2 text-[10px] font-bold">{undo ? "Undo" : "Put back"}</button> : null}
         <span className={`max-w-full break-words ${tag.cls}`} data-row-tag>{tag.text}</span>
       </div>
       {split && partId ? <SplitDialog name={name} qty={qty} onClose={() => setSplit(false)} onSplit={(lines) => { setSplit(false); const fd = new FormData(); fd.set("lines", JSON.stringify(lines)); run(() => splitPart(jobId, partId, fd)); }} /> : null}
       {correcting && partId ? <CorrectCostDialog jobId={jobId} partId={partId} name={name} why={row.settledFix ?? ""} onLpo={!!row.onLpo} suppliers={suppliers} onClose={() => setCorrecting(false)} onDone={() => { setCorrecting(false); start(() => refreshWhenIdle(() => router.refresh())); }} /> : null}
-      {removing ? <RemoveDialog kind={removing} name={name} options={removeReasons} onClose={() => setRemoving(null)} onConfirm={(reason, disposition) => { const kind = removing; setRemoving(null); doRemove(kind, reason, disposition); }} /> : null}
+      {removing === "ordered" ? <EndDialog name={name} endings={row.endings ?? null} options={removeReasons} onClose={() => setRemoving(null)} onEnd={endNow} /> : null}
+      {removing === "part" || removing === "request" ? <RemoveDialog kind={removing} name={name} options={removeReasons} onClose={() => setRemoving(null)} onConfirm={(reason) => { const kind = removing; setRemoving(null); doRemove(kind, reason); }} /> : null}
     </div>
   );
 }
 
-/** "Remove: not needed": one-tap reasons (Settings) or typed; before the order the row is greyed with Put back, after it the part gets an ending. */
-function RemoveDialog({ kind, name, options, onClose, onConfirm }: { kind: "part" | "request" | "ordered"; name: string; options: readonly string[]; onClose: () => void; onConfirm: (reason: string, disposition?: "returned" | "stock") => void }) {
+/** "Remove: not needed" before the order: one-tap reasons (Settings) or typed; the row is greyed with Put back. */
+function RemoveDialog({ kind, name, options, onClose, onConfirm }: { kind: "part" | "request"; name: string; options: readonly string[]; onClose: () => void; onConfirm: (reason: string) => void }) {
   const [reason, setReason] = useState("");
+  void kind;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()} data-remove-dialog>
+      <div className="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()} data-remove-dialog>
         <span className="text-lg font-extrabold">Remove: not needed</span>
-        <p className="text-xs text-muted">{kind === "ordered" ? `${name} is already ordered: choose where it goes, back to the supplier (credit note to follow) or into our stock. It leaves the quotation either way.` : `${name} comes off the list and the quotation, greyed with the reason; Put back is one tap. The advisor and the workshop manager are told. "Not available" is different: wanted, but the supplier cannot supply it.`}</p>
+        <p className="text-xs text-muted">{`${name} comes off the list and the quotation, greyed with the reason; Put back is one tap. The advisor and the workshop manager are told. "Not available" is different: wanted, but the supplier cannot supply it.`}</p>
         <ReasonChips name="reason" label="Why?" options={options} onValue={setReason} placeholder="Tap a reason, or type" textCase="sentence" />
         <div className="flex flex-wrap gap-2">
-          {kind === "ordered" ? (
-            <>
-              <Button type="button" size="md" tone="danger" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim(), "returned")} data-remove-return>Return to supplier</Button>
-              <Button type="button" size="md" tone="secondary" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim(), "stock")} data-remove-stock>Keep in stock</Button>
-            </>
-          ) : (
-            <Button type="button" size="md" tone="danger" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim())}>Remove</Button>
-          )}
+          <Button type="button" size="md" tone="danger" disabled={!reason.trim()} onClick={() => onConfirm(reason.trim())}>Remove</Button>
           <Button type="button" tone="ghost" size="md" onClick={onClose}>Cancel</Button>
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * "Remove: not needed (ordered: choose its ending)" (3 November 2026, section 7): the three endings from THE rule
+ * (part-endings.ts) - Cancelled with the supplier (not delivered), Return to supplier (delivered: credit note awaited),
+ * Keep in stock (delivered: its cost moves to stock) - a greyed one says why. The window stays open with "Saving…"
+ * until the server answers: an error shows here in red and nothing is closed; success shows what happened, with the
+ * message for the supplier ready to copy.
+ */
+function EndDialog({ name, endings: given, options, onClose, onEnd }: { name: string; endings: EndingChoices | null; options: readonly string[]; onClose: () => void; onEnd: (ending: EndingKey, reason: string) => Promise<EndResult> }) {
+  // The choices as the window opened with them: the row's own change after the save never redraws the window.
+  const [endings] = useState(given);
+  const [reason, setReason] = useState("");
+  const [choice, setChoice] = useState<EndingKey | null>(endings?.suggested ?? null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<EndResult | null>(null);
+  const close = () => { if (!busy) onClose(); };
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !busy) onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onClose]);
+  const save = async () => {
+    if (!choice || reason.trim().length < 3 || busy) return;
+    setBusy(true);
+    setError(null);
+    const r = await onEnd(choice, reason.trim());
+    setBusy(false);
+    if (r.ok) setDone(r);
+    else setError(r.error ?? "Not saved. Try again.");
+  };
+  const refusal = endings ? endings.refusal : "Look at this part again: its ending cannot be chosen here.";
+  // In a portal on the page itself: the window stays open after the save, when its row greys out (opacity-60), and
+  // inside the row it would turn see-through with the rows below painted over it (Close could not be tapped).
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onClick={close}>
+      <div className="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Choose the ending of an ordered part" data-remove-dialog data-end-dialog>
+        <span className="text-lg font-extrabold">{done ? "Saved ✓" : "Remove: not needed – choose its ending"}</span>
+        <span className="text-sm font-bold uppercase break-words">{name}</span>
+        {done ? (
+          <div className="flex flex-col gap-3" data-end-done>
+            <p className="text-sm text-green font-semibold" data-end-message>{done.message}</p>
+            {done.supplierCopy ? (
+              <div className="flex flex-col gap-2 rounded-control border border-line bg-chip p-3" data-end-supplier-copy>
+                <span className="text-xs font-bold">Tell {done.supplierCopy.supplier}:</span>
+                <pre className="whitespace-pre-wrap break-words font-sans text-sm">{done.supplierCopy.text}</pre>
+                <div><CopyText text={done.supplierCopy.text} label="Copy for the supplier" /></div>
+              </div>
+            ) : null}
+            <div><Button type="button" size="md" onClick={onClose} data-end-close>Close</Button></div>
+          </div>
+        ) : refusal ? (
+          <>
+            <p className="text-sm font-semibold text-red" role="alert" data-end-refusal>{refusal}</p>
+            <div><Button type="button" tone="ghost" size="md" onClick={onClose}>Close</Button></div>
+          </>
+        ) : (
+          <>
+            <div className="flex flex-col gap-1.5">
+              {endings!.options.map((o) => (
+                <div key={o.key} className="flex flex-col gap-0.5">
+                  <button type="button" disabled={!o.allowed || busy} onClick={() => setChoice(o.key)} aria-pressed={choice === o.key} className={`min-h-11 rounded-control border px-3 text-left text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${choice === o.key ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-end-option={o.key} data-allowed={o.allowed ? "1" : "0"}>
+                    {choice === o.key ? "✓ " : ""}{o.label}
+                  </button>
+                  <span className={`text-xs ${o.allowed ? "text-muted" : "font-semibold text-muted"}`} data-end-why={o.allowed ? undefined : o.key}>{o.allowed ? o.help : o.why}</span>
+                </div>
+              ))}
+            </div>
+            {endings!.partly ? <p className="text-xs font-semibold text-amber" data-end-partly>{endings!.partly}</p> : null}
+            <ReasonChips name="reason" label="Why is it not needed?" options={options} onValue={setReason} placeholder="Tap a reason, or type" textCase="sentence" disabled={busy} />
+            {error ? <p className="rounded-control border border-red-bar bg-white px-3 py-2 text-sm font-semibold text-red" role="alert" data-end-error>{error}</p> : null}
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="md" tone="danger" disabled={!choice || reason.trim().length < 3 || busy} onClick={() => void save()} data-end-save>{busy ? "Saving…" : "Save the ending"}</Button>
+              <Button type="button" tone="ghost" size="md" disabled={busy} onClick={onClose}>Cancel</Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>,
+    document.body,
   );
 }
 

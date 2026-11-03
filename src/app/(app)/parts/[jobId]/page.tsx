@@ -36,6 +36,8 @@ import { refusalsReady } from "@/lib/lpo";
 import { costChecksFor } from "@/lib/part-cost-history";
 import { isSettledStatus, settledCostProblem } from "@/lib/part-cost-check";
 import { costConfirmReady } from "@/lib/schema-ready";
+import { endingOf, endingsFor, endingWords, type EndingPart } from "@/lib/part-endings";
+import { cancelledSupplierLpos, endedLinesOf } from "@/lib/part-endings-server";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +60,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     admin.from("jobs").select("id, vehicle_id, job_number, status, is_open, parts_pricing_done_at, parts_pricing_reopened_at, plan_parts_done_at, plan_parts_ready_date, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, tyre_size_front, tyre_size_rear, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle(),
     admin.from("part_requests").select(REQUEST_SELECT + ", removed_at, removed_by, removed_reason").eq("job_id", jobId).eq("is_active", true).order("created_at"),
     // Removed parts ("not needed") stay on the list, greyed, with Put back.
-    admin.from("part_items").select(PART_SELECT + `, po_id, expected_date, received_qty, issue_status, return_status, replaced_part_id, replacement_part_id, not_needed_at, stock_item_id, final_cost_aed, exchange_status${(await refusalsReady()) ? ", refused_at, refused_by, refused_reason" : ""}${(await costConfirmReady()) ? ", cost_confirmed_aed" : ""}`).eq("job_id", jobId).or("is_active.eq.true,removed_at.not.is.null").order("created_at"),
+    admin.from("part_items").select(PART_SELECT + `, po_id, expected_date, received_qty, issue_status, return_status, replaced_part_id, replacement_part_id, not_needed_at, not_needed_reason, disposition, disposition_at, disposition_by, disposition_note, stock_item_id, final_cost_aed, exchange_status${(await refusalsReady()) ? ", refused_at, refused_by, refused_reason" : ""}${(await costConfirmReady()) ? ", cost_confirmed_aed" : ""}`).eq("job_id", jobId).or("is_active.eq.true,removed_at.not.is.null").order("created_at"),
     admin.from("suppliers").select("id, name, default_discount_percent, discount_by_type").eq("is_active", true).order("name"),
     admin.from("staff").select("id, display_name").eq("is_active", true),
     loadInspection(jobId),
@@ -70,7 +72,9 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   if (!job) notFound();
   const charges = await jobCharges(jobId);
   const poNumber = new Map<string, string>([...(lpos.main ? [[lpos.main.id, lpos.main.number] as [string, string]] : []), ...lpos.suppliers.map((s) => [s.po.id, s.po.number] as [string, string])]);
-  const chargeRows = charges.map((c) => ({ id: c.id, description: c.description, supplier: c.supplier_name, amount: c.amount_aed, lpo: c.po_id ? poNumber.get(c.po_id) ?? "an LPO" : null }));
+  // A charge on a supplier LPO left with no part (every part cancelled with the supplier) can be waived (3 November 2026).
+  const emptyLpos = new Set(lpos.suppliers.filter((s) => !s.lines.length && ["ordered", "partly_received", "received"].includes(s.po.status)).map((s) => s.po.id));
+  const chargeRows = charges.map((c) => ({ id: c.id, description: c.description, supplier: c.supplier_name, amount: c.amount_aed, lpo: c.po_id ? poNumber.get(c.po_id) ?? "an LPO" : null, waivable: !!c.po_id && emptyLpos.has(c.po_id) }));
   const lastImport = lastImportRow ? { id: lastImportRow.id as string, count: Number(lastImportRow.applied_count) || 0, at: lastImportRow.created_at as string } : null;
   type V = { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; variant: string | null; model_year: number | null; tyre_size_front?: string | null; tyre_size_rear?: string | null; make: { name: string } | null; model: { name: string } | null };
   const v = job.vehicle as unknown as V;
@@ -112,6 +116,19 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   };
   // The request's note (the positions have their own line under the name); a part added by Parts says so.
   const infoOf = (r: PartRequest | null, p?: PartItem) => [r ? (r.note ?? "") : p ? "Added by Parts" : "", p?.availability_note ?? ""].filter(Boolean).join(" · ") || null;
+  // An ordered part not needed (3 November 2026): its ending (cancelled with the supplier, returned, kept in stock), or
+  // the endings that fit it - one rule, src/lib/part-endings.ts.
+  const endingInputOf = (p: PartItem) => ({ ...p, ...(rawById.get(p.id) ?? {}) }) as unknown as EndingPart;
+  const endingOfPart = (p: PartItem) => endingOf(endingInputOf(p));
+  const live = (p: PartItem) => p.is_active !== false && !endingOfPart(p);
+  const endedRow = (p: PartItem) => {
+    const ending = endingOfPart(p);
+    if (!ending) return null;
+    const raw = rawById.get(p.id);
+    const by = nameOf.get(String(raw?.disposition_by ?? "")) ?? "Parts";
+    const reason = String((ending === "returned" ? raw?.not_needed_reason : raw?.disposition_note ?? raw?.not_needed_reason) ?? "");
+    return { by, reason, words: endingWords(ending, by), awaited: ending === "return_pending" };
+  };
   const rowOfPart = (p: PartItem, r: PartRequest | null, key: string): TableRow => ({
     key,
     requestId: p.part_request_id,
@@ -123,11 +140,15 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     shownPositions: p.positions?.length ? p.positions : (r?.positions ?? null),
     // The same values and state function as the server's counts (src/lib/parts-pricing.ts), so nothing can disagree.
     values: valuesOfPart({ ...p, stock_item_id: (rawById.get(p.id)?.stock_item_id as string | null) ?? null }, today, costChecks.get(p.id), stockOfItem.get(String(rawById.get(p.id)?.stock_item_id ?? "")) ?? null),
-    removed: p.removed_at ? { by: nameOf.get(p.removed_by ?? "") ?? "Parts", reason: p.removed_reason ?? "" } : null,
+    removed: endedRow(p) ? { by: endedRow(p)!.by, reason: endedRow(p)!.reason } : p.removed_at ? { by: nameOf.get(p.removed_by ?? "") ?? "Parts", reason: p.removed_reason ?? "" } : null,
+    ended: endedRow(p)?.words ?? null,
+    creditAwaited: !!endedRow(p)?.awaited,
+    endings: !endingOfPart(p) && p.is_active !== false && (p.order_status !== "none" || String(rawById.get(p.id)?.issue_status ?? "") === "confirmed") ? endingsFor(endingInputOf(p)) : null,
     refused: refusedOf(p),
     replaces: replacesOf(p),
     // Refused, or not needed and never ordered: Replace adds a row for another supplier (once).
-    replaceable: (!!rawById.get(p.id)?.refused_at || (!!rawById.get(p.id)?.not_needed_at && ["none", "to_order"].includes(String(p.order_status)))) && !parts.some((x) => x.id === rawById.get(p.id)?.replacement_part_id && x.is_active !== false),
+    // Never for an ordered part given its ending (it is not needed: nothing to replace).
+    replaceable: !endingOfPart(p) && (!!rawById.get(p.id)?.refused_at || (!!rawById.get(p.id)?.not_needed_at && ["none", "to_order"].includes(String(p.order_status)))) && !parts.some((x) => x.id === rawById.get(p.id)?.replacement_part_id && x.is_active !== false),
     notNeeded: !!rawById.get(p.id)?.not_needed_at && ["none", "to_order"].includes(String(p.order_status)) && !rawById.get(p.id)?.refused_at,
     waitingApproval: p.discount_approval_status === "pending",
     optionGroup: p.option_group,
@@ -136,9 +157,9 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     locked: p.order_status !== "none" || String(rawById.get(p.id)?.issue_status ?? "") === "confirmed",
     // Approved by the customer, not ordered yet: the row is locked, but its cost question can still be answered.
     approvedNotOrdered: p.order_status === "to_order" && !rawById.get(p.id)?.refused_at && !rawById.get(p.id)?.not_needed_at,
-    settledFix: settledFixOf(p),
+    settledFix: endingOfPart(p) ? null : settledFixOf(p),
     onLpo: !!rawById.get(p.id)?.po_id,
-    orderLabel: orderLabel(p),
+    orderLabel: endingOfPart(p) ? null : orderLabel(p),
     diagramUrl: p.diagram_path ? (urls[p.diagram_path] ?? null) : null,
     question: p.question_text,
     answer: p.answer_text ? `${nameOf.get(p.answered_by ?? "") ?? "Manager"}: ${p.answer_text}` : null,
@@ -154,9 +175,10 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   for (const p of parts.filter((p) => !p.part_request_id)) rows.push(rowOfPart(p, null, p.id));
 
   // After the customer's approval: the approved parts, the one main LPO and its supplier LPOs.
-  const approvedParts = parts.filter((p) => p.order_status !== "none" && String(rawById.get(p.id)?.return_status ?? "none") !== "returned");
+  // A part given its ending (cancelled, returned, kept in stock) has left the job: it is in none of these lists.
+  const approvedParts = parts.filter((p) => live(p) && p.order_status !== "none" && String(rawById.get(p.id)?.return_status ?? "none") !== "returned");
   // Received and still with Parts: their labels are printed before the handover.
-  const labelsToPrint = parts.filter((p) => (p.order_status === "received" || p.order_status === "partly_received") && String(rawById.get(p.id)?.issue_status ?? "none") !== "confirmed" && String(rawById.get(p.id)?.return_status ?? "none") === "none" && !rawById.get(p.id)?.not_needed_at);
+  const labelsToPrint = parts.filter((p) => live(p) && (p.order_status === "received" || p.order_status === "partly_received") && String(rawById.get(p.id)?.issue_status ?? "none") !== "confirmed" && String(rawById.get(p.id)?.return_status ?? "none") === "none" && !rawById.get(p.id)?.not_needed_at);
   const hasApproved = approvedParts.length > 0 || lpos.suppliers.length > 0 || !!lpos.main;
   const pendingMain = lpos.main && lpos.main.status === "pending_approval" ? lpos.main : null;
   const supplierNames = Array.from(new Set(lpos.toOrder.map((p) => (p.supplier ?? "").trim()).filter(Boolean)));
@@ -168,7 +190,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     lpos.suppliers.length ? `${lpos.suppliers.length} supplier LPO${lpos.suppliers.length === 1 ? "" : "s"}` : "",
   ].filter(Boolean).join(" · ");
   const supplierEmailOf = new Map<string, string | null>(((lpos.suppliers).length ? (await admin.from("suppliers").select("id, email").in("id", (lpos.suppliers).map((s) => s.po.supplier_id).filter((x): x is string => !!x))).data ?? [] : []).map((s) => [s.id as string, (s.email as string | null) ?? null]));
-  const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[]; charges?: { id: string; description: string; amount_aed: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, sent_at: s.po.sent_at ?? null, emailed_at: s.po.emailed_at ?? null, emailed_to: s.po.emailed_to ?? null, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: (rawById.get(l.part_item_id)?.positions as string[] | null | undefined) ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges ?? [] });
+  const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[]; charges?: { id: string; description: string; amount_aed: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, sent_at: s.po.sent_at ?? null, emailed_at: s.po.emailed_at ?? null, emailed_to: s.po.emailed_to ?? null, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: (rawById.get(l.part_item_id)?.positions as string[] | null | undefined) ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges ?? [], ended: endedByPo.get(s.po.id) ?? [] });
   // Lines still being priced (not removed, refused or unavailable): "Send LPO for approval" names them first.
   const unfinishedNames = rows.filter((r) => !r.removed && !r.refused && !r.unavailable && rowState(r.values, { waitingApproval: r.waitingApproval }) === "not_finished").map((r) => r.name.toUpperCase());
   const car = [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
@@ -178,8 +200,11 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const stepParts = parts.map((p) => stepPartOf({ ...p, received_qty: Number(rawById.get(p.id)?.received_qty) || 0, issue_status: String(rawById.get(p.id)?.issue_status ?? "") || null, po_id: (rawById.get(p.id)?.po_id as string | null) ?? null, return_status: String(rawById.get(p.id)?.return_status ?? "none") }));
   const steps = partsSteps({ jobStatus: job.status, pricingDoneAt: job.parts_pricing_done_at, pricingReopenedAt: job.parts_pricing_reopened_at, parts: stepParts.map((sp, i) => ({ ...sp, from_stock: sp.from_stock || lpos.fromStock.some((f) => f.id === parts[i].id) })), mainLpoStatus: lpos.main?.status ?? null, toOrder: lpos.toOrder.length });
   const dep = await depositState(jobId);
-  const toReceive = parts.filter((p) => ["ordered", "partly_received"].includes(String(p.order_status)));
-  const receivedParts = parts.filter((p) => String(p.order_status) === "received");
+  const toReceive = parts.filter((p) => live(p) && ["ordered", "partly_received"].includes(String(p.order_status)));
+  const receivedParts = parts.filter((p) => live(p) && String(p.order_status) === "received");
+  // The LPO lines whose part was given its ending, and the supplier LPOs left with no line (3 November 2026).
+  const cancelledLpos = await cancelledSupplierLpos(jobId);
+  const endedByPo = await endedLinesOf([...lpos.suppliers.map((s) => s.po.id), ...(lpos.main ? [lpos.main.id] : []), ...cancelledLpos.map((c) => c.id)]);
 
   return (
     <>
@@ -234,6 +259,15 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
           <SectionLabel right={lpos.suppliers.every((s) => !["approved", "pending_approval"].includes(s.po.status)) ? <span className="font-bold text-green" data-all-ordered>All ordered ✓</span> : `${lpos.suppliers.length}`}>Supplier LPOs</SectionLabel>
           {lpos.suppliers.map((s) => (
             <SupplierLpoCard key={s.po.id} po={toView(s)} vin={v?.vin ?? null} canManage={canOrder} onOrdered={markSupplierOrdered.bind(null, s.po.id)} onSetDate={setPartExpectedDate} supplierEmail={supplierEmailOf.get(s.po.supplier_id ?? "") ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, s.po.id)} jobId={jobId} />
+          ))}
+        </section>
+      ) : null}
+      {/* A supplier LPO whose every part was cancelled stays in sight, greyed, with its cancelled lines (3 November 2026). */}
+      {cancelledLpos.length ? (
+        <section className="flex flex-col gap-3" data-cancelled-lpos>
+          <SectionLabel right={`${cancelledLpos.length}`}>Cancelled LPOs</SectionLabel>
+          {cancelledLpos.map((c) => (
+            <SupplierLpoCard key={c.id} po={{ id: c.id, number: c.number, supplier_name: c.supplier_name, status: c.status, ordered_at: c.ordered_at, verify_token: c.verify_token, total_cost_aed: c.total_cost_aed, lines: [], charges: [], ended: endedByPo.get(c.id) ?? [] }} vin={v?.vin ?? null} canManage={false} onOrdered={markSupplierOrdered.bind(null, c.id)} onSetDate={setPartExpectedDate} jobId={jobId} />
           ))}
         </section>
       ) : null}

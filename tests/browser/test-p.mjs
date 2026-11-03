@@ -13,6 +13,8 @@ cleanupDb();
 const until = async (fn, tries = 60, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 const plainText = (html) => html.replace(/<!--.*?-->/g, "").replace(/<script[\s\S]*?<\/script>/g, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
 const afterSubmit = async (page) => { const before = page.url(); await page.waitForURL((u) => u.toString() !== before, { timeout: 30000 }).catch(() => null); await sleep(600); };
+/** Returns and leftovers answers an ending in a window on the page: wait for it and close it. */
+const closeEndingResult = async (page) => { const win = page.locator("[data-ending-result]"); await win.waitFor({ timeout: 30000 }).catch(() => null); await win.locator("[data-ending-result-close]").click().catch(() => null); await sleep(300); };
 async function fetchAs(pathname, role) {
   const res = await fetch(`${base}${pathname}`, { headers: { cookie: await cookieHeader(role) }, redirect: "manual" });
   return { status: res.status, text: await res.text() };
@@ -49,9 +51,11 @@ await section("1 labels, returns and leftovers, price memory", async () => {
   check("1: the page is called Returns and leftovers", /Returns and leftovers/.test(plainText(await p.content())));
   // Keep the oil filter in stock.
   const filterCard = p.locator("[data-no-home='22222222-0000-4000-8000-00000000e3a1']");
-  await filterCard.getByRole("button", { name: /Moved to stock/ }).click();
+  // 3 November 2026 (section 7): a part not needed takes THE endings - "Keep in stock" (was "Moved to stock").
+  await filterCard.getByRole("button", { name: /Keep in stock/ }).click();
   await filterCard.getByRole("button", { name: /Save the ending/ }).click();
-  await afterSubmit(p);
+  // 3 November 2026: the answer opens in a window on the page (the card leaves the list), never at the top of the page.
+  await closeEndingResult(p);
   const stockRow = await until(async () => (await sql("select i.id, i.name, i.quantity::float as quantity, i.unit_cost::float as cost, (select count(*)::int from public.stock_movements m where m.stock_item_id = i.id and m.kind = 'in') as moves from public.stock_items i where i.part_number = 'E2E-OF-1'"))[0], 30, 500);
   check("1: Keep in stock puts the part on the shelf as real stock with its cost", stockRow?.quantity === 2 && stockRow?.cost === 30 && stockRow?.moves === 1, JSON.stringify(stockRow));
   // Scrap the wiper blade with a reason.
@@ -59,7 +63,7 @@ await section("1 labels, returns and leftovers, price memory", async () => {
   await wiperCard.getByRole("button", { name: /^Scrap$/ }).click();
   await wiperCard.locator("textarea[name='note']").fill("Bent in the box");
   await wiperCard.getByRole("button", { name: /Save the ending/ }).click();
-  await afterSubmit(p);
+  await closeEndingResult(p);
   const scrapped = await until(async () => (await sql("select disposition, disposition_note from public.part_items where id = '22222222-0000-4000-8000-00000000e3a2'"))[0]?.disposition === "scrap" ? 1 : null, 30, 500);
   check("1: Scrap with a reason ends the part", !!scrapped);
   check("1: the returns page is empty again", !/E2E Wiper Blade|E2E Oil Filter/.test(plainText(await (await fetchAs("/parts/no-home", "parts")).text)));

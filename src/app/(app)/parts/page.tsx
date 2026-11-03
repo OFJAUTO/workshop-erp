@@ -2,6 +2,7 @@ import { formatDate } from "@/lib/format";
 import { estimateTaskWords, loadEstimatesToPrice } from "@/lib/estimate-parts-data";
 import { seesCustomers } from "@/lib/customer-data";
 import { partsWithNoHome } from "@/lib/handover";
+import { creditNotesAwaited } from "@/lib/part-endings-server";
 import { CarThumb } from "@/components/CarThumb";
 import { signCarPictures } from "@/lib/car-pictures";
 import { partsSteps, stepPartOf } from "@/lib/parts-steps";
@@ -55,7 +56,8 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
     admin.from("part_items").select(PART_FULL_SELECT).eq("is_active", true).order("created_at"),
   ]);
   const requests = (reqRows ?? []) as PartRequest[];
-  const noHomeCount = (await partsWithNoHome()).length;
+  // Parts without a home, and returns still waiting for the supplier's credit note (3 November 2026): one count on the tab.
+  const noHomeCount = (await partsWithNoHome()).length + (await creditNotesAwaited()).length;
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull).map((p) => ({ ...p, advisor_added_label: p.added_by_role === "service_advisor" && !p.part_request_id ? "Added by advisor" : null }));
   const today = todayIso();
   const jobIds = Array.from(new Set([...requests.map((r) => r.job_id), ...parts.map((p) => p.job_id)]));

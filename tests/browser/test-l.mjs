@@ -1,6 +1,7 @@
 // Proof for the evening list of 15 October 2026: an Our stock part priced after the quotation was sent lands on the next
 // version (quote, PDF, link) and the advisor is told; the missing-parts check on Quotation complete; the parts desk's
-// All cars and search; Parts adding or deleting parts at any time (an ordered part gets Return or Keep in stock);
+// All cars and search; Parts adding or deleting parts at any time (an ordered part gets its ending: since 3 November
+// 2026 one not delivered is Cancelled with the supplier, see test-s7-remove for Return and Keep in stock);
 // Revise quotation in the bottom bar and the header; Mark as declined as a small link; the declined job's two choices
 // with an optional charge invoiced before gate-out, or a free gate-out.
 // Run against `npx next dev -p 3100`:  node --env-file=.env.test.local tests/browser/test-l.mjs
@@ -186,20 +187,21 @@ await section("3 parts delete", async () => {
   check("3: a part deleted by Parts leaves the draft quotation at once", !!gone, JSON.stringify(gone));
   const ev = (await sql("select note from public.quotation_events where quotation_id = $1 and event_type = 'parts_removed' order by created_at desc limit 1", [v2]))[0];
   check("3: the quote history shows 'Parts removed E2E STOCK FILTER'", /Parts removed e2e stock filter/i.test(ev?.note ?? ""), ev?.note ?? "");
-  // An ordered part: the menu offers Return to supplier or Keep in stock.
+  // An ordered part, nothing delivered (3 November 2026, section 7): its ending is Cancelled with the supplier; Return
+  // and Keep in stock are greyed (nothing arrived), and the ending takes it off the job.
   await sql("update public.part_items set order_status = 'ordered' where job_id = $1 and description ilike 'rear brake discs' and is_active", [jobId]);
   await page.reload();
   const row2 = page.locator("[data-row-key]", { has: page.getByRole("button", { name: /^rear brake discs$/i }) }).first();
   await until(async () => ((await row2.count()) ? 1 : null), 30, 500);
   await row2.locator("button[aria-label='More for this part']").first().click();
   await page.locator("button", { hasText: /choose its ending/ }).first().click();
-  await until(async () => ((await page.locator("[data-remove-dialog]").count()) ? 1 : null), 20, 300);
-  check("3: an ordered part cannot be deleted without choosing Return to supplier or Keep in stock", (await page.locator("[data-remove-return]").count()) === 1 && (await page.locator("[data-remove-stock]").count()) === 1);
-  const chip = page.locator("[data-remove-dialog] button").filter({ hasNotText: /Return to supplier|Keep in stock|Cancel/ }).first();
-  if (await chip.count()) await chip.click();
-  await page.locator("[data-remove-stock]").click();
-  const kept = await until(async () => { const r = (await sql("select not_needed_at, disposition from public.part_items where job_id = $1 and description ilike 'rear brake discs' limit 1", [jobId]))[0]; return r?.not_needed_at && r?.disposition === "stock" ? r : null; }, 30, 500);
-  check("3: Keep in stock marks the ordered part not needed, kept in stock", !!kept, JSON.stringify(kept));
+  await until(async () => ((await page.locator("[data-end-dialog]").count()) ? 1 : null), 20, 300);
+  const allowedOf = async (k) => page.locator(`[data-end-dialog] [data-end-option="${k}"]`).getAttribute("data-allowed");
+  check("3: an ordered part not delivered offers Cancelled with the supplier; Return and Keep in stock are greyed", (await allowedOf("cancelled")) === "1" && (await allowedOf("return")) === "0" && (await allowedOf("stock")) === "0");
+  await page.locator("[data-end-dialog] input[name='reason']").pressSequentially("Not needed after all", { delay: 10 });
+  await page.locator("[data-end-dialog] [data-end-save]").click();
+  const kept = await until(async () => { const r = (await sql("select not_needed_at, disposition, disposition_at, is_active, order_status from public.part_items where job_id = $1 and description ilike 'rear brake discs' limit 1", [jobId]))[0]; return r?.not_needed_at && r?.disposition_at && r?.is_active === false ? r : null; }, 30, 500);
+  check("3: Cancelled with the supplier marks the ordered part not needed and takes it off the job", !!kept && kept.order_status === "none" && (kept.disposition === "cancelled" || kept.disposition === null), JSON.stringify(kept));
   await browser.close();
 });
 

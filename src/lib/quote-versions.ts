@@ -141,8 +141,18 @@ export async function requestPartsGone(quotationId: string): Promise<{ allGone: 
   if (q?.revision_request_kind !== "parts" || !ids.length) return null;
   const { data: parts } = await admin.from("part_items").select(`id, description, is_active, confirm_status, removed_at, removed_reason, not_needed_at${(await schemaReady("part_items", "refused_at")) ? ", refused_at" : ""}`).in("id", ids);
   const rows = (parts ?? []) as unknown as { id: string; description: string; is_active: boolean; confirm_status: string; removed_at: string | null; removed_reason: string | null; not_needed_at: string | null; refused_at?: string | null }[];
-  const allGone = rows.length >= ids.length && rows.every(partGone);
+  // 3 November 2026 (section 7): a part taken off the job that the approved quotation STILL charges (an ordered part
+  // cancelled with the supplier, returned or kept in stock) is exactly what the revision must change - never "nothing left".
+  const charged = await partsStillCharged(quotationId, ids);
+  const allGone = rows.length >= ids.length && rows.every(partGone) && !charged.size;
   return { allGone, words: rows.map((p) => `${String(p.description).toUpperCase()}${p.removed_reason ? ` (${p.removed_reason})` : ""}`).join(", ") };
+}
+
+/** The parts (of those given) that still have an active line on this quotation: a removal the revision must carry out. */
+async function partsStillCharged(quotationId: string, partIds: string[]): Promise<Set<string>> {
+  if (!partIds.length) return new Set();
+  const { data } = await createAdminClient().from("quotation_lines").select("part_item_id").eq("quotation_id", quotationId).eq("is_active", true).in("part_item_id", partIds);
+  return new Set((data ?? []).map((l) => String(l.part_item_id)));
 }
 
 /** The request's part list cleared with its answer (allowed, declined, used), once the column exists. */
@@ -174,8 +184,33 @@ export async function quoteTargetFor(jobId: string, by: string | null, change?: 
       .sort(([a], [b]) => ((firstSeen.get(a) ?? "") < (firstSeen.get(b) ?? "") ? -1 : 1));
     if (preparing.length) return { id: preparing[0][1].id, created: false };
   }
-  if (latest.status === "draft" || latest.status === "pending_owner") return { id: latest.id, created: false };
-  if (!REVISABLE.includes(latest.status)) return null;
+  const out = await revisionTargetOf(latest as RevisionRow, jobId, by, change, ask);
+  return out.kind === "target" ? { id: out.id, created: out.created } : null;
+}
+
+type RevisionRow = { id: string; number: string; version: number; status: string; job_id: string | null; created_by: string | null; sent_by: string | null; revision_allowed_at: string | null; revision_requested_at: string | null; revision_declined_at: string | null };
+const REVISION_ROW = "id, number, version, status, job_id, created_by, sent_by, revision_allowed_at, revision_requested_at, revision_declined_at";
+
+/** Where a change from Parts lands on ONE quotation number, and why it went nowhere when it did not. */
+export type RevisionOutcome =
+  | { kind: "target"; id: string; created: boolean; /** The new version's number when one was made. */ version: number | null }
+  /** Approved by the customer: the owner is asked to allow one revision (or his open request names this part too). */
+  | { kind: "asked" }
+  /** A tax invoice is out: the quotation is locked for good; the owner was told to settle it with a credit note. */
+  | { kind: "tax"; number: string }
+  /** Not revisable (declined, expired, cancelled): nothing changes. */
+  | { kind: "none" };
+
+/**
+ * THE path of a change from Parts on the newest version of one quotation number (quoteTargetFor's rule, which applies
+ * it to the job's latest): still being prepared = that version; a tax invoice out = nothing (the owner hears it: a
+ * credit note settles it); approved and not yet allowed = the owner is asked; otherwise the next version is made and
+ * the advisor told to send it (an owner's permission covers that one revision).
+ */
+async function revisionTargetOf(latest: RevisionRow, jobId: string, by: string | null, change: string | undefined, ask: { partIds?: string[]; redOf?: () => Promise<string | null> }): Promise<RevisionOutcome> {
+  const admin = createAdminClient();
+  if (latest.status === "draft" || latest.status === "pending_owner") return { kind: "target", id: latest.id, created: false, version: null };
+  if (!REVISABLE.includes(latest.status)) return { kind: "none" };
   const { data: who } = by ? await admin.from("staff").select("display_name").eq("id", by).maybeSingle() : { data: null };
   // A tax invoice is out: the quotation cannot change any more. The owner hears what Parts changed; a credit note or a new invoice settles it.
   if (latest.status === "approved") {
@@ -184,22 +219,43 @@ export async function quoteTargetFor(jobId: string, by: string | null, change?: 
       await refuseIfLocked(latest.id, by, change ?? "change the parts", "Parts desk");
       const { data: jobRow } = await admin.from("jobs").select("job_number").eq("id", jobId).maybeSingle();
       await notifyRoles(["owner"], { type: "revision_request", title: `${change ?? "Parts changed"} · ${jobRow?.job_number ?? ""}: tax invoice ${live.tax.number} already issued`, body: `${latest.number} is locked once a tax invoice is out. Settle the difference with a credit note or a new invoice.`, jobId, href: `/jobs/${jobId}/invoice` });
-      return null;
+      return { kind: "tax", number: live.tax.number };
     }
   }
   // The customer approved this quotation: a change from Parts needs the owner's one-time permission first; the owner is asked, the part waits.
   if (latest.status === "approved" && !latest.revision_allowed_at) {
     await askOwnerForRevision({ id: latest.id, number: latest.number, job_id: jobId, pending: !!latest.revision_requested_at && !latest.revision_declined_at }, by, who?.display_name ?? "Parts", change ?? "Parts changed the priced parts", "parts", ask);
-    return null;
+    return { kind: "asked" };
   }
   const r = await createNextVersion(latest.id, { id: by ?? latest.created_by ?? "", display_name: who?.display_name ?? "Parts" }, { reason: latest.status === "approved" ? "parts changed, allowed by the owner" : "parts changed" });
-  if ("error" in r) return null;
+  if ("error" in r) return { kind: "none" };
   // The permission covers one revision.
   if (latest.status === "approved") await admin.from("quotations").update({ revision_allowed_at: null, revision_allowed_by: null, ...(await requestPartsCleared()), updated_by: by }).eq("id", latest.id);
   const { data: job } = await admin.from("jobs").select("job_number, gated_in_by").eq("id", jobId).maybeSingle();
   const ids = Array.from(new Set([job?.gated_in_by, latest.created_by, latest.sent_by].filter((x): x is string => !!x)));
   await notifyStaff(ids, { type: "quote_revised_by_parts", title: `Parts changed on ${job?.job_number ?? ""}: send the revised quotation`, body: `${latest.number} version ${r.version} is ready with the change from Parts. Check it and send it to the customer.`, jobId, href: `/jobs/${jobId}/quote/${r.id}?send=1` });
-  return { id: r.id, created: true };
+  return { kind: "target", id: r.id, created: true, version: r.version };
+}
+
+/**
+ * A part taken off the job (an ordered part given its ending, 3 November 2026) whose line is on the newest version of
+ * quotation `quotationId`'s number: the change lands on THAT number - never on another quotation of the job (an
+ * additional quotation approved later, or one still being prepared, never carries this part). Returns what happened,
+ * so the words for Parts and the advisor say exactly that.
+ */
+export async function revisePartOnQuotation(jobId: string, partId: string, quotationId: string, by: string | null): Promise<RevisionOutcome> {
+  const admin = createAdminClient();
+  const [{ data: row }, { data: part }, { data: who }] = await Promise.all([
+    admin.from("quotations").select(REVISION_ROW).eq("id", quotationId).eq("job_id", jobId).maybeSingle(),
+    admin.from("part_items").select("description").eq("id", partId).maybeSingle(),
+    by ? admin.from("staff").select("display_name").eq("id", by).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
+  if (!row) return { kind: "none" };
+  const change = `${who?.display_name ?? "Parts"} removed ${String(part?.description ?? "a part").toUpperCase()}`;
+  const out = await revisionTargetOf(row as RevisionRow, jobId, by, change, { partIds: [partId] });
+  // On the version now being prepared (the draft, or the new one) the part's line leaves it.
+  if (out.kind === "target") await syncPartLine(jobId, partId, by, out.id);
+  return out;
 }
 
 /**
@@ -254,6 +310,8 @@ export async function withdrawStaleRevisions(jobId: string, by: string | null): 
     const { data: parts } = await admin.from("part_items").select(`id, description, is_active, confirm_status, removed_at, removed_reason, not_needed_at${(await schemaReady("part_items", "refused_at")) ? ", refused_at" : ""}`).in("id", ids);
     const rows = (parts ?? []) as unknown as { id: string; description: string; is_active: boolean; confirm_status: string; removed_at: string | null; removed_reason: string | null; not_needed_at: string | null; refused_at?: string | null }[];
     if (rows.length < ids.length || !rows.every(partGone)) continue;
+    // A part off the job that this approved quotation still charges is the very change to make: the request stays.
+    if ((await partsStillCharged(q.id, ids)).size) continue;
     const words = rows.map((p) => `${String(p.description).toUpperCase()}${p.removed_reason ? ` (${p.removed_reason})` : ""}`).join(", ");
     const note = `Withdrawn by itself: ${words} ${rows.length === 1 ? "was" : "were"} taken off by Parts, nothing left to revise.`;
     const { data: done } = await admin.from("quotations").update({ revision_declined_at: new Date().toISOString(), revision_declined_by: by, revision_decision_note: note, updated_by: by }).eq("id", q.id).is("revision_allowed_at", null).is("revision_declined_at", null).select("id");

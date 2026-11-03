@@ -6,6 +6,7 @@ import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { inspectionDangerous, loadInspection } from "@/lib/inspection-data";
 import { hasNoHome, partState } from "@/lib/part-state";
+import { endingsFor, isExchanging, type EndingPart } from "@/lib/part-endings";
 import { JOB_BRIEF_SELECT, PART_FULL_SELECT, toPartFull, type JobBrief } from "@/lib/parts-data";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -14,7 +15,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { dispositionAction, exchangePartAction, markPartsReadyAction, notNeededAction, returnToParts } from "../../handover-actions";
 import { ReadyForm, ReturnForm, type DeskPart } from "./HandoverForm";
-import { EndingForm, PartActions, PartStateBadge } from "./PartActions";
+import { EndingForm, EndingResultHost, PartActions, PartStateBadge } from "./PartActions";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,7 @@ export default async function HandoverPage({ params, searchParams }: { params: P
   const settings = await getSettings();
   const [{ data: job }, { data: rows }, { data: priv }, { data: names }] = await Promise.all([
     admin.from("jobs").select(JOB_BRIEF_SELECT).eq("id", jobId).maybeSingle(),
-    admin.from("part_items").select(PART_FULL_SELECT + ", pending_handover_id, sticker_kind, battery_model, serial_number").eq("job_id", jobId).eq("is_active", true).neq("order_status", "none").order("created_at"),
+    admin.from("part_items").select(PART_FULL_SELECT + ", pending_handover_id, sticker_kind, battery_model, serial_number, stock_item_id").eq("job_id", jobId).eq("is_active", true).neq("order_status", "none").order("created_at"),
     admin.from("staff_private").select("pin_hash").eq("staff_id", staff.id).maybeSingle(),
     admin.from("staff").select("id, display_name").eq("is_active", true),
   ]);
@@ -63,6 +64,8 @@ export default async function HandoverPage({ params, searchParams }: { params: P
   return (
     <>
       <LiveRefresh tables={["part_handovers", "part_items"]} jobId={jobId} />
+      {/* An ending's result and the message for the supplier open in a window here: the card that was tapped leaves the list (3 November 2026). */}
+      <EndingResultHost />
       <PageHeader title={`Hand over · ${plate}`} subtitle={<span className="flex flex-wrap items-center gap-2"><span>{[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · {j.job_number}</span>{dangers.length ? <Badge tone="red">Dangerous to drive</Badge> : null}</span>} actions={<><CopyVin vin={j.vehicle?.vin} /><LinkButton href={`/parts/trail/${jobId}`} tone="secondary" size="lg">Parts trail</LinkButton><LinkButton href={`/parts/${jobId}`} tone="secondary" size="lg">Parts page</LinkButton>{can(role, "viewJobs") ? <LinkButton href={`/jobs/${jobId}`} tone="secondary" size="lg">Job card</LinkButton> : null}</>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
@@ -129,7 +132,7 @@ export default async function HandoverPage({ params, searchParams }: { params: P
                 {p.not_needed_reason ? <span className="text-xs text-muted">Not needed: {p.not_needed_reason} ({nameOf.get(p.not_needed_by ?? "") ?? ""}, {formatDateTime(p.not_needed_at)})</span> : null}
                 {p.exchange_note || p.exchange_at ? <span className="text-xs text-muted">{p.exchange_note ? `${p.exchange_note} · ` : ""}{formatDateTime(p.exchange_at)}{p.replacement_part_id ? " · the correct part is on the Parts desk to order" : ""}</span> : null}
                 {p.return_note && !p.not_needed_reason && !p.exchange_at ? <span className="text-xs text-muted">{p.return_note}</span> : null}
-                {canEnd ? <EndingForm partId={p.id} back={back} action={dispositionAction.bind(null, jobId)} /> : null}
+                {canEnd ? <EndingForm partId={p.id} back={back} action={dispositionAction.bind(null, jobId)} endings={isExchanging(p as unknown as EndingPart) ? null : endingsFor(p as unknown as EndingPart)} /> : null}
               </li>
             ))}
           </ul>

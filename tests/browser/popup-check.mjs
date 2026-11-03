@@ -331,6 +331,21 @@ export async function runPopups() {
     await goto(o2.page, `/jobs/${q2.jobId}`);
     if (await o2.page.locator("[data-declined-all]").count()) await check(o2.page, "Customer declined all work", "[data-declined-dialog]", () => click(o2.page, "[data-declined-all]"), findings, shots);
     else notReached.push("Customer declined all work: the button did not show");
+    // 3 November 2026 (section 7): the result window of an ending saved on Returns and leftovers (the card leaves the
+    // list, so the answer opens in a page-level window). Each opening seeds a fresh delivered, not-needed part.
+    let endN = 0;
+    const endingResult = async () => {
+      const id = `22222222-0000-4000-8000-00000000e79${(endN++ % 16).toString(16)}`;
+      await sql("insert into public.part_items (id, job_id, description, part_number, quantity, confirmed_quantity, cost_aed, supplier, availability, confirm_status, part_type, priced_at, priced_by, order_status, received_qty, not_needed_at, not_needed_by, not_needed_reason, created_by, updated_by) values ($1, $2, 'E2E POPUP HORN', 'E2E-PU-HN', 1, 1, 70, 'E2E POPUP SUPPLIER', 'to_order', 'confirmed', 'genuine', now(), $3, 'received', 1, now(), $3, 'Pop-up check', $3, $3) on conflict (id) do nothing", [id, q2.jobId, ownerId]);
+      await goto(o2.page, "/parts/no-home");
+      const card = o2.page.locator(`[data-no-home="${id}"]`);
+      await card.scrollIntoViewIfNeeded().catch(() => {});
+      await card.locator("[data-ending-choice='stock']").click();
+      await card.locator("[data-ending-save]").click();
+      await o2.page.locator("[data-ending-result]").waitFor({ timeout: 30000 });
+    };
+    if (ownerId) await check(o2.page, "Ending saved (Returns and leftovers)", "[data-ending-result]", endingResult, findings, shots);
+    else notReached.push("Ending saved (Returns and leftovers): no owner to seed the part");
     await o2.browser.close();
   }
 

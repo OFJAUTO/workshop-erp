@@ -1,6 +1,7 @@
 "use server";
 
 import { isTyreName, tyreSizeIn, type TyreSpec } from "@/lib/tyres";
+import { endingOf } from "@/lib/part-endings";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { syncPartLine } from "@/lib/quote-versions";
 import { randomBytes } from "node:crypto";
@@ -384,8 +385,11 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
   }
   // "From our stock…" (2.3): the stock item's average cost is the part's cost; a typed cost is never used for it.
   const confirmReady = await costConfirmReady();
-  const { data: stored } = partId ? await admin.from("part_items").select(`stock_item_id, option_group, supplier, order_status${confirmReady ? ", cost_confirmed_aed" : ""}`).eq("id", partId).maybeSingle() : { data: null };
-  const storedRow = stored as unknown as { stock_item_id: string | null; option_group: string | null; supplier: string | null; order_status: string | null; cost_confirmed_aed?: number | string | null } | null;
+  const { data: stored } = partId ? await admin.from("part_items").select(`stock_item_id, option_group, supplier, order_status, disposition, disposition_at, return_status${confirmReady ? ", cost_confirmed_aed" : ""}`).eq("id", partId).maybeSingle() : { data: null };
+  const storedRow = stored as unknown as { stock_item_id: string | null; option_group: string | null; supplier: string | null; order_status: string | null; disposition: string | null; disposition_at: string | null; return_status: string | null; cost_confirmed_aed?: number | string | null } | null;
+  // A part given its ending (cancelled with the supplier, returned, kept in stock) is off the job: a save from a screen
+  // opened before that never changes it again (3 November 2026).
+  if (storedRow && endingOf(storedRow)) return { error: "This part was given its ending (not needed): nothing more to change on it." };
   let stockItemId: string | null = fromStock ? (row.stockItemId === undefined ? (storedRow?.stock_item_id ?? null) : row.stockItemId) : null;
   // A part priced "Our stock" before the rule (no stock item) keeps saving as it was (never unpriced for it; Prices to
   // fix lists it); anything newly set to Our stock comes from a stock item, so its cost is the stock list's (2.3).
@@ -912,9 +916,11 @@ export async function replaceRefusedPart(jobId: string, partId: string): Promise
   if (!job || !job.is_open) return { error: "This job is closed." };
   const admin = createAdminClient();
   const refusedCol = (await refusalsReady()) ? ", refused_at" : "";
-  const { data: raw } = await admin.from("part_items").select(`id, part_request_id, description, quantity, confirmed_quantity, positions, part_type, brand, supplier, replacement_part_id, not_needed_at${refusedCol}`).eq("id", partId).eq("job_id", jobId).maybeSingle();
-  const p = raw as unknown as { id: string; part_request_id: string | null; description: string; quantity: number; confirmed_quantity: number | null; positions: string[] | null; part_type: string | null; brand: string | null; supplier: string | null; replacement_part_id: string | null; not_needed_at: string | null; refused_at?: string | null } | null;
+  const { data: raw } = await admin.from("part_items").select(`id, part_request_id, description, quantity, confirmed_quantity, positions, part_type, brand, supplier, replacement_part_id, not_needed_at, disposition, disposition_at, return_status${refusedCol}`).eq("id", partId).eq("job_id", jobId).maybeSingle();
+  const p = raw as unknown as { id: string; part_request_id: string | null; description: string; quantity: number; confirmed_quantity: number | null; positions: string[] | null; part_type: string | null; brand: string | null; supplier: string | null; replacement_part_id: string | null; not_needed_at: string | null; disposition: string | null; disposition_at: string | null; return_status: string | null; refused_at?: string | null } | null;
   if (!p) return { error: "Part not found." };
+  // An ordered part given its ending is not needed on this car: nothing to replace (3 November 2026).
+  if (endingOf(p)) return { error: "This part was given its ending (not needed): add a new part if the car needs one after all." };
   if (!p.refused_at && !p.not_needed_at) return { error: "Only a refused part, or one marked not needed, can be replaced." };
   if (p.replacement_part_id) {
     const { data: r } = await admin.from("part_items").select("id").eq("id", p.replacement_part_id).eq("is_active", true).maybeSingle();

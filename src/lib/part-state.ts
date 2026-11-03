@@ -3,7 +3,10 @@
  * after the customer approved it: the handover page, the parts trail, the technician's screen, the
  * owner's "Parts with no home" list. Safe for the browser.
  */
+import { endingOf } from "./part-endings";
+
 export type PartStateInput = {
+  disposition_at?: string | null;
   order_status?: string | null;
   issue_status?: string | null;
   return_status?: string | null;
@@ -41,6 +44,10 @@ export function exchangeReasonLabel(v: string | null | undefined) {
 }
 
 export function partState(p: PartStateInput): PartState {
+  // The endings of an ordered part not needed (part-endings.ts, 3 November 2026).
+  const ending = endingOf(p);
+  if (ending === "cancelled") return { key: "cancelled", label: "Cancelled with the supplier", tone: "neutral" };
+  if (ending === "return_pending") return { key: "return_pending", label: "Back to the supplier: credit note awaited", tone: "amber" };
   if (p.disposition === "returned") return { key: "returned_supplier", label: "Returned to supplier", tone: "neutral" };
   if (p.disposition === "stock") return { key: "stock", label: "Moved to stock", tone: "neutral" };
   if (p.disposition === "scrap") return { key: "scrap", label: "Scrapped", tone: "neutral" };
@@ -64,13 +71,14 @@ export function partState(p: PartStateInput): PartState {
 
 /** A part that still needs an ending: not needed, wrong or faulty, or back with Parts, with nothing decided yet. */
 export function hasNoHome(p: PartStateInput): boolean {
-  if (p.disposition) return false;
+  if (p.disposition || endingOf(p)) return false;
   return !!p.not_needed_at || p.exchange_status === "needed" || p.exchange_status === "ordered" || p.return_status === "returned";
 }
 
 /** A part the technician still has to receive before the job can be finished. */
 export function stillToReceive(p: PartStateInput): boolean {
   if (!p.order_status || p.order_status === "none") return false;
+  if (endingOf(p)) return false;
   if (p.issue_status === "confirmed") return false;
   if (p.return_status === "returned") return false;
   if (p.not_needed_at && p.disposition !== "fit_approved") return false;

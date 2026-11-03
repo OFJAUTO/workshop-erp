@@ -189,7 +189,8 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
     await admin.from("purchase_order_lines").update({ received_qty: total, received_at: now, flag: flag === "wrong" || flag === "damaged" ? flag : null, flag_note: flag ? flagNote : null, updated_by: staff.id }).eq("id", l.id);
     if (l.part_item_id) {
       const { data: p } = await admin.from("part_items").select("label_code").eq("id", l.part_item_id).maybeSingle();
-      await admin.from("part_items").update({ received_qty: total, order_status: complete ? "received" : "partly_received", label_code: p?.label_code ?? newLabelCode(), return_status: flag === "wrong" || flag === "damaged" ? "to_return" : "none", return_note: flag ? (flagNote ?? (flag === "wrong" ? "Wrong part" : "Damaged")) : null, updated_by: staff.id }).eq("id", l.part_item_id);
+      // Never on a part given its ending (returned, kept in stock): it has left the job (3 November 2026).
+      await admin.from("part_items").update({ received_qty: total, order_status: complete ? "received" : "partly_received", label_code: p?.label_code ?? newLabelCode(), return_status: flag === "wrong" || flag === "damaged" ? "to_return" : "none", return_note: flag ? (flagNote ?? (flag === "wrong" ? "Wrong part" : "Damaged")) : null, updated_by: staff.id }).eq("id", l.part_item_id).eq("is_active", true);
     } else if (l.stock_item_id && !flag) {
       // A stock order: the delivery lands on the shelf with its cost averaged in.
       await recordStockMovement(l.stock_item_id, { kind: "in", quantity: qty, unitCost: l.unit_cost, poId, note: `Delivery on ${po.number}` }, staff);
@@ -321,8 +322,10 @@ export async function decideInvoiceCheck(lineId: string, formData: FormData) {
   const po = poRaw ? toPo(poRaw as Record<string, unknown>) : null;
   const now = new Date().toISOString();
   await admin.from("purchase_order_lines").update({ invoice_check: decision === "accept" ? "accepted" : "disputed", invoice_check_by: staff.id, invoice_check_at: now, updated_by: staff.id }).eq("id", lineId);
-  if (decision === "accept" && l.part_item_id && l.invoice_unit_cost !== null) await admin.from("part_items").update({ final_cost_aed: l.invoice_unit_cost, updated_by: staff.id }).eq("id", l.part_item_id);
-  if (decision === "dispute" && l.part_item_id) await admin.from("part_items").update({ final_cost_aed: l.unit_cost, updated_by: staff.id }).eq("id", l.part_item_id);
+  // A part given its ending (returned, kept in stock, cancelled) keeps its cost off the job (3 November 2026).
+  const liveOnly = "disposition.is.null,disposition.in.(fit_pending,fit_approved,scrap)";
+  if (decision === "accept" && l.part_item_id && l.invoice_unit_cost !== null) await admin.from("part_items").update({ final_cost_aed: l.invoice_unit_cost, updated_by: staff.id }).eq("id", l.part_item_id).eq("is_active", true).or(liveOnly);
+  if (decision === "dispute" && l.part_item_id) await admin.from("part_items").update({ final_cost_aed: l.unit_cost, updated_by: staff.id }).eq("id", l.part_item_id).eq("is_active", true).or(liveOnly);
   const { data: left } = await admin.from("purchase_order_lines").select("id").eq("po_id", l.po_id).eq("invoice_check", "mismatch").eq("is_active", true);
   // Every price decided by accounts or the owner is their check of the invoice: checked, and the bill goes to Zoho.
   if (!(left ?? []).length && (role === "owner" || role === "accounts")) {

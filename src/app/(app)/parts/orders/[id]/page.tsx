@@ -7,6 +7,7 @@ import { Badge, Button, Card, ChoiceButtons, DescriptionList, Input, LinkButton,
 import { SUPPLIER_PAY_METHODS, readZohoMap } from "@/lib/zoho-sync";
 import { SupplierProofUpload } from "./SupplierProofUpload";
 import { requirePermission } from "@/lib/auth";
+import { endedLinesOf } from "@/lib/part-endings-server";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
 import { loadJobLpos, lpoProblemsFor, refusalsReady } from "@/lib/lpo";
@@ -113,6 +114,11 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const problemList = Array.from(lineProblems.values());
   const problemAdvice = problemList.length ? lpoProblemAdvice(problemList, true) : "";
   const refusedBy = new Map(((refusedRows ?? []).length ? (await admin.from("staff").select("id, display_name").in("id", (refusedRows ?? []).map((r) => r.refused_by as string).filter(Boolean))).data ?? [] : []).map((s) => [s.id as string, s.display_name as string]));
+  // Lines whose part was given its ending (3 November 2026): cancelled ones are off the LPO, returned or kept ones stay on it.
+  const endedByPo = await endedLinesOf([po.id, ...children.map((s) => s.po.id)]);
+  const endedHere = endedByPo.get(po.id) ?? [];
+  const endedOfLine = new Map(endedHere.filter((e) => e.onLpo).map((e) => [e.lineId, e]));
+  const cancelledHere = endedHere.filter((e) => !e.onLpo);
 
   return (
     <>
@@ -157,7 +163,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             <section className="flex flex-col gap-3" data-supplier-lpos>
               <SectionLabel right={`${children.length}`}>Supplier LPOs</SectionLabel>
               {children.map((s) => (
-                <SupplierLpoCard key={s.po.id} po={{ id: s.po.id, number: s.po.number, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, sent_at: s.po.sent_at, emailed_at: s.po.emailed_at, emailed_to: s.po.emailed_to, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: bundle.parts.find((x) => x.id === l.part_item_id)?.positions ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges }} vin={v?.vin ?? null} canManage={canManage} onOrdered={markSupplierOrdered.bind(null, s.po.id)} onSetDate={setPartExpectedDate} supplierEmail={supplierEmailOf.get(s.po.supplier_id ?? "") ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, s.po.id)} jobId={po.job_id} />
+                <SupplierLpoCard key={s.po.id} po={{ id: s.po.id, number: s.po.number, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, sent_at: s.po.sent_at, emailed_at: s.po.emailed_at, emailed_to: s.po.emailed_to, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: bundle.parts.find((x) => x.id === l.part_item_id)?.positions ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges, ended: endedByPo.get(s.po.id) ?? [] }} vin={v?.vin ?? null} canManage={canManage} onOrdered={markSupplierOrdered.bind(null, s.po.id)} onSetDate={setPartExpectedDate} supplierEmail={supplierEmailOf.get(s.po.supplier_id ?? "") ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, s.po.id)} jobId={po.job_id} />
               ))}
             </section>
           ) : null}
@@ -231,9 +237,18 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                       ) : null}
                       {part?.label_code ? <span className="ml-auto text-xs text-muted">label {part.label_code}</span> : null}
                       {part?.issue_status === "confirmed" ? <Badge tone="green">Issued</Badge> : null}
+                      {endedOfLine.get(l.id) ? <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${endedOfLine.get(l.id)!.state === "return_pending" ? "border-amber-bar bg-amber-soft text-amber" : "border-line-strong text-ink"}`} data-lpo-line-ended={endedOfLine.get(l.id)!.state}>{endedOfLine.get(l.id)!.words}</span> : null}
                     </li>
                   );
                 })}
+                {cancelledHere.map((e) => (
+                  <li key={e.lineId} className="py-2 flex flex-wrap items-center gap-2 text-muted" data-lpo-line-cancelled={e.lineId}>
+                    <span className="font-semibold uppercase line-through">{e.description}</span>
+                    {e.partNumber ? <span className="line-through">{e.partNumber}</span> : null}
+                    <span className="line-through">× {e.quantity} at AED {e.unitCost.toFixed(2)}</span>
+                    <span className="rounded-full border border-line-strong px-2 py-0.5 text-[11px] font-bold text-ink">{e.words}</span>
+                  </li>
+                ))}
                 {bundle.charges.map((c) => (
                   <li key={c.id} className="py-2 flex flex-wrap items-center gap-2" data-lpo-charge>
                     <Badge tone="outline">Other charge</Badge>
@@ -271,7 +286,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             <Card className="flex flex-col gap-2 border-ink">
               <SectionLabel>Send it, then Ordered</SectionLabel>
               <p className="text-sm text-muted">Copy the text or send the PDF to {po.supplier_name}, then press Ordered: the arrival dates follow from the availability entered at pricing, and any date can be changed with a tap.</p>
-              <SupplierLpoCard po={{ id: po.id, number: po.number, supplier_name: po.supplier_name, status: po.status, ordered_at: po.ordered_at, verify_token: po.verify_token, sent_at: po.sent_at, emailed_at: po.emailed_at, emailed_to: po.emailed_to, total_cost_aed: po.total_cost_aed, lines: lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: bundle.parts.find((x) => x.id === l.part_item_id)?.positions ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: bundle.charges }} vin={v?.vin ?? null} canManage={canManage} onOrdered={markSupplierOrdered.bind(null, po.id)} onSetDate={setPartExpectedDate} supplierEmail={bundle.supplier?.email ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, po.id)} jobId={po.job_id} />
+              <SupplierLpoCard po={{ id: po.id, number: po.number, supplier_name: po.supplier_name, status: po.status, ordered_at: po.ordered_at, verify_token: po.verify_token, sent_at: po.sent_at, emailed_at: po.emailed_at, emailed_to: po.emailed_to, total_cost_aed: po.total_cost_aed, lines: lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: bundle.parts.find((x) => x.id === l.part_item_id)?.positions ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: bundle.charges, ended: endedHere }} vin={v?.vin ?? null} canManage={canManage} onOrdered={markSupplierOrdered.bind(null, po.id)} onSetDate={setPartExpectedDate} supplierEmail={bundle.supplier?.email ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, po.id)} jobId={po.job_id} />
             </Card>
           ) : null}
           {(po.status === "ordered" || po.status === "partly_received") && canManage ? (

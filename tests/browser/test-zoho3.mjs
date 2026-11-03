@@ -162,7 +162,9 @@ await section("3 customer refund", async () => {
 /* ---------------- 4. the returned-part hook (Returns and leftovers) ---------------- */
 await section("4 returned part hook", async () => {
   const [part] = await sql(
-    "insert into public.part_items (job_id, description, quantity, confirmed_quantity, cost_aed, supplier, availability, not_needed_at, not_needed_reason) values ($1, 'E2e alternator', 1, 1, 450, 'E2e Novat Supplier', 'in_stock', now(), 'E2e test') returning id",
+    // 3 November 2026 (section 7): only a part that ARRIVED can go back to the supplier (one never delivered is
+    // cancelled with the supplier), so the alternator is received.
+    "insert into public.part_items (job_id, description, quantity, confirmed_quantity, cost_aed, supplier, availability, order_status, received_qty, not_needed_at, not_needed_reason) values ($1, 'E2e alternator', 1, 1, 450, 'E2e Novat Supplier', 'to_order', 'received', 1, now(), 'E2e test') returning id",
     [jobId],
   );
   const { browser, page } = await browserFor("owner", { viewport: { width: 1440, height: 1400 } });
@@ -170,11 +172,12 @@ await section("4 returned part hook", async () => {
     await go(page, `${base}/parts/no-home`);
     check("4: the part sits on Returns and leftovers", (await page.getByText("E2e alternator").count()) >= 1);
     // The 'returned' ending with the supplier's credit note number.
-    await page.getByRole("button", { name: /Returned to supplier/i }).first().click().catch(() => null);
+    await page.locator(`[data-ending-form="${part.id}"] [data-ending-choice="return"]`).click().catch(() => null);
     await sleep(300);
-    await page.locator('input[name="note"]').first().fill("SCN-123");
-    await page.getByRole("button", { name: /^Save|^Confirm|Returned/i }).last().click();
-    await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
+    await page.locator(`[data-ending-form="${part.id}"] input[name="note"]`).pressSequentially("SCN-123", { delay: 10 });
+    await page.locator(`[data-ending-form="${part.id}"] [data-ending-save]`).click();
+    // 3 November 2026: the answer opens in a window on Returns and leftovers (no ?message= address any more).
+    await page.locator("[data-ending-result], [data-ending-form] [data-ending-error]").first().waitFor({ timeout: 30000 }).catch(() => null);
     const row = await until(async () => { const r = (await sql("select disposition from public.part_items where id = $1", [part.id]))[0]; return r?.disposition === "returned" ? r : null; });
     check("4: the part is marked returned with the credit note number", row?.disposition === "returned", JSON.stringify(row));
     const ob = await until(async () => (await sql("select status from public.zoho_outbox where kind = 'vendorcredit' and record_id = $1", [part.id]))[0]);

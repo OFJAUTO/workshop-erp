@@ -1,4 +1,5 @@
 import "server-only";
+import { logAppError, SAVE_FAILED } from "./app-errors";
 import { addPartToStock } from "./stock";
 import { tryEnqueueZoho } from "./zoho-sync";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
@@ -189,11 +190,19 @@ export async function partNotNeeded(jobId: string, partId: string, actor: Actor,
   if (!reason.trim()) return { error: "Say why the part is not needed." };
   const job = await jobBrief(jobId);
   if (!job) return { error: "Job not found." };
+  // Written first and checked (3 November 2026): a failed save says so and writes nothing else.
+  const { data: marked, error: markErr } = await admin.from("part_items").update({ not_needed_at: new Date().toISOString(), not_needed_by: actor.id, not_needed_reason: reason.trim().slice(0, 300), updated_by: actor.id }).eq("id", p.id).is("not_needed_at", null).select("id");
+  if (markErr) {
+    await logAppError("part_not_needed", markErr, { staffId: actor.id, jobId, detail: { partId } });
+    return { error: SAVE_FAILED };
+  }
+  if (!marked?.length) return { error: "Already marked not needed." };
   await takeBack(p, actor, `Not needed: ${reason.trim()}`);
-  await admin.from("part_items").update({ not_needed_at: new Date().toISOString(), not_needed_by: actor.id, not_needed_reason: reason.trim().slice(0, 300), updated_by: actor.id }).eq("id", p.id);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "part_not_needed", note: `${p.description} not needed (${actor.display_name}): ${reason.trim()}`, created_by: actor.id });
-  await notifyRoles(["parts"], { type: "parts_no_home", title: `Part not needed · ${job.job_number}`, body: opts.question ? `${opts.question} Decide on the Parts without a home page.` : `${p.description}: ${reason.trim()}. Decide its ending: back to the supplier, to stock, or fit it with the owner's approval.`, jobId, href: `/parts/no-home` });
-  return { ok: true, message: `${p.description} marked not needed. Choose where it goes under "Parts without a home".` };
+  // The question names the endings that fit: nothing delivered = cancel it with the supplier; here = return or keep.
+  const here = Number(p.received_qty) > 0;
+  await notifyRoles(["parts"], { type: "parts_no_home", title: `Part not needed · ${job.job_number}`, body: opts.question ? `${opts.question} Decide on Returns and leftovers.` : `${p.description}: ${reason.trim()}. Decide its ending: ${here ? "return it to the supplier, keep it in stock, or fit it with the owner's approval" : "cancel it with the supplier"}.`, jobId, href: `/parts/no-home` });
+  return { ok: true, message: `${p.description} marked not needed. Choose its ending under "Returns and leftovers".` };
 }
 
 /** Where a part without a home ends up: returned to the supplier (credit note), moved to stock, or fitted on this car once the owner approves. */
@@ -241,14 +250,18 @@ export async function approveGoodwill(jobId: string, partId: string, actor: Acto
 
 export type NoHomePart = ReturnType<typeof toPartFull> & { pending_handover_id: string | null; job: { id: string; job_number: string; is_open: boolean; vehicle: { kind?: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null } | null; since: string };
 
-/** Every part without a home across the workshop: not needed, wrong or faulty, or back with Parts, with nothing decided yet. */
+/**
+ * Every part without a home across the workshop: not needed, wrong or faulty, or back with Parts, with nothing decided
+ * yet - and the ones waiting for the owner's goodwill approval (3 November 2026: they were filtered out, so his Approve
+ * could never be reached).
+ */
 export async function partsWithNoHome(): Promise<NoHomePart[]> {
-  const { data } = await createAdminClient().from("part_items").select(PART_FULL_SELECT + ", pending_handover_id, job:jobs(id, job_number, is_open, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)))").eq("is_active", true).is("disposition", null).or("not_needed_at.not.is.null,exchange_status.in.(needed,ordered),return_status.eq.returned").order("updated_at");
+  const { data } = await createAdminClient().from("part_items").select(PART_FULL_SELECT + ", pending_handover_id, stock_item_id, job:jobs(id, job_number, is_open, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)))").eq("is_active", true).or("not_needed_at.not.is.null,exchange_status.in.(needed,ordered),return_status.eq.returned").order("updated_at");
   return ((data ?? []) as unknown as Record<string, unknown>[]).map((r) => {
     const p = toPartFull(r) as NoHomePart;
     p.pending_handover_id = (r.pending_handover_id as string | null) ?? null;
     p.job = r.job as NoHomePart["job"];
     p.since = (p.not_needed_at ?? p.exchange_at ?? (r.updated_at as string | null) ?? p.created_at) as string;
     return p;
-  }).filter((p) => hasNoHome(p));
+  }).filter((p) => hasNoHome(p) || p.disposition === "fit_pending");
 }

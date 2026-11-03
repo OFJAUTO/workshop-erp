@@ -4,6 +4,7 @@ import { Badge, Card, Empty, LinkButton, PageHeader, SectionLabel } from "@/comp
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { partState } from "@/lib/part-state";
+import { endingOf, endingWords } from "@/lib/part-endings";
 import { JOB_BRIEF_SELECT, PART_FULL_SELECT, toPartFull, type JobBrief } from "@/lib/parts-data";
 import { can, type RoleId } from "@/lib/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -26,7 +27,8 @@ export default async function PartsTrailPage({ params, searchParams }: { params:
     admin.from("part_handovers").select("id, kind, from_staff, to_staff, signed_for_by, pin_used, items, note, created_at, confirmed_at, stickers, stickers_printed_at, status").eq("job_id", jobId).eq("is_active", true).order("created_at", { ascending: false }),
     admin.from("job_events").select("id, event_type, note, created_at, created_by").eq("job_id", jobId).in("event_type", ["parts_issued", "part_return", "part_returned", "parts_received", "po_raised", "po_ordered", "parts_delayed", "planning", "part_exchange", "part_not_needed", "part_disposition", "goodwill", "handover_requested", "handover_cancelled"]).order("created_at", { ascending: false }),
     admin.from("staff").select("id, display_name"),
-    admin.from("part_items").select(PART_FULL_SELECT + ", pending_handover_id").eq("job_id", jobId).eq("is_active", true).neq("order_status", "none").order("created_at"),
+    // Approved parts, and the ones given their ending (cancelled, returned, kept in stock: off the job, still on the trail).
+    admin.from("part_items").select(PART_FULL_SELECT + ", pending_handover_id").eq("job_id", jobId).or("and(is_active.eq.true,order_status.neq.none),disposition_at.not.is.null").order("created_at"),
   ]);
   if (!job) notFound();
   const j = job as unknown as JobBrief;
@@ -47,7 +49,12 @@ export default async function PartsTrailPage({ params, searchParams }: { params:
     if (p.not_needed_at) out.push(`not needed ${formatDateTime(p.not_needed_at)}${p.not_needed_reason ? `: ${p.not_needed_reason}` : ""}`);
     const po = p.po_id ? poOf.get(p.po_id) : null;
     if (po) out.push(`${po.number}${po.supplier_invoice_number ? ` · supplier invoice ${po.supplier_invoice_number}` : ""}`);
-    if (p.disposition_at) out.push(`${p.disposition === "returned" ? "returned to the supplier" : p.disposition === "stock" ? "moved to stock" : p.disposition === "fit_approved" ? "goodwill approved" : "ending asked"} ${formatDateTime(p.disposition_at)}${p.disposition_note ? ` · ${p.disposition_note}` : ""}`);
+    if (p.disposition_at) {
+      // The endings of an ordered part not needed (3 November 2026): one wording with the Parts table.
+      const e = endingOf(p);
+      const by = nameOf.get(p.disposition_by ?? "") ?? null;
+      out.push(`${e ? endingWords(e, by) : p.disposition === "fit_approved" ? "goodwill approved" : p.disposition === "scrap" ? "scrapped" : "ending asked"} ${formatDateTime(p.disposition_at)}${p.disposition_note ? ` · ${p.disposition_note}` : ""}`);
+    }
     return out;
   };
   return (

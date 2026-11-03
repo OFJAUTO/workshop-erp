@@ -2,10 +2,13 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { logAppError, SAVE_FAILED } from "@/lib/app-errors";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { getCurrentDevice } from "@/lib/devices";
+import { isExchanging } from "@/lib/part-endings";
 import { blankToNull } from "@/lib/format";
 import { approveGoodwill, exchangePart, markPartsReady, partNotNeeded, receivePartsByTechnician, setDisposition } from "@/lib/handover";
+import { endOrderedPart, recordCreditNote } from "@/lib/part-endings-server";
 import { PARTS_BUCKET } from "@/lib/quote-data";
 import { PART_FULL_SELECT, toPartFull } from "@/lib/parts-data";
 import { verifyPin } from "@/lib/pin";
@@ -132,30 +135,62 @@ async function creditNotePathOf(partId: string, raw: FormDataEntryValue | null):
   return (await objectExists(PARTS_BUCKET, path)) ? path : null;
 }
 
+/**
+ * The answer of an ending saved from Returns and leftovers or the handover page (3 November 2026): it comes back to the
+ * card that was tapped - an error inside the card, the result (and the message for the supplier) in a window on the
+ * page - never to the top of the page.
+ */
+export type EndingAnswer = { ok?: boolean; error?: string; message?: string; supplierCopy?: { supplier: string; text: string } | null };
+
+const SCAN_MISSING = "The credit note scan is not on the server – nothing was saved. Add the scan again, or type the credit note number.";
+
 /** Where a part without a home ends up. Parts (or the owner); a credit note scan goes to the parts bucket. */
-export async function dispositionAction(jobId: string, formData: FormData) {
+export async function dispositionAction(jobId: string, formData: FormData): Promise<EndingAnswer> {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
-  const to = String(formData.get("back") ?? `/parts/handover/${jobId}`);
-  if (!(role === "owner" || can(role, "managePurchaseOrders")) || staff.viewingAs) outcome(jobId, { error: "Only Parts or the owner decide where a part goes." }, to);
+  if (!(role === "owner" || can(role, "managePurchaseOrders")) || staff.viewingAs) return { error: "Only Parts or the owner decide where a part goes." };
   const partId = String(formData.get("part") ?? "");
   const disposition = String(formData.get("disposition") ?? "");
-  if (disposition !== "returned" && disposition !== "stock" && disposition !== "fit_pending" && disposition !== "scrap") outcome(jobId, { error: "Choose where the part goes." }, to);
+  if (disposition !== "returned" && disposition !== "stock" && disposition !== "fit_pending" && disposition !== "scrap" && disposition !== "cancelled") return { error: "Choose where the part goes." };
+  // 3 November 2026 (section 7): an ordered part not needed (not being exchanged) takes THE ending function -
+  // Cancelled with the supplier, Return to supplier (the credit note now or later, tracked) or Keep in stock.
+  const { data: partRow, error: readErr } = await createAdminClient().from("part_items").select("exchange_status, not_needed_reason").eq("id", partId).eq("job_id", jobId).maybeSingle();
+  if (readErr) {
+    await logAppError("part_disposition", readErr, { staffId: staff.id, jobId, detail: { partId, step: "read the part" } });
+    return { error: SAVE_FAILED };
+  }
+  // Only a wrong or faulty part in its exchange keeps its own endings (a part replaced by another supplier is not one).
+  const exchanging = !!partRow && isExchanging(partRow);
+  if (disposition === "cancelled" && (!partRow || exchanging)) return { error: !partRow ? "This part is not on this job any more." : "This part is being exchanged: it goes back to the supplier with its credit note." };
+  if (partRow && !exchanging && (disposition === "cancelled" || disposition === "returned" || disposition === "stock")) {
+    const reason = blankToNull(formData.get("reason")) ?? partRow.not_needed_reason ?? "Not needed";
+    const number = disposition === "returned" ? blankToNull(formData.get("note")) : null;
+    const sent = formData.get("credit_note_path");
+    const scan = typeof sent === "string" && sent.trim() ? await creditNotePathOf(partId, sent) : null;
+    if (typeof sent === "string" && sent.trim() && !scan) return { error: SCAN_MISSING };
+    const amountText = String(formData.get("credit_amount") ?? "").replace(/[^\d.]/g, "");
+    const r = await endOrderedPart(jobId, partId, { ending: disposition === "returned" ? "return" : disposition, reason, creditNote: disposition === "returned" ? { number, path: scan, amount: amountText ? Number(amountText) : null, date: blankToNull(formData.get("credit_date")) } : null }, actorOf(staff));
+    // A scan still on its way lands on the part by itself once it arrives (the credit_note place attaches it to a returned part).
+    if (r.error) return { error: r.error };
+    refresh(jobId);
+    revalidatePath("/parts/no-home");
+    return { ok: true, message: r.message, supplierCopy: r.supplierCopy ?? null };
+  }
   // 31 October 2026: the page sends the scan straight to storage first (it waits on the device without signal) and hands
   // over its path; a tab opened before that still sends the file itself.
   let creditNotePath: string | null = null;
   const sentPath = formData.get("credit_note_path");
   if (typeof sentPath === "string" && sentPath.trim()) {
     creditNotePath = await creditNotePathOf(partId, sentPath);
-    if (!creditNotePath) outcome(jobId, { error: "The credit note scan is not on the server – nothing was saved. Add the scan again, or type the credit note number." }, to);
+    if (!creditNotePath) return { error: SCAN_MISSING };
   } else {
     const file = formData.get("credit_note");
     if (file instanceof File && file.size > 0) {
-      if (file.size > 10 * 1024 * 1024) outcome(jobId, { error: "The scan is too big (10 MB at most)." }, to);
+      if (file.size > 10 * 1024 * 1024) return { error: "The scan is too big (10 MB at most)." };
       const ext = (file.name.split(".").pop() ?? "pdf").toLowerCase().replace(/[^a-z0-9]/g, "") || "pdf";
       creditNotePath = `credit-notes/${partId}/${Date.now()}.${ext}`;
       const { error: upError } = await createAdminClient().storage.from(PARTS_BUCKET).upload(creditNotePath, file, { contentType: file.type || "application/pdf", upsert: false });
-      if (upError) outcome(jobId, { error: "Could not save the scan – nothing was saved. Try again." }, to);
+      if (upError) return { error: "Could not save the scan – nothing was saved. Try again." };
     }
   }
   // A scan picked a moment ago and still on its way: when it has arrived by now it goes with the ending.
@@ -170,9 +205,30 @@ export async function dispositionAction(jobId: string, formData: FormData) {
     const arrived = await creditNotePathOf(partId, waiting);
     if (arrived) await createAdminClient().from("part_items").update({ credit_note_path: arrived, updated_by: staff.id }).eq("id", partId).eq("job_id", jobId).is("credit_note_path", null);
   }
+  if (r.error) return { error: r.error };
   refresh(jobId);
   revalidatePath("/parts/no-home");
-  outcome(jobId, r, to);
+  return { ok: true, message: r.message ?? "Saved." };
+}
+
+/**
+ * The supplier's credit note for a part returned to them (3 November 2026): the number and/or the scan, the amount and
+ * the date when known. Parts or the owner, from the "Waiting for a supplier credit note" list.
+ */
+export async function creditNoteAction(jobId: string, formData: FormData): Promise<EndingAnswer> {
+  const staff = await requireStaff();
+  const role = staff.role_id as RoleId;
+  if (!(role === "owner" || can(role, "managePurchaseOrders")) || staff.viewingAs) return { error: "Only Parts or the owner record a supplier credit note." };
+  const partId = String(formData.get("part") ?? "");
+  const sent = formData.get("credit_note_path");
+  const scan = typeof sent === "string" && sent.trim() ? await creditNotePathOf(partId, sent) : null;
+  if (typeof sent === "string" && sent.trim() && !scan) return { error: SCAN_MISSING };
+  const amountText = String(formData.get("credit_amount") ?? "").replace(/[^\d.]/g, "");
+  const r = await recordCreditNote(jobId, partId, { number: blankToNull(formData.get("note")), path: scan, amount: amountText ? Number(amountText) : null, date: blankToNull(formData.get("credit_date")) }, actorOf(staff));
+  if (r.error) return { error: r.error };
+  refresh(jobId);
+  revalidatePath("/parts/no-home");
+  return { ok: true, message: r.message };
 }
 
 /** The owner approves fitting a not-needed part as goodwill. */

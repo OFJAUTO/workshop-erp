@@ -157,6 +157,7 @@
     "test:s3-payreport": "node --env-file=.env.test.local tests/browser/test-s3-payreport.mjs",
     "test:s4-moneylist": "node --env-file=.env.test.local tests/browser/test-s4-moneylist.mjs",
     "test:s5-authcode": "node --env-file=.env.test.local tests/browser/test-s5-authcode.mjs",
+    "test:s7-remove": "node --env-file=.env.test.local tests/browser/test-s7-remove.mjs",
     "test:s8-charges": "node --env-file=.env.test.local tests/browser/test-s8-charges.mjs"
   },
   "dependencies": {

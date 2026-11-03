@@ -38,7 +38,9 @@ export async function applyInvoicePrices(poId: string, prices: Map<string, numbe
     const check = !c ? "match" : c.each < 0 || decision.auto ? "accepted" : "mismatch";
     await admin.from("purchase_order_lines").update({ invoice_unit_cost: l.invoice_unit_cost, invoice_check: check, invoice_check_by: by.id, invoice_check_at: now, updated_by: by.id }).eq("id", l.id);
     // The supplier's invoice is the real cost on the job (and so in the profit and the bill); the LPO keeps its price.
-    if (l.part_item_id) await admin.from("part_items").update({ final_cost_aed: c ? l.invoice_unit_cost : null, updated_by: by.id }).eq("id", l.part_item_id);
+    // Never on a part given its ending (returned, kept in stock, cancelled): its cost is off the job; the invoice price
+    // stays on the line for the bill and the supplier credit (3 November 2026).
+    if (l.part_item_id) await admin.from("part_items").update({ final_cost_aed: c ? l.invoice_unit_cost : null, updated_by: by.id }).eq("id", l.part_item_id).eq("is_active", true).or("disposition.is.null,disposition.in.(fit_pending,fit_approved,scrap)");
     if (c) changed.push(`${String(l.description).toUpperCase()}: ${changeWords(l)}`);
   }
   if (!po || !changed.length) return { decision, changed };

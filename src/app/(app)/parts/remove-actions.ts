@@ -4,8 +4,9 @@ import { redirect } from "next/navigation";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff, requireStaff } from "@/lib/auth";
-import { setDisposition,partNotNeeded } from "@/lib/handover";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
+import { endingOf, type EndingKey } from "@/lib/part-endings";
+import { endOrderedPart, type EndResult } from "@/lib/part-endings-server";
 import { loadPricingRows } from "@/lib/parts-pricing";
 import { supplierDiscount, type SupplierOption } from "@/lib/parts-rows";
 import { can, type RoleId } from "@/lib/roles";
@@ -69,7 +70,7 @@ export async function removeNotNeeded(jobId: string, target: { partId?: string |
   if (target.partId) {
     const { data: p } = await admin.from("part_items").select("id, description, order_status").eq("id", target.partId).eq("job_id", jobId).maybeSingle();
     if (!p) return { error: "Part not found." };
-    if (p.order_status !== "none") return { error: "This part is already ordered: give it an ending on the handover page." };
+    if (p.order_status !== "none") return { error: "This part is already ordered: use \"Remove: not needed (ordered: choose its ending)\" in its menu." };
     await admin.from("part_items").update({ is_active: false, removed_at: now, removed_by: staff.id, removed_reason: reason, updated_by: staff.id }).eq("id", p.id);
     await syncLineForPart(jobId, p.id, staff.id);
     name = p.description;
@@ -98,8 +99,11 @@ export async function putBackPart(jobId: string, target: { partId?: string | nul
   if (!job || !job.is_open) return { error: "This job is closed." };
   let name = "";
   if (target.partId) {
-    const { data: p } = await admin.from("part_items").select("id, description").eq("id", target.partId).eq("job_id", jobId).maybeSingle();
+    const { data: p } = await admin.from("part_items").select("id, description, disposition, disposition_at, return_status").eq("id", target.partId).eq("job_id", jobId).maybeSingle();
     if (!p) return { error: "Part not found." };
+    // An ordered part given its ending (cancelled with the supplier, returned, kept in stock) never comes back here:
+    // the supplier, the LPO and the stock already moved (3 November 2026).
+    if (endingOf(p)) return { error: "This part was given its ending (cancelled with the supplier, returned or kept in stock): it cannot be put back. Add the part again if it is needed after all." };
     await admin.from("part_items").update({ is_active: true, removed_at: null, removed_by: null, removed_reason: null, updated_by: staff.id }).eq("id", p.id);
     await syncLineForPart(jobId, p.id, staff.id);
     name = p.description;
@@ -115,19 +119,27 @@ export async function putBackPart(jobId: string, target: { partId?: string | nul
   return { ok: true };
 }
 
-/** "Remove: not needed" after the part is ordered: the three endings already agreed (return, stock, fit with approval). */
-export async function notNeededFromParts(jobId: string, partId: string, formData: FormData): Promise<Result> {
+/**
+ * "Remove: not needed (ordered: choose its ending)" on the Parts table (3 November 2026, section 7): Cancelled with the
+ * supplier, Return to supplier or Keep in stock, through THE ending function (src/lib/part-endings-server.ts). The
+ * dialog waits for this answer: an error shows inside it, nothing half-done is ever left behind.
+ */
+export async function endPartFromParts(jobId: string, partId: string, input: { ending: string; reason: string }): Promise<EndResult> {
   const staff = await partsPerson();
   if ("error" in staff) return staff;
-  const r = await partNotNeeded(jobId, partId, staff, String(formData.get("reason") ?? ""));
-  // The ending chosen on the spot: back to the supplier (credit note to follow), or kept in stock.
-  const disposition = String(formData.get("disposition") ?? "");
-  if (!r.error && (disposition === "returned" || disposition === "stock")) {
-    const d = await setDisposition(jobId, partId, staff, { disposition, note: null, creditNotePath: null });
-    if (d.error) return d;
+  const r = await endOrderedPart(jobId, partId, { ending: input.ending as EndingKey, reason: String(input.reason ?? "") }, staff);
+  if (r.ok) {
+    refresh(jobId);
+    revalidatePath("/parts/no-home");
+    revalidatePath("/parts/orders", "layout");
   }
-  refresh(jobId);
   return r;
+}
+
+/** A tab opened before 3 November 2026 still sends the old form: it goes through the same ending function. */
+export async function notNeededFromParts(jobId: string, partId: string, formData: FormData): Promise<Result> {
+  const disposition = String(formData.get("disposition") ?? "");
+  return endPartFromParts(jobId, partId, { ending: disposition === "returned" ? "return" : disposition === "stock" ? "stock" : "cancelled", reason: String(formData.get("reason") ?? "") });
 }
 
 /**
