@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { PositionsLine } from "@/components/PositionsLine";
+import { Words } from "@/components/Words";
 import { useRouter } from "next/navigation";
 import { Button, Input, Textarea } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
@@ -748,7 +749,7 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
         {canPrice && !estimate && !row.removed ? <input type="checkbox" aria-label={`Select ${name}`} checked={selected} onChange={(e) => onSelect(e.target.checked)} className="h-4 w-4 shrink-0 accent-ink" data-row-select /> : null}
         <span className={`w-4 shrink-0 text-center text-green font-extrabold ${complete ? "" : "invisible"}`} aria-label={complete ? "priced" : undefined}>✓</span>
         <button type="button" disabled={readOnly} onClick={() => setEditingName(true)} className={`min-h-9 min-w-0 flex-1 py-0.5 text-left font-bold disabled:cursor-default overflow-hidden ${row.removed || row.refused ? "line-through text-muted" : ""}`} title={readOnly ? name : `${name} · tap to correct the name`} data-part-name>
-          <span className="block break-words text-[13px] uppercase leading-[1.15]">{name}</span>
+          <Words text={name} className="block break-words text-[13px] uppercase leading-[1.15]" />
           <PositionsLine positions={row.shownPositions ?? row.positions} className="leading-tight" />
         </button>
         {(isTyreName(name) || v.tyre_row) && !readOnly && !estimate ? (
