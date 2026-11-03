@@ -261,6 +261,8 @@ const DEFAULTS = {
   working_days: ["mon", "tue", "wed", "thu", "fri", "sat"] as string[],
   profit_target_yellow_percent: 80,
   supplier_invoice_pending_red_days: 7,
+  /** Parts accounts (3 November 2026): a part returned to the supplier with no credit note on file turns red after this many days. */
+  supplier_credit_wait_days: 14,
   video_retention_months: 12,
   terms_and_conditions: "",
   terms_and_conditions_ar: "",

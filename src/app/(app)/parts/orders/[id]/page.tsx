@@ -13,6 +13,7 @@ import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
 import { loadJobLpos, lpoProblemsFor, refusalsReady } from "@/lib/lpo";
 import { lpoProblemAdvice } from "@/lib/part-cost-check";
 import { invoiceHref } from "@/lib/supplier-invoices";
+import { supplierNeedsTrn } from "@/lib/supplier-rules";
 import { realPartNumber } from "@/lib/parts-rows";
 import { changeWords } from "@/lib/price-change";
 import { PO_STATUS_LABELS, loadPurchaseOrder, partUnitsOf } from "@/lib/parts-data";
@@ -152,7 +153,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       {/* C1, 1 November 2026: a VAT-registered supplier without a TRN - its bill cannot go to Zoho until it is typed. */}
-      {!isMain && bundle.supplier && bundle.supplier.vat_registered !== false && !bundle.supplier.trn && !/^our stock$/i.test(po.supplier_name.trim()) ? (
+      {!isMain && bundle.supplier && supplierNeedsTrn({ name: po.supplier_name, trn: bundle.supplier.trn, vat_registered: bundle.supplier.vat_registered }) ? (
         <div data-no-trn>
           <Notice tone="error">{po.supplier_name} is ticked VAT registered but has no TRN: its bill cannot go to Zoho Books. Type the 15-digit TRN on <Link href="/parts/suppliers" className="font-bold underline underline-offset-4">Parts &gt; Suppliers</Link> (or untick VAT registered); the bill then goes back in the queue and is sent with the next Sync to Zoho.</Notice>
         </div>
@@ -324,10 +325,11 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
               ]}
             />
           </Card>
-          {!isMain && po.job_id && po.status !== "pending_approval" && po.status !== "cancelled" && (po.supplier_invoice_status !== "none" || invoiceFiles.length > 0 || po.status === "received") ? (
-            <Card className="flex flex-col gap-3" data-supplier-pay>
-              <SectionLabel>Invoice files &amp; payment</SectionLabel>
-              <InvoiceFiles jobId={po.job_id} poId={po.id} files={invoiceFiles} canEdit={canManage || canPay} />
+          {/* The payment box of every supplier LPO, a stock order (no car) included: "Pay on the LPO" lands here. */}
+          {!isMain && po.status !== "pending_approval" && po.status !== "cancelled" && (po.supplier_invoice_status !== "none" || invoiceFiles.length > 0 || po.status === "received") ? (
+            <Card className="flex flex-col gap-3 scroll-mt-4" id="paid" data-supplier-pay>
+              <SectionLabel>{po.job_id ? <>Invoice files &amp; payment</> : "Payment"}</SectionLabel>
+              {po.job_id ? <InvoiceFiles jobId={po.job_id} poId={po.id} files={invoiceFiles} canEdit={canManage || canPay} /> : <p className="text-xs text-muted" data-stock-order-pay>Stock order (no car): the supplier invoice is the one entered when the order was received.</p>}
               {po.supplier_paid_at ? (
                 <div className="flex flex-col gap-2">
                 {!staff.viewingAs && (role === "owner" || po.supplier_paid_by === staff.id) ? <UndoButton at={po.supplier_paid_at} minutes={undoMinutes} done="Payment to the supplier recorded" action={undoSupplierPaid.bind(null, po.id)} /> : null}

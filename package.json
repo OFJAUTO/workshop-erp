@@ -162,7 +162,8 @@
     "test:s9-qty": "node --env-file=.env.test.local tests/browser/test-s9-qty.mjs",
     "test:s10-pricing": "node --env-file=.env.test.local tests/browser/test-s10-pricing.mjs",
     "test:s9-s10": "node --env-file=.env.test.local tests/browser/test-s9-s10-parts-desk.mjs",
-    "test:s11-zoho-manual": "node --env-file=.env.test.local tests/browser/test-s11-zoho-manual.mjs"
+    "test:s11-zoho-manual": "node --env-file=.env.test.local tests/browser/test-s11-zoho-manual.mjs",
+    "test:s12-parts-accounts": "node --env-file=.env.test.local tests/browser/test-s12-parts-accounts.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

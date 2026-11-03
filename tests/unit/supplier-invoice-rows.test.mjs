@@ -36,6 +36,11 @@ check("the search finds a part name", filterInvoices(rows, { q: "stabiliser" }, 
 check("the search finds the number without its dash", filterInvoices(rows, { q: "4512" }).length === 1);
 check("unpaid filter leaves the paid one out", !filterInvoices(rows, { unpaid: true }).some((r) => r.number === "INV-77"));
 check("unpaid per supplier", unpaidBySupplier(rows)[0]?.supplier === "SPARE HUB");
+// 3 November 2026: paid LPO by LPO, a split invoice can be partly paid (only the rest is unpaid).
+const part = groupInvoices([po("p1", "j1", "INV-1", 500, { paid_at: "x" }), po("p2", "j2", "INV-1", 300)], [], jobs, [{ id: "s1", name: "SPARE HUB", trn: "100200300400500", vat_registered: true }])[0];
+check("a split invoice paid on one LPO is partly paid: 525 paid, 315 to pay", part.partlyPaid && !part.paid && part.paidAmount === 525 && part.unpaidAmount === 315 && part.shares.find((s) => s.poId === "p1")?.paidAt === "x");
+check("unpaid per supplier counts only the rest", unpaidBySupplier([part])[0]?.total === 315);
+check("a fully paid invoice has nothing to pay", rows.find((r) => r.number === "INV-77")?.unpaidAmount === 0);
 check("the notice title", invoiceNoticeTitle("Spare Hub", "4512", 1040) === "Supplier invoice · SPARE HUB · INV 4512 · AED 1,040.00 + VAT");
 check("INV never twice", invWords("INV-4512") === "INV-4512" && invWords("4512") === "INV 4512");
 console.log(failed ? `FAILED (${failed})` : "All passed");

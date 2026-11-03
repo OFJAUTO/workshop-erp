@@ -69,7 +69,9 @@ try {
   await parts.page.locator("[data-no-stickers]").click();
   const recA = await until(async () => (await sql("select supplier_invoice_number from public.purchase_orders where id = $1 and supplier_invoice_status = 'received'", [poA.id]))[0]);
   check("A: the parts and the invoice are saved on the LPO", recA?.supplier_invoice_number === "INV-4512");
-  const note = await until(async () => (await sql("select title, body, href from public.notifications where staff_id = $1 and type = 'supplier_invoice_received' order by created_at desc limit 1", [acc.id]))[0]);
+  // THIS invoice's notice (3 November 2026: older notices of other tests' invoices sit on the shared TEST database, so
+  // "the newest one" could be read before this one was written).
+  const note = await until(async () => (await sql("select title, body, href from public.notifications where staff_id = $1 and type = 'supplier_invoice_received' and body like '%LPO-E2ESI-1%' order by created_at desc limit 1", [acc.id]))[0]);
   check(`A: accounts are told ("${note?.title}")`, note?.title === "Supplier invoice · E2E SPARE HUB · INV-4512 · AED 520.00 + VAT");
   check(`A: the notice names the LPO, the car and the parts ("${note?.body}")`, (note?.body ?? "").includes("LPO-E2ESI-1") && (note?.body ?? "").includes(job.job_number) && /1 part received/.test(note?.body ?? ""));
   const noBill = (await sql("select count(*)::int as n from public.zoho_outbox where kind = 'bill' and record_id = $1", [poA.id]))[0];
@@ -124,6 +126,13 @@ try {
   check(`C: its count includes new, waiting for invoice and price differs (${tileCount})`, tileCount >= 3);
 
   /* ---------- D. Checked → Sent to Zoho → Paid ---------- */
+  // Since the LPO price changes (1 November 2026, night) Mark checked waits while a price is above the limit: the
+  // second car's line (200 → 210) first takes the owner's OK (the OK button itself is proven by test-price-changes).
+  await go(page, `${base}/supplier-invoices?open=${encodeURIComponent(`${sup.id}|INV4512`)}`);
+  await page.locator("[data-si-check]").click();
+  await page.waitForURL(/error=/, { timeout: 20000 }).catch(() => {});
+  check("D: Mark checked waits for the owner's OK on the higher price, saying so inside the opened invoice", /owner's OK/.test(await text(page.locator("[data-si-opened] [data-si-outcome='error']"))));
+  await sql("update public.purchase_order_lines set invoice_check = 'accepted' where po_id = $1 and invoice_check = 'mismatch'", [poB.id]);
   await go(page, `${base}/supplier-invoices?open=${encodeURIComponent(`${sup.id}|INV4512`)}`);
   await page.locator("[data-si-check]").click();
   const checked = await until(async () => { const r = await sql("select count(*)::int as n from public.purchase_orders where id = any($1::uuid[]) and supplier_invoice_checked_at is not null", [[poA.id, poB.id]]); return r[0]?.n === 2 ? r : null; });

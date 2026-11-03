@@ -585,6 +585,9 @@ export async function saveMoneyLimits(formData: FormData) {
   // Payment hand-over (2 November 2026, section 3): a payment an advisor sent and not recorded within these working hours reminds accounts and the owner.
   const reportHours = formData.has("payment_report_reminder_hours") ? num("payment_report_reminder_hours", 1, 24) : undefined;
   if (reportHours === null) redirect(`/settings?error=${encodeURIComponent("Reported payments: remind after 1 to 24 working hours.")}#money-limits`);
+  // Parts accounts (3 November 2026, section 12): a returned part waiting for the supplier's credit note turns red after these days.
+  const creditDays = formData.has("supplier_credit_wait_days") ? num("supplier_credit_wait_days", 1, 365) : undefined;
+  if (creditDays === null) redirect(`/settings?error=${encodeURIComponent("Supplier credit notes: red after 1 to 365 days.")}#money-limits`);
   if (askBelow === null || farBelow === null || similar === null || markupWarn === null) redirect(`/settings?error=${encodeURIComponent("Part costs: ask under 0 to 10,000 AED; flag under 1 to 100 %; similar 0 to 100 %; markup warning 50 to 1,000,000 %.")}#money-limits`);
   const admin = createAdminClient();
   const rows = [
@@ -596,6 +599,7 @@ export async function saveMoneyLimits(formData: FormData) {
     ...(similar !== undefined ? [{ key: "part_cost_similar_percent", label: "Parts: a cheap cost bought before within this percent is not asked again", value: similar }] : []),
     ...(markupWarn !== undefined ? [{ key: "part_markup_warn_percent", label: "Quotations: warn on a part markup over (%)", value: markupWarn }] : []),
     ...(reportHours !== undefined && reportHours !== null ? [{ key: "payment_report_reminder_hours", label: "Payment reported by an advisor and not recorded: remind accounts and the owner after (working hours)", value: Math.round(reportHours) }] : []),
+    ...(creditDays !== undefined && creditDays !== null ? [{ key: "supplier_credit_wait_days", label: "Supplier credit note: days to wait", value: Math.round(creditDays) }] : []),
   ];
   for (const r of rows) await admin.from("settings").upsert({ ...r, updated_by: staff.id }, { onConflict: "key" });
   revalidatePath("/settings");

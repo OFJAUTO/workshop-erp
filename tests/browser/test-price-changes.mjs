@@ -96,6 +96,8 @@ try {
   await accB.page.locator("[data-si-check]").click();
   await accB.page.waitForURL(/error=|message=/, { timeout: 20000 }).catch(() => {});
   check("B: accounts cannot check it before the owner's OK", /waits for the owner/.test(decodeURIComponent(accB.page.url().replace(/\+/g, " "))) && !(await sql("select supplier_invoice_checked_at from public.purchase_orders where id = $1", [poB.id]))[0]?.supplier_invoice_checked_at);
+  // 3 November 2026 (section 12 review): the refusal shows next to Mark checked, inside the opened invoice.
+  check("B: the refusal is shown inside the opened invoice, next to its buttons", /waits for the owner/.test(await text(accB.page.locator(`[data-si-opened] [data-si-outcome='error']`))));
   await go(accB.page, `${base}/parts/orders/${poB.id}`);
   check("B: accounts see no OK button (the owner's call)", (await accB.page.locator("[data-price-ok]").count()) === 0);
   await go(own.page, `${base}/parts/orders/${poB.id}`);

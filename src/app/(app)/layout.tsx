@@ -91,6 +91,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/scoreboard", label: "Scoreboard", show: can(role, "manageWork") },
     { href: "/comebacks", label: "Comebacks", show: can(role, "manageWork") },
     { href: "/invoices", label: "Invoices and payments", show: can(role, "viewInvoices") },
+    { href: "/parts-accounts", label: "Parts accounts", show: can(role, "viewPartsAccounts") },
     { href: "/supplier-invoices", label: "Supplier invoices", show: ["owner", "accounts", "parts"].includes(role) },
     { href: "/pending-charges", label: "Pending charges", show: ["owner", "service_advisor", "accounts"].includes(role), badge: pendingCharges || undefined },
     { href: "/recovery", label: "Recovery", show: role === "owner" || role === "service_advisor" || role === "accounts" },

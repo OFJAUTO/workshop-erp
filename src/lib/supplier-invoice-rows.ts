@@ -22,6 +22,9 @@ export type SiPo = {
   checked_at: string | null;
   zoho_bill_id: string | null;
   paid_at: string | null;
+  /** How and with what reference the supplier was paid (Parts accounts > Payments to suppliers). */
+  paid_method?: string | null;
+  paid_reference?: string | null;
   query?: string | null;
   query_at?: string | null;
 };
@@ -47,7 +50,11 @@ export const MATCH_WORDS: Record<InvoiceMatch, string> = {
   not_linked: "Not linked to an LPO",
 };
 
-export type InvoiceShare = { poId: string; poNumber: string; jobId: string | null; jobNumber: string | null; plate: string; car: string; amount: number; lpoTotal: number; parts: number };
+/**
+ * One LPO's part of a supplier invoice. Payment is recorded LPO by LPO ("Paid to supplier" on each LPO page), so each
+ * share carries its own paid stamp: a split invoice can be partly paid.
+ */
+export type InvoiceShare = { poId: string; poNumber: string; jobId: string | null; jobNumber: string | null; plate: string; car: string; amount: number; lpoTotal: number; parts: number; paidAt: string | null };
 export type InvoiceRow = {
   key: string;
   supplier: string;
@@ -65,7 +72,17 @@ export type InvoiceRow = {
   status: InvoiceStatus;
   /** "Possible duplicate of …": the same invoice typed twice, or the same amount and date under another number. */
   duplicateOf: string | null;
+  /** Every LPO of the invoice paid to the supplier. */
   paid: boolean;
+  /** Some LPOs of a split invoice paid, others not yet. */
+  partlyPaid: boolean;
+  /** With VAT: what was paid (the paid shares) and what is still to pay (the rest). They add up to `total`. */
+  paidAmount: number;
+  unpaidAmount: number;
+  /** When, how and with what reference it was paid (the first LPO of the invoice marked paid). */
+  paidAt: string | null;
+  paidMethod: string | null;
+  paidReference: string | null;
   /** When it arrived (the invoice entered, else the parts received). */
   at: string | null;
   query: string | null;
@@ -98,10 +115,14 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
     const shares: InvoiceShare[] = items.map((p) => {
       const j = p.job_id ? jobOf.get(p.job_id) : null;
       const mine = lines.filter((l) => l.po_id === p.id);
-      return { poId: p.id, poNumber: p.number, jobId: p.job_id, jobNumber: j?.job_number ?? null, plate: j?.plate ?? "", car: j?.car ?? "", amount: r2(waiting ? p.total_cost_aed : (p.supplier_invoice_amount ?? p.total_cost_aed)), lpoTotal: p.total_cost_aed, parts: mine.length };
+      return { poId: p.id, poNumber: p.number, jobId: p.job_id, jobNumber: j?.job_number ?? null, plate: j?.plate ?? "", car: j?.car ?? "", amount: r2(waiting ? p.total_cost_aed : (p.supplier_invoice_amount ?? p.total_cost_aed)), lpoTotal: p.total_cost_aed, parts: mine.length, paidAt: p.paid_at };
     });
     const beforeVat = r2(shares.reduce((a, s) => a + s.amount, 0));
     const vat = vatRegistered ? r2((beforeVat * vatPercent) / 100) : 0;
+    const total = r2(beforeVat + vat);
+    // Paid LPO by LPO: the paid shares with their VAT, the rest still to pay (all or nothing is exactly the total).
+    const paidShares = shares.filter((s) => s.paidAt);
+    const paidAmount = paidShares.length === shares.length ? total : paidShares.length === 0 ? 0 : r2(paidShares.reduce((a, s) => a + s.amount, 0) * (1 + (vatRegistered ? vatPercent / 100 : 0)));
     const mine = lines.filter((l) => items.some((p) => p.id === l.po_id));
     const match: InvoiceMatch[] = [];
     if (!mine.length) match.push("not_linked");
@@ -132,6 +153,7 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
             break;
           }
     }
+    const paidPo = items.filter((p) => p.paid_at).sort((a, b) => String(a.paid_at).localeCompare(String(b.paid_at)))[0] ?? null;
     rows.push({
       key,
       supplier: sup?.name ?? first.supplier_name,
@@ -142,13 +164,19 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
       date: waiting ? null : first.supplier_invoice_date,
       beforeVat,
       vat,
-      total: r2(beforeVat + vat),
+      total,
       shares,
       parts: mine.length,
       match,
       status,
       duplicateOf,
       paid: items.every((p) => !!p.paid_at),
+      partlyPaid: paidShares.length > 0 && paidShares.length < shares.length,
+      paidAmount,
+      unpaidAmount: r2(total - paidAmount),
+      paidAt: paidPo?.paid_at ?? null,
+      paidMethod: paidPo?.paid_method ?? null,
+      paidReference: paidPo?.paid_reference ?? null,
       at: items.map((p) => p.supplier_invoice_at ?? p.received_at).filter((x): x is string => !!x).sort().at(-1) ?? null,
       query,
     });
@@ -164,6 +192,25 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
 }
 
 export type InvoiceFilter = { supplier?: string; from?: string; to?: string; status?: string; unpaid?: boolean; problems?: boolean; q?: string; job?: string };
+
+/**
+ * The Supplier invoices filters as they travel in an address: ONE list read by the screen (its filter form and open
+ * links), its Excel export, and Parts accounts' "Export this tab" on the same screen, so the file always holds what the
+ * screen shows (Unpaid, Match problems and the car included).
+ */
+export const SI_FILTER_KEYS = ["supplier", "from", "to", "status", "unpaid", "problems", "q", "job"] as const;
+export type SiFilterKey = (typeof SI_FILTER_KEYS)[number];
+
+/** The filters to keep in an address, in a fixed order, empty ones left out. */
+export function invoiceFilterParams(sp: Partial<Record<SiFilterKey, string | null | undefined>>): [string, string][] {
+  return SI_FILTER_KEYS.map((k): [string, string] => [k, String(sp[k] ?? "").trim()]).filter(([, v]) => v !== "");
+}
+
+/** The filter from an address (the screen's search params, or an export's query). */
+export function invoiceFilterOf(get: (key: SiFilterKey) => string | null | undefined): InvoiceFilter {
+  const v = (k: SiFilterKey) => String(get(k) ?? "").trim() || undefined;
+  return { supplier: v("supplier"), from: v("from"), to: v("to"), status: v("status"), unpaid: v("unpaid") === "1", problems: v("problems") === "1", q: v("q"), job: v("job") };
+}
 
 /** The filters of the tab: supplier, date range, status, unpaid, match problems, a job, and the search box. */
 export function filterInvoices(rows: InvoiceRow[], f: InvoiceFilter, partNames: Map<string, string[]> = new Map()): InvoiceRow[] {
@@ -185,15 +232,28 @@ export function filterInvoices(rows: InvoiceRow[], f: InvoiceFilter, partNames: 
   });
 }
 
-/** "Unpaid per supplier": the open total of each supplier, biggest first. */
-export function unpaidBySupplier(rows: InvoiceRow[]): { supplier: string; count: number; total: number }[] {
-  const m = new Map<string, { supplier: string; count: number; total: number }>();
+export type UnpaidSupplier = { supplier: string; supplierId: string | null; count: number; total: number; /** The oldest unpaid invoice date (or arrival day). */ oldest: string | null };
+
+/** The LPOs of an invoice still to pay (each one is paid on its own LPO page). */
+export const unpaidShares = (r: InvoiceRow): InvoiceShare[] => (r.status === "waiting" ? [] : r.shares.filter((s) => !s.paidAt));
+
+/**
+ * "Unpaid per supplier": the open total of each supplier (with VAT), biggest first. Keyed by the supplier's id (by the
+ * name only for an LPO typed with no supplier on the list), so two suppliers of the same name never merge. A split
+ * invoice paid on one LPO and not the other counts only what is still to pay. THE one figure of the Supplier invoices
+ * tab, Parts accounts > Payments to suppliers and the suppliers list.
+ */
+export function unpaidBySupplier(rows: InvoiceRow[]): UnpaidSupplier[] {
+  const m = new Map<string, UnpaidSupplier>();
   for (const r of rows) {
-    if (r.paid || r.status === "waiting") continue;
-    const cur = m.get(r.supplier) ?? { supplier: r.supplier, count: 0, total: 0 };
+    if (r.status === "waiting" || r.unpaidAmount <= 0.005) continue;
+    const k = r.supplierId ?? `name:${r.supplier.trim().toLowerCase()}`;
+    const cur = m.get(k) ?? { supplier: r.supplier, supplierId: r.supplierId, count: 0, total: 0, oldest: null };
     cur.count++;
-    cur.total = r2(cur.total + r.total);
-    m.set(r.supplier, cur);
+    cur.total = r2(cur.total + r.unpaidAmount);
+    const day = r.date ?? (r.at ? r.at.slice(0, 10) : null);
+    if (day && (!cur.oldest || day < cur.oldest)) cur.oldest = day;
+    m.set(k, cur);
   }
   return Array.from(m.values()).sort((a, b) => b.total - a.total);
 }

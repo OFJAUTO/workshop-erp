@@ -58,6 +58,10 @@ export const PART_LINE_EXTRA_SELECT = "id, unit, asked_quantity, quantity_change
  *  estimate leaves the parts desk's list by itself once nothing is left to price or check (as it always did). */
 export const estimatePricingReady = () => schemaReady("quotations", "parts_priced_at, parts_priced_by");
 
+/** Suppliers search (3 November 2026, section 12): the person we deal with at the supplier. Migration
+ *  20261203190000_parts_accounts. Before it the "Contact person" box is not shown and nothing reads or writes the column. */
+export const supplierContactReady = () => schemaReady("suppliers", "contact_name");
+
 /** Payment hand-over (2 November 2026, section 3): an advisor's "Payment received – send to accounts". Migration
  *  20261203110000_payment_reports. Before it the button is not shown and nothing reads the table (nothing half-works). */
 export const paymentReportsReady = () => schemaReady("payment_reports", "id, status, payment_id, reminded_at, replaces_id");

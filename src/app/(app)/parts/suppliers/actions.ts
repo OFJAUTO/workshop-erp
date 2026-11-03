@@ -8,6 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { supplierDiscount, type SupplierOption } from "@/lib/parts-rows";
 import { syncLineForPart } from "../actions";
 import { flagZohoAttention, retrySupplierRows } from "@/lib/zoho-sync";
+import { supplierContactReady } from "@/lib/schema-ready";
 
 const back = (msg: string, ok: boolean) => redirect(`/parts/suppliers?${ok ? "message" : "error"}=${encodeURIComponent(msg)}`);
 
@@ -46,7 +47,8 @@ async function flagBillsAfterVatChange(supplierId: string, name: string, nowRegi
   }
 }
 
-function read(formData: FormData) {
+/** The form's fields; the contact person only once its column exists (migration 20261203190000, `contactOn`). */
+function read(formData: FormData, contactOn = false) {
   const name = (blankToNull(formData.get("name")) ?? "").slice(0, 120);
   if (name.length < 2) back("Type the supplier's name.", false);
   const trn = blankToNull(formData.get("trn"))?.replace(/\s+/g, "").slice(0, 20) ?? null;
@@ -60,13 +62,15 @@ function read(formData: FormData) {
     address: blankToNull(formData.get("address"))?.slice(0, 300) ?? null,
     payment_terms: blankToNull(formData.get("payment_terms"))?.slice(0, 120) ?? null,
     notes: blankToNull(formData.get("notes"))?.slice(0, 500) ?? null,
+    // A form without the box (an older tab) never wipes a stored contact.
+    ...(contactOn && formData.has("contact_name") ? { contact_name: blankToNull(formData.get("contact_name"))?.slice(0, 120) ?? null } : {}),
   };
 }
 
 /** Parts, accounts or the owner add a supplier: name, TRN, phone, email, address, payment terms. */
 export async function addSupplier(formData: FormData) {
   const staff = await requirePermission("manageSuppliers");
-  const row = read(formData);
+  const row = read(formData, await supplierContactReady());
   const admin = createAdminClient();
   const { data: same } = await admin.from("suppliers").select("id, is_active").ilike("name", row.name).maybeSingle();
   if (same) {
@@ -86,7 +90,7 @@ export async function addSupplier(formData: FormData) {
 
 export async function updateSupplier(id: string, formData: FormData) {
   const staff = await requirePermission("manageSuppliers");
-  const row = read(formData);
+  const row = read(formData, await supplierContactReady());
   const admin = createAdminClient();
   const { data: before } = await admin.from("suppliers").select("name, trn, default_discount_percent, discount_by_type, vat_registered").eq("id", id).maybeSingle();
   const discounts = readDiscounts(formData);

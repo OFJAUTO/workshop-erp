@@ -419,3 +419,53 @@ Lessons:
 - A count that drives a reminder must count only what the reminded action can clear.
 - `window.history.replaceState(window.history.state, …)` leaves `useSearchParams` stale in Next 16.
 - A child component's mount effect runs before Next's app router patches `history.replaceState`: a URL tidy-up on first load must wait a tick, or Next never hears of it.
+
+Parts accounts, 3 November 2026 (section 12; migration `20261203190000_parts_accounts.sql` adds `suppliers.contact_name` + setting `supplier_credit_wait_days`, dormant behind `supplierContactReady`; note `docs/2-nov-s12-note.md`; tests `tests/unit/parts-accounts.test.mjs` (170 checks) and `npm run test:s12-parts-accounts`). Page `/parts-accounts` (permission `viewPartsAccounts` = owner + accounts, roles.ts only; menu "Parts accounts"; every read through the admin client). THE rules are pure, in `src/lib/parts-accounts-rules.ts` (imports only pure modules: `format`, `part-endings`, `part-state`, `part-units` included):
+- `partLines`: `partStep` is the furthest step, the customer's documents first. The four dots are each their OWN fact, never the ladder position (`partIsOrdered`, `partFullyHere`, `partIsFitted`, invoiced = a tax-invoice sale). `late` = bought, past the expected day, not all here, no ending, whatever document the part is on. The status words come from `lineWords`: plain dates through `formatDate`, plus "· not received yet / partly received / not ordered yet" for a part sold before it is here. `partEnding` gives the endings: refused, then section 7's four (below), then removed, then `partState`.
+- Section 7's endings (integrated 3 November): `endingStateOf(p)` = section 7's `endingOf` (cancelled / return_pending / returned / stock, also the before-migration storage: disposition empty + disposition_at set). Section 7 writes every ending with `removed_at` set and the part INACTIVE, so `loadPartsBase` keeps inactive parts with an ending (and asks for `disposition_at.not.is.null` too) and `partEnding`/`partIsBought`/`returnStateOf` read the ending BEFORE "removed". Words are section 7's `ENDING_LABEL`. Every ending costs 0 on the line (`partCostCounts`; "Cancelled: nothing to pay", "Returned: credit due", "Moved to stock"); cancelled is never bought; returned and return_pending are not in Parts bought (`isBoughtLine`). Returns and credits: returned = on file (else waiting), return_pending = `waiting_credit` (red after `supplier_credit_wait_days`, "Record the credit note" links to `/parts/no-home#cn-<id>`), cancelled = nothing unless its LPO was paid before the cancellation (`cancelledAfterPayment` → `credit_due`, amber, in Problems as credit_missing and in the supplier's credits due), stock = not listed. `expectedCredit(p, line)` = section 7's `returnCreditOf` (typed credit note amount → invoice price on the part's LPO line → LPO price → the part's cost; a cancelled part counts what was ordered). `stale_invoice_cost` counts an ended part's cost as 0, so a part ended after its tax invoice stays red until the invoice is corrected. The credit note columns (`credit_note_number`, `credit_note_date`, `credit_note_amount_aed`) are read only behind `partEndingsReady()`.
+- Units (section 9, integrated 3 November): `qtyWithUnit` is section 9's `qtyWithUnit` through its `cleanUnit` (one display rule); a part's unit is `part_items.unit` behind `partUnitsReady()`, else its request's stored unit.
+- `partSupplierOf`: a part on a MAIN LPO still waiting ("2 suppliers") keeps its own supplier.
+- `salesByPart` + `replacementChain` over `everyPart(base)` = parts + `linkParts` (originals read only to follow their replacement, never listed). A tax invoice line keeps the ORIGINAL part id.
+- `lpoRows` uses `lpoStep` and `poStatus`; the invoice match comes from THE `groupInvoices` rows.
+- `supplierBalances`.
+- `returnStateOf` is THE one Returns reader (`waiting_credit`, `credit_due`, `credit_on_file`, `to_return` = scanned back with no ending, `no_ending` = bought with nothing decided). A never-bought part returns null. `creditNoteOf` is the ONE credit-note function: section 7's `creditNumber` wins, else the number typed on Returns and leftovers (`disposition_note` of a returned part; `typed`), else the scan.
+- `partsProblems`: nine rules. Rule 1 `not_charged` never fires on a live proforma (a car released on credit is charged). The others: not_on_quote, no_supplier_invoice, price_differs, placeholder_cost (open cars from `pricesToFix`, gone cars from `settledCostProblem`), stale_invoice_cost, duplicate_invoice, credit_missing, supplier_no_trn.
+- Free comebacks: an invoice with `warranty_credit_aed` sells its parts at 0 (`notCharged: "warranty"`).
+- `isBoughtLine` / `isChargedLine` are THE rules of the totals AND the chips their boxes open (Parts bought → quick `bought`).
+- Also there: `filterLines`/`filterLpos`/`filterInvoiceRows`/`filterBalances`/`filterReturns`/`filterProblems`, `searchHit` (also compares without spaces), `partsAccountsTotals`, `PA_TABS`/`PA_QUICK`/`PA_STATUS`.
+
+The reads are in `src/lib/parts-accounts.ts`: `loadPartsBase` (cached per request, `pageAll`/`pageAllIn` everywhere, reads `warranty_credit_aed`, reads replaced originals into `linkParts`) and `partsAccountsView`.
+
+Supplier invoices (`src/lib/supplier-invoice-rows.ts`):
+- Paid LPO by LPO: `InvoiceShare.paidAt`; `InvoiceRow.partlyPaid`/`paidAmount`/`unpaidAmount` (with VAT, they add up to `total`); `unpaidShares(r)` = the LPOs still to pay.
+- `unpaidBySupplier` counts `unpaidAmount` and is keyed by supplier id, with `oldest`. It is THE figure of the Owed box, Payments to suppliers and the suppliers list.
+- `SI_FILTER_KEYS` / `invoiceFilterParams` / `invoiceFilterOf` are THE filters in an address, so the screen and both exports always agree.
+
+The screen is ONE shared view, `src/app/(app)/supplier-invoices/SupplierInvoicesView.tsx`:
+- `place` is supplier-invoices | parts-accounts (`siHref`).
+- The actions read a whitelisted hidden `from` to come back to the tab.
+- The answer of Mark checked / Query shows inside the opened invoice next to its buttons (`data-si-outcome`), at the top only when nothing is open; the pages no longer print it.
+- One pay button per unpaid LPO (`data-si-pay`); paid/unpaid lines per LPO (`data-si-share-paid/-unpaid`); `data-si-partly-paid`.
+
+`loadSupplierInvoices({ strict })`:
+- strict throws: Parts accounts, the view (red notice), the suppliers page (red notice), both exports (503), the check/query actions ("Couldn't read … nothing was changed") and `supplierInvoicesToCheckCount`.
+- The default logs with `logAppError('supplier-invoices.load')` and reads as none: the job card and Waiting on you.
+- `notifyInvoiceReceived` never fails a finished save (try/catch + log).
+
+The sheet is `supplierInvoiceSheet`. Export `/api/export/parts-accounts?tab=lines|lpos|invoices|payments|returns|problems|all`: on invoices it takes the tab's own filters; dates go in as Dubai days through `dubaiDay`.
+
+The LPO page's pay card (`id="paid"`) shows for every supplier LPO, a stock order without a car included (`data-stock-order-pay`).
+
+Suppliers: `src/lib/supplier-rules.ts`:
+- `supplierNeedsTrn` = THE no-TRN rule (15 digits), used by the suppliers page, the LPO page and Parts accounts.
+- `supplierSearchHit`: phone through `nationalNumber` (00 / 971 / trunk 0 off, landlines and mobiles both ways), TRN by its digits.
+- `/parts/suppliers?q=&filter=no_trn|unpaid` with `data-supplier-unpaid` "Unpaid AED x (n)".
+
+Hooks: `data-pa-totals/-tile/-tab/-filters/-quick/-list/-row/-state/-problem/-severity/-export/-export-all/-pay/-partly-paid/-record-credit`.
+
+Lessons:
+- `part_items.supplier` is text, so a supplier filter matches by id OR by name, and a main LPO's "N suppliers" name must never stand for the part's supplier.
+- A heavy page should not live-refresh on `part_items` (the Parts table autosaves).
+- A box's figure and the list it opens must come from one shared predicate.
+- A supplier invoice can be split over LPOs that are paid one by one, so "paid" is per LPO, never per invoice.
+- A section built before another section's endings reached main read every ended part as "Removed" and lost it (the endings write the part inactive with removed_at): a list of parts must ask the ONE ending rule before `removed_at` and `is_active`.

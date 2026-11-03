@@ -122,6 +122,9 @@ export const PERMISSIONS = {
   zohoSync: ["owner", "accounts"],
   /** Card and payment-link settlements (the bank's actual fee): accounts and the owner. */
   cardSettlements: ["owner", "accounts"],
+  /** Parts accounts (3 November 2026): every part line, LPO, supplier invoice, supplier payment, return and problem with
+   *  their costs. Accounts and the owner only; the page reads through the server (no SQL policy of its own). */
+  viewPartsAccounts: ["owner", "accounts"],
 } as const satisfies Record<string, readonly RoleId[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
