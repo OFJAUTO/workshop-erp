@@ -7,6 +7,10 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ZOHO_REAL_ORG_ID, zohoBooksNow, zohoFetch, zohoTestOrgId } from "@/lib/zoho";
 import { beforeGoLiveStart, billErpFigures, poForZoho, zohoClearingAccounts } from "@/lib/zoho-sync";
+import { SENDS_ON_PRESS_FILTER, RECON_LOOKBACK_DAYS, dayWaitsForSync, reconDaysDue, reconDue } from "@/lib/zoho-sync-rules";
+
+// PURE, kept importable from here (the e2e route and older callers): the rule itself lives in zoho-sync-rules.
+export { reconDue };
 
 /**
  * Daily reconciliation (phase 4, 27 October 2026): every morning, yesterday per the ERP next to yesterday per
@@ -56,22 +60,6 @@ export function reconOrgFor(day: string, wentLive: boolean, startDate: string, t
 async function orgForDay(day: string): Promise<string | null> {
   const [state, settings, testOrg] = await Promise.all([zohoBooksNow(), getSettings(), zohoTestOrgId()]);
   return reconOrgFor(day, state.live || state.wentLive, String(settings.zoho_golive_start_date ?? ""), testOrg);
-}
-
-/**
- * PURE: is yesterday's check due on this cron run? Never while the queue is still busy (a saturated drain leaves
- * documents for the next run), never before 00:30 the morning after (the evening's last posts land first); then
- * when the day has no row, when its row was written BEFORE the day ended (a manual check mid-day), or — while it
- * is still yesterday — once an hour while it is red, so a difference that cleared itself goes green again.
- */
-export function reconDue(row: { status: string; checked_at: string } | null, day: string, nowMs: number, drainSaturated: boolean): boolean {
-  if (drainSaturated) return false;
-  const dayEnd = Date.parse(`${day}T00:00:00+04:00`) + DAY;
-  if (nowMs < dayEnd + 30 * 60 * 1000) return false;
-  if (!row) return true;
-  const checked = Date.parse(row.checked_at);
-  if (!Number.isFinite(checked) || checked < dayEnd) return true;
-  return row.status === "red" && nowMs - checked >= 3600 * 1000;
 }
 
 type ZohoListRow = Record<string, unknown> & { status?: string; total?: number; amount?: number; payment_mode?: string };
@@ -259,19 +247,45 @@ export async function reconcileDay(day: string): Promise<{ status: "green" | "re
   return { status, org };
 }
 
-/** The morning run, from the five-minute cron: yesterday is checked when reconDue says so (see there). */
-export async function reconcileYesterdayIfDue(opts: { drainSaturated: boolean }): Promise<{ day: string; status: string } | null> {
+/**
+ * MANUAL SYNC (3 November 2026): while the sync waits for someone to press Sync to Zoho, a day whose documents have
+ * not been sent yet would compare "the ERP has it, Zoho does not" and turn red for nothing. The oldest row still
+ * waiting that a press would send (sendsOnPress: never tried, or waiting only on Zoho's own allowance) — a day ending
+ * after it is not compared yet; it gets its check once the documents went (reconcileDueDays walks back to it). A row
+ * that WAS tried and waits for something else (a red bill, a cheque) is a true difference.
+ * Null when nothing unsent stands in the way (or the sync is automatic).
+ */
+export async function firstUnsentAt(): Promise<string | null> {
+  if ((await zohoBooksNow()).auto) return null;
+  const { data } = await createAdminClient().from("zoho_outbox").select("enqueued_at").eq("status", "pending").or(SENDS_ON_PRESS_FILTER).order("enqueued_at").limit(1).maybeSingle();
+  return (data as { enqueued_at?: string } | null)?.enqueued_at ?? null;
+}
+
+/**
+ * The automatic, read-only comparison, from the five-minute cron and after every Sync to Zoho (review of 3 November
+ * 2026): every recent day that is due (reconDaysDue: no row, or a row written before the day ended, and no longer
+ * waiting for Sync to Zoho; yesterday also hourly while red), oldest first, a few per run — not only yesterday, so a
+ * day held back over a day off is still compared once its documents went. Stops at the first problem (logged; the
+ * next run tries again).
+ */
+export async function reconcileDueDays(opts: { drainSaturated: boolean }): Promise<{ day: string; status: string }[]> {
+  const done: { day: string; status: string }[] = [];
   try {
+    if (opts.drainSaturated) return done;
     const now = Date.now();
-    const day = new Date(now + 4 * 3600 * 1000 - DAY).toISOString().slice(0, 10);
-    const { data: row } = await createAdminClient().from("zoho_reconciliation").select("status, checked_at").eq("day", day).maybeSingle();
-    if (!reconDue((row as { status: string; checked_at: string } | null) ?? null, day, now, opts.drainSaturated)) return null;
-    const { status } = await reconcileDay(day);
-    return { day, status };
+    const from = new Date(now + 4 * 3600 * 1000 - RECON_LOOKBACK_DAYS * DAY).toISOString().slice(0, 10);
+    const { data } = await createAdminClient().from("zoho_reconciliation").select("day, status, checked_at").gte("day", from);
+    const rows: Record<string, { status: string; checked_at: string }> = {};
+    for (const r of (data ?? []) as { day: string; status: string; checked_at: string }[]) rows[String(r.day).slice(0, 10)] = { status: r.status, checked_at: r.checked_at };
+    const days = reconDaysDue({ nowMs: now, rows, firstUnsent: await firstUnsentAt(), drainSaturated: false });
+    for (const day of days) {
+      const { status } = await reconcileDay(day);
+      done.push({ day, status });
+    }
   } catch (e) {
-    await logAppError("zoho_reconcile", e, {});
-    return null;
+    await logAppError("zoho_reconcile", e, { detail: { compared: done.map((d) => d.day) } });
   }
+  return done;
 }
 
 /** The first Dubai day any document carries — the reconciliation covers its whole month from there. */
@@ -298,24 +312,29 @@ async function firstDocumentDay(): Promise<string | null> {
 }
 
 /** The backfill: every missing day from the first of the month of the first document to yesterday, oldest first, capped per call. */
-export async function reconcileMissingDays(cap = 40): Promise<{ done: string[]; remaining: number }> {
+export async function reconcileMissingDays(cap = 40): Promise<{ done: string[]; remaining: number; waitingForSync: number }> {
   const admin = createAdminClient();
   const first = await firstDocumentDay();
-  if (!first) return { done: [], remaining: 0 };
+  if (!first) return { done: [], remaining: 0, waitingForSync: 0 };
   const start = `${first.slice(0, 7)}-01`;
   const yesterday = new Date(Date.now() + 4 * 3600 * 1000 - DAY).toISOString().slice(0, 10);
   const { data: haveRows } = await admin.from("zoho_reconciliation").select("day").gte("day", start);
   const have = new Set(((haveRows ?? []) as { day: string }[]).map((r) => String(r.day).slice(0, 10)));
+  // Manual sync: the days whose documents still wait for Sync to Zoho are left for after the next sync.
+  const unsent = await firstUnsentAt();
   const days: string[] = [];
+  let waitingForSync = 0;
   for (let d = new Date(`${start}T00:00:00Z`); ; d = new Date(d.getTime() + DAY)) {
     const day = d.toISOString().slice(0, 10);
     if (day > yesterday) break;
-    if (!have.has(day)) days.push(day);
+    if (have.has(day)) continue;
+    if (dayWaitsForSync(day, unsent)) waitingForSync++;
+    else days.push(day);
   }
   const done: string[] = [];
   for (const day of days.slice(0, cap)) {
     await reconcileDay(day);
     done.push(day);
   }
-  return { done, remaining: Math.max(0, days.length - done.length) };
+  return { done, remaining: Math.max(0, days.length - done.length), waitingForSync };
 }

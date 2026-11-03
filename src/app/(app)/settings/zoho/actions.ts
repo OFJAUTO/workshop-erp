@@ -145,8 +145,9 @@ export async function flipGoLive(formData: FormData) {
   }
   await logGoLive({ action: "live", by: staff.id, name: staff.display_name, at: now, start_date: checklist.startDate, moved, replay }, staff.id);
   await admin.from("audit_log").insert({ table_name: "settings", record_id: "zoho_live_enabled", action: "golive", new_data: { live: true, start_date: checklist.startDate, moved, replay }, changed_by: staff.id }).then(() => null, () => null);
-  await notifyRoles(["owner", "accounts"], { type: "zoho_golive", title: "Zoho Books is LIVE on the REAL organization", body: `Flipped by ${staff.display_name}. Documents from ${checklist.startDate} now post to O F J AUTOMOTIVE WORKS LLC; OFJ TEST is closed for good. Queued: ${replay}.`, href: "/zoho" }).catch(() => null);
-  return back(followupOk ? "message" : "error", `LIVE from ${checklist.startDate}; OFJ TEST is closed for good. Queued for the REAL book: ${replay}.`);
+  const manualWords = (await zohoBooksNow()).auto ? "" : " Nothing goes until someone presses Sync to Zoho on the Zoho Books page: check the preview (it names the REAL book in red), then Yes.";
+  await notifyRoles(["owner", "accounts"], { type: "zoho_golive", title: "Zoho Books is LIVE on the REAL organization", body: `Flipped by ${staff.display_name}. Documents from ${checklist.startDate} now go to O F J AUTOMOTIVE WORKS LLC; OFJ TEST is closed for good. Queued: ${replay}.${manualWords}`, href: "/zoho" }).catch(() => null);
+  return back(followupOk ? "message" : "error", `LIVE from ${checklist.startDate}; OFJ TEST is closed for good. Queued for the REAL book: ${replay}.${manualWords}`);
 }
 
 /** If the follow-up did not finish at the flip, the owner runs it again (it never queues anything twice). */
@@ -203,5 +204,5 @@ export async function resumeGoLive(formData: FormData) {
   await logGoLive({ action: "resume", by: staff.id, name: staff.display_name, at: now }, staff.id);
   await admin.from("audit_log").insert({ table_name: "settings", record_id: "zoho_live_enabled", action: "golive_resume", new_data: { live: true }, changed_by: staff.id }).then(() => null, () => null);
   await notifyRoles(["owner", "accounts"], { type: "zoho_golive", title: "Posting to the REAL Zoho book resumed", body: `Resumed by ${staff.display_name}.`, href: "/zoho" }).catch(() => null);
-  return back("message", "Resumed. The waiting documents post to the REAL book in order over the next few minutes.");
+  return back("message", `Resumed. The waiting documents ${(await zohoBooksNow()).auto ? "post to the REAL book in order over the next few minutes" : "go to the REAL book when someone presses Sync to Zoho on the Zoho Books page (a preview first, then Yes)"}.`);
 }

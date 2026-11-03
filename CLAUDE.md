@@ -371,3 +371,51 @@ Lessons:
 - A stored column default of 'pc' hides the name-based unit, so a request's "pc" is read as "no answer".
 - A rule that holds notifications must be the same rule that puts the car on a to-do list, or a held notice is lost.
 - A send button whose stamp column may not exist yet needs another record of the send (the history event), or the button never shows its answer and sends twice.
+
+Zoho on manual, 3 November 2026 (section 11; migration `20261203180000_zoho_manual_sync.sql`, note `docs/2-nov-s11-note.md`, tests `npm run test:s11-zoho-manual` + `tests/unit/zoho-sync-rules.test.mjs`). The setting `zoho_sync_mode` is 'manual' or 'automatic'; a missing row is MANUAL. `zohoBooksNow()` returns `auto`; `syncModeOf` reads the value. The five-minute cron calls `zohoCronTick` (`src/lib/zoho-manual.ts`). It drains only when automatic (`drainZohoOutbox(limit, { requireAuto: true })`; a switch to manual mid-run stops it). Otherwise it records "Manual: N items waiting for Sync to Zoho" (plus "· M waiting on something else"), so the job is never late. Both modes keep the read-only reconciliation (only where Zoho is configured). ONE row runner, `processOutboxRow` in zoho-sync.ts: the undo hold, the claim, the switch re-read, the handler, and the outcome written under the claim stamp. The outcome is posted, removed (`result.reversed`) or skipped (`result.skipped`) via `doneOutcome`, else failed or waiting. When Zoho's call allowance is used up (`isRateLimitError`), the row waits and the run stops. The runner serves the cron's drain and `runOutboxRows(ids, { deadlineMs, fake })`, which sends exactly the named rows in order (Retry and Sync to Zoho never sweep other rows).
+
+Pure rules in `src/lib/zoho-sync-rules.ts`:
+- words and order: `KIND_WORDS`/`kindWord`/`kindCount`, `resultWords` (it also reads removals: "Removed from Zoho: RCT-…"), `POSTING_ORDER`/`sortForPosting`;
+- THE effect rule `rowEffect` (new / again = already in Zoho / removal = taken back out of Zoho / nothing = voided, cancelled or internal before it was sent) and `effectOfRow`;
+- `buildPreview` with `PREVIEW_GROUPS`: the groups and Money in/out count FIRST POSTS only; `removals` (with its total), `again` and `nothing` are separate lists; held for undo, being sent, `RUN_CAP_TEST_ROWS` 120 on OFJ TEST;
+- THE "a press can move it" rule `sendsOnPress` + `SENDS_ON_PRESS_FILTER`: never tried, or waiting only on Zoho's allowance or `ACCOUNTS_WAIT_WORDS`;
+- `stuckWords`, `retryRefusal` (hand_only and manual rows), `reminderDue`/`reminderWords`;
+- `reconDue` (moved here, re-exported by zoho-reconcile), `reconDaysDue` (`RECON_LOOKBACK_DAYS` 10, `RECON_DAYS_PER_RUN` 3), `reconRunWords`, `dayWaitsForSync`;
+- `runWords`/`tallyItems` (posted, removed, skipped, failed, waiting), `mergeItems`.
+
+ONE document lookup: `outboxDocs(rows, { billFigures })` in `src/lib/zoho-docs.ts`. It gives name, amount, effect and effectWords; a bill's amount is the `billErpFigures` gross; the outbox row's `zoho_id` means "already in Zoho" unless the document is voided.
+
+`zoho-manual.ts` holds:
+- `sendState`: the block words, and `testStub`;
+- `loadSyncPreview` (selects `zoho_id`);
+- `startSyncRun`: only previewed rows that still wait; one running run through a partial unique index;
+- `runSyncChunk`: 45 s per chunk, ids filtered to the run's `outbox_ids`;
+- `finishSyncRun`;
+- `retryOneRow`: refuses with `retryRefusal`;
+- `loadRecentRuns`/`loadRun`;
+- `waitingCounts`: `total` = rows a press would send, plus `stuck`/`stuckWords`. It is THE number for the bell, the menu badge (layout.tsx counts with `SENDS_ON_PRESS_FILTER`), the button and Waiting on you;
+- `zohoWaitingReminder`: housekeeping step 29; "told today" = a `zoho_waiting` notification since the Dubai day began; no bell when only stuck rows remain;
+- `zohoWaitingExtra`: Waiting on you for accounts and the owner;
+- `setSyncMode`: owner only, never viewing or acting; upsert with the label; an audit_log row; a `zoho_sync_mode` bell.
+
+The reconciliation: `reconcileDueDays` runs after every Sync to Zoho and on every cron tick. It covers every day of the last ten that has no row, or whose row was checked before the day ended, and that no longer waits for Sync to Zoho. It goes oldest first, three per run, and stops at the first error. So a Saturday held back over a Sunday off is compared after Monday's sync. `firstUnsentAt` uses `SENDS_ON_PRESS_FILTER`. Accounts are read with `resolveZohoAccounts(..., { create: false })`.
+
+Screens:
+- `ZohoSyncButton`: hooks `data-zoho-sync-open`/`-now`, `-window`, `data-zoho-preview`, `-dest`, `-group` with `data-count`/`data-total`, `-row` with `data-zoho-preview-effect`, `data-zoho-preview-removals` (rows `data-zoho-preview-removal`), `data-zoho-preview-again`, `data-zoho-preview-nothing`, `-held`, `data-zoho-sync-confirm`, `-results`, and `data-zoho-sync-item` (posted / removed / skipped / failed / waiting) with `data-outbox-id`, `-retry`. It watches `useSearchParams` for `sync=1`, so each arrival opens it, including a bell tapped while already on /zoho. It drops the parameter with `history.replaceState(null, …)` one tick later (`setTimeout` 0): Next skips its router sync when given its own `__NA` state, and Next installs its replaceState patch in the app router's own effect, which on the first load runs AFTER the child's effect (a replaceState in the effect itself bypassed Next, the router kept `?sync=1` and a later bell tap on /zoho opened nothing; found by test-s11 at integration).
+- `ZohoSyncModeCard` (`data-zoho-mode-card`, `data-zoho-mode-switch`) sits on /zoho and on Settings > Zoho Books.
+- Last syncs (`data-zoho-run`) and `/zoho?run=<id>` (`data-zoho-run-view`, `data-zoho-run-now`). Retry is hidden with `data-zoho-retry-refused` where `retryRefusal` says so.
+- The /zoho list filters in the database: Failed and Waiting show every row; All and Posted show the newest 400, and All also shows every red row. Chips count in the database (`data-zoho-rows-capped` when cut). Rows carry `id="z-<outbox id>"`.
+- The page sets `maxDuration` 120.
+
+`zoho_sync_runs` (with `removed`/`skipped` counts) is server-only and dormant behind `syncRunsReady()`.
+
+TEST stand-in: an outbox row with `zoho_result.e2e_stub` ('post' | 'fail' | 'fail_once' | 'wait' | 'skip' | 'reverse', plus `e2e_words`) is "sent" by `e2eFake()` only under `isTestEnvironment()`. e2e actions: `manual_cron`, `manual_reminder` ({ nowMs }), `manual_mode_as` ({ role, mode }).
+
+Lessons:
+- A manual run must never call `recordJobRun('zoho')`: it would hide a dead cron.
+- `outboxDocs` reads a supplier credit's amount through section 7's `returnCreditOf` (the handler's own rule), so the preview never shows a returned part at the 0 cost an ending leaves on it.
+- The live Zoho suites drained through the live cron, and on manual they no longer drain.
+- A preview total must count only the money that FIRST reaches Zoho: reopened, voided and internal rows get their own lines.
+- A count that drives a reminder must count only what the reminded action can clear.
+- `window.history.replaceState(window.history.state, …)` leaves `useSearchParams` stale in Next 16.
+- A child component's mount effect runs before Next's app router patches `history.replaceState`: a URL tidy-up on first load must wait a tick, or Next never hears of it.

@@ -61,3 +61,8 @@ export const estimatePricingReady = () => schemaReady("quotations", "parts_price
 /** Payment hand-over (2 November 2026, section 3): an advisor's "Payment received – send to accounts". Migration
  *  20261203110000_payment_reports. Before it the button is not shown and nothing reads the table (nothing half-works). */
 export const paymentReportsReady = () => schemaReady("payment_reports", "id, status, payment_id, reminded_at, replaces_id");
+
+/** Zoho Books on manual (3 November 2026, section 11): the stored "Sync to Zoho" runs (the results list kept after the
+ *  window closes, "Last syncs", one run at a time). Migration 20261203180000_zoho_manual_sync. Before it a run still
+ *  works and shows its results in the window; only the stored history and the one-run lock wait for the table. */
+export const syncRunsReady = () => schemaReady("zoho_sync_runs", "id, status, heartbeat_at, outbox_ids, items, removed, skipped");

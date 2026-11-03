@@ -71,16 +71,20 @@ after it posts to the REAL book by itself.
    - the day-by-day comparisons from the start date are cleared (they were made against OFJ TEST; those days now
      belong to the REAL book and are checked again);
    - the switch turns on: from now on only the REAL book is written, and **OFJ TEST is closed for good**;
-   - every document dated from the start date is queued for the REAL book (the message says how many), and the
-     five-minute sync posts them — customers and suppliers are created (or found) in the REAL book as each document
-     needs them;
+   - every document dated from the start date is queued for the REAL book (the message says how many). Since
+     3 November 2026 the sync is **manual**: nothing goes until Mathew or Omar opens **Zoho Books** and presses
+     **Sync to Zoho** — the window shows how many tax invoices, payments, bills and settlements, with their totals,
+     and names **the REAL book in red**; check it, then **Yes, send**. Customers and suppliers are created (or found)
+     in the REAL book as each document needs them. (If the owner has switched the sync to automatic on Settings >
+     Zoho Books, the five-minute run posts them by itself instead.);
    - every document dated **before** the start date that never reached OFJ TEST (it was still waiting there, for
      example a supplier credit waiting for a bill) is shown **red** on /zoho, to be entered by hand.
 4. The flip is logged with who and when, and Omar and Mathew get a bell. If the queuing part ever fails, the panel
    and the sync page show a red line and a button **"Finish the go-live queue"** — press it (nothing is ever queued
    twice).
-5. When the sync page shows nothing waiting (usually within the hour), Mathew opens **/zoho/reconciliation** and
-   presses **"Check every missing day"**: the days from the start date are compared with the REAL book.
+5. When the sync page shows nothing waiting (after **Sync to Zoho** has sent the queue — OFJ TEST took at most 120
+   rows a press; the REAL book has no such limit), Mathew opens **/zoho/reconciliation** and presses **"Check every
+   missing day"**: the days from the start date are compared with the REAL book.
 
 ## Step 5 — Mathew, on the start date and the days after
 
@@ -102,9 +106,14 @@ after it posts to the REAL book by itself.
      document a second time);
    - closing an invoice with "Done by hand" also turns red every payment of it that had already posted (unapplied):
      apply each to the invoice in Zoho by hand.
-3. Watch **/zoho** daily. **/zoho/reconciliation** checks yesterday by itself every morning (from 00:30, once the
-   queue has caught up), re-checks a red day every hour, and compares each day with the book that owns it — OFJ TEST
-   before the start date, REAL from it. A day that turns red rings one bell.
+3. Press **Sync to Zoho** on **/zoho** every working day (the bell "X items waiting to sync to Zoho" comes at opening
+   time when something waits). **/zoho/reconciliation** checks the days by itself (from 00:30 the next morning, once
+   that day's documents have been sent — on manual a day waits until Sync to Zoho has sent what was queued before it
+   ended). It looks back over the last ten days, so a day that had to wait (the Saturday before a Sunday off, a
+   holiday) is compared right after the next Sync to Zoho, even when it is no longer yesterday; it re-checks yesterday
+   every hour while red, and compares each day with the book that owns it — OFJ TEST before the start date, REAL from
+   it. A day that turns red rings one bell. The go-live checklist's "last seven days green" needs nothing more than the
+   usual Sync to Zoho on working days; days off are caught up by themselves after the next press.
 4. Before closing a month in Zoho, open **/zoho/close** for it and clear every red line.
 
 ## If something goes wrong (Omar)
@@ -112,7 +121,9 @@ after it posts to the REAL book by itself.
 On the same panel, **"Stop posting to the REAL book"** needs a written reason and is logged; accounts get a bell.
 It is a pause: nothing is written to any Zoho book (OFJ TEST stays closed — the go-live switch runs only once), and
 every new document waits in the queue. **Nothing already posted is removed.** When the problem is fixed, type
-**REAL** and press **"Resume posting to the REAL book"**: the waiting documents post in order.
+**REAL** and press **"Resume posting to the REAL book"**: the waiting documents go with the next **Sync to Zoho**
+(or by themselves when the sync is automatic). While posting is stopped, the Sync to Zoho window says so and its
+Yes button stays off.
 
 ---
 
@@ -122,7 +133,10 @@ every new document waits in the queue. **Nothing already posted is removed.** Wh
 - Deposits stay unapplied in Zoho until their invoice exists; then the invoice takes them.
 - Supplier bills carry the supplier's own figures, the courier as its own line and the scan attached; a supplier
   credit (a part returned to the supplier) waits for its bill and is applied to it.
-- The sync runs by itself every five minutes on the live server; **Sync now** on /zoho is only for impatience.
+- Since 3 November 2026 the sync is **manual**: nothing goes to Zoho until the owner or accounts press **Sync to
+  Zoho** on /zoho (a preview with the counts and totals, then **Yes, send**, then the results: posted, failed with the
+  reason and **Retry**, still waiting with the reason). The owner alone can switch it to **automatic** (every five
+  minutes, 25 at a time, no preview) on Settings > Zoho Books, and back.
 
 ### Paying a supplier (accounts)
 

@@ -11,6 +11,8 @@ import { loadUnsettled } from "./card-settlements";
 import { formatPlate } from "./types";
 import { formatDate } from "./format";
 import { unallocatedOf } from "./customer-money";
+import { kindWord } from "./zoho-sync-rules";
+import { zohoWaitingExtra } from "./zoho-manual";
 
 const PLATE_SELECT = "kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant";
 type PlateRow = Parameters<typeof formatPlate>[0];
@@ -156,22 +158,10 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
   // (a void, a bounce, a credit note), so the reason itself carries the action, not a "did not post" prefix.
   const { data: zoho } = await admin.from("zoho_outbox").select("id, kind, last_error, enqueued_at").eq("status", "failed").order("enqueued_at").limit(20);
   for (const z of (zoho ?? []) as { id: string; kind: string; last_error: string | null; enqueued_at: string }[]) {
-    const kindWord =
-      z.kind === "invoice" ? "Tax invoice"
-      : z.kind === "contact" ? "Customer"
-      : z.kind === "deposit" ? "Deposit"
-      : z.kind === "creditnote" ? "Credit note"
-      : z.kind === "vendor" ? "Supplier"
-      : z.kind === "bill" ? "Supplier bill"
-      : z.kind === "billpayment" ? "Supplier payment"
-      : z.kind === "commission" ? "Commission"
-      : z.kind === "recovery" ? "Recovery month"
-      : z.kind === "vendorcredit" ? "Supplier credit"
-      : z.kind === "cnrefund" ? "Customer refund"
-      : z.kind === "settlement" ? "Card settlement"
-      : "Payment";
-    out.push({ jobId: `zoho:${z.id}`, plate: "Zoho Books", car: null, what: `${kindWord}: ${(z.last_error ?? "see the sync page").slice(0, 140)}`, amount: null, actionLabel: "Open the sync page", href: "/zoho?show=failed", always: true, urgency: "amber", since: z.enqueued_at });
+    out.push({ jobId: `zoho:${z.id}`, plate: "Zoho Books", car: null, what: `${kindWord(z.kind)}: ${(z.last_error ?? "see the sync page").slice(0, 140)}`, amount: null, actionLabel: "Open the sync page", href: "/zoho?show=failed", always: true, urgency: "amber", since: z.enqueued_at });
   }
+  // 6b. Zoho Books on manual (3 November 2026): what waits for Sync to Zoho, one line with the button behind it.
+  out.push(...(await zohoWaitingExtra()));
 
   // 8. Card and payment-link money still in the clearing account three working days after it was taken: the bank
   // should have paid it out; record the settlement (27 October 2026). One amber row per method.

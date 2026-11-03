@@ -149,13 +149,15 @@ export async function zohoLiveNow(): Promise<boolean> {
  * The books' state read fresh: live (posting to REAL), and whether they EVER went live. The switch runs once:
  * after it OFJ TEST is never written again, and "stop" only pauses posting to the REAL book (live false, wentLive true).
  */
-export async function zohoBooksNow(): Promise<{ live: boolean; wentLive: boolean }> {
-  const { data, error } = await createAdminClient().from("settings").select("key, value").in("key", ["zoho_live_enabled", "zoho_went_live_at"]);
+export async function zohoBooksNow(): Promise<{ live: boolean; wentLive: boolean; auto: boolean }> {
+  const { data, error } = await createAdminClient().from("settings").select("key, value").in("key", ["zoho_live_enabled", "zoho_went_live_at", "zoho_sync_mode"]);
   if (error) throw new ZohoError(`The go-live switch could not be read: ${error.message}`);
   const rows = (data ?? []) as { key: string; value: unknown }[];
   const live = rows.find((r) => r.key === "zoho_live_enabled")?.value === true;
   const went = rows.find((r) => r.key === "zoho_went_live_at")?.value;
-  return { live, wentLive: typeof went === "string" && went.trim() !== "" };
+  // 3 November 2026: the sync is MANUAL unless the owner switched it to automatic (a missing row is manual).
+  const auto = rows.find((r) => r.key === "zoho_sync_mode")?.value === "automatic";
+  return { live, wentLive: typeof went === "string" && went.trim() !== "", auto };
 }
 
 export async function zohoTestOrgId(): Promise<string | null> {

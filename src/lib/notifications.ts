@@ -115,6 +115,8 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "background_job_late", label: "A background job (mailbox check, hourly housekeeping) has not run on time (owner)", locked: true },
   { type: "zoho_reconciliation", label: "The daily Zoho reconciliation found a difference (owner, accounts)", locked: true },
   { type: "zoho_golive", label: "The Zoho go-live switch was flipped (owner, accounts)", locked: true },
+  { type: "zoho_waiting", label: "Zoho Books on manual: items waiting to sync to Zoho (once a working day, owner and accounts)", locked: true },
+  { type: "zoho_sync_mode", label: "Zoho Books switched between manual and automatic sending (owner, accounts)", locked: true },
   { type: "film_waste", label: "A film roll finished with too many metres unaccounted", locked: true },
   { type: "aftercare_due", label: "A 10-day after-care check due or missed", locked: true },
   { type: "scan_approval", label: "A technician asks to skip the pre-scan", locked: true },

@@ -10,13 +10,16 @@ import { ZOHO_REAL_ORG_ID, ZohoError, listAccounts, listTaxes, zohoBooksNow, zoh
 import { positionsWords } from "@/lib/parts-list";
 import { returnCreditOf } from "@/lib/part-endings";
 import { schemaReady } from "@/lib/schema-ready";
+import { isTestEnvironment } from "@/lib/environment";
+import { ACCOUNTS_WAIT_WORDS, CLAIM_FRESH_MS, POSTING_ORDER, RATE_LIMIT_WORDS, doneOutcome, isRateLimitError, resultWords, type RunItem } from "@/lib/zoho-sync-rules";
 
 /**
  * Zoho Books, phase 1 (26 October 2026, docs/zoho-plan.md): customers, tax invoices, payments and deposits post to
  * Zoho through the zoho_outbox table. The screens only ENQUEUE (a plain database insert that works everywhere);
- * the WORKER (drainZohoOutbox) talks to Zoho and runs only where the Zoho secret lives: the five-minute cron on
- * the live site and the Sync now button. One-way: the only things ever read back are Zoho ids and the figures
- * stored on the outbox row to prove the match.
+ * the WORKER talks to Zoho and runs only where the Zoho secret lives. Since 3 November 2026 it runs when the owner
+ * or accounts press Sync to Zoho (a preview first, then exactly those rows: runOutboxRows); the five-minute cron
+ * sends by itself (drainZohoOutbox) only while the owner switched the sync to automatic. One-way: the only things
+ * ever read back are Zoho ids and the figures stored on the outbox row to prove the match.
  *
  * The hard rules, in order:
  *  - Writes go only to the organization zohoWriteOrg() names: OFJ TEST until the owner turns the go-live switch
@@ -265,27 +268,30 @@ export function forgetZohoAccounts(): void {
   accountsCache.clear();
 }
 
-async function resolveZohoAccounts(org: string, map: ZohoAccountMap): Promise<Resolved> {
-  const key = `${org}|${JSON.stringify(map)}`;
+async function resolveZohoAccounts(org: string, map: ZohoAccountMap, opts: { create?: boolean } = {}): Promise<Resolved> {
+  // 3 November 2026: a READ-ONLY resolve (the reconciliation) never creates a missing account in OFJ TEST; only the
+  // sending worker may. The flag is part of the key, so a read-only answer never stands in for the worker's.
+  const create = opts.create !== false;
+  const key = `${org}|${create ? "make" : "read"}|${JSON.stringify(map)}`;
   const hit = accountsCache.get(key);
   if (hit && Date.now() - hit.at < ACCOUNTS_TTL_MS) return hit.value;
-  const value = await resolveZohoAccountsFresh(org, map);
+  const value = await resolveZohoAccountsFresh(org, map, create);
   accountsCache.set(key, { at: Date.now(), value });
   return value;
 }
 
-async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap): Promise<Resolved> {
+async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create = true): Promise<Resolved> {
   const [taxes, chart] = await Promise.all([listTaxes(org), listAccounts(org)]);
   const tax = taxes.find((t) => Number(t.tax_percentage) === 5);
   if (!tax) throw new ZohoError("No 5% tax exists in this Zoho organization. Run the mirror on Settings > Zoho Books.");
   const byName = new Map(chart.filter((a) => a.is_active !== false).map((a) => [a.account_name.trim().toLowerCase(), a]));
-  const mayCreate = org !== ZOHO_REAL_ORG_ID;
+  const mayCreate = create && org !== ZOHO_REAL_ORG_ID;
   const resolve = async (name: string | undefined, label: string, kind: "income" | "cash" | "bank" | "expense"): Promise<string> => {
     const clean = (name ?? "").trim();
     if (!clean) throw new ZohoError(`Mapping missing: ${label}. Pick the account on Settings > Zoho Books > Mapping.`);
     const found = byName.get(clean.toLowerCase());
     if (found) return found.account_id;
-    if (!mayCreate) throw new ZohoError(`Account not found in this organization: ${clean}. The accountant creates it in Zoho first.`);
+    if (!mayCreate) throw new ZohoError(create ? `Account not found in this organization: ${clean}. The accountant creates it in Zoho first.` : `Account not found in this organization: ${clean} (the next Sync to Zoho makes it in OFJ TEST; in the REAL book the accountant creates it).`);
     // OFJ TEST only: make the mapped account so testing never waits on the accountant.
     const made =
       kind === "bank"
@@ -1976,10 +1982,12 @@ async function syncSettlementRow(org: string, accounts: Resolved, settlementId: 
   return { zohoId: transferId ?? feeId, result: { settlement: st.number, method: st.method, gross: round2(Number(st.gross_aed) || 0), received, fee, transfer_id: transferId, fee_expense_id: feeId, reference } };
 }
 
-/** The two clearing accounts' Zoho ids in an organization (for the daily reconciliation), or the reason they cannot be read. */
+/** The two clearing accounts' Zoho ids in an organization (for the daily reconciliation), or the reason they cannot be read.
+ *  READ-ONLY (3 November 2026): the reconciliation only reads, so a mapped account missing from the chart is never
+ *  created here — only the sending worker makes one in OFJ TEST. */
 export async function zohoClearingAccounts(org: string): Promise<{ card: string; link: string } | { error: string }> {
   try {
-    const accounts = await resolveZohoAccounts(org, readZohoMap(await getSettings()));
+    const accounts = await resolveZohoAccounts(org, readZohoMap(await getSettings()), { create: false });
     return { card: accounts.depositTo.card, link: accounts.depositTo.link };
   } catch (e) {
     return { error: e instanceof Error ? e.message : String(e) };
@@ -1990,111 +1998,222 @@ export async function zohoClearingAccounts(org: string): Promise<{ card: string;
 
 export type DrainReport = { pushed: number; failed: number; waiting: number; skipped?: string };
 
-const KIND_ORDER: Record<ZohoKind, number> = { contact: 0, vendor: 1, deposit: 2, invoice: 3, creditnote: 4, payment: 5, cnrefund: 6, bill: 7, vendorcredit: 8, billpayment: 9, commission: 10, recovery: 11, settlement: 12 };
+/** THE posting order lives with the pure rules (zoho-sync-rules.ts), shared by the cron's batches and the manual sync. */
+const KIND_ORDER = POSTING_ORDER;
+
+/** The words when nothing can be sent at all, the same on the cron, the button and Retry. */
+export const NOT_SET_UP_WORDS = "Zoho is not set up on this server (ZOHO_CLIENT_ID / ZOHO_CLIENT_SECRET).";
+export const STOPPED_WORDS = "Posting to the REAL book is stopped by the owner: documents wait in the queue until Resume (Settings > Zoho Books).";
+export const NO_TEST_ORG_WORDS = "No test organization is picked on Settings > Zoho Books.";
+
+/** A stand-in for Zoho on the TEST server only (the e2e proof of the manual sync): applies to the rows a test marked. */
+export type FakeZoho = { applies: (row: WorkRow) => boolean; run: (row: WorkRow, attempt: number) => HandlerOut };
+
+type WorkRow = Pick<OutboxRow, "id" | "kind" | "record_id" | "attempts" | "enqueued_at"> & { zoho_result?: Record<string, unknown> | null };
+
+/** What one run carries from row to row: the organization, the switch as it was at the start, the accounts read once. */
+type RunCtx = {
+  org: string | null;
+  atStart: { live: boolean; wentLive: boolean; auto: boolean };
+  undoMinutes: number;
+  /** The cron in automatic mode: a switch to manual mid-run stops it at the next row. */
+  requireAuto?: boolean;
+  fake?: FakeZoho;
+  accounts: Resolved | null;
+  accountsError: string | null;
+  accountsFatal: boolean;
+};
+
+type RowDone = { outcome: "posted" | "removed" | "skipped" | "failed" | "waiting" | "held" | "busy" | "stop"; words: string | null; result?: Record<string, unknown> | null; stop?: string };
 
 /**
- * The five-minute worker (and the Sync now button): the rows looked at longest ago first (a row that waited goes to
- * the back, so rows that wait for days can never starve the rest), contacts before deposits before invoices before
- * payments within a batch, one Zoho call at a time (zohoFetch's own queue), every row's outcome written on the row.
- * A row that cannot run yet (a cheque not cleared, an invoice not in Zoho) stays pending with the reason; a real
- * refusal goes FAILED and shows amber on the accounts' Waiting on you; a document that posted but still needs a
- * by-hand step goes FAILED too, keeping its Zoho id and figures.
+ * ONE row through Zoho (3 November 2026: shared by the five-minute worker and the manual Sync to Zoho): the undo
+ * hold, the claim (two runs never post the same row), the go-live switch re-read, the handler, and the outcome
+ * written on the row under the claim stamp. Zoho's call allowance used up = the row waits and the run stops.
  */
-export async function drainZohoOutbox(limit = 25): Promise<DrainReport> {
-  if (!zohoConfigured()) return { pushed: 0, failed: 0, waiting: 0, skipped: "Zoho is not set up on this server (ZOHO_CLIENT_ID / ZOHO_CLIENT_SECRET)." };
-  // The organization comes from the switch as it stands NOW (not the request's cached settings).
-  const atStart = await zohoBooksNow();
-  if (!atStart.live && atStart.wentLive) return { pushed: 0, failed: 0, waiting: 0, skipped: "Posting to the REAL book is stopped by the owner: documents wait in the queue until Resume (Settings > Zoho Books)." };
-  const org = atStart.live ? ZOHO_REAL_ORG_ID : await zohoTestOrgId();
-  if (!org) return { pushed: 0, failed: 0, waiting: 0, skipped: "No test organization is picked on Settings > Zoho Books." };
+async function processOutboxRow(row: WorkRow, ctx: RunCtx): Promise<RowDone> {
+  if (heldForUndo(row.kind, row.enqueued_at, ctx.undoMinutes)) return { outcome: "held", words: `Recorded in the last ${ctx.undoMinutes} minutes: it can still be undone, so it goes with the next sync.` };
   const admin = createAdminClient();
   // A claim older than ten minutes belongs to a worker that died: the row may be taken again.
-  const cutoff = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const cutoff = new Date(Date.now() - CLAIM_FRESH_MS).toISOString();
+  // The claim: two runs at once (the cron next to a Sync to Zoho, or two people) never run the same row twice — the
+  // row is marked in flight, not just version-checked, so a run that STARTS mid-handler cannot take it either.
+  const now = new Date().toISOString();
+  const { data: claimed } = await admin.from("zoho_outbox").update({ claimed_at: now, attempts: row.attempts + 1, updated_at: now }).eq("id", row.id).eq("status", "pending").or(`claimed_at.is.null,claimed_at.lt.${cutoff}`).select("id");
+  if (!claimed?.length) return { outcome: "busy", words: "Another run is sending it at this moment." };
+  // The go-live switch moved (or posting was stopped, or the owner switched the cron to manual) while this run was
+  // going: release the row and stop; the next run starts on the right organization — or not at all.
+  const nowState = await zohoBooksNow();
+  if (nowState.live !== ctx.atStart.live || nowState.wentLive !== ctx.atStart.wentLive || (ctx.requireAuto && !nowState.auto)) {
+    await admin.from("zoho_outbox").update({ claimed_at: null, attempts: row.attempts }).eq("id", row.id).eq("claimed_at", now);
+    const stop = ctx.requireAuto && !nowState.auto ? "The owner switched Zoho Books to manual during this run: nothing more is sent until someone presses Sync to Zoho." : "The go-live switch changed during this run; the next run continues on the new organization.";
+    return { outcome: "stop", words: stop, stop };
+  }
+  try {
+    let out: HandlerOut;
+    if (ctx.fake && ctx.fake.applies(row)) out = ctx.fake.run(row, row.attempts + 1);
+    else if (!ctx.org) throw new ZohoError(NOT_SET_UP_WORDS);
+    else if (row.kind === "contact") out = { zohoId: await ensureContact(ctx.org, row.record_id) };
+    else if (row.kind === "vendor") out = { zohoId: await ensureVendor(ctx.org, row.record_id) };
+    else {
+      const org = ctx.org;
+      if (!ctx.accounts && !ctx.accountsError) {
+        try {
+          ctx.accounts = await resolveZohoAccounts(org, readZohoMap(await getSettings()));
+        } catch (e) {
+          ctx.accountsError = e instanceof Error ? e.message : String(e);
+          // Only a problem a human must fix (the mapping, the connection) fails rows; a hiccup waits.
+          ctx.accountsFatal = /Mapping missing|not found in this organization|No 5% tax|not connected|cannot be read|Pick the OFJ TEST/i.test(ctx.accountsError);
+        }
+      }
+      const accounts = ctx.accounts;
+      if (!accounts) {
+        if (ctx.accountsFatal) throw new ZohoError(ctx.accountsError ?? "The account mapping could not be read.");
+        if (isRateLimitError(ctx.accountsError ?? "")) throw new ZohoError(ctx.accountsError ?? "rate limit");
+        out = { wait: `${ACCOUNTS_WAIT_WORDS}: ${ctx.accountsError ?? "unknown"}` };
+      } else {
+        out =
+          row.kind === "invoice" ? await syncInvoiceRow(org, accounts, row.record_id)
+          : row.kind === "creditnote" ? await syncCreditNoteRow(org, accounts, row.record_id)
+          : row.kind === "bill" ? await syncBillRow(org, accounts, row.record_id)
+          : row.kind === "billpayment" ? await syncBillPaymentRow(org, accounts, row.record_id)
+          : row.kind === "commission" ? await syncCommissionRow(org, accounts, row.record_id)
+          : row.kind === "recovery" ? await syncRecoveryRow(org, accounts, row.record_id)
+          : row.kind === "vendorcredit" ? await syncVendorCreditRow(org, accounts, row.record_id)
+          : row.kind === "cnrefund" ? await syncCnRefundRow(org, accounts, row.record_id)
+          : row.kind === "settlement" ? await syncSettlementRow(org, accounts, row.record_id)
+          : await syncPaymentRow(org, accounts, row.record_id);
+      }
+    }
+    // Every outcome write carries the claim stamp: a row reopened mid-flight (a proof uploaded while the
+    // handler ran) keeps its fresh pending state and runs again, instead of being marked synced over it.
+    if (out.wait) {
+      await admin.from("zoho_outbox").update({ last_error: out.wait, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now);
+      return { outcome: "waiting", words: out.wait };
+    }
+    if (out.attention) {
+      // Posted, with a by-hand step left: red with the words, the Zoho id and figures kept (Done by hand closes it).
+      const { data: s } = await admin.from("zoho_outbox").update({ status: "failed", synced_at: new Date().toISOString(), zoho_id: out.zohoId ?? null, zoho_result: out.result ?? null, last_error: out.attention.slice(0, 500), claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now).select("id");
+      return s?.length ? { outcome: "failed", words: out.attention.slice(0, 500), result: out.result ?? null } : { outcome: "waiting", words: "Changed while it was being sent: it goes again with the next sync." };
+    }
+    const { data: s } = await admin.from("zoho_outbox").update({ status: "synced", synced_at: new Date().toISOString(), zoho_id: out.zohoId ?? null, zoho_result: out.result ?? null, last_error: null, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now).select("id");
+    // Posted, taken back out of Zoho (a void or reversal after it posted), or closed with nothing sent (voided before it
+    // went, internal, before the go-live start): three different answers on the results list, never all "posted".
+    return s?.length ? { outcome: doneOutcome(out.result ?? null), words: resultWords(row.kind, out.result ?? null), result: out.result ?? null } : { outcome: "waiting", words: "Changed while it was being sent: it goes again with the next sync." };
+  } catch (e) {
+    const msg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+    // Zoho's own call allowance used up (OFJ TEST: 1,000 a day): nothing is wrong with the document — it waits, and
+    // the run stops instead of burning the rest of the list on the same refusal.
+    if (isRateLimitError(msg)) {
+      await admin.from("zoho_outbox").update({ last_error: RATE_LIMIT_WORDS, claimed_at: null, attempts: row.attempts, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now);
+      return { outcome: "stop", words: RATE_LIMIT_WORDS, stop: RATE_LIMIT_WORDS };
+    }
+    // An account Zoho no longer knows (renamed or removed there): the next run reads the chart afresh.
+    if (/account|tax/i.test(msg)) forgetZohoAccounts();
+    const { data: f } = await admin.from("zoho_outbox").update({ status: "failed", last_error: msg, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now).select("id");
+    if (!(ctx.fake && ctx.fake.applies(row))) await logAppError("zoho_sync", e, { detail: { kind: row.kind, record: row.record_id } });
+    return f?.length ? { outcome: "failed", words: msg } : { outcome: "waiting", words: "Changed while it was being sent: it goes again with the next sync." };
+  }
+}
+
+async function undoMinutesNow(): Promise<number> {
+  return Number(((await getSettings()) as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES;
+}
+
+/**
+ * The AUTOMATIC worker (the five-minute cron, only while the owner chose "automatic"): the rows looked at longest ago
+ * first (a row that waited goes to the back, so rows that wait for days can never starve the rest), contacts before
+ * deposits before invoices before payments within a batch, one Zoho call at a time (zohoFetch's own queue), every
+ * row's outcome written on the row. A row that cannot run yet (a cheque not cleared, an invoice not in Zoho) stays
+ * pending with the reason; a real refusal goes FAILED and shows amber on the accounts' Waiting on you; a document
+ * that posted but still needs a by-hand step goes FAILED too, keeping its Zoho id and figures.
+ */
+export async function drainZohoOutbox(limit = 25, opts: { requireAuto?: boolean } = {}): Promise<DrainReport> {
+  if (!zohoConfigured()) return { pushed: 0, failed: 0, waiting: 0, skipped: NOT_SET_UP_WORDS };
+  // The organization comes from the switch as it stands NOW (not the request's cached settings).
+  const atStart = await zohoBooksNow();
+  if (opts.requireAuto && !atStart.auto) return { pushed: 0, failed: 0, waiting: 0, skipped: "Manual mode: nothing is sent until someone presses Sync to Zoho." };
+  if (!atStart.live && atStart.wentLive) return { pushed: 0, failed: 0, waiting: 0, skipped: STOPPED_WORDS };
+  const org = atStart.live ? ZOHO_REAL_ORG_ID : await zohoTestOrgId();
+  if (!org) return { pushed: 0, failed: 0, waiting: 0, skipped: NO_TEST_ORG_WORDS };
+  const admin = createAdminClient();
+  const cutoff = new Date(Date.now() - CLAIM_FRESH_MS).toISOString();
   const { data } = await admin.from("zoho_outbox").select("id, kind, record_id, attempts, enqueued_at").eq("status", "pending").or(`claimed_at.is.null,claimed_at.lt.${cutoff}`).order("updated_at").limit(limit);
-  const rows = (data ?? []) as Pick<OutboxRow, "id" | "kind" | "record_id" | "attempts" | "enqueued_at">[];
+  const rows = (data ?? []) as WorkRow[];
   const report: DrainReport = { pushed: 0, failed: 0, waiting: 0 };
   if (!rows.length) return report;
   rows.sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.enqueued_at.localeCompare(b.enqueued_at));
-  let accounts: Resolved | null = null;
-  let accountsError: string | null = null;
-  let accountsFatal = false;
   // 1 November 2026 (B3): a payment, deposit or supplier payment waits out the undo window before it posts.
-  const undoMinutes = Number(((await getSettings()) as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES;
+  const ctx: RunCtx = { org, atStart, undoMinutes: await undoMinutesNow(), requireAuto: opts.requireAuto, accounts: null, accountsError: null, accountsFatal: false };
   for (const row of rows) {
-    if (heldForUndo(row.kind, row.enqueued_at, undoMinutes)) {
-      report.waiting++;
-      continue;
-    }
-    // The claim: two drains at once (the cron next to a Sync now) never run the same row twice — the row is
-    // marked in flight, not just version-checked, so a drain that STARTS mid-handler cannot take it either.
-    const now = new Date().toISOString();
-    const { data: claimed } = await admin.from("zoho_outbox").update({ claimed_at: now, attempts: row.attempts + 1, updated_at: now }).eq("id", row.id).eq("status", "pending").or(`claimed_at.is.null,claimed_at.lt.${cutoff}`).select("id");
-    if (!claimed?.length) continue;
-    // The go-live switch moved (or posting was stopped) while this run was going: release the row and stop; the
-    // next run starts on the right organization — or not at all while stopped.
-    const nowState = await zohoBooksNow();
-    if (nowState.live !== atStart.live || nowState.wentLive !== atStart.wentLive) {
-      await admin.from("zoho_outbox").update({ claimed_at: null, attempts: row.attempts }).eq("id", row.id).eq("claimed_at", now);
-      report.skipped = "The go-live switch changed during this run; the next run continues on the new organization.";
+    const r = await processOutboxRow(row, ctx);
+    // The cron's counts: a removal or a closed row is finished work like a post (its own words are on the row).
+    if (r.outcome === "posted" || r.outcome === "removed" || r.outcome === "skipped") report.pushed++;
+    else if (r.outcome === "failed") report.failed++;
+    else if (r.outcome === "waiting" || r.outcome === "held") report.waiting++;
+    else if (r.outcome === "stop") {
+      report.skipped = r.stop;
       break;
-    }
-    try {
-      let out: HandlerOut;
-      if (row.kind === "contact") out = { zohoId: await ensureContact(org, row.record_id) };
-      else if (row.kind === "vendor") out = { zohoId: await ensureVendor(org, row.record_id) };
-      else {
-        if (!accounts && !accountsError) {
-          try {
-            accounts = await resolveZohoAccounts(org, readZohoMap(await getSettings()));
-          } catch (e) {
-            accountsError = e instanceof Error ? e.message : String(e);
-            // Only a problem a human must fix (the mapping, the connection) fails rows; a hiccup waits.
-            accountsFatal = /Mapping missing|not found in this organization|No 5% tax|not connected|cannot be read|Pick the OFJ TEST/i.test(accountsError);
-          }
-        }
-        if (!accounts) {
-          if (accountsFatal) throw new ZohoError(accountsError ?? "The account mapping could not be read.");
-          out = { wait: `Zoho could not be reached for the chart of accounts: ${accountsError ?? "unknown"}` };
-        } else {
-          out =
-            row.kind === "invoice" ? await syncInvoiceRow(org, accounts, row.record_id)
-            : row.kind === "creditnote" ? await syncCreditNoteRow(org, accounts, row.record_id)
-            : row.kind === "bill" ? await syncBillRow(org, accounts, row.record_id)
-            : row.kind === "billpayment" ? await syncBillPaymentRow(org, accounts, row.record_id)
-            : row.kind === "commission" ? await syncCommissionRow(org, accounts, row.record_id)
-            : row.kind === "recovery" ? await syncRecoveryRow(org, accounts, row.record_id)
-            : row.kind === "vendorcredit" ? await syncVendorCreditRow(org, accounts, row.record_id)
-            : row.kind === "cnrefund" ? await syncCnRefundRow(org, accounts, row.record_id)
-            : row.kind === "settlement" ? await syncSettlementRow(org, accounts, row.record_id)
-            : await syncPaymentRow(org, accounts, row.record_id);
-        }
-      }
-      // Every outcome write carries the claim stamp: a row reopened mid-flight (a proof uploaded while the
-      // handler ran) keeps its fresh pending state and runs again, instead of being marked synced over it.
-      if (out.wait) {
-        await admin.from("zoho_outbox").update({ last_error: out.wait, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now);
-        report.waiting++;
-      } else if (out.attention) {
-        // Posted, with a by-hand step left: red with the words, the Zoho id and figures kept (Done by hand closes it).
-        const { data: s } = await admin.from("zoho_outbox").update({ status: "failed", synced_at: new Date().toISOString(), zoho_id: out.zohoId ?? null, zoho_result: out.result ?? null, last_error: out.attention.slice(0, 500), claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now).select("id");
-        if (s?.length) report.failed++;
-        else report.waiting++;
-      } else {
-        const { data: s } = await admin.from("zoho_outbox").update({ status: "synced", synced_at: new Date().toISOString(), zoho_id: out.zohoId ?? null, zoho_result: out.result ?? null, last_error: null, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now).select("id");
-        if (s?.length) report.pushed++;
-        else report.waiting++;
-      }
-    } catch (e) {
-      const msg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
-      // An account Zoho no longer knows (renamed or removed there): the next run reads the chart afresh.
-      if (/account|tax/i.test(msg)) forgetZohoAccounts();
-      const { data: f } = await admin.from("zoho_outbox").update({ status: "failed", last_error: msg, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", row.id).eq("claimed_at", now).select("id");
-      if (f?.length) report.failed++;
-      else report.waiting++;
-      await logAppError("zoho_sync", e, { detail: { kind: row.kind, record: row.record_id } });
     }
   }
   return report;
+}
+
+/** One manual run's answer: what happened to each row taken, the rows left for the next call, and why it stopped. */
+export type RowsRunResult = { items: RunItem[]; left: string[]; stopped: string | null };
+
+/**
+ * THE MANUAL SYNC (3 November 2026): exactly the named rows, in the order given (the preview's posting order), until
+ * the deadline — never any other row (Retry sends its one row; Sync to Zoho sends what the person saw). The same
+ * per-row rules as the automatic worker. A row no longer waiting reports what became of it; when nothing can be sent
+ * (Zoho not set up here, posting stopped, no test organization) the rows are left untouched with the reason.
+ */
+export async function runOutboxRows(ids: string[], opts: { deadlineMs: number; fake?: FakeZoho }): Promise<RowsRunResult> {
+  // The stand-in only ever runs on the TEST server; anywhere else it is ignored.
+  const fake = opts.fake && isTestEnvironment() ? opts.fake : undefined;
+  const items: RunItem[] = [];
+  const want = Array.from(new Set(ids.filter((x) => /^[0-9a-f-]{36}$/i.test(x))));
+  if (!want.length) return { items, left: [], stopped: null };
+  const admin = createAdminClient();
+  const byId = new Map<string, WorkRow & { status: string; last_error: string | null }>();
+  for (let i = 0; i < want.length; i += 150) {
+    const { data, error } = await admin.from("zoho_outbox").select("id, kind, record_id, attempts, enqueued_at, status, last_error, zoho_result").in("id", want.slice(i, i + 150));
+    if (error) throw new Error(error.message);
+    for (const r of (data ?? []) as (WorkRow & { status: string; last_error: string | null })[]) byId.set(r.id, r);
+  }
+  const atStart = await zohoBooksNow();
+  let block: string | null = null;
+  if (!zohoConfigured()) block = NOT_SET_UP_WORDS;
+  else if (!atStart.live && atStart.wentLive) block = STOPPED_WORDS;
+  const org = block ? null : atStart.live ? ZOHO_REAL_ORG_ID : await zohoTestOrgId();
+  if (!block && !org) block = NO_TEST_ORG_WORDS;
+  const ctx: RunCtx = { org, atStart, undoMinutes: await undoMinutesNow(), fake, accounts: null, accountsError: null, accountsFatal: false };
+  const at = () => new Date().toISOString();
+  for (let i = 0; i < want.length; i++) {
+    if (Date.now() > opts.deadlineMs) return { items, left: want.slice(i), stopped: null };
+    const id = want[i];
+    const row = byId.get(id);
+    // A row that left the queue altogether (outbox rows are never deleted outside the tests): nothing to report.
+    if (!row) continue;
+    if (row.status === "synced") {
+      const o = doneOutcome(row.zoho_result ?? null);
+      items.push({ id, kind: row.kind, record_id: row.record_id, outcome: o, words: `${o === "posted" ? "Already posted by another run." : "Already done by another run."} ${resultWords(row.kind, row.zoho_result ?? null) ?? ""}`.trim(), at: at() });
+      continue;
+    }
+    if (row.status === "failed") {
+      items.push({ id, kind: row.kind, record_id: row.record_id, outcome: "failed", words: row.last_error ?? "Failed in another run.", at: at() });
+      continue;
+    }
+    if (block && !(fake && fake.applies(row))) {
+      items.push({ id, kind: row.kind, record_id: row.record_id, outcome: "waiting", words: fake ? `${block} Test server: only the rows a test marked are sent.` : block, at: at() });
+      continue;
+    }
+    const r = await processOutboxRow(row, ctx);
+    const outcome = r.outcome === "posted" || r.outcome === "removed" || r.outcome === "skipped" || r.outcome === "failed" ? r.outcome : "waiting";
+    items.push({ id, kind: row.kind, record_id: row.record_id, outcome, words: r.words, at: at() });
+    if (r.outcome === "stop") return { items, left: want.slice(i + 1), stopped: r.stop ?? r.words };
+  }
+  return { items, left: [], stopped: null };
 }
 
 /** Reads a whole table page by page (the one helper lives in page-all.ts since 3 November 2026; kept here for its callers). */

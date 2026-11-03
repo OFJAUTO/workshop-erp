@@ -1,5 +1,6 @@
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { lpoApprovalsWaiting } from "@/lib/accounts-waiting";
+import { zohoWaitingExtra } from "@/lib/zoho-manual";
 import { finalChecksToBook } from "@/lib/recheck";
 import { jobCustomersFor, jobPeopleFor } from "@/lib/customer-data";
 import {Card, SectionLabel} from "@/components/ui";
@@ -196,7 +197,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <LiveRefresh tables={["jobs", "gate_ins", "invoices", ...((await paymentReportsReady()) ? ["payment_reports"] : [])]} showUpdated />
       <HomeHeader staff={staff} gateIn={can(role, "gateIn")} />
 
-      <WaitingPanel staff={staff} extra={role === "service_advisor" || role === "owner" ? [...moneyWaiting, ...finalChecks, ...(role === "owner" ? await lpoApprovalsWaiting() : [])] : []} />
+      <WaitingPanel staff={staff} extra={role === "service_advisor" || role === "owner" ? [...moneyWaiting, ...finalChecks, ...(role === "owner" ? [...(await lpoApprovalsWaiting()), ...(await zohoWaitingExtra())] : [])] : []} />
 
       {role === "owner" && profit ? (
         <ProfitPanel live target={Number(settings.daily_profit_target_aed) || 0} data={profit} />

@@ -290,6 +290,10 @@ export async function runPopups() {
   if (await p.locator("[data-search-input]:visible").count()) await check(p, "Search results", "[data-search-results]", async () => { await p.locator("[data-search-input]:visible").first().fill("J-0"); await sleep(1500); }, findings, shots);
   await goto(p, "/recovery");
   if (await p.locator("details[data-change-price] summary").count()) await check(p, "Recovery: change price", "details[data-change-price][open]", () => click(p, "details[data-change-price] summary"), findings, shots);
+  /* ---- Zoho Books: the Sync to Zoho preview (3 November 2026; reads the ERP only, nothing is sent from here) ---- */
+  await goto(p, "/zoho");
+  if (await p.locator("[data-zoho-sync-open]").count()) await check(p, "Sync to Zoho (preview)", "[data-zoho-sync-window]", async () => { await click(p, "[data-zoho-sync-open]"); await p.locator("[data-zoho-preview], [data-zoho-sync-error]").first().waitFor({ timeout: 30000 }); }, findings, shots);
+  else notReached.push("Sync to Zoho: the button did not show on /zoho");
 
   /* ---- Recovery: change a claimed trip's price (a test trip on the seeded car) ---- */
   await sql("insert into public.recovery_trips (id, job_id, status, price_aed, location_details) values ('22222222-0000-4000-8000-00000000e370', $1, 'claimed', 250, 'E2e pop-up check') on conflict (id) do update set status = 'claimed', price_aed = 250, location_details = 'E2e pop-up check'", [ready.jobId]);

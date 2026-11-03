@@ -37,7 +37,7 @@ export default async function ZohoReconciliationPage({ searchParams }: { searchP
           <form action={backfillReconciliation}>
             <Button type="submit" size="md" data-recon-backfill>Check every missing day</Button>
           </form>
-          <span className="text-xs text-muted">Each morning the sync checks yesterday by itself once the queue has caught up, and re-checks it hourly while it is red. Every day is compared with the book that owns it.</span>
+          <span className="text-xs text-muted">Each day is checked by itself once its documents have been sent (on manual, a day is compared after Sync to Zoho has sent what it holds). The check looks back over the last ten days, so a day that had to wait, such as the Saturday before a day off, is compared after the next Sync. Yesterday is re-checked hourly while it is red. Every day is compared with the book that owns it.</span>
         </Card>
       ) : null}
 

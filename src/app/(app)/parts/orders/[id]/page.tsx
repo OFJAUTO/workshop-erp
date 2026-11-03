@@ -154,7 +154,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
       {/* C1, 1 November 2026: a VAT-registered supplier without a TRN - its bill cannot go to Zoho until it is typed. */}
       {!isMain && bundle.supplier && bundle.supplier.vat_registered !== false && !bundle.supplier.trn && !/^our stock$/i.test(po.supplier_name.trim()) ? (
         <div data-no-trn>
-          <Notice tone="error">{po.supplier_name} is ticked VAT registered but has no TRN: its bill cannot go to Zoho Books. Type the 15-digit TRN on <Link href="/parts/suppliers" className="font-bold underline underline-offset-4">Parts &gt; Suppliers</Link> (or untick VAT registered); the bill then tries again by itself.</Notice>
+          <Notice tone="error">{po.supplier_name} is ticked VAT registered but has no TRN: its bill cannot go to Zoho Books. Type the 15-digit TRN on <Link href="/parts/suppliers" className="font-bold underline underline-offset-4">Parts &gt; Suppliers</Link> (or untick VAT registered); the bill then goes back in the queue and is sent with the next Sync to Zoho.</Notice>
         </div>
       ) : null}
       {po.status === "pending_approval" ? <Notice tone="info">{isMain ? "Waiting for the owner or the head accountant. One Approve covers every supplier; one LPO per supplier is made at approval." : "Waiting for the owner or the head accountant. The PDF cannot be downloaded or sent before approval."}</Notice> : null}

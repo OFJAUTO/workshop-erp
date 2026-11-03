@@ -6,6 +6,8 @@ import { goLiveChecklist, reconGate, startDateGate } from "@/lib/zoho-golive";
 import { reconDue, reconOrgFor } from "@/lib/zoho-reconcile";
 import { validMonth } from "@/lib/zoho-close";
 import { getSettings } from "@/lib/settings";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { setSyncMode, zohoCronTick, zohoWaitingReminder } from "@/lib/zoho-manual";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +74,26 @@ export async function POST(request: NextRequest) {
       reconDue: (b.reconDue ?? []).map((c) => reconDue(c.row, c.day, c.nowMs, c.saturated)),
       months: (b.months ?? []).map((m) => validMonth(m)),
     });
+  }
+  if (body.action === "manual_cron") {
+    // Section 11 (3 November 2026): the five-minute run's own function, as the cron calls it (no Zoho here: on
+    // manual it only counts what waits; nothing is claimed or sent).
+    const r = await zohoCronTick(25);
+    return NextResponse.json(r);
+  }
+  if (body.action === "manual_reminder") {
+    // The daily "X items waiting to sync to Zoho" bell, at an injected moment (its rule decides; the bell is real).
+    const b = body as { nowMs?: number };
+    const r = await zohoWaitingReminder(await getSettings(), typeof b.nowMs === "number" ? b.nowMs : Date.now());
+    return NextResponse.json({ ...r, workingDays: (await getSettings()).working_days, openHour: (await getSettings()).opening_hour });
+  }
+  if (body.action === "manual_mode_as") {
+    // The owner-only switch's server rule, asked as another role (the screen hides the card; the server must refuse too).
+    const b = body as { role?: string; mode?: string };
+    const { data: person } = await createAdminClient().from("staff").select("id, role_id, display_name").eq("role_id", b.role ?? "").eq("is_active", true).limit(1).maybeSingle();
+    if (!person) return NextResponse.json({ error: "No such person." }, { status: 404 });
+    const r = await setSyncMode({ id: person.id as string, role_id: person.role_id as Parameters<typeof setSyncMode>[0]["role_id"], display_name: person.display_name as string, viewingAs: null, actingAs: null }, String(b.mode ?? ""));
+    return NextResponse.json(r);
   }
   return NextResponse.json({ error: "Unknown action." }, { status: 400 });
 }

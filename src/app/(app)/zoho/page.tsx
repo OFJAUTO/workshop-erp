@@ -4,11 +4,19 @@ import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { wentLiveOf, zohoOpenUrl, zohoWriteOrg, type OutboxRow, type ZohoKind } from "@/lib/zoho-sync";
+import { wentLiveOf, zohoOpenUrl, zohoWriteOrg, type OutboxRow } from "@/lib/zoho-sync";
 import { ZOHO_REAL_ORG_ID } from "@/lib/zoho";
-import { backfillZoho, markZohoDoneByHand, retryZohoRow, syncZohoNow, tickGoLiveReview } from "./actions";
+import { outboxDocs } from "@/lib/zoho-docs";
+import { loadRecentRuns, loadRun, waitingCounts } from "@/lib/zoho-manual";
+import { RUN_STALE_MS, SYNC_MODE_WORDS, kindWord, resultWords, retryRefusal, runWords, syncModeOf } from "@/lib/zoho-sync-rules";
+import { pageAll } from "@/lib/page-all";
+import { backfillZoho, markZohoDoneByHand, retryZohoRow, tickGoLiveReview } from "./actions";
+import { ZohoSyncButton } from "./ZohoSyncButton";
+import { ZohoSyncModeCard } from "./ZohoSyncModeCard";
 
 export const dynamic = "force-dynamic";
+// 3 November 2026: Sync to Zoho runs as server actions of this page, part by part (each part about 45 seconds).
+export const maxDuration = 120;
 
 /**
  * The Zoho Books sync page (phase 1, owner and accounts): what is waiting, what posted with the matching figures,
@@ -22,118 +30,57 @@ const FILTERS = [
   { key: "synced", label: "Posted" },
 ] as const;
 
-const KIND_WORDS: Record<ZohoKind, string> = {
-  contact: "Customer",
-  deposit: "Deposit",
-  invoice: "Tax invoice",
-  payment: "Payment",
-  creditnote: "Credit note",
-  vendor: "Supplier",
-  bill: "Supplier bill",
-  billpayment: "Supplier payment",
-  commission: "Commission",
-  recovery: "Recovery month",
-  vendorcredit: "Supplier credit",
-  cnrefund: "Customer refund",
-  settlement: "Card settlement",
-};
+/** "All" and "Posted" show the newest rows only; "Waiting" and "Failed" always show every row (review of 3 November 2026). */
+const LIST_LIMIT = 400;
+const OUTBOX_LIST_SELECT = "id, kind, record_id, job_id, status, attempts, last_error, zoho_id, zoho_result, enqueued_at, synced_at";
 
-const aed = (n: number) => `AED ${Number(n).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
-
-function resultWords(row: OutboxRow): string | null {
-  const r = row.zoho_result as Record<string, unknown> | null;
-  if (!r) return null;
-  if (r.manual === true) return `Done by hand by ${String(r.name ?? "accounts")} on ${formatDate(String(r.at ?? ""))}: ${String(r.note ?? "")}`;
-  if (typeof r.skipped === "string") return r.skipped;
-  if (row.kind === "invoice") {
-    const z = r.zoho as { total?: number; vat?: number; balance?: number } | undefined;
-    if (!z) return null;
-    return `In Zoho: ${aed(z.total ?? 0)} · VAT ${aed(z.vat ?? 0)} · balance ${aed(z.balance ?? 0)} — matches the ERP to the fils`;
-  }
-  if (row.kind === "creditnote") {
-    const z = r.zoho as { total?: number; unapplied?: number } | undefined;
-    if (!z) return null;
-    return `Credit note in Zoho: ${aed(z.total ?? 0)} · applied to ${String(r.applied_to ?? "the invoice")}${typeof r.invoice_balance_after === "number" ? ` · invoice balance now ${aed(r.invoice_balance_after)}` : ""}`;
-  }
-  if (row.kind === "bill") {
-    const z = r.zoho as { net?: number; vat?: number; total?: number; balance?: number } | undefined;
-    if (!z) return null;
-    return `Bill in Zoho: ${aed(z.net ?? 0)} + VAT ${aed(z.vat ?? 0)} = ${aed(z.total ?? 0)} · due ${aed(z.balance ?? 0)}${r.attached ? " · scan attached" : ""}${r.price_flags ? ` · ${r.price_flags} price flag(s) in the notes` : ""} — matches the ERP to the fils`;
-  }
-  if (row.kind === "billpayment") {
-    return `Paid in Zoho${typeof r.amount === "number" ? `: ${aed(r.amount)}` : ""}${typeof r.method === "string" ? ` · ${r.method}${r.paid_from ? ` from ${String(r.paid_from)}` : ""}` : ""} · the bill shows ${aed(Number(r.bill_balance_after) || 0)} due${typeof r.proof === "string" ? ` · proof ${r.proof}` : ""}`;
-  }
-  if (row.kind === "vendorcredit") {
-    const z = r.zoho as { total?: number; unapplied?: number } | undefined;
-    if (!z) return null;
-    return `Supplier credit in Zoho: ${aed(z.total ?? 0)}${typeof r.applied_now === "number" && r.applied_now > 0 ? ` · ${aed(r.applied_now)} applied to the bill` : ""}${typeof r.bill_balance_after === "number" ? ` · the bill shows ${aed(r.bill_balance_after)} due` : ""}`;
-  }
-  if (row.kind === "cnrefund") {
-    return `Refund in Zoho${typeof r.refund === "number" ? `: ${aed(r.refund)}` : ""}${typeof r.cn_unapplied_after === "number" ? ` · ${aed(r.cn_unapplied_after)} of the credit left unapplied` : ""}`;
-  }
-  if (row.kind === "settlement") {
-    return `Transfer to the bank ${aed(Number(r.received ?? 0))}${typeof r.fee === "number" && r.fee > 0 ? ` · bank charges ${aed(r.fee)}` : ""}`;
-  }
-  if (row.kind === "commission" || row.kind === "recovery") {
-    const amount = typeof r.amount === "number" ? aed(r.amount) : "";
-    return `Expense in Zoho: ${amount}${r.receipt ? " · proof attached" : typeof r.note === "string" ? ` · ${r.note}` : ""}`;
-  }
-  const amount = typeof r.amount === "number" ? aed(r.amount) : null;
-  const charge = typeof r.bank_charges === "number" && r.bank_charges > 0 ? ` · bank charge ${aed(r.bank_charges)}` : "";
-  return amount ? `${r.kind === "advance" ? "Advance" : "Payment"} in Zoho: ${amount}${charge}` : typeof r.note === "string" ? r.note : null;
-}
-
-export default async function ZohoSyncPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; show?: string }> }) {
+export default async function ZohoSyncPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; show?: string; run?: string }> }) {
   const staff = await requirePermission("zohoSync");
-  const { message, error, show: showRaw } = await searchParams;
+  const { message, error, show: showRaw, run: runParam } = await searchParams;
   const show = FILTERS.some((f) => f.key === showRaw) ? (showRaw as (typeof FILTERS)[number]["key"]) : "all";
   const admin = createAdminClient();
-  const [settings, org, { data: rowsRaw }] = await Promise.all([
+  // The list is filtered in the database, not in the newest 400 rows (review of 3 November 2026): a bill red since
+  // October stays on "Failed" however many rows came after it. Every red row is also on "All", so the links from the
+  // results window and Waiting on you (/zoho?show=failed#z-<id>) always land on their row. The chips count in the database.
+  const countOf = async (status?: "pending" | "failed" | "synced") => {
+    let q = admin.from("zoho_outbox").select("id", { count: "exact", head: true });
+    if (status) q = q.eq("status", status);
+    return (await q).count ?? 0;
+  };
+  const everyRow = (status: "pending" | "failed") => pageAll<OutboxRow>((a, b) => admin.from("zoho_outbox").select(OUTBOX_LIST_SELECT).eq("status", status).order("enqueued_at", { ascending: false }).range(a, b));
+  const newest = async (status?: "synced") => {
+    let q = admin.from("zoho_outbox").select(OUTBOX_LIST_SELECT);
+    if (status) q = q.eq("status", status);
+    return ((await q.order("enqueued_at", { ascending: false }).limit(LIST_LIMIT)).data ?? []) as OutboxRow[];
+  };
+  const [settings, org, nAll, nPending, nFailed, nSynced, filtered] = await Promise.all([
     getSettings(),
     zohoWriteOrg(),
-    admin.from("zoho_outbox").select("id, kind, record_id, job_id, status, attempts, last_error, zoho_id, zoho_result, enqueued_at, synced_at").order("enqueued_at", { ascending: false }).limit(400),
+    countOf(),
+    countOf("pending"),
+    countOf("failed"),
+    countOf("synced"),
+    (async (): Promise<OutboxRow[]> => {
+      if (show === "failed" || show === "pending") return everyRow(show);
+      if (show === "synced") return newest("synced");
+      const [recent, red] = await Promise.all([newest(), everyRow("failed")]);
+      const seen = new Set(recent.map((r) => r.id));
+      return [...recent, ...red.filter((r) => !seen.has(r.id))].sort((a, b) => b.enqueued_at.localeCompare(a.enqueued_at));
+    })(),
   ]);
-  const rows = (rowsRaw ?? []) as OutboxRow[];
+  const rows = filtered;
 
-  // The document names, batched per kind: INV-xxxxx, RCT-xxxxx, LPO-xxxxx, CPV-xxxxx or the person's name.
-  const names = new Map<string, string>();
-  const idsOf = (...kinds: ZohoKind[]) => rows.filter((r) => kinds.includes(r.kind)).map((r) => r.record_id);
-  const invoiceIds = idsOf("invoice", "creditnote");
-  const paymentIds = idsOf("deposit", "payment");
-  const customerIds = idsOf("contact");
-  const supplierIds = idsOf("vendor");
-  const poIds = idsOf("bill", "billpayment");
-  const voucherIds = idsOf("commission");
-  const payoutIds = idsOf("recovery");
-  const partIds = idsOf("vendorcredit");
-  const refundIds = idsOf("cnrefund");
-  const settlementIds = idsOf("settlement");
-  if (invoiceIds.length)
-    for (const i of (await admin.from("invoices").select("id, number, total_aed").in("id", invoiceIds)).data ?? []) {
-      names.set(`invoice:${i.id}`, `${i.number} · ${aed(Number(i.total_aed))}`);
-      names.set(`creditnote:${i.id}`, `${i.number} · ${aed(Number(i.total_aed))}`);
-    }
-  if (paymentIds.length)
-    for (const p of (await admin.from("payments").select("id, number, amount_aed").in("id", paymentIds)).data ?? []) {
-      names.set(`deposit:${p.id}`, `${p.number} · ${aed(Number(p.amount_aed))}`);
-      names.set(`payment:${p.id}`, `${p.number} · ${aed(Number(p.amount_aed))}`);
-    }
-  if (customerIds.length) for (const c of (await admin.from("customers").select("id, full_name, company_name").in("id", customerIds)).data ?? []) names.set(`contact:${c.id}`, String(c.company_name || c.full_name));
-  if (supplierIds.length) for (const s of (await admin.from("suppliers").select("id, name").in("id", supplierIds)).data ?? []) names.set(`vendor:${s.id}`, String(s.name));
-  if (poIds.length)
-    for (const po of (await admin.from("purchase_orders").select("id, number, supplier_name, supplier_invoice_number").in("id", poIds)).data ?? []) {
-      names.set(`bill:${po.id}`, `${po.supplier_invoice_number ?? po.number} · ${po.supplier_name}`);
-      names.set(`billpayment:${po.id}`, `${po.number} · ${po.supplier_name}`);
-    }
-  if (voucherIds.length) for (const v of (await admin.from("commission_payments").select("id, number, recipient, amount_aed").in("id", voucherIds)).data ?? []) names.set(`commission:${v.id}`, `${v.number} · ${v.recipient} · ${aed(Number(v.amount_aed))}`);
-  if (payoutIds.length) for (const r of (await admin.from("recovery_payouts").select("id, who, month, total_aed").in("id", payoutIds)).data ?? []) names.set(`recovery:${r.id}`, `${r.month} · ${r.who} · ${aed(Number(r.total_aed))}`);
-  if (partIds.length) for (const pt of (await admin.from("part_items").select("id, description, supplier").in("id", partIds)).data ?? []) names.set(`vendorcredit:${pt.id}`, `${pt.description}${pt.supplier ? ` · ${pt.supplier}` : ""}`);
-  if (refundIds.length) for (const rf of (await admin.from("invoices").select("id, number, refund_amount_aed, total_aed").in("id", refundIds)).data ?? []) names.set(`cnrefund:${rf.id}`, `${rf.number} · ${aed(Number(rf.refund_amount_aed ?? rf.total_aed))}`);
+  // The document names, batched per kind (THE lookup shared with the Sync to Zoho window and the reminder).
+  const docs = await outboxDocs(rows);
+  const [waiting, runs, runView] = await Promise.all([waitingCounts(), loadRecentRuns(5), runParam ? loadRun(runParam) : Promise.resolve(null)]);
+  const mode = syncModeOf(settings.zoho_sync_mode);
+  const isOwner = staff.role_id === "owner" && !staff.viewingAs && !staff.actingAs;
+  // eslint-disable-next-line react-hooks/purity
+  const nowMs = Date.now();
 
-  if (settlementIds.length) for (const st of (await admin.from("card_settlements").select("id, number, method, gross_aed").in("id", settlementIds)).data ?? []) names.set(`settlement:${st.id}`, `${st.number} · ${st.method === "card" ? "card machine" : "payment link"} · ${aed(Number(st.gross_aed))}`);
-
-  const counts = Object.fromEntries(FILTERS.map((f) => [f.key, f.key === "all" ? rows.length : rows.filter((r) => r.status === f.key).length]));
-  const filtered = show === "all" ? rows : rows.filter((r) => r.status === show);
+  const counts: Record<(typeof FILTERS)[number]["key"], number> = { all: nAll, pending: nPending, failed: nFailed, synced: nSynced };
+  const total = counts[show];
+  const capped = filtered.length < total;
   const live = settings.zoho_live_enabled === true;
   const stopped = !live && wentLiveOf(settings);
   const followupPending = (settings.zoho_golive_followup as { pending?: boolean } | undefined)?.pending === true;
@@ -159,19 +106,83 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
         </div>
       ) : null}
 
-      <Card className="flex flex-wrap items-center gap-2" data-zoho-controls>
-        {!staff.viewingAs ? (
-          <form action={syncZohoNow}>
-            <Button type="submit" size="md" data-zoho-sync-now>Sync now</Button>
-          </form>
-        ) : null}
+      <Card className="flex flex-wrap items-center gap-2" data-zoho-controls data-zoho-mode={mode}>
+        {!staff.viewingAs ? <ZohoSyncButton waiting={waiting.total} /> : <span className="text-sm font-semibold text-muted">Viewing only: Sync to Zoho is pressed from your own login.</span>}
         {staff.role_id === "owner" && !staff.viewingAs ? (
           <form action={backfillZoho}>
             <Button type="submit" tone="secondary" size="md" className="!whitespace-normal text-center" data-zoho-backfill>Backfill: queue everything already in the ERP</Button>
           </form>
         ) : null}
-        <span className="text-xs text-muted">The sync also runs by itself every five minutes.</span>
+        <span className="text-xs text-muted basis-full" data-zoho-mode-line>
+          <span className="font-bold text-ink">{SYNC_MODE_WORDS[mode].title}:</span> {SYNC_MODE_WORDS[mode].line} {mode === "manual" ? `${waiting.total ? `${waiting.total} waiting now.` : "Nothing waiting now."} ${waiting.stuckWords ? `${waiting.stuckWords} ` : ""}` : ""}
+          {isOwner ? "You change this below." : "Only the owner changes this."}
+        </span>
       </Card>
+
+      {runView ? (
+        <Card className="flex flex-col gap-2" data-zoho-run-view={runView.run.id}>
+          <SectionLabel right={runWords({ posted: runView.run.posted, removed: runView.run.removed, skipped: runView.run.skipped, failed: runView.run.failed, waiting: runView.run.waiting })}>Sync of {formatDateTime(runView.run.started_at)}</SectionLabel>
+          <p className="text-sm text-muted">
+            By {runView.run.started_name ?? "someone"} · to {runView.run.book_label ?? runView.run.org ?? "Zoho"} ·{" "}
+            {runView.run.status === "running" && nowMs - Date.parse(runView.run.heartbeat_at) > RUN_STALE_MS ? "stopped part-way (the window closed)" : runView.run.status === "running" ? "still sending" : runView.run.status === "stopped" ? `stopped: ${runView.run.stop_reason ?? "part-way"}` : "finished"}
+          </p>
+          <ul className="divide-y divide-line">
+            {(Array.isArray(runView.run.items) ? runView.run.items : []).map((i) => {
+              const now = runView.now.get(i.id);
+              const nowWord = now?.status === "synced" ? "posted" : now?.status === "failed" ? "failed" : now ? "waiting" : null;
+              return (
+                <li key={i.id} className="py-2 flex flex-col gap-1" data-zoho-run-item={i.outcome} data-zoho-run-now={nowWord ?? "gone"}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone="outline">{kindWord(i.kind)}</Badge>
+                    <span className="font-bold">{i.name ?? i.record_id.slice(0, 8)}</span>
+                    <span className="flex-1" />
+                    {nowWord === "posted" ? <Badge tone="green">Posted ✓</Badge> : nowWord === "failed" ? <Badge tone="red">Failed</Badge> : nowWord === "waiting" ? <Badge tone="amber">Waiting</Badge> : null}
+                  </div>
+                  {i.outcome === "removed" ? <Badge tone="outline">Removed from Zoho</Badge> : i.outcome === "skipped" ? <Badge tone="outline">Nothing sent</Badge> : null}
+                  {i.words ? <p className={`text-sm ${i.outcome === "failed" && nowWord !== "posted" ? "font-semibold text-red" : i.outcome === "posted" || i.outcome === "removed" ? "font-semibold text-green" : "text-muted"}`}>{i.words}</p> : null}
+                  {nowWord === "failed" && i.outcome !== "posted" && now?.last_error && now.last_error !== i.words ? <p className="text-sm font-semibold text-red">Now: {now.last_error}</p> : null}
+                  {nowWord === "failed" && retryRefusal(now?.zoho_result) ? (
+                    <p className="text-sm font-semibold" data-zoho-retry-refused>{retryRefusal(now?.zoho_result)}</p>
+                  ) : nowWord === "failed" && !staff.viewingAs ? (
+                    <form action={retryZohoRow.bind(null, i.id)}>
+                      <input type="hidden" name="run" value={runView.run.id} />
+                      <Button type="submit" tone="secondary" size="md" data-zoho-retry data-zoho-run-retry>Retry</Button>
+                    </form>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+          <LinkButton href="/zoho" tone="secondary" size="md">Close this sync</LinkButton>
+        </Card>
+      ) : runParam ? (
+        <Notice tone="error">That sync is not on record (the history starts once the database change is applied).</Notice>
+      ) : null}
+
+      {runs.length ? (
+        <Card className="flex flex-col gap-1" data-zoho-runs>
+          <SectionLabel>Last syncs</SectionLabel>
+          <ul className="divide-y divide-line">
+            {runs.map((r) => {
+              const stale = r.status === "running" && nowMs - Date.parse(r.heartbeat_at) > RUN_STALE_MS;
+              return (
+                <li key={r.id} className="py-2" data-zoho-run={r.id} data-zoho-run-status={stale ? "stopped" : r.status}>
+                  <Link href={`/zoho?run=${r.id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 min-h-11 text-sm">
+                    <span className="font-bold">{formatDateTime(r.started_at)}</span>
+                    <span>{r.started_name ?? "Someone"}</span>
+                    <span className="text-muted">{r.book_label ?? r.org ?? ""}</span>
+                    <span className="flex-1" />
+                    <span className="font-semibold">{runWords({ posted: r.posted, removed: r.removed, skipped: r.skipped, failed: r.failed, waiting: r.waiting })}</span>
+                    <span className="text-muted">{stale ? "stopped part-way" : r.status === "running" ? "sending…" : r.status === "stopped" ? "stopped" : "done"}</span>
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      ) : null}
+
+      {isOwner ? <ZohoSyncModeCard mode={mode} waiting={waiting.total} back="/zoho" /> : null}
 
       {staff.role_id === "accounts" && !staff.viewingAs
         ? await (async () => {
@@ -202,18 +213,23 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
       </div>
 
       <Card className="flex flex-col gap-1" data-zoho-rows>
-        <SectionLabel right={String(filtered.length)}>Documents</SectionLabel>
+        <SectionLabel right={String(total)}>Documents</SectionLabel>
+        {capped ? (
+          <p className="text-xs text-muted" data-zoho-rows-capped>
+            {show === "all" ? `The newest ${LIST_LIMIT} of ${total}, plus every red row.` : `The newest ${LIST_LIMIT} of ${total}.`} Every waiting row is under Waiting and every red row under Failed.
+          </p>
+        ) : null}
         {!filtered.length ? (
-          <Empty title="Nothing here">{show === "failed" ? "No failures. Everything that was queued has posted or is waiting its turn." : "Nothing queued yet. Recording a payment, a deposit or a tax invoice queues it by itself; Backfill queues what already exists."}</Empty>
+          <Empty title="Nothing here">{show === "failed" ? "No failures. Everything that was queued has posted or is waiting its turn." : "Nothing queued yet. Recording a payment, a deposit or a tax invoice queues it by itself (press Sync to Zoho to send it); Backfill queues what already exists."}</Empty>
         ) : (
           <ul className="divide-y divide-line">
             {filtered.map((r) => {
-              const name = names.get(`${r.kind}:${r.record_id}`) ?? r.record_id.slice(0, 8);
-              const words = resultWords(r);
+              const name = docs.get(`${r.kind}:${r.record_id}`)?.name ?? r.record_id.slice(0, 8);
+              const words = resultWords(r.kind, r.zoho_result);
               return (
-                <li key={r.id} className="py-3 flex flex-col gap-1.5" data-zoho-row={r.status}>
+                <li key={r.id} id={`z-${r.id}`} className="py-3 flex flex-col gap-1.5 scroll-mt-24" data-zoho-row={r.status}>
                   <div className="flex flex-wrap items-center gap-2">
-                    <Badge tone="outline">{KIND_WORDS[r.kind]}</Badge>
+                    <Badge tone="outline">{kindWord(r.kind)}</Badge>
                     <span className="font-bold">{name}</span>
                     <span className="flex-1" />
                     {r.status === "synced" ? <Badge tone="green">Posted ✓</Badge> : r.status === "failed" ? <Badge tone="red">Failed</Badge> : <Badge tone="amber">Waiting</Badge>}
@@ -231,10 +247,13 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
                         Open in Zoho
                       </a>
                     ) : null}
-                    {r.status === "failed" && !staff.viewingAs ? (
+                    {r.status === "failed" && !staff.viewingAs && !retryRefusal(r.zoho_result) ? (
                       <form action={retryZohoRow.bind(null, r.id)}>
                         <Button type="submit" tone="secondary" size="md" data-zoho-retry>Retry</Button>
                       </form>
+                    ) : null}
+                    {r.status === "failed" && retryRefusal(r.zoho_result) ? (
+                      <span className="text-sm font-semibold" data-zoho-retry-refused>{retryRefusal(r.zoho_result)}</span>
                     ) : null}
                   </div>
                   {r.status === "failed" && !staff.viewingAs ? (

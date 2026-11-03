@@ -22,6 +22,7 @@ import { loadDocAlerts } from "@/lib/doc-reminders-data";
 import { depositsWaiting } from "@/lib/deposits";
 import { paymentReportsHourly } from "@/lib/payment-reports";
 import { releaseHeldPricingHourly } from "@/lib/pricing-send";
+import { zohoWaitingReminder } from "@/lib/zoho-manual";
 
 /**
  * Runs every hour (Vercel cron). Two jobs:
@@ -68,6 +69,7 @@ function housekeepingWords(report: Record<string, number>): string {
     bodyshopLate: ["late bodyshop stage", "late bodyshop stages"], bodyshopDueOut: ["bodyshop car due out tomorrow", "bodyshop cars due out tomorrow"], monthlySummary: ["monthly summary sent", "monthly summaries sent"],
     paymentReportsLate: ["reported payment reminder", "reported payment reminders"],
     pricingReleased: ["held parts change sent to the advisor", "held parts changes sent to the advisor"],
+    zohoWaiting: ["Zoho waiting reminder", "Zoho waiting reminders"],
   };
   const parts = Object.entries(report)
     .filter(([, n]) => n > 0)
@@ -496,6 +498,14 @@ async function runHousekeeping(): Promise<Record<string, number>> {
     report.pricingReleased = await releaseHeldPricingHourly();
   } catch {
     report.pricingReleased = -1;
+  }
+
+  // 29. Zoho Books on manual (3 November 2026, section 11): once a working day from opening time, accounts and the owner
+  // are told "X items waiting to sync to Zoho" (never twice the same day, never in automatic mode, never when nothing waits).
+  try {
+    report.zohoWaiting = (await zohoWaitingReminder(settings)).sent;
+  } catch {
+    report.zohoWaiting = -1;
   }
 
   // 24. Supplier invoices still missing ("to follow"): Parts are reminded once a day per LPO until the

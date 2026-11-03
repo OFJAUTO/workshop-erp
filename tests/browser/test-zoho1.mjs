@@ -23,7 +23,8 @@ let proformaId = null;
 await section("1 the REAL write guard", async () => {
   const r = await api("/api/e2e/zoho", { action: "write_to_real" });
   check("1: the write is REFUSED", r.json?.refused === true, JSON.stringify(r.json).slice(0, 200));
-  check("1: the refusal says the real book is read-only until go-live", /read-only until the owner declares go-live/.test(r.json?.message ?? ""));
+  // 30 October 2026: on the TEST server the door refuses the REAL organization outright (before the go-live rule).
+  check("1: the refusal says the real book is read-only until go-live (or, on the test server, never touched)", /read-only until the owner declares go-live|test server never touches the REAL Zoho organization/.test(r.json?.message ?? ""), r.json?.message);
   const w = await api("/api/e2e/zoho", { action: "write_org" });
   check("1: writes aim at OFJ TEST (944122733) and the go-live switch is OFF", w.json?.org === "944122733" && w.json?.live === false, JSON.stringify(w.json).slice(0, 120));
   check("1: the mapping is stored with names for every line type", !!w.json?.map?.income?.labour && !!w.json?.map?.income?.bodyshop && !!w.json?.map?.depositTo?.card, JSON.stringify(w.json?.map).slice(0, 200));
@@ -78,7 +79,9 @@ await section("2 enqueue hooks", async () => {
     await go(page, `${base}/jobs/${jobId}/invoice`);
     await page.locator('[data-method="transfer"]').click();
     await page.locator("[data-reference]").fill("E2E-ZOHO");
-    await page.locator("[data-proof-input]").setInputFiles({ name: "proof.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64") });
+    // 28 October 2026: the proof goes straight to storage through the form's JobFileUpload (the plain file box is only for an invoice without a job).
+    await page.locator('[data-payment-form] [data-job-file-upload] input[type="file"]').first().setInputFiles({ name: "proof.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64") });
+    await until(async () => (await page.locator("[data-payment-form] [data-proof-missing]").count()) === 0, 40, 500);
     await page.locator("[data-record-payment]").click();
     await page.locator("[data-confirm-yes]").waitFor({ timeout: 10000 });
     await page.locator("[data-confirm-yes]").click();
@@ -144,7 +147,8 @@ await section("4 mapping screen", async () => {
   try {
     await go(page, `${base}/settings/zoho/mapping`);
     check("4: accounts may open the mapping screen", (await page.locator("[data-map-income]").count()) === 1);
-    check("4: six income boxes, five deposit boxes, charges and advances", (await page.locator("[data-map-income] select").count()) === 6 && (await page.locator("[data-map-deposit] select").count()) === 5 && (await page.locator("[data-map-other] select").count()) === 2);
+    // The reference group holds four boxes since the bank fees of 29 October 2026 (MSF, transaction fee, advances, refunds).
+    check("4: six income boxes, five deposit boxes, charges and advances", (await page.locator("[data-map-income] select").count()) === 6 && (await page.locator("[data-map-deposit] select").count()) === 5 && (await page.locator("[data-map-other] select").count()) === 4, `${await page.locator("[data-map-income] select").count()}/${await page.locator("[data-map-deposit] select").count()}/${await page.locator("[data-map-other] select").count()}`);
     const labour = await page.locator('[data-map-box="map__income__labour"]').inputValue();
     check("4: the stored mapping pre-fills the boxes", labour === (stored?.income?.labour ?? ""), labour);
     await page.screenshot({ path: "tests/browser/shots/zoho1-mapping.png", fullPage: true });

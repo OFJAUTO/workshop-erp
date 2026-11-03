@@ -21,6 +21,9 @@ import { wentLiveOf } from "@/lib/zoho-sync";
 import { goLiveChecklist } from "@/lib/zoho-golive";
 import { getSettings } from "@/lib/settings";
 import { Field, Input } from "@/components/ui";
+import { ZohoSyncModeCard } from "../../zoho/ZohoSyncModeCard";
+import { waitingCounts } from "@/lib/zoho-manual";
+import { syncModeOf } from "@/lib/zoho-sync-rules";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +47,7 @@ async function readOrg(org: string, title: string): Promise<OrgRead> {
  * accounts, bank accounts and payment modes — proof the connection works before anything is ever written.
  */
 export default async function ZohoSettingsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string }> }) {
-  await requirePermission("manageSettings");
+  const staff = await requirePermission("manageSettings");
   const { message, error } = await searchParams;
   const configured = zohoConfigured();
   const conn = configured ? await zohoConnection() : null;
@@ -149,6 +152,9 @@ export default async function ZohoSettingsPage({ searchParams }: { searchParams:
           {!testOrg ? <p className="text-sm text-muted">Pick OFJ TEST above: until go-live, every write goes there and nowhere else.</p> : null}
         </Card>
       ) : null}
+
+      {/* 11.5 (3 November 2026): the owner's switch between manual (Sync to Zoho) and automatic (every five minutes). */}
+      {staff.role_id === "owner" && !staff.viewingAs && !staff.actingAs ? <ZohoSyncModeCard mode={syncModeOf((await getSettings()).zoho_sync_mode)} waiting={(await waitingCounts()).total} back="/settings/zoho" /> : null}
 
       {reads.map((r) => (
         <Card key={r.org} className="flex flex-col gap-3" data-zoho-read={r.org}>

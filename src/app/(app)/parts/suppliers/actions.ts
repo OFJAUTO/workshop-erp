@@ -97,7 +97,7 @@ export async function updateSupplier(id: string, formData: FormData) {
   if (before && (before.vat_registered !== false) !== row.vat_registered) await flagBillsAfterVatChange(id, row.name, row.vat_registered);
   // A TRN entered or corrected (or the VAT switch moved): the bills that waited on it try Zoho again by themselves.
   const retried = before && ((before.trn ?? null) !== row.trn || (before.vat_registered !== false) !== row.vat_registered) ? await retrySupplierRows(id) : 0;
-  const retriedWords = retried ? ` ${retried} Zoho ${retried === 1 ? "item tries" : "items try"} again now.` : "";
+  const retriedWords = retried ? ` ${retried} Zoho ${retried === 1 ? "item tries" : "items try"} again now: back in the queue for the next Sync to Zoho.` : "";
   // LPOs carry the supplier's name at the time; the ones not yet sent follow a rename.
   await admin.from("purchase_orders").update({ supplier_name: row.name, updated_by: staff.id }).eq("supplier_id", id).in("status", ["pending_approval", "approved"]);
   revalidatePath("/parts/suppliers");

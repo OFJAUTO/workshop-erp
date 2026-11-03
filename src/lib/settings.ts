@@ -293,6 +293,9 @@ const DEFAULTS = {
   zoho_went_live_at: "" as string,
   zoho_golive_followup: {} as Record<string, unknown>,
   zoho_last_live_test_at: "" as string,
+  /** 3 November 2026: "manual" (the default; a missing row is manual too) = nothing goes to Zoho until the owner or
+   *  accounts press Sync to Zoho; "automatic" = the five-minute cron sends by itself. Only the owner switches it. */
+  zoho_sync_mode: "manual" as "manual" | "automatic",
   // The grey note at the end of every receipt (26 October 2026), edited by the owner in Settings.
   receipt_footer_note: "This is a payment receipt, not a tax invoice. The tax invoice is issued when the job is paid in full, with this amount deducted.",
   inspection_fee_notice_ar: "في حال عدم الموافقة على أي أعمال بعد الفحص، تُطبَّق رسوم فحص بقيمة [total] درهمًا شاملة ضريبة القيمة المضافة ([amount] درهمًا + الضريبة).",

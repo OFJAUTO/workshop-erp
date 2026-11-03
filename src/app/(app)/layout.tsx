@@ -16,6 +16,7 @@ import { RecordPaymentHost } from "@/components/RecordPaymentHost";
 import { AuthAddedWindow } from "@/components/AuthCodeMissing";
 import { SpellHost } from "@/components/SpellHost";
 import { getCurrentDevice } from "@/lib/devices";
+import { SENDS_ON_PRESS_FILTER, syncModeOf } from "@/lib/zoho-sync-rules";
 
 /** The browser tab says whose screens these are while the owner views or acts as someone. */
 export async function generateMetadata(): Promise<Metadata> {
@@ -57,6 +58,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     pendingCharges = count ?? 0;
   }
 
+  // Zoho Books on manual (3 November 2026): how many documents a press of Sync to Zoho would send, next to the menu
+  // entry (THE rule sendsOnPress: a row waiting for something else, such as its red bill, is never counted).
+  let zohoWaiting = 0;
+  if (can(role, "zohoSync") && syncModeOf(settings.zoho_sync_mode) === "manual") {
+    const { count } = await createAdminClient().from("zoho_outbox").select("id", { count: "exact", head: true }).eq("status", "pending").or(SENDS_ON_PRESS_FILTER);
+    zohoWaiting = count ?? 0;
+  }
+
   const entries: (NavItem & { show: boolean })[] = [
     { href: "/home", label: "Home", show: role !== "gate_in" && role !== "technician" && role !== "qc_inspector" && role !== "team_leader" },
     { href: "/dashboard", label: "Dashboard", show: can(role, "viewDashboard") },
@@ -87,7 +96,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/recovery", label: "Recovery", show: role === "owner" || role === "service_advisor" || role === "accounts" },
     { href: "/commissions", label: "Commissions", show: role === "owner" || role === "accounts" },
     { href: "/card-settlements", label: "Card settlements", show: can(role, "cardSettlements") },
-    { href: "/zoho", label: "Zoho Books", show: can(role, "zohoSync") },
+    { href: "/zoho", label: "Zoho Books", show: can(role, "zohoSync"), badge: zohoWaiting || undefined },
     { href: "/warranties", label: "Warranties", show: role === "owner" || role === "service_advisor" },
     { href: "/profit", label: "Profit", show: role === "owner" },
     { href: "/reports/monthly", label: "Reports", show: role === "owner" },

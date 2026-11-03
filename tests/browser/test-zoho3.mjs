@@ -323,10 +323,11 @@ await section("7c by-hand-only rows", async () => {
   try {
     await go(page, `${base}/zoho?show=failed`);
     const row = page.locator('li[data-zoho-row="failed"]', { hasText: "E2e: sits in the opening balances" }).first();
-    await row.locator("[data-zoho-retry]").click();
-    await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
+    // Since the S11 review (3 November 2026) the row shows no Retry at all, only the words (retryRefusal); the server
+    // refuses the same row too (retryOneRow) — a Retry from an old tab never re-runs it.
+    const refused = ((await row.locator("[data-zoho-retry-refused]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
     const after = (await sql("select status from public.zoho_outbox where kind = 'creditnote' and record_id = $1", [cnId]))[0];
-    check("7c: Retry refuses it in plain words (it could post twice)", /corrected\+by\+hand|corrected%20by%20hand/.test(page.url()) && after?.status === "failed", `${page.url().slice(-120)} ${JSON.stringify(after)}`);
+    check("7c: Retry is refused in plain words (it could post twice): no Retry button, the words instead", (await row.locator("[data-zoho-retry]").count()) === 0 && /corrected by hand/.test(refused) && after?.status === "failed", `${refused.slice(0, 120)} ${JSON.stringify(after)}`);
   } finally {
     await browser.close();
   }

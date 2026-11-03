@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { checkLateJobs, recordJobRun } from "@/lib/background-jobs";
-import { reconcileDay, reconcileYesterdayIfDue } from "@/lib/zoho-reconcile";
-import { drainZohoOutbox } from "@/lib/zoho-sync";
+import { reconcileDay } from "@/lib/zoho-reconcile";
+import { zohoCronTick } from "@/lib/zoho-manual";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -9,9 +9,12 @@ export const maxDuration = 300;
 const DRAIN_LIMIT = 25;
 
 /**
- * Every five minutes (Vercel cron): the Zoho outbox is drained — customers, deposits, tax invoices and payments
- * post to the organization the go-live switch names (OFJ TEST until go-live). Protected by CRON_SECRET, and the
- * answer is COUNTS ONLY: no Zoho data ever comes back through this route.
+ * Every five minutes (Vercel cron). Since 3 November 2026 the sync to Zoho is MANUAL by default: this run then sends
+ * nothing — it counts what waits for Sync to Zoho and keeps the read-only reconciliation (every recent day that is due,
+ * not only yesterday: a day held back until its documents were sent is compared once they went). Only while the
+ * owner switched the sync to automatic does it send (customers, deposits, tax invoices, payments, bills… to the
+ * organization the go-live switch names, 25 at a time). It records every run, so the job is never "late" on manual.
+ * Protected by CRON_SECRET, and the answer is COUNTS ONLY: no Zoho data ever comes back through this route.
  */
 export async function GET(request: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -27,13 +30,12 @@ export async function GET(request: NextRequest) {
     }
   }
   try {
-    const r = await drainZohoOutbox(DRAIN_LIMIT);
-    // Yesterday's books are checked once the queue has caught up (its own catch: a Zoho hiccup never kills the drain's record).
-    const recon = await reconcileYesterdayIfDue({ drainSaturated: r.pushed + r.failed + r.waiting >= DRAIN_LIMIT });
-    const words = (r.skipped ?? `${r.pushed} posted · ${r.failed} failed · ${r.waiting} waiting`) + (recon ? ` · reconciled ${recon.day}: ${recon.status}` : "");
-    await recordJobRun("zoho", true, words).catch(() => null);
+    const r = await zohoCronTick(DRAIN_LIMIT);
+    await recordJobRun("zoho", true, r.words).catch(() => null);
     await checkLateJobs(true).catch(() => null);
-    return NextResponse.json({ ok: true, pushed: r.pushed, failed: r.failed, waiting: r.waiting, ...(recon ? { reconciled: recon.day, reconciliation: recon.status } : {}) });
+    // Every recent day compared on this run (oldest first); "reconciled" stays the latest one, as before.
+    const last = r.recon[r.recon.length - 1];
+    return NextResponse.json({ ok: true, pushed: r.pushed, failed: r.failed, waiting: r.waiting, ...(last ? { reconciled: last.day, reconciliation: last.status, reconciledDays: r.recon } : {}) });
   } catch (e) {
     await recordJobRun("zoho", false, `Problem: ${e instanceof Error ? e.message.slice(0, 200) : "unknown"}`).catch(() => null);
     return NextResponse.json({ ok: false }, { status: 503 });

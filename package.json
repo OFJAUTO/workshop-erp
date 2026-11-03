@@ -161,7 +161,8 @@
     "test:s8-charges": "node --env-file=.env.test.local tests/browser/test-s8-charges.mjs",
     "test:s9-qty": "node --env-file=.env.test.local tests/browser/test-s9-qty.mjs",
     "test:s10-pricing": "node --env-file=.env.test.local tests/browser/test-s10-pricing.mjs",
-    "test:s9-s10": "node --env-file=.env.test.local tests/browser/test-s9-s10-parts-desk.mjs"
+    "test:s9-s10": "node --env-file=.env.test.local tests/browser/test-s9-s10-parts-desk.mjs",
+    "test:s11-zoho-manual": "node --env-file=.env.test.local tests/browser/test-s11-zoho-manual.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

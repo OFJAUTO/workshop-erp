@@ -35,9 +35,10 @@ export async function backfillReconciliation() {
   try {
     const r = await reconcileMissingDays(40);
     kind = "message";
+    const waiting = r.waitingForSync ? ` ${r.waitingForSync} later day${r.waitingForSync === 1 ? " waits" : "s wait"} until its documents are sent with Sync to Zoho.` : "";
     words = r.done.length
-      ? `${r.done.length} day${r.done.length === 1 ? "" : "s"} checked (${r.done[0]} to ${r.done[r.done.length - 1]}).${r.remaining ? ` ${r.remaining} older day${r.remaining === 1 ? "" : "s"} remain: press the button again.` : " Every day is covered."}`
-      : "Every day is already covered.";
+      ? `${r.done.length} day${r.done.length === 1 ? "" : "s"} checked (${r.done[0]} to ${r.done[r.done.length - 1]}).${r.remaining ? ` ${r.remaining} older day${r.remaining === 1 ? "" : "s"} remain: press the button again.` : waiting ? "" : " Every day is covered."}${waiting}`
+      : waiting ? waiting.trim() : "Every day is already covered.";
   } catch (e) {
     unstable_rethrow(e);
     kind = "error";

@@ -3,32 +3,111 @@
 import { redirect, unstable_rethrow } from "next/navigation";
 import { requirePermission } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { drainZohoOutbox, enqueueBackfill, flagZohoAttention } from "@/lib/zoho-sync";
+import { enqueueBackfill, flagZohoAttention } from "@/lib/zoho-sync";
+import { finishSyncRun, loadSyncPreview, retryOneRow, runSyncChunk, setSyncMode, startSyncRun, type ChunkResult, type StartResult, type SyncPreview } from "@/lib/zoho-manual";
+import type { RunItem } from "@/lib/zoho-sync-rules";
 
 const back = (kind: "message" | "error", text: string, show?: string): never => redirect(`/zoho?${show ? `show=${show}&` : ""}${kind}=${encodeURIComponent(text)}`);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** A failed row goes back in the queue, and the worker runs at once so the answer is on screen in a moment. */
+/**
+ * Retry on a red row (the page's list and a stored run): THAT row goes back in the queue and is sent at once — never
+ * any other row (3 November 2026: before, Retry swept the next 25 waiting documents along with it).
+ */
 export async function retryZohoRow(id: string, formData: FormData) {
   const staff = await requirePermission("zohoSync");
-  if (staff.viewingAs) return back("error", "Viewing only.");
-  void formData;
-  const admin = createAdminClient();
-  // A row only a human can settle (a document in the REAL book's opening balances) is never re-run: the handler does
-  // not know it is already in a book and could post it again.
-  const { data: row } = await admin.from("zoho_outbox").select("zoho_result").eq("id", id).maybeSingle();
-  if ((row as { zoho_result?: { hand_only?: boolean } | null } | null)?.zoho_result?.hand_only === true) {
-    return back("error", 'This one is corrected by hand in Zoho (it sits in the opening balances): make the change there, then press "Done by hand".', "failed");
-  }
-  await admin.from("zoho_outbox").update({ status: "pending", last_error: null, updated_at: new Date().toISOString() }).eq("id", id).neq("status", "synced");
+  const run = String(formData.get("run") ?? "");
+  const to = (kind: "message" | "error", text: string): never => (UUID.test(run) ? redirect(`/zoho?run=${run}&${kind}=${encodeURIComponent(text)}`) : back(kind, text, "failed"));
+  if (staff.viewingAs) return to("error", "Viewing only.");
+  let kind: "message" | "error" = "message";
   let words: string;
   try {
-    const r = await drainZohoOutbox();
-    words = r.skipped ? `Back in the queue. ${r.skipped}` : `${r.pushed} posted · ${r.failed} failed · ${r.waiting} waiting.`;
+    const r = await retryOneRow(id);
+    if (r.error) {
+      kind = "error";
+      words = r.error;
+    } else if (!r.item) words = "Back in the queue.";
+    else if (r.item.outcome === "posted") words = `Posted ✓ ${r.item.name ?? ""}${r.item.words ? ` — ${r.item.words}` : ""}`.trim();
+    else if (r.item.outcome === "removed") words = `Removed from Zoho: ${r.item.name ?? ""}${r.item.words ? ` — ${r.item.words}` : ""}`.trim();
+    else if (r.item.outcome === "skipped") words = `Closed, nothing sent: ${r.item.name ?? ""}${r.item.words ? ` — ${r.item.words}` : ""}`.trim();
+    else if (r.item.outcome === "failed") {
+      kind = "error";
+      words = `Failed again: ${r.item.words ?? "see the row"}`;
+    } else words = `Back in the queue. ${r.item.words ?? ""}`.trim();
   } catch (e) {
     unstable_rethrow(e);
+    kind = "error";
     words = `Back in the queue; the run hit a problem: ${e instanceof Error ? e.message : String(e)}`;
   }
-  return back("message", words, "failed");
+  return to(kind, words);
+}
+
+/* ------------------------------------------------- Sync to Zoho (the window) ------------------------------------------------- */
+
+const VIEW_ONLY = "Viewing only: sign in as yourself to send to Zoho.";
+
+/** Owner or accounts, from their own screen (never while viewing as someone): every step of the window checks this. */
+async function sender() {
+  const staff = await requirePermission("zohoSync");
+  return staff.viewingAs ? null : staff;
+}
+
+/** Step 1: the preview — how many of each document and their totals, read from the ERP only. */
+export async function zohoSyncPreviewAction(): Promise<{ preview: SyncPreview | null; error: string | null }> {
+  if (!(await sender())) return { preview: null, error: VIEW_ONLY };
+  return { preview: await loadSyncPreview(), error: null };
+}
+
+/** Step 2: "Yes, send" — the run takes exactly the rows the person saw that still wait. */
+export async function zohoSyncStartAction(
+  ids: string[],
+  groups: { key: string; label: string; count: number; total: number }[],
+  others?: { removals?: number; removalsTotal?: number; again?: number; nothing?: number },
+): Promise<StartResult> {
+  const staff = await sender();
+  if (!staff) return { runId: null, ids: [], error: VIEW_ONLY };
+  // What the person confirmed, kept with the run: the first posts by group, and the lines that are not new money.
+  const preview = {
+    groups: (Array.isArray(groups) ? groups : []).slice(0, 20).map((g) => ({ key: String(g.key), label: String(g.label), count: Number(g.count) || 0, total: Number(g.total) || 0 })),
+    count: Array.isArray(ids) ? ids.length : 0,
+    removals: Number(others?.removals) || 0,
+    removalsTotal: Number(others?.removalsTotal) || 0,
+    again: Number(others?.again) || 0,
+    nothing: Number(others?.nothing) || 0,
+  };
+  return startSyncRun(staff, Array.isArray(ids) ? ids : [], preview);
+}
+
+/** Step 3, repeated: one part of the run (about 45 seconds), answered with each row's outcome. */
+export async function zohoSyncChunkAction(runId: string | null, ids: string[]): Promise<ChunkResult> {
+  const staff = await sender();
+  if (!staff) return { items: [], left: [], stopped: null, error: VIEW_ONLY };
+  try {
+    return await runSyncChunk(staff, runId && UUID.test(runId) ? runId : null, Array.isArray(ids) ? ids : []);
+  } catch (e) {
+    unstable_rethrow(e);
+    return { items: [], left: [], stopped: null, error: `The sync stopped part-way: ${e instanceof Error ? e.message : String(e)}. What was sent stays posted; press Sync to Zoho again for the rest.` };
+  }
+}
+
+/** Step 4: the run is closed as done or stopped (and yesterday's books are compared when due). */
+export async function zohoSyncFinishAction(runId: string | null, stopped: string | null): Promise<{ recon: string | null }> {
+  if (!(await sender())) return { recon: null };
+  return finishSyncRun(runId && UUID.test(runId) ? runId : null, stopped ? "stopped" : "done", stopped ? String(stopped).slice(0, 300) : null);
+}
+
+/** Retry from the results window: the one row, its new outcome returned in place. */
+export async function zohoSyncRetryAction(id: string): Promise<{ item: RunItem | null; error: string | null }> {
+  if (!(await sender())) return { item: null, error: VIEW_ONLY };
+  return retryOneRow(String(id));
+}
+
+/** 11.5: the owner's switch between manual and automatic (Settings > Zoho Books, and the Zoho Books page). */
+export async function setZohoSyncModeAction(formData: FormData) {
+  const staff = await requirePermission("zohoSync");
+  const where = String(formData.get("back") ?? "") === "/settings/zoho" ? "/settings/zoho" : "/zoho";
+  const r = await setSyncMode(staff, String(formData.get("mode") ?? ""));
+  redirect(`${where}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.words ?? "Saved.")}`);
 }
 
 /**
@@ -83,24 +162,6 @@ async function flagPaymentsOfHandInvoice(invoiceId: string): Promise<number> {
   return n;
 }
 
-/** The whole queue runs now instead of waiting for the five-minute cron. */
-export async function syncZohoNow() {
-  const staff = await requirePermission("zohoSync");
-  if (staff.viewingAs) return back("error", "Viewing only.");
-  let kind: "message" | "error";
-  let words: string;
-  try {
-    const r = await drainZohoOutbox(40);
-    kind = r.skipped ? "error" : "message";
-    words = r.skipped ?? `${r.pushed} posted · ${r.failed} failed · ${r.waiting} waiting.`;
-  } catch (e) {
-    unstable_rethrow(e);
-    kind = "error";
-    words = e instanceof Error ? e.message : String(e);
-  }
-  return back(kind, words);
-}
-
 /** The owner's backfill: everything already in the ERP joins the queue once (section 7 of the phase 1 plan). */
 export async function backfillZoho() {
   const staff = await requirePermission("manageSettings");
@@ -109,7 +170,7 @@ export async function backfillZoho() {
   let words: string;
   try {
     const r = await enqueueBackfill(staff.id);
-    words = `Queued: ${r.contacts} customer(s), ${r.deposits} deposit(s), ${r.invoices} tax invoice(s), ${r.payments} payment(s), ${r.creditnotes} credit note(s), ${r.vendors} supplier(s), ${r.bills} supplier bill(s), ${r.billpayments} supplier payment(s), ${r.commissions} commission(s), ${r.recoveries} recovery month(s), ${r.vendorcredits} supplier credit(s), ${r.cnrefunds} customer refund(s), ${r.settlements} card settlement(s). The five-minute sync works through them; Sync now pushes the first batch at once.`;
+    words = `Queued: ${r.contacts} customer(s), ${r.deposits} deposit(s), ${r.invoices} tax invoice(s), ${r.payments} payment(s), ${r.creditnotes} credit note(s), ${r.vendors} supplier(s), ${r.bills} supplier bill(s), ${r.billpayments} supplier payment(s), ${r.commissions} commission(s), ${r.recoveries} recovery month(s), ${r.vendorcredits} supplier credit(s), ${r.cnrefunds} customer refund(s), ${r.settlements} card settlement(s). They are in the queue: press Sync to Zoho (a preview first, then Yes) to send them; on automatic they go by themselves within minutes.`;
     kind = "message";
   } catch (e) {
     unstable_rethrow(e);
