@@ -5,6 +5,7 @@ import { chargeNet, type ChargeLineRow } from "./charge-rules";
 import { packageDetailsText } from "./packages";
 import { cutWords, lineIsPpf } from "./ppf-cut";
 import { round2 } from "./money";
+import { fitTotal } from "./roundoff";
 import { pageAllIn } from "./page-all";
 import { creditTakenOff, type CreditNoteFacts } from "./money-list";
 import { LINE_SELECT, PART_SELECT, approvedQuotations, approvedQuotationsMany, toLine, toPart, type ApprovedQuote } from "./quote-data";
@@ -412,11 +413,13 @@ export function draftFrom(inp: DraftInputs, settings: Settings): InvoiceDraft {
   const warrantyCredit = job?.comeback_free ? gross : 0;
   if (warrantyCredit) discount = 0;
   const beforeRounding = round2(gross - discount - warrantyCredit);
-  // The customer pays the figure on the quotation: the pre-VAT amount adjusts and the VAT line takes the rounding.
-  const total = warrantyCredit ? 0 : anyRounded ? round2(quotedTotal) : round2(beforeRounding + round2(beforeRounding * (vatPercent / 100)));
-  const taxable = warrantyCredit ? 0 : anyRounded ? round2(total / (1 + vatPercent / 100)) : beforeRounding;
+  // The customer pays the figure on the quotation: the pre-VAT amount adjusts and VAT is recalculated,
+  // so VAT is exactly 5% of the taxable amount and the total lands on the chosen number (3 November 2026).
+  const fit = warrantyCredit ? { total: 0, taxable: 0, vat: 0 } : anyRounded ? fitTotal(round2(quotedTotal), vatPercent / 100) : { total: round2(beforeRounding + round2(beforeRounding * (vatPercent / 100))), taxable: beforeRounding, vat: round2(beforeRounding * (vatPercent / 100)) };
+  const total = fit.total;
+  const taxable = fit.taxable;
   const rounding = round2(taxable - beforeRounding);
-  const vat = round2(total - taxable);
+  const vat = fit.vat;
   return {
     lines: out,
     totals: { gross, services, parts: partsTotal, fees, discount, discountPercent: discountBase ? round2((discount / discountBase) * 100) : 0, discountLabel, rounding, taxable, vat, total, warrantyCredit },

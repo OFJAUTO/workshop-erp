@@ -15,7 +15,8 @@ import { requireStaff } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
 import { installerHistoryFor } from "@/lib/bodyshop";
-import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServices, minMarkupFor, packageCostingOf, approvalReasonsNow } from "@/lib/quote-data";
+import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServices, minMarkupFor, packageCostingOf, approvalReasonsNow, roundingByOwnerOf } from "@/lib/quote-data";
+import { roundoffLimitsOf } from "@/lib/roundoff";
 import { QUOTE_STATUS_LABELS, aed, approvalCovers, isHidden, estimatedDaysAfterApproval } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings, highestBankCharge } from "@/lib/settings";
@@ -144,7 +145,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   // The owner's box sits in the right column under "Before sending": the approval above the limit, or a revision request.
   const discountBy = await discountByOf(q);
   // The owner's approval still covers what the quotation would ask now (the send's own rule).
-  const approvalNow = approvalReasonsNow(bundle, settings, discountBy?.owner === true);
+  const roundingByOwner = await roundingByOwnerOf(q.id, q.rounded_total_aed !== null && q.rounded_total_aed !== undefined);
+  const approvalNow = approvalReasonsNow(bundle, settings, { discount: discountBy?.owner === true, rounding: roundingByOwner });
   const approvalStands = !!q.owner_approved_at && approvalCovers(q.owner_approval_reason ?? null, approvalNow);
   const ownerBox = <OwnerApprovalBox q={q} mayApprove={can(role, "approveQuotes") && !staff.viewingAs} discountBy={discountBy} approveFocus={approve === "1"} revision={{ pending: revisionPending, requesterName, kind: q.revision_request_kind ?? null, reason: q.revision_request_reason ?? null, preview: ownerSees ? await revisionPreview(q.id) : [], allGone: ownerSees ? !!(await requestPartsGone(q.id))?.allGone : false }} />;
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
@@ -200,6 +202,10 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     clockedHours,
     // 2 November 2026: the owner may approve a line below its cost (with a reason) once the database update is in.
     belowCostReady: await belowCostReady(),
+    // The round-off limits (3 November 2026) and whose round-off this one is.
+    roundDownMax: roundoffLimitsOf(settings).downMax,
+    roundUpMax: roundoffLimitsOf(settings).upMax,
+    roundingByOwner,
     // 8.2 (3 November 2026): the recoveries already on the car (another quotation, the job card) - "+ Recovery" asks once.
     recoveryElsewhere: await recoveryElsewhere(q.job_id, q.number),
     // ... and an estimate's recovery that was left out when this quotation was made from it (review fix, 3 November 2026).

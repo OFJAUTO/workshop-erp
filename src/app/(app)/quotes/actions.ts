@@ -23,7 +23,8 @@ import { loadInspection } from "@/lib/inspection-data";
 import { TYRE_POSITIONS } from "@/lib/inspection";
 import { notifyManagers,notifyRoles, notifyStaff } from "@/lib/notifications";
 import { handBack, quoteLeadIds } from "@/lib/quote-lead";
-import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, packageCostingForQuote, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor, approvalReasonsNow } from "@/lib/quote-data";
+import { LINE_SELECT, PART_SELECT, SERVICE_SELECT, packageCostingForQuote, ensurePartRequests, labourRateFor, loadQuotation, logQuoteEvent, minMarkupFor, quoteToken, refreshQuoteTotals, toLine, toPart, loadPartsWait, loadQuoteChecks, parentLineFor, approvalReasonsNow, roundingByOwnerOf } from "@/lib/quote-data";
+import { fitTotal, roundoffCheck, roundoffLimitsOf, roundoffWords } from "@/lib/roundoff";
 import { applyCustomerResponse } from "@/lib/quote-respond";
 import { aed, approvalCovers, hasPackageLine, effectiveMarkupPercent, isUnchosen, marginToneOf, positionsWarningOf, quoteTotals, recoveryTitle, revisionRowRed, revisionRowWarning, round2, sendBlockers, type QuoteLine, blockOf, isHidden } from "@/lib/quotes";
 import { costLimitsOf, markupTooHigh, markupTooHighWords } from "@/lib/part-cost-check";
@@ -581,7 +582,7 @@ export async function sendQuotation(quotationId: string, _prev: SendQuoteState, 
   }
   const setter = q.discount_set_by ?? null;
   const { data: setterRow } = setter ? await admin.from("staff").select("role_id").eq("id", setter).maybeSingle() : { data: null };
-  const reasons = approvalReasonsNow(bundle, settings, setterRow?.role_id === "owner");
+  const reasons = approvalReasonsNow(bundle, settings, { discount: setterRow?.role_id === "owner", rounding: await roundingByOwnerOf(q.id, q.rounded_total_aed !== null && q.rounded_total_aed !== undefined) });
   // The owner's approval covers what he saw: the same reasons, or a total or discount that has only gone down since.
   // Anything new or bigger goes back to him.
   if (reasons.length && staff.role_id !== "owner" && !approvalCovers(q.owner_approved_at ? q.owner_approval_reason : null, reasons)) {
@@ -947,22 +948,40 @@ export async function escalateParts(quotationId: string): Promise<{ error?: stri
   return { ok: true };
 }
 
-/** The whole-dirham total chosen when sending; the pre-VAT amount takes the difference so VAT and the total agree. */
-export async function roundQuotation(quotationId: string, total: number): Promise<{ error?: string; ok?: boolean }> {
+/**
+ * The optional round-off (3 November 2026): the chosen total incl. VAT is stored, the pre-VAT amount
+ * adjusts and VAT is recalculated to exactly 5% (fitTotal). Advisors may round DOWN up to the AED limit
+ * (Settings > Money; beyond it the quotation waits for the owner at Send), UP at most the up limit for
+ * everyone. `total` null removes the round-off.
+ */
+export async function roundQuotation(quotationId: string, total: number | null): Promise<{ error?: string; ok?: boolean; /** Stored, but above the advisor's limit: it will go to the owner at Send. */ needsOwner?: boolean; /** The total as stored (snapped to a VAT-exact figure). */ total?: number }> {
   const bundle = await loadQuotation(quotationId);
   if (!bundle) return { error: "Quotation not found." };
   const q = bundle.quotation;
   const staff = await mayEdit(q.job_id, q.created_by);
   if (!staff) return { error: "Not allowed." };
   if (q.status !== "draft" && q.status !== "pending_owner") return { error: (await refuseIfLocked(q.id, staff.id, "change the quotation", "quotation page")) ?? "This version has been sent." };
-  const whole = Math.round(total);
-  if (!Number.isFinite(whole) || whole <= 0 || Math.abs(whole - q.total_aed) > Math.max(10, q.total_aed * 0.02)) return { error: "That rounded total is too far from the quotation total." };
+  const settings = await getSettings();
   const admin = createAdminClient();
-  await admin.from("quotations").update({ rounded_total_aed: whole, updated_by: staff.id }).eq("id", q.id);
-  await refreshQuoteTotals(q.id, await getSettings(), staff.id);
-  await logQuoteEvent(q.id, q.job_id, staff.id, "quote_rounded", `${q.number} v${q.version} total rounded from ${q.total_aed.toFixed(2)} to ${whole} by ${staff.display_name}`);
+  if (total === null) {
+    if (q.rounded_total_aed === null || q.rounded_total_aed === undefined) return { ok: true };
+    await admin.from("quotations").update({ rounded_total_aed: null, updated_by: staff.id }).eq("id", q.id);
+    await refreshQuoteTotals(q.id, settings, staff.id);
+    await logQuoteEvent(q.id, q.job_id, staff.id, "quote_round_removed", `${q.number} v${q.version}: the round-off was removed by ${staff.display_name}`);
+    refresh(q.job_id, q.id);
+    return { ok: true };
+  }
+  // The total WITHOUT any round-off is what the limits measure against.
+  const base = quoteTotals(bundle.lines, { ...q, rounded_total_aed: null }).total;
+  if (base <= 0) return { error: "Nothing to round yet - add the lines first." };
+  const fit = fitTotal(total, (Number(q.vat_percent) || 5) / 100);
+  const check = roundoffCheck({ current: base, target: fit.total, isOwner: staff.role_id === "owner", limits: roundoffLimitsOf(settings) });
+  if (check.error) return { error: check.error };
+  await admin.from("quotations").update({ rounded_total_aed: fit.total, updated_by: staff.id }).eq("id", q.id);
+  await refreshQuoteTotals(q.id, settings, staff.id);
+  await logQuoteEvent(q.id, q.job_id, staff.id, "quote_rounded", `${q.number} v${q.version} total set to ${fit.total.toFixed(2)} (${roundoffWords(round2(fit.total - base))}, from ${base.toFixed(2)}) by ${staff.display_name}`);
   refresh(q.job_id, q.id);
-  return { ok: true };
+  return { ok: true, needsOwner: check.needsOwner, total: fit.total };
 }
 
 /** On a revised quotation: keep the labour lines marked Urgent and their parts; every other charge stays. The rest is removed from this version. */

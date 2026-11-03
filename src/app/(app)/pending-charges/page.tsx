@@ -15,6 +15,9 @@ import { PRODUCTION_SITE_URL } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { cancelEntryAction, createEntryAction, issueEntryTaxInvoiceAction } from "./actions";
+import { roundInvoice } from "@/app/(app)/invoices/actions";
+import { RoundOff } from "@/components/RoundOff";
+import { roundoffLimitsOf } from "@/lib/roundoff";
 
 const money = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 type Search = { open?: string; new?: string; customer?: string; cq?: string; status?: string; q?: string; provider?: string; from?: string; to?: string; message?: string; error?: string };
@@ -101,6 +104,18 @@ async function OpenEntry({ e, staffRole, viewingAs, remindDays }: { e: EntryView
   const accounts = ["owner", "accounts"].includes(staffRole) && !viewingAs;
   const link = e.proformaToken ? await shortFor(`${PRODUCTION_SITE_URL}/proforma/${e.proformaToken}`).catch(() => null) : null;
   const msg = link ? `Dear ${e.customer}, please find the proforma for ${e.what.toLowerCase()} (AED ${money(e.balance)} with VAT): ${link} Thank you, OFJ Automotive` : null;
+  // The optional round-off on the pending charge's proforma (3 November 2026): same control as every document.
+  const proformaId = (e as unknown as { proforma_id?: string | null }).proforma_id ?? null;
+  const { data: proRow } = proformaId && e.status === "pending" && accounts ? await createAdminClient().from("invoices").select("id, kind, status, converted_to, subtotal_aed, discount_aed, warranty_credit_aed, taxable_aed, total_aed").eq("id", proformaId).maybeSingle() : { data: null };
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const pro = proRow && proRow.kind === "proforma" && proRow.status === "issued" && !proRow.converted_to
+    ? (() => {
+        const net = r2((Number(proRow.subtotal_aed) || 0) - (Number(proRow.discount_aed) || 0) - (Number(proRow.warranty_credit_aed) || 0));
+        const vat = r2(net * 0.05);
+        return { net, baseTotal: r2(net + vat), rounding: r2((Number(proRow.taxable_aed) || 0) - net), total: Number(proRow.total_aed) || 0 };
+      })()
+    : null;
+  const limits = roundoffLimitsOf(await getSettings());
   return (
     <Card className="flex flex-col gap-3 !border-ink" data-pc-opened={e.id}>
       <div className="flex flex-wrap items-center gap-2">
@@ -123,6 +138,7 @@ async function OpenEntry({ e, staffRole, viewingAs, remindDays }: { e: EntryView
           {link ? <a href={`https://wa.me/${(e.phone ?? "").replace(/[^\d]/g, "")}?text=${encodeURIComponent(msg ?? "")}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white" data-pc-send>Send the proforma (WhatsApp)</a> : null}
           {msg ? <CopyText text={msg} label="Copy message" /> : null}
           {accounts ? <RecordPaymentButton customerId={e.customer_id} vehicleId={e.vehicle_id ?? undefined} label="Record payment" /> : null}
+          {accounts && pro && proformaId ? <RoundOff docWords="proforma" baseTotal={pro.baseTotal} baseNet={pro.net} rounding={pro.rounding} appliedTotal={pro.total} vatPercent={5} isOwner={staffRole === "owner"} limits={limits} approvedCap={null} refuseOverLimit apply={roundInvoice.bind(null, proformaId)} /> : null}
           {e.proformaToken ? <a href={`/proforma/${e.proformaToken}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-sm font-bold underline underline-offset-4" data-pc-proforma>Open the proforma</a> : null}
         </div>
       ) : null}

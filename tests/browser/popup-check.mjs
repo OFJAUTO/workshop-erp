@@ -142,6 +142,8 @@ export async function runPopups() {
   await goto(p, qUrl);
   await check(p, "Add a part (quotation)", "[data-part-picker]", () => p.getByRole("button", { name: "+ Add a part" }).first().click(), findings, shots);
   await goto(p, qUrl);
+  await check(p, "Round off (quotation)", "[data-roundoff-dialog]", () => click(p, "[data-roundoff-open]"), findings, shots);
+  await goto(p, qUrl);
   if (await p.locator("[data-add-package]").count()) await check(p, "Add a package", "[data-package-ask]", () => click(p, "[data-add-package]"), findings, shots);
   /* ---- The Parts desk ---- */
   const pUrl = `/parts/${quote.jobId}`;

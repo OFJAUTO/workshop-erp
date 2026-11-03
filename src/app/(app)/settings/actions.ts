@@ -588,6 +588,10 @@ export async function saveMoneyLimits(formData: FormData) {
   // Parts accounts (3 November 2026, section 12): a returned part waiting for the supplier's credit note turns red after these days.
   const creditDays = formData.has("supplier_credit_wait_days") ? num("supplier_credit_wait_days", 1, 365) : undefined;
   if (creditDays === null) redirect(`/settings?error=${encodeURIComponent("Supplier credit notes: red after 1 to 365 days.")}#money-limits`);
+  // Round-off (3 November 2026): advisors may round a document DOWN up to this (more needs the owner); UP capped for everyone.
+  const roundDown = formData.has("roundoff_down_limit_aed") ? num("roundoff_down_limit_aed", 0, 100000) : undefined;
+  const roundUp = formData.has("roundoff_up_limit_aed") ? num("roundoff_up_limit_aed", 0, 1000) : undefined;
+  if (roundDown === null || roundUp === null) redirect(`/settings?error=${encodeURIComponent("Round-off limits: down 0 to 100,000 AED; up 0 to 1,000 AED.")}#money-limits`);
   if (askBelow === null || farBelow === null || similar === null || markupWarn === null) redirect(`/settings?error=${encodeURIComponent("Part costs: ask under 0 to 10,000 AED; flag under 1 to 100 %; similar 0 to 100 %; markup warning 50 to 1,000,000 %.")}#money-limits`);
   const admin = createAdminClient();
   const rows = [
@@ -600,6 +604,8 @@ export async function saveMoneyLimits(formData: FormData) {
     ...(markupWarn !== undefined ? [{ key: "part_markup_warn_percent", label: "Quotations: warn on a part markup over (%)", value: markupWarn }] : []),
     ...(reportHours !== undefined && reportHours !== null ? [{ key: "payment_report_reminder_hours", label: "Payment reported by an advisor and not recorded: remind accounts and the owner after (working hours)", value: Math.round(reportHours) }] : []),
     ...(creditDays !== undefined && creditDays !== null ? [{ key: "supplier_credit_wait_days", label: "Supplier credit note: days to wait", value: Math.round(creditDays) }] : []),
+    ...(roundDown !== undefined && roundDown !== null ? [{ key: "roundoff_down_limit_aed", label: "Round-off: advisors may round DOWN up to (AED per document)", value: roundDown }] : []),
+    ...(roundUp !== undefined && roundUp !== null ? [{ key: "roundoff_up_limit_aed", label: "Round-off: rounding UP capped at (AED per document)", value: roundUp }] : []),
   ];
   for (const r of rows) await admin.from("settings").upsert({ ...r, updated_by: staff.id }, { onConflict: "key" });
   revalidatePath("/settings");

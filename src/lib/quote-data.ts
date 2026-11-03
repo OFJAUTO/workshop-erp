@@ -7,6 +7,7 @@ import { loadInspection, INSPECTION_BUCKET, type InspectionBundle, type Inspecti
 import { DISC_ACTIONS, LEAK_REPAIRS, LEAK_SEVERITIES, TYRE_POSITIONS, cleanPartsRows, partsRowsText } from "./inspection";
 import { cleanPartsList, mergePartsList, positionsWords } from "./parts-list";
 import { ownerApprovalReasons, quoteTotals, lineTotal, round2, type PartItem, type PartRequest, type QuoteLine, type QuoteRow, type QuoteSummary, type Service, type ServiceCategory } from "./quotes";
+import { roundoffLimitsOf } from "./roundoff";
 import { expectedFeeCost, type Settings } from "./settings";
 import { newToken } from "./media";
 import { dubaiDate } from "./jobs";
@@ -366,9 +367,9 @@ export async function suggestedLines(jobId: string, labourRate: number): Promise
 }
 
 /** The reasons this quotation needs the owner NOW (B3): one computation for the send, the quote page and the save route. */
-export function approvalReasonsNow(bundle: Pick<QuoteBundle, "quotation" | "lines"> & { job?: QuoteBundle["job"] }, settings: Settings, discountByOwner: boolean): string[] {
+export function approvalReasonsNow(bundle: Pick<QuoteBundle, "quotation" | "lines"> & { job?: QuoteBundle["job"] }, settings: Settings, by: { discount: boolean; /** The round-off was the owner's own (3 November 2026). */ rounding: boolean }): string[] {
   const totals = quoteTotals(bundle.lines, bundle.quotation, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
-  const reasons = ownerApprovalReasons(bundle.quotation, bundle.lines, totals, { discountLimit: Number(settings.discount_limit_percent) || 0, approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0 }, { discountByOwner });
+  const reasons = ownerApprovalReasons(bundle.quotation, bundle.lines, totals, { discountLimit: Number(settings.discount_limit_percent) || 0, approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0, roundDownMax: roundoffLimitsOf(settings).downMax }, { discountByOwner: by.discount, roundingByOwner: by.rounding });
   // Section 5 (30 October 2026): anything free goes to the owner with its reason - except a free comeback the owner
   // already decided (the warranty repair) and the free pick-up of a PPF package. Dormant until the reason can be saved.
   const q = bundle.quotation;
@@ -418,8 +419,16 @@ export async function refreshQuoteTotals(quotationId: string, settings: Settings
     if (round2(l.line_total) !== t) await admin.from("quotation_lines").update({ line_total: t, updated_by: stamp }).eq("id", l.id);
   }
   const responded = q.status === "approved";
-  const totals = quoteTotals(ls, qArgs, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
+  let totals = quoteTotals(ls, qArgs, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
   const patch: Record<string, unknown> = { subtotal_aed: totals.subtotal, discount_aed: totals.discount, vat_aed: totals.vat, total_aed: totals.total, deposit_aed: totals.deposit, commission_aed: totals.commission, updated_by: stamp };
+  // A round-off set earlier that the lines have moved AWAY from (it would now round UP beyond the limit)
+  // is dropped by itself: the figure was chosen for other lines (3 November 2026).
+  if (qArgs.rounded_total_aed !== null && totals.rounding > roundoffLimitsOf(settings).upMax + 0.004) {
+    qArgs.rounded_total_aed = null;
+    totals = quoteTotals(ls, qArgs, { depositThreshold: Number(settings.deposit_threshold_aed) || 0, depositPercent: Number(settings.deposit_percent) || 50 });
+    Object.assign(patch, { rounded_total_aed: null, subtotal_aed: totals.subtotal, discount_aed: totals.discount, vat_aed: totals.vat, total_aed: totals.total, deposit_aed: totals.deposit, commission_aed: totals.commission });
+    await logQuoteEvent(quotationId, null, stamp, "quote_round_dropped", "The round-off was removed: the lines changed and the chosen total would now round the quotation UP beyond the limit.");
+  }
   if (responded) patch.approved_total_aed = quoteTotals(ls, qArgs, { onlyApproved: true }).total;
   // A change after "Quotation complete" reopens it: the advisor checks it again before sending.
   if (reopening) Object.assign(patch, { completed_at: null, completed_by: null, rounded_total_aed: null });
@@ -428,7 +437,7 @@ export async function refreshQuoteTotals(quotationId: string, settings: Settings
   if (q.status === "pending_owner") {
     const setter = (q.discount_set_by as string | null) ?? null;
     const { data: setterRow } = setter ? await admin.from("staff").select("role_id").eq("id", setter).maybeSingle() : { data: null };
-    const left = ownerApprovalReasons(qArgs, ls, totals, { discountLimit: Number(settings.discount_limit_percent) || 0, approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0 }, { discountByOwner: setterRow?.role_id === "owner" });
+    const left = ownerApprovalReasons(qArgs, ls, totals, { discountLimit: Number(settings.discount_limit_percent) || 0, approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0, roundDownMax: roundoffLimitsOf(settings).downMax }, { discountByOwner: setterRow?.role_id === "owner", roundingByOwner: await roundingByOwnerOf(quotationId, qArgs.rounded_total_aed !== null) });
     if (!left.length) Object.assign(patch, { status: "draft", owner_approval_reason: null });
     else if (left.join("; ") !== ((q.owner_approval_reason as string | null) ?? "")) patch.owner_approval_reason = left.join("; ");
   }
@@ -447,6 +456,19 @@ export async function refreshQuoteTotals(quotationId: string, settings: Settings
       }
     }
   }
+}
+
+/**
+ * Who last set this version's round-off (the newest quote_rounded event): true when it was the owner.
+ * His own round-off never needs his approval; anyone else's counts against the AED limit (3 November 2026).
+ */
+export async function roundingByOwnerOf(quotationId: string, hasRounding: boolean): Promise<boolean> {
+  if (!hasRounding) return false;
+  const admin = createAdminClient();
+  const { data: ev } = await admin.from("quotation_events").select("created_by").eq("quotation_id", quotationId).eq("event_type", "quote_rounded").order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (!ev?.created_by) return false;
+  const { data: who } = await admin.from("staff").select("role_id").eq("id", ev.created_by).maybeSingle();
+  return who?.role_id === "owner";
 }
 
 export async function logQuoteEvent(quotationId: string, jobId: string | null, by: string | null, event_type: string, note: string) {

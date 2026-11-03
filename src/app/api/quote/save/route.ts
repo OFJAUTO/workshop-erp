@@ -7,7 +7,7 @@ import { recoveryElsewhere } from "@/lib/charges";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { LINE_TYPES, belowCostAll, belowCostChangesIn, belowCostWords, effectiveMarkupPercent, floorProblem, minimumMarkupAed, needsPackageCosting, parseHours, priceSideKeys, recoveryTitle, round2, worseBelowCost, type BelowCost, type BelowCostOpts, type LineType, type QuoteHeaderForTotals, type QuoteLine } from "@/lib/quotes";
-import { LINE_SELECT, SERVICE_SELECT, approvalReasonsNow, attachBelowCost, attachPartLineExtras, labourRateFor, loadQuotation, minMarkupFor, refreshQuoteTotals, toLine, logQuoteEvent } from "@/lib/quote-data";
+import { LINE_SELECT, SERVICE_SELECT, approvalReasonsNow, attachBelowCost, attachPartLineExtras, labourRateFor, loadQuotation, minMarkupFor, refreshQuoteTotals, toLine, logQuoteEvent, roundingByOwnerOf } from "@/lib/quote-data";
 import { belowCostOptsFor, flagBelowCost, headerOf, linesForBelowCost, stampBelowCost } from "@/lib/below-cost";
 import { belowCostReady, lineCostConfirmReady, partUnitsReady } from "@/lib/schema-ready";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
@@ -861,7 +861,7 @@ export async function POST(request: NextRequest) {
       const b = await loadQuotation(q.id);
       // refreshQuoteTotals may already have sent it back (and handed it back): never twice.
       if (b && b.quotation.status === "pending_owner") {
-        const left = approvalReasonsNow(b, settings, true);
+        const left = approvalReasonsNow(b, settings, { discount: true, rounding: await roundingByOwnerOf(q.id, b.quotation.rounded_total_aed !== null && b.quotation.rounded_total_aed !== undefined) });
         if (left.length) await admin.from("quotations").update({ owner_approval_reason: left.join("; "), updated_by: staff.id }).eq("id", q.id);
         else {
           await admin.from("quotations").update({ status: "draft", owner_approval_reason: null, updated_by: staff.id }).eq("id", q.id);

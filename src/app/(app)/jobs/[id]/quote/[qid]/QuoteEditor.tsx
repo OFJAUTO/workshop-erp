@@ -37,7 +37,8 @@ import { NOT_PRICE_KEYS, belowCostAll, belowCostChangesIn, belowCostWords, type 
 import { INTERNAL_ONLY_LABEL, profitLines, approvalCovers, discountAgainstLimit, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { DEFAULT_COST_LIMITS, markupTooHigh, markupTooHighWords } from "@/lib/part-cost-check";
-import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
+import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, roundQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
+import { RoundOff } from "@/components/RoundOff";
 import { SendQuoteControl } from "./SendQuoteControl";
 import { CommissionLine } from "./CommissionLine";
 import { realPartNumber } from "@/lib/parts-rows";
@@ -212,6 +213,11 @@ export type EditorSettings = {
   recoveryElsewhere?: string[];
   /** An estimate's recovery not copied onto this quotation because the car already had one (the History's words). */
   recoveryLeftOut?: string[];
+  /** Round-off limits (Settings > Money, 3 November 2026): how far an advisor may round down, the up cap for all. */
+  roundDownMax?: number;
+  roundUpMax?: number;
+  /** The stored round-off was the owner's own (never a reason for his approval). */
+  roundingByOwner?: boolean;
 };
 
 export type RecoveryType = { key: string; label: string; cost: number; price: number };
@@ -421,6 +427,8 @@ export function QuoteEditor({
     setHeader((h) => ({ ...h, discount_kind: quotation.discount_kind ?? null, discount_value: quotation.discount_value ?? null, discount_scope: quotation.discount_scope ?? "labour" }));
   }
   const [discountOpen, setDiscountOpen] = useState(false);
+  /** Who set the round-off in THIS tab (true = the owner); null = nobody here, the server's word stands. */
+  const [roundedHere, setRoundedHere] = useState<boolean | null>(null);
   /** "Markup for every part … Apply to all": as a percentage of the cost, or a fixed AED per part. */
   const [allMode, setAllMode] = useState<"percent" | "aed">("percent");
   const [removeAsk, setRemoveAsk] = useState<{ id: string; parts: number } | null>(null);
@@ -896,6 +904,8 @@ export function QuoteEditor({
     return isOwner ? { block: false, words: `${words}. You will be asked why (logged).` } : { block: true, words: `Not saved: ${words}. Lower the discount – only the owner can sell below cost.` };
   };
   const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, bankChargeFixed: liveFixed, clockedHours: settings.clockedHours ?? null, bodyshopRate: settings.bodyshopRate ?? 0, supplierCharges: settings.supplierCharges?.total ?? 0, packageCosting: liveCosting });
+  /** The totals WITHOUT the round-off: what the Round off window measures against. */
+  const noRound = q.rounded_total_aed ? quoteTotals(lines, { ...q, rounded_total_aed: null }, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, bankChargeFixed: liveFixed, clockedHours: settings.clockedHours ?? null, bodyshopRate: settings.bodyshopRate ?? 0, supplierCharges: settings.supplierCharges?.total ?? 0, packageCosting: liveCosting }) : totals;
   // Section 5: what is free on this quotation and what it costs us, from the same calculation.
   const compFree = comp && !comp.decidedComeback ? compLinesOf(lines, q) : [];
   const compCostNow = compFree.length ? compCost(compFree, q, { technicianCostRate: settings.technicianCostRate ?? 0, bodyshopRate: settings.bodyshopRate ?? 0, packageCosting: liveCosting, clockedHours: settings.clockedHours ?? null }, { technician: settings.technicianCostRate ?? 0, bodyshop: settings.bodyshopRate ?? settings.costing?.ratePerHour ?? 0 }) : null;
@@ -990,7 +1000,8 @@ export function QuoteEditor({
   const discountGiver = discountChangedHere && viewerName ? { name: viewerName, owner: isOwner } : discountBy;
   const discountByOwnerNow = discountGiver?.owner === true;
   const compReason = compFree.length ? compApprovalReason(lines, q, quotation.comp_original_job_number ?? null) : null;
-  const reasons = [...ownerApprovalReasons(q, lines, totals, { discountLimit: settings.discountLimit, approvalAbove: settings.approvalAbove }, { discountByOwner: discountByOwnerNow }), ...(compReason ? [compReason] : [])];
+  const roundingByOwnerNow = roundedHere ?? settings.roundingByOwner ?? false;
+  const reasons = [...ownerApprovalReasons(q, lines, totals, { discountLimit: settings.discountLimit, approvalAbove: settings.approvalAbove, roundDownMax: settings.roundDownMax ?? 100 }, { discountByOwner: discountByOwnerNow, roundingByOwner: roundingByOwnerNow }), ...(compReason ? [compReason] : [])];
   /** The owner's approval still covers what the quotation asks now (the send's own rule). */
   const approvalStands = !!quotation.owner_approved_at && approvalCovers(quotation.owner_approval_reason ?? null, reasons);
   const partOf = (l: QuoteLine) => (l.part_item_id ? parts.find((p) => p.id === l.part_item_id) ?? null : null);
@@ -1948,12 +1959,31 @@ export function QuoteEditor({
             <dt className="text-muted">Parts</dt><dd className="text-right">{aed(totals.partsSell)}</dd>
             <dt className="text-muted">Other charges</dt><dd className="text-right">{aed(totals.otherSell)}</dd>
             {totals.discount ? <><dt className="font-bold text-green" data-labour-discount-row>{discountLabelOf(q, { hasPackage: hasPackageLine(lines) })}</dt><dd className="text-right font-bold text-green">− {aed(totals.discount)}</dd></> : null}
-            {totals.rounding ? <><dt className={totals.rounding < 0 ? "font-bold text-green" : "text-muted"} data-roundoff-row>{totals.rounding < 0 ? "Round-off" : "Rounding"}</dt><dd className={`text-right ${totals.rounding < 0 ? "font-bold text-green" : ""}`}>{totals.rounding < 0 ? "− " : ""}{aed(Math.abs(totals.rounding))}</dd></> : null}
+            {totals.rounding ? <><dt className={totals.rounding < 0 ? "font-bold text-green" : "text-muted"} data-roundoff-row>Round-off</dt><dd className={`text-right ${totals.rounding < 0 ? "font-bold text-green" : ""}`}>{totals.rounding < 0 ? "− " : "+ "}{aed(Math.abs(totals.rounding))}</dd></> : null}
             <dt className="text-muted border-t border-line pt-1">Subtotal before VAT</dt><dd className="text-right border-t border-line pt-1">{aed(totals.net)}</dd>
             <dt className="text-muted">VAT {quotation.vat_percent}%</dt><dd className="text-right">{aed(totals.vat)}</dd>
             <dt className="font-extrabold">Grand total</dt><dd className="text-right text-lg font-extrabold">{aed(totals.total)}</dd>
             {totals.deposit ? <><dt className="text-muted">Deposit required</dt><dd className="text-right font-semibold" data-deposit-row>{aed(totals.deposit)}</dd></> : null}
           </dl>
+          {!disabled ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <RoundOff
+                docWords={isQuotation ? "quotation" : "estimate"}
+                baseTotal={noRound.total}
+                baseNet={noRound.net}
+                rounding={totals.rounding}
+                appliedTotal={totals.total}
+                vatPercent={Number(quotation.vat_percent) || 5}
+                isOwner={isOwner}
+                limits={{ downMax: settings.roundDownMax ?? 100, upMax: settings.roundUpMax ?? 10 }}
+                apply={async (t) => {
+                  const r = await roundQuotation(quotation.id, t);
+                  if (!r.error) setRoundedHere(t === null ? null : isOwner);
+                  return r;
+                }}
+              />
+            </div>
+          ) : null}
           {isQuotation ? (
             <div className="flex flex-col gap-2 border-t border-line pt-3" data-deposit-box>
               <label className="flex items-center gap-3 min-h-10 cursor-pointer text-sm font-bold">
@@ -2370,7 +2400,7 @@ export function QuoteEditor({
                   {pending ? "Checking…" : isQuotation ? "Quotation complete" : "Estimate complete"}
                 </Button>
               ) : null}
-              {!sent && completed && canSend ? <SendQuoteControl isOwner={isOwner} quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={blockers.length > 0} onBlocked={scrollToFirstBlocker} existingToken={quotation.token} shortLink={shortLink} status={quotation.status} total={totals.total} roundedTotal={quotation.rounded_total_aed} autoOpen={autoSend} compact /> : null}
+              {!sent && completed && canSend ? <SendQuoteControl isOwner={isOwner} quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={blockers.length > 0} onBlocked={scrollToFirstBlocker} existingToken={quotation.token} shortLink={shortLink} status={quotation.status} autoOpen={autoSend} compact /> : null}
               {canSend && sent && onRevise ? <form action={onRevise}><Button type="submit" tone="secondary" size="md" data-revise-bar>Revise quotation</Button></form> : null}
               {canSend && sent && !onRevise && onAskRevise ? (
                 <span className="inline-flex flex-wrap items-center gap-2" data-ask-revise-bar>
@@ -2384,7 +2414,7 @@ export function QuoteEditor({
                 </span>
               ) : null}
               {canSend && sent && onRevise && revision?.allowedAt ? <span className="text-xs font-semibold text-green" data-revise-allowed>Owner allowed one revision</span> : null}
-              {canSend && sent && quotation.token && (quotation.status === "sent" || quotation.status === "opened") ? <SendQuoteControl quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={false} onBlocked={() => {}} existingToken={quotation.token} shortLink={shortLink} status={quotation.status} total={totals.total} roundedTotal={quotation.rounded_total_aed} again /> : null}
+              {canSend && sent && quotation.token && (quotation.status === "sent" || quotation.status === "opened") ? <SendQuoteControl quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={false} onBlocked={() => {}} existingToken={quotation.token} shortLink={shortLink} status={quotation.status} again /> : null}
             </span>
           </div>
         </div>

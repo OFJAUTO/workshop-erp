@@ -5,7 +5,7 @@ import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
-import { PAYMENT_SELECT, loadInvoice, nextDocumentNumber, toPayment } from "@/lib/invoice-data";
+import { PAYMENT_SELECT, buildInvoiceDraft, loadInvoice, nextDocumentNumber, toPayment } from "@/lib/invoice-data";
 import { newToken } from "@/lib/media";
 import { round2 } from "@/lib/money";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
@@ -21,6 +21,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { paymentFromForm } from "@/lib/payment-form";
 import { flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "@/lib/zoho-sync";
+import { fitTotal, roundoffCheck, roundoffLimitsOf, roundoffWords } from "@/lib/roundoff";
 
 function refresh(jobId: string | null, invoiceId?: string) {
   revalidatePath("/invoices");
@@ -38,6 +39,58 @@ async function advisorsOf(jobId: string) {
   return advisorsInCharge(jobId);
 }
 const actorOf = (s: { id: string; display_name: string; role_id: string; is_head_accountant?: boolean }): Actor => ({ id: s.id, display_name: s.display_name, role_id: s.role_id, is_head_accountant: s.is_head_accountant });
+
+/**
+ * The optional round-off on a proforma (3 November 2026): the chosen total incl. VAT replaces the
+ * stored figures with the amount BEFORE VAT adjusted and VAT recalculated to exactly 5% (fitTotal).
+ * Owner, accounts and advisors; an advisor may round DOWN up to the AED limit (above it the owner does
+ * it - no waiting flow on invoices), UP at most the up limit, and never above the approved quotation
+ * total (a tax invoice is born from these figures). `target` null puts the draft's own totals back.
+ */
+export async function roundInvoice(invoiceId: string, target: number | null): Promise<{ error?: string; ok?: boolean; needsOwner?: boolean }> {
+  const staff = await requireStaff();
+  const role = staff.role_id as RoleId;
+  if (staff.viewingAs) return { error: "View as is read-only." };
+  if (!["owner", "accounts", "service_advisor"].includes(role)) return { error: "Only the owner, accounts or an advisor can round a document." };
+  const admin = createAdminClient();
+  const { data: invRaw } = await admin.from("invoices").select("id, kind, status, number, job_id, converted_to, deposit_for_quotation_id, subtotal_aed, discount_aed, warranty_credit_aed, taxable_aed, vat_aed, total_aed").eq("id", invoiceId).maybeSingle();
+  if (!invRaw) return { error: "Invoice not found." };
+  const inv = { ...invRaw, subtotal_aed: Number(invRaw.subtotal_aed) || 0, discount_aed: Number(invRaw.discount_aed) || 0, warranty_credit_aed: Number(invRaw.warranty_credit_aed) || 0, taxable_aed: Number(invRaw.taxable_aed) || 0, total_aed: Number(invRaw.total_aed) || 0 };
+  if (inv.kind !== "proforma" || inv.status !== "issued" || inv.converted_to) return { error: "Only a live proforma can be rounded. A tax invoice is corrected by credit note." };
+  if (inv.deposit_for_quotation_id) return { error: "A deposit proforma is the money asked for - it is not rounded." };
+  const settings = await getSettings();
+  // The reset point: the draft's own totals (they already carry a round-off agreed on the quotation).
+  const draft = inv.job_id ? await buildInvoiceDraft(inv.job_id, settings) : null;
+  const pct = (draft?.vatPercent ?? 5) / 100;
+  const base = draft
+    ? { total: draft.totals.total, taxable: draft.totals.taxable, vat: draft.totals.vat }
+    : (() => {
+        const net = round2(inv.subtotal_aed - inv.discount_aed - inv.warranty_credit_aed);
+        const vat = round2(net * pct);
+        return { total: round2(net + vat), taxable: net, vat };
+      })();
+  const { data: pays } = await admin.from("payments").select("amount_aed, status, is_active").eq("invoice_id", inv.id).eq("is_active", true).neq("status", "voided");
+  const paid = round2(((pays ?? []) as { amount_aed: number | string }[]).reduce((a, p) => a + (Number(p.amount_aed) || 0), 0));
+  if (target === null) {
+    const { error } = await admin.from("invoices").update({ taxable_aed: base.taxable, vat_aed: base.vat, total_aed: base.total, updated_by: staff.id }).eq("id", inv.id).eq("kind", "proforma").is("converted_to", null);
+    if (error) return { error: error.message };
+    if (inv.job_id) await admin.from("job_events").insert({ job_id: inv.job_id, event_type: "invoice_rounded", note: `${inv.number}: the round-off was removed by ${staff.display_name} (total back to ${base.total.toFixed(2)})`, created_by: staff.id });
+    refresh(inv.job_id, inv.id);
+    return { ok: true };
+  }
+  const fit = fitTotal(target, pct);
+  const check = roundoffCheck({ current: base.total, target: fit.total, isOwner: role === "owner", limits: roundoffLimitsOf(settings), approvedCap: draft && draft.quotationNumbers.length ? base.total : null, refuseOverLimit: true });
+  if (check.error) return { error: check.error };
+  if (fit.total + 0.004 < paid) return { error: `AED ${paid.toLocaleString("en-GB", { minimumFractionDigits: 2 })} is already paid on ${inv.number}: the total cannot go below it.` };
+  const { error } = await admin.from("invoices").update({ taxable_aed: fit.taxable, vat_aed: fit.vat, total_aed: fit.total, updated_by: staff.id }).eq("id", inv.id).eq("kind", "proforma").is("converted_to", null);
+  if (error) return { error: error.message };
+  if (inv.job_id) await admin.from("job_events").insert({ job_id: inv.job_id, event_type: "invoice_rounded", note: `${inv.number} set to ${fit.total.toFixed(2)} (${roundoffWords(round2(fit.taxable - base.taxable))}, from ${base.total.toFixed(2)}) by ${staff.display_name}`, created_by: staff.id });
+  else await admin.from("audit_log").insert({ table_name: "invoices", record_id: inv.id, action: "UPDATE", new_data: { note: `${inv.number} set to ${fit.total.toFixed(2)} (${roundoffWords(round2(fit.taxable - base.taxable))}) by ${staff.display_name}` }, changed_by: staff.id }).then(() => null, () => null);
+  // A paid-in-full proforma becomes the tax invoice at once (the usual rule).
+  if (inv.job_id && paid >= fit.total - 0.004) await convertProformaIfPaid(inv.job_id, staff.id, settings);
+  refresh(inv.job_id, inv.id);
+  return { ok: true };
+}
 
 /** The advisor marks the car ready to invoice; accounts are told. */
 export async function markReadyToInvoice(jobId: string) {

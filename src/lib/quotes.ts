@@ -2,6 +2,7 @@
 
 import type { WorkingTime } from "./working-time";
 import { roundHalfUp } from "./bank-fees";
+import { fitTotal, roundoffReason, roundoffReasonAmount } from "./roundoff";
 import { customerAvailabilityWords, daysFromDate, isPlaceholderSupplier } from "./parts-rows";
 import { unpricedEstimateParts, waitingWords } from "./estimate-parts";
 import { positionsQtyMismatch, positionsWords } from "./parts-list";
@@ -1009,9 +1010,12 @@ export function quoteTotals(
   let total = round2(net + vat);
   let rounding = 0;
   if (q.rounded_total_aed && q.rounded_total_aed > 0 && net > 0) {
-    total = round2(q.rounded_total_aed);
-    net = round2(total / (1 + pct));
-    vat = round2(total - net);
+    // The chosen total (3 November 2026): the round-off adjusts the amount BEFORE VAT and VAT is
+    // recalculated, so VAT is exactly the set percentage of the taxable amount (fitTotal).
+    const fit = fitTotal(q.rounded_total_aed, pct);
+    total = fit.total;
+    net = fit.taxable;
+    vat = fit.vat;
     rounding = round2(net - (subtotal - discount));
   }
   const parts = counted.filter((l) => blockOf(l) === "parts");
@@ -1230,11 +1234,15 @@ export function discountAgainstLimit(totals: { discountBase: number; discount: n
   return { amount, roundOff, pct, over, words: `${aed(amount)}${roundOff > 0 ? ` + round-off ${aed(roundOff)}` : ""} = ${pct.toFixed(1)}% of labour` };
 }
 
-export function ownerApprovalReasons(q: Pick<QuoteRow, "discount_percent">, lines: QuoteLine[], totals: { total: number; discountBase: number; discount: number; rounding: number }, settings: { discountLimit: number; approvalAbove: number }, opts: { discountByOwner?: boolean } = {}): string[] {
+export function ownerApprovalReasons(q: Pick<QuoteRow, "discount_percent">, lines: QuoteLine[], totals: { total: number; discountBase: number; discount: number; rounding: number }, settings: { discountLimit: number; approvalAbove: number; /** Round-off down above this (AED) needs the owner unless he set it himself (3 November 2026; default 100). */ roundDownMax?: number }, opts: { discountByOwner?: boolean; roundingByOwner?: boolean } = {}): string[] {
   void q;
   const out: string[] = [];
   const d = discountAgainstLimit(totals, settings.discountLimit);
   if (!opts.discountByOwner && d.over) out.push(`discount ${d.words} (limit ${settings.discountLimit}%)`);
+  // A round-off down beyond the AED limit is its own reason (the % rule above already counts it in the share).
+  const roundDownMax = settings.roundDownMax ?? 100;
+  const roundedDown = round2(Math.max(0, -(totals.rounding ?? 0)));
+  if (!opts.roundingByOwner && roundedDown > roundDownMax + 0.004) out.push(roundoffReason(roundedDown, roundDownMax));
   for (const l of lines) {
     if (!l.is_active) continue;
     if (hasCostFloor(l) && (l.discount_percent ?? 0) > 0) out.push(`${l.title}: part discount of ${l.discount_percent}%${l.discount_reason ? ` (${l.discount_reason})` : ""}`);
@@ -1271,6 +1279,9 @@ export function approvalCovers(approved: string | null | undefined, reasons: str
     const d = discountOf(r);
     // Covered when the discount has not grown and the labour has not shrunk (0.5% slack: the share is shown to one decimal).
     if (d) return seen.some((s) => { const sd = discountOf(s); return !!sd && sd.main + 0.005 >= d.main && d.base >= sd.base * 0.995; });
+    // A round-off the owner approved covers one that has only gone DOWN since (never a bigger one).
+    const ro = roundoffReasonAmount(r);
+    if (ro !== null) return seen.some((s) => { const sr = roundoffReasonAmount(s); return sr !== null && sr + 0.005 >= ro; });
     return false;
   });
 }

@@ -21,7 +21,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { PaymentForm } from "@/app/(app)/invoices/[id]/PaymentForm";
-import { addPayNow, customerSaysPaid, issueInvoice, markReadyToInvoice, recordPayment, setPaymentLink, undoPaymentAction, verifyPaymentAction } from "@/app/(app)/invoices/actions";
+import { addPayNow, customerSaysPaid, issueInvoice, markReadyToInvoice, recordPayment, roundInvoice, setPaymentLink, undoPaymentAction, verifyPaymentAction } from "@/app/(app)/invoices/actions";
+import { RoundOff } from "@/components/RoundOff";
+import { roundoffLimitsOf } from "@/lib/roundoff";
 import { UndoButton } from "@/components/UndoButton";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { DEFAULT_UNDO_MINUTES } from "@/lib/money-undo";
@@ -270,6 +272,12 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
             </div>
             {chequeClearing ? <p className="text-sm font-semibold text-amber">Cheque of AED {m(chequeClearing)} pending clearance.</p> : null}
             {bal?.credited ? <p className="text-sm font-semibold text-muted" data-credit-note-off>Credit notes AED {m(bal.credited)} taken off the balance.</p> : null}
+            {proforma && !taxInvoice && acting && ["owner", "accounts", "service_advisor"].includes(role) ? (
+              <div className="flex flex-wrap items-center gap-2 border-t border-line pt-2" data-invoice-roundoff>
+                <RoundOff docWords="proforma" baseTotal={draft.totals.total} baseNet={draft.totals.taxable} rounding={Math.round(((proforma as unknown as { taxable_aed: number }).taxable_aed - draft.totals.taxable) * 100) / 100} appliedTotal={proforma.total_aed} vatPercent={draft.vatPercent} isOwner={role === "owner"} limits={roundoffLimitsOf(settings)} approvedCap={draft.quotationNumbers.length ? draft.totals.total : null} refuseOverLimit apply={roundInvoice.bind(null, proforma.id)} />
+                <span className="text-xs text-muted">Adjusts the amount before VAT; VAT stays exactly {draft.vatPercent}%. The tax invoice is born from these figures.</span>
+              </div>
+            ) : null}
             {live && !unpaid ? <p className="text-sm font-bold text-green">Paid in full{bal?.paidAt ? ` · ${formatDayTime(bal.paidAt)}` : ""}{taxInvoice && !taxInvoice.sent_at ? " · gate-out opens after the tax invoice is sent." : ""}</p> : null}
             {taxInvoice && unpaid ? <p className="text-sm font-semibold text-amber">Tax invoice issued before full payment{taxInvoice.issue_reason ? `: ${taxInvoice.issue_reason}` : ""}. The balance is still due.</p> : null}
           </Card>

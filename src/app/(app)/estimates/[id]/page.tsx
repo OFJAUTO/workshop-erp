@@ -9,7 +9,8 @@ import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } fro
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
-import { labourRateFor, loadQuotation, loadServices, minMarkupFor, packageCostingOf } from "@/lib/quote-data";
+import { labourRateFor, loadQuotation, loadServices, minMarkupFor, packageCostingOf, roundingByOwnerOf } from "@/lib/quote-data";
+import { roundoffLimitsOf } from "@/lib/roundoff";
 import { QUOTE_STATUS_LABELS } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings, highestBankCharge } from "@/lib/settings";
@@ -170,6 +171,9 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           workingTime: workingTimeOf(settings),
           reasons: { part_discount: reasonsFor(settings, "part_discount") },
           belowCostReady: await belowCostReady(),
+          roundDownMax: roundoffLimitsOf(settings).downMax,
+          roundUpMax: roundoffLimitsOf(settings).upMax,
+          roundingByOwner: await roundingByOwnerOf(q.id, q.rounded_total_aed !== null && q.rounded_total_aed !== undefined),
         }}
         readOnly={!canEdit}
         lockedBy={lockedBy}

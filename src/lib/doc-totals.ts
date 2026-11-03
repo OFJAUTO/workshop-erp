@@ -48,7 +48,7 @@ export function docMoneyRows(input: {
   const rows: MoneyRow[] = [];
   if (adjusted && lines >= 2) rows.push({ label: "Subtotal", value: r2(input.gross), kind: "plain" });
   for (const g of green) rows.push({ label: g.label, value: r2(Math.abs(g.value)), kind: "green" });
-  if (roundUp > 0) rows.push({ label: "Rounding", value: roundUp, kind: "plain" });
+  if (roundUp > 0) rows.push({ label: "Round-off", value: roundUp, kind: "plain" });
   if (adjusted || lines >= 2 || input.taxDocument) rows.push({ label: "Subtotal before VAT", value: r2(input.net), kind: "net" });
   rows.push({ label: `VAT ${Number.isInteger(input.vatPercent) ? input.vatPercent : input.vatPercent.toFixed(2)}%`, value: r2(input.vat), kind: "vat" });
   rows.push({ label: input.totalLabel ?? "Total incl. VAT", value: r2(input.total), kind: "total" });

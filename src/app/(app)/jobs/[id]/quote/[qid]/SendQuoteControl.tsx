@@ -4,14 +4,14 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SendLinkDialog } from "@/components/SendLinkDialog";
 import { Button } from "@/components/ui";
-import { aed, roundingChoices } from "@/lib/quotes";
-import { markQuoteSent, resendQuotation, roundQuotation, sendQuotation } from "@/app/(app)/quotes/actions";
+import { markQuoteSent, resendQuotation, sendQuotation } from "@/app/(app)/quotes/actions";
 
 /**
- * "Send quotation": the rounding question (to the nearest ten dirhams, down by default), the checks,
- * then the centre window with the message, Open WhatsApp and Copy.
+ * "Send quotation": the checks, then the centre window with the message, Open WhatsApp and Copy.
+ * The total goes out exactly as it stands; a round-off is the advisor's own choice through the
+ * "Round off" button in the Summary (3 November 2026) - nothing is rounded by itself any more.
  */
-export function SendQuoteControl({ quotationId, kind, siteUrl, messageTemplate, phoneDigits, blocked, onBlocked, existingToken, shortLink = null, status, total, roundedTotal, again = false, compact = false, autoOpen = false, isOwner = false }: { /** The owner may send a quotation waiting for his approval (sending records it). */ isOwner?: boolean; /** The short address for an existing link (erp.ofjauto.com/m/xxxx), from the page. */ shortLink?: string | null; /** Opens the send window on arrival (the "send the revised quotation" link). */ autoOpen?: boolean; quotationId: string; kind: "quotation" | "estimate"; siteUrl: string; messageTemplate: string; phoneDigits: string; blocked: boolean; onBlocked: () => void; existingToken: string | null; status: string; total: number; roundedTotal: number | null; again?: boolean; /** In the bottom bar: a normal-sized button, the notes beside it. */ compact?: boolean }) {
+export function SendQuoteControl({ quotationId, kind, siteUrl, messageTemplate, phoneDigits, blocked, onBlocked, existingToken, shortLink = null, status, again = false, compact = false, autoOpen = false, isOwner = false }: { /** The owner may send a quotation waiting for his approval (sending records it). */ isOwner?: boolean; /** The short address for an existing link (erp.ofjauto.com/m/xxxx), from the page. */ shortLink?: string | null; /** Opens the send window on arrival (the "send the revised quotation" link). */ autoOpen?: boolean; quotationId: string; kind: "quotation" | "estimate"; siteUrl: string; messageTemplate: string; phoneDigits: string; blocked: boolean; onBlocked: () => void; existingToken: string | null; status: string; again?: boolean; /** In the bottom bar: a normal-sized button, the notes beside it. */ compact?: boolean }) {
   const router = useRouter();
   const [token, setToken] = useState<string | null>(existingToken);
   const [short, setShort] = useState<string | null>(shortLink);
@@ -23,8 +23,6 @@ export function SendQuoteControl({ quotationId, kind, siteUrl, messageTemplate, 
   const [pending, start] = useTransition();
   const message = token ? messageTemplate.replaceAll("[link]", short ?? `${siteUrl}/quote/${token}`) : null;
   const label = kind === "estimate" ? "Send estimate" : "Send quotation";
-  const choices = roundingChoices(total);
-  const whole = Math.abs(total - Math.round(total)) < 0.005;
 
   function send() {
     setError(null);
@@ -32,22 +30,10 @@ export function SendQuoteControl({ quotationId, kind, siteUrl, messageTemplate, 
       onBlocked();
       return;
     }
-    // Totals to customers are whole dirhams: rounded down to the nearest ten by default; up only if the advisor chooses it afterwards.
-    if (!roundedTotal && !whole && status !== "expired") {
-      go(choices.down);
-      return;
-    }
-    go(null);
+    go();
   }
-  function go(rounded: number | null) {
+  function go() {
     start(async () => {
-      if (rounded !== null) {
-        const r = await roundQuotation(quotationId, rounded);
-        if (r.error) {
-          setError(r.error);
-          return;
-        }
-      }
       const res = status === "expired" ? await resendQuotation(quotationId) : await sendQuotation(quotationId, {});
       if (res.pendingOwner) {
         setPendingOwner(res.pendingOwner);
@@ -87,12 +73,6 @@ export function SendQuoteControl({ quotationId, kind, siteUrl, messageTemplate, 
           {pending ? "Checking…" : status === "pending_owner" ? (isOwner ? "Approve and send" : "Waiting for the owner") : status === "expired" ? "Re-send" : label}
         </Button>
       )}
-      {roundedTotal && roundedTotal < total && status === "draft" && !pending ? (
-        <p className="text-xs text-muted">
-          Total rounded down to {aed(roundedTotal)} (from {aed(total)}), shown to the customer as a discount.{" "}
-          <button type="button" onClick={() => start(async () => { const r = await roundQuotation(quotationId, choices.up); if (r.error) setError(r.error); router.refresh(); })} className="font-semibold underline underline-offset-4">Round up to {aed(choices.up)} instead</button>
-        </p>
-      ) : null}
       {pendingOwner ? <p className="text-xs font-semibold text-amber">Sent to the owner for approval: {pendingOwner.join("; ")}. You will be told when it is approved.</p> : null}
       {warranty ? <p className="text-xs font-semibold text-green">Warranty repair: approved without the customer. Planning starts.</p> : null}
       {error ? <p className="text-xs font-semibold text-red">{error}</p> : null}
