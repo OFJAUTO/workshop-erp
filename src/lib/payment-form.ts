@@ -37,13 +37,32 @@ export async function paymentFromForm(staff: { id: string; display_name: string;
     const { data: same } = await admin.from("payments").select("id, number, amount_aed, method, job_id, token").eq("client_key", clientKeyIn).maybeSingle();
     if (same) {
       const differs = Math.abs(Number(same.amount_aed) - amount) > 0.005 || String(same.method) !== method;
+      // A reported payment whose receipt was made but whose report was not closed (the answer was lost): closed now.
+      if (!differs && formData.get("report_id") === clientKeyIn) {
+        const { closeReportWithPayment } = await import("./payment-reports");
+        await closeReportWithPayment(clientKeyIn as string, { id: String(same.id), number: String(same.number), amount: Number(same.amount_aed), method: String(same.method) }, { id: staff.id, display_name: staff.display_name }).catch(() => null);
+      }
       return out(differs ? { error: `This form was already used for ${same.number}. Nothing new was recorded – reload the page and record it again.` } : { ok: true, number: same.number, paymentId: same.id, token: (same.token as string | null) ?? null, message: `${same.number} was already recorded.`, repeat: { amount: Number(same.amount_aed), method: String(same.method) } }, (same.job_id as string | null) ?? jobIdIn);
     }
   }
   const proofJobId = jobIdIn ?? (invoiceId ? ((await loadInvoice(invoiceId))?.invoice.job_id ?? null) : null);
-  const { data: proofRows } = !proofFile && proofJobId && isUuid(clientKeyIn) ? await admin.from("job_files").select("id, storage_path").eq("job_id", proofJobId).eq("kind", "payment_proof").eq("ref_id", clientKeyIn).is("removed_at", null).order("created_at") : { data: [] };
-  const uploaded = (proofRows ?? []) as { id: string; storage_path: string }[];
-  if ((method === "card" || method === "transfer") && !proofFile && !uploaded.length) return out({ error: method === "card" ? "Attach a photo of the card slip first." : "Attach the transfer proof (screenshot or photo) first." }, proofJobId);
+  // A payment an advisor sent to accounts (2 November 2026, section 3): it is recorded once, on its own car, under the
+  // report's own id as the receipt's key; the advisor's slip is its proof.
+  const reportId = blankToNull(formData.get("report_id"));
+  let report: { id: string; jobId: string; proofPath: string } | null = null;
+  if (reportId) {
+    const { reportToRecord } = await import("./payment-reports");
+    const r = await reportToRecord(reportId, clientKeyIn);
+    if (r.error || !r.report) return out({ error: r.error ?? "The reported payment was not found." }, proofJobId);
+    if (unallocatedCustomer || proofJobId !== r.report.jobId) return out({ error: "This payment was reported on another car: record it on that car's job." }, proofJobId);
+    report = r.report;
+  }
+  const { data: proofRows } = !proofFile && proofJobId && isUuid(clientKeyIn) ? await admin.from("job_files").select("id, storage_path, kind").eq("job_id", proofJobId).in("kind", ["payment_proof", "payment_report"]).eq("ref_id", clientKeyIn).is("removed_at", null).order("created_at") : { data: [] };
+  const found = (proofRows ?? []) as { id: string; storage_path: string; kind: string }[];
+  // Accounts' own proofs move onto the receipt; the advisor's slips stay with his report (its record of what he sent).
+  const uploaded = found.filter((f) => f.kind === "payment_proof");
+  const proofPath = found[0]?.storage_path ?? report?.proofPath ?? null;
+  if ((method === "card" || method === "transfer") && !proofFile && !proofPath) return out({ error: method === "card" ? "Attach a photo of the card slip first." : "Attach the transfer proof (screenshot or photo) first." }, proofJobId);
   if (proofFile && proofFile.size > 25 * 1024 * 1024) return out({ error: "The proof photo is too large (over 25 MB)." }, proofJobId);
   const r = await recordPaymentCore(actor, {
     invoiceId,
@@ -58,12 +77,14 @@ export async function paymentFromForm(staff: { id: string; display_name: string;
     unallocated: unallocatedCustomer ? { customerId: unallocatedCustomer, vehicleId: vehicleIn } : null,
     overNote: blankToNull(formData.get("over_note")),
     overCheck: true,
+    // The report is closed by this receipt and its advisor told "Recorded ✓ RCT-…" (recordPaymentCore).
+    reportId: report?.id ?? null,
   }, settings);
   // The form's key was already used for another receipt (a copied tab): that earlier receipt is never touched.
   if (r.repeat && (Math.abs(r.repeat.amount - amount) > 0.005 || r.repeat.method !== method)) return out({ error: `This form was already used for ${r.number ?? "an earlier receipt"}. Nothing new was recorded – reload the page and record it again.` }, proofJobId);
-  if (!r.error && r.paymentId && !r.repeat && !proofFile && uploaded.length) {
-    await admin.from("payments").update({ proof_path: uploaded[0].storage_path, updated_by: staff.id }).eq("id", r.paymentId);
-    await admin.from("job_files").update({ ref_id: r.paymentId }).in("id", uploaded.map((u) => u.id));
+  if (!r.error && r.paymentId && !r.repeat && !proofFile && proofPath) {
+    await admin.from("payments").update({ proof_path: proofPath, updated_by: staff.id }).eq("id", r.paymentId);
+    if (uploaded.length) await admin.from("job_files").update({ ref_id: r.paymentId }).in("id", uploaded.map((u) => u.id));
   }
   if (!r.error && r.paymentId && !r.repeat && proofFile) {
     const ext = proofFile.type.includes("png") ? "png" : proofFile.type.includes("webp") ? "webp" : proofFile.type.includes("pdf") ? "pdf" : "jpg";

@@ -20,6 +20,7 @@ import { autoPauseBreaks, autoPauseEndOfShift } from "@/lib/work-flow";
 import { monthKey, monthLabel, monthlySummary, shiftMonth } from "@/lib/owner-report";
 import { loadDocAlerts } from "@/lib/doc-reminders-data";
 import { depositsWaiting } from "@/lib/deposits";
+import { paymentReportsHourly } from "@/lib/payment-reports";
 
 /**
  * Runs every hour (Vercel cron). Two jobs:
@@ -64,6 +65,7 @@ function housekeepingWords(report: Record<string, number>): string {
     aftercareOverdue: ["after-care check overdue", "after-care checks overdue"], redTaskBells: ["red task bell", "red task bells"], orderNowOverdue: ["LPO to order", "LPOs to order"],
     invoiceMissingReminders: ["missing supplier invoice reminder", "missing supplier invoice reminders"], stockLow: ["low stock alert", "low stock alerts"], stockCount: ["monthly stock count request", "monthly stock count requests"],
     bodyshopLate: ["late bodyshop stage", "late bodyshop stages"], bodyshopDueOut: ["bodyshop car due out tomorrow", "bodyshop cars due out tomorrow"], monthlySummary: ["monthly summary sent", "monthly summaries sent"],
+    paymentReportsLate: ["reported payment reminder", "reported payment reminders"],
   };
   const parts = Object.entries(report)
     .filter(([, n]) => n > 0)
@@ -475,6 +477,14 @@ async function runHousekeeping(): Promise<Record<string, number>> {
       rang++;
     }
     report.orderNowOverdue = rang;
+  }
+
+  // 27. A payment an advisor sent to accounts and not recorded or queried within the set WORKING hours (Settings >
+  // Money, default 4): accounts and the owner are told once (2 November 2026, section 3). Its Waiting line is red.
+  try {
+    report.paymentReportsLate = await paymentReportsHourly(settings);
+  } catch {
+    report.paymentReportsLate = -1;
   }
 
   // 24. Supplier invoices still missing ("to follow"): Parts are reminded once a day per LPO until the

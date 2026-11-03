@@ -10,6 +10,7 @@ const isStaffPage = (path: string) => !NOT_STAFF.some((p) => (p.endsWith("/") ? 
 
 const KIND_WORDS: Record<string, string> = {
   payment_proof: "Payment proof",
+  payment_report: "Payment slip for accounts",
   supplier_invoice: "Supplier invoice",
   odometer_out: "Gate-out km photo",
   gate_out_photo: "Gate-out photo",

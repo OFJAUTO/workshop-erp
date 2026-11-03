@@ -59,6 +59,8 @@ export default async function CustomerPage({
   // 1 November 2026: the customer's money - "Paid so far · Balance" per job, credit not allocated - and Record payment.
   const role = staff.role_id as RoleId;
   const mayPay = can(role, "recordPayments") && !staff.viewingAs;
+  // The owner in View as sees the same button, greyed ("View as is read-only", 2 November 2026).
+  const viewPay = can(role, "recordPayments") && !!staff.viewingAs;
   const seesMoney = can(role, "viewInvoices");
   const [moneyChoices, credit] = seesMoney ? await Promise.all([paymentChoices({ customerId: id }, await getSettingsForGoodwill()), unallocatedOf({ customerId: id })]) : [null, []];
   const owing = (moneyChoices?.targets ?? []).filter((t) => t.kind !== "unallocated");
@@ -77,9 +79,9 @@ export default async function CustomerPage({
           </span>
         }
         actions={
-          canEdit || mayPay ? (
+          canEdit || mayPay || viewPay ? (
             <>
-              {mayPay ? <RecordPaymentButton customerId={c.id} size="lg" tone="secondary" /> : null}
+              {mayPay || viewPay ? <RecordPaymentButton customerId={c.id} readOnly={viewPay} size="lg" tone="secondary" /> : null}
               {canEdit ? (
                 <>
                   <LinkButton href={`/vehicles/new?customer=${c.id}`} tone="secondary">

@@ -7,7 +7,9 @@ import { dubaiDate } from "@/lib/jobs";
 import { loadMoneyRows, loadMoneyTiles } from "@/lib/money-data";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings, bankFeeValuesOf, bankFeesOf } from "@/lib/settings";
-import { CounterPaymentsCard, MoneyTilesRow } from "@/app/(app)/dashboard/AccountsDashboard";
+import { MoneyTilesRow } from "@/app/(app)/dashboard/AccountsDashboard";
+import { PaymentReportsCard } from "@/components/PaymentReportsCard";
+import { paymentReportsReady } from "@/lib/schema-ready";
 import { saveBankFeesAction } from "../card-settlements/actions";
 import { BankFeeSettings } from "../card-settlements/BankFeeSettings";
 import { feeRuleWords } from "@/lib/bank-fees";
@@ -20,7 +22,7 @@ export const dynamic = "force-dynamic";
 const FILTERS = [
   { key: "", label: "All" },
   { key: "awaiting", label: "Awaiting payment" },
-  { key: "says_paid", label: "Customer says paid" },
+  { key: "says_paid", label: "Customer says paid / reported" },
   { key: "part", label: "Part paid" },
   { key: "paid", label: "Paid" },
   { key: "proforma", label: "Proformas" },
@@ -43,6 +45,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const tiles = await loadMoneyTiles(openRows);
   // 1 November 2026: money on customers' accounts, not allocated yet (with its age), and Record payment for anyone.
   const mayPay = can(role, "recordPayments") && !staff.viewingAs;
+  const viewPay = can(role, "recordPayments") && !!staff.viewingAs;
+  const reportsOn = await paymentReportsReady();
   const unallocated = await unallocatedOf();
   // Open cars without an invoice yet sit at the top of "All" and "Awaiting": they come from the open scope.
   const all = [...openRows.filter((r) => !rows.some((x) => x.jobId === r.jobId)), ...rows];
@@ -50,8 +54,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
   const searched = needle ? all.filter((r) => [r.plate, r.jobNumber, r.customer, r.car, r.proforma?.number, r.taxInvoice?.number].some((v) => (v ?? "").toLowerCase().includes(needle))) : all;
   const match = (key: string) => (r: (typeof all)[number]) => {
     switch (key) {
-      case "awaiting": return r.state.current === "payment" && r.balance > 0.005 && !r.proforma?.customer_says_paid_at;
-      case "says_paid": return !!r.proforma?.customer_says_paid_at;
+      case "awaiting": return r.state.current === "payment" && r.balance > 0.005 && !r.proforma?.customer_says_paid_at && !r.reportedBy;
+      case "says_paid": return !!r.proforma?.customer_says_paid_at || !!r.reportedBy;
       case "part": return r.paid > 0 && r.balance > 0.005;
       case "paid": return !!(r.taxInvoice ?? r.proforma) && r.balance <= 0.005;
       case "proforma": return !!r.proforma && !r.taxInvoice;
@@ -71,16 +75,17 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <LiveRefresh tables={["invoices", "payments", "jobs"]} />
+      <LiveRefresh tables={["invoices", "payments", "jobs", ...(reportsOn ? ["payment_reports"] : [])]} />
       <PageHeader
         title="Invoices and payments"
         subtitle={`${counts[""]} car${counts[""] === 1 ? "" : "s"}${ranged ? ` · invoices from ${from || "the start"} to ${to || "today"}` : ""}`}
-        actions={can(role, "exportAccounts") || mayPay ? <>{mayPay ? <RecordPaymentButton size="lg" /> : null}{can(role, "exportAccounts") ? <a href="/api/export/accounts" className="inline-flex items-center justify-center rounded-control font-bold bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">Export for the accountant</a> : null}</> : undefined}
+        actions={can(role, "exportAccounts") || mayPay || viewPay ? <>{mayPay || viewPay ? <RecordPaymentButton size="lg" readOnly={viewPay} /> : null}{can(role, "exportAccounts") ? <a href="/api/export/accounts" className="inline-flex items-center justify-center rounded-control font-bold bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">Export for the accountant</a> : null}</> : undefined}
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <MoneyTilesRow t={tiles} />
-      {can(role, "verifyPayments") ? <CounterPaymentsCard canConfirm={!staff.viewingAs} returnTo="/invoices" /> : null}
+      {/* 2 November 2026: payments advisors took and sent to accounts, on All and "Customer says paid / reported". */}
+      {show === "" || show === "says_paid" ? <PaymentReportsCard staff={staff} settings={settings} /> : null}
 
       <Card className="flex flex-col gap-3">
         <form method="get" action="/invoices" className="flex flex-wrap items-end gap-2">

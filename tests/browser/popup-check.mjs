@@ -229,6 +229,21 @@ export async function runPopups() {
   await goto(p, `/jobs/${dep.jobId}`);
   if (await p.locator("[data-send-payment-link]").count()) await check(p, "Send payment link", "[role=dialog]", () => click(p, "[data-send-payment-link]"), findings, shots);
   else notReached.push("Send payment link: the button did not show");
+  // 3 November 2026 (payment hand-over): the advisor's "Payment received – send to accounts", the Record payment window
+  // opened on his report (the slip banner, "Record a different payment instead") and the Query window.
+  const advB = await browserFor("service_advisor", { viewport: { width: 1366, height: 1000 } });
+  await goto(advB.page, `/jobs/${dep.jobId}`);
+  if (await advB.page.locator('[data-payment-report-open="new"]').count()) await check(advB.page, "Payment received – send to accounts", "[data-payment-report-dialog]", () => click(advB.page, '[data-payment-report-open="new"]'), findings, shots);
+  else notReached.push("Payment received – send to accounts: the button did not show (the database update of 2 November not on this database?)");
+  await advB.browser.close();
+  const advId = (await sql("select id::text as id from public.staff where role_id = 'service_advisor' and is_active order by display_name limit 1"))[0]?.id;
+  const repId = (await sql("insert into public.payment_reports (job_id, customer_id, vehicle_id, amount_aed, method, reference, note, proof_path, status, reported_by, created_by, updated_by) select j.id, j.customer_id, j.vehicle_id, 500, 'transfer', 'TT-POPUP-12345', 'Paid by the driver at the counter', 'e2e/popup-slip.png', 'waiting', $2::uuid, $2::uuid, $2::uuid from public.jobs j where j.id = $1::uuid returning id::text as id", [dep.jobId, advId]).catch(() => []))[0]?.id ?? null;
+  if (repId) {
+    const onReport = async () => { await goto(p, `/jobs/${dep.jobId}?pay-report=${repId}`); await p.locator("[data-report-banner]").waitFor({ timeout: 15000 }); };
+    await check(p, "Record payment window (reported payment)", "[data-record-payment-dialog]", onReport, findings, shots);
+    await check(p, "Query a reported payment", "[data-report-query-dialog]", async () => { await onReport(); await click(p, "[data-report-banner] [data-report-query-open]"); }, findings, shots);
+    await sql("update public.payment_reports set status = 'withdrawn', withdrawn_reason = 'Pop-up check', withdrawn_at = now() where id = $1", [repId]);
+  } else notReached.push("Record payment window (reported payment): no report could be seeded");
 
   const ready = (await api("/api/e2e/stage", { stage: "ready" })).json;
   const iUrl = `/jobs/${ready.jobId}/invoice`;

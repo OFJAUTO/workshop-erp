@@ -201,6 +201,152 @@ export async function paymentChoices(input: { customerId?: string | null; vehicl
   };
 }
 
+/** One result of the Record payment window's search: who pays, for which car and job, and what is left to pay. */
+export type PayerRow = {
+  key: string;
+  customerId: string;
+  name: string;
+  phone: string | null;
+  vehicleId: string | null;
+  /** "Dubai GG 13706" (empty when the customer has no car on record). */
+  plate: string;
+  /** "MERCEDES-BENZ S 580 2023". */
+  car: string;
+  jobId: string | null;
+  jobNumber: string | null;
+  pictureUrl: string | null;
+  total: number | null;
+  paid: number;
+  /** What is left on the job; null while nothing is approved, or with no job. */
+  balance: number | null;
+  /** The car has left. */
+  gone: boolean;
+  /** Money on the customer's account not allocated yet (rows without a job). */
+  credit: number;
+  /** "Balance AED 7,930.00", "Paid in full", "No approved total yet", "No open job", "Credit AED 150.00". */
+  moneyWords: string;
+};
+
+/**
+ * THE search of the Record payment window (2 November 2026, section 3): by customer name, mobile, customer number, plate
+ * ("GG 13706" finds the code and number kept apart), VIN or job number. Every row is a customer with a car and a job, the
+ * car's picture and what is left to pay. ONE car rule for every kind of hit: a car shows its open jobs, then its jobs that
+ * left still owing (a balance above zero), else the car alone (the money then goes on the account). A job number typed is
+ * that job, always. A customer found by name or mobile shows each of their cars by the same rule; "No car on record" only
+ * when the customer has no car at all.
+ */
+export async function payerRows(q: string, settings: Settings): Promise<PayerRow[]> {
+  const { cleanNeedle, vehicleOrFilter } = await import("./plate-search");
+  const needle = cleanNeedle(q);
+  if (needle.length < 2) return [];
+  const admin = createAdminClient();
+  const digits = needle.replace(/\D/g, "");
+  const like = `%${needle}%`;
+  const VPHOTO = `${VEH}, customer_id, photo_path`;
+  const [{ data: custs }, { data: phones }, { data: cars }, { data: jobs }] = await Promise.all([
+    admin.from("customers").select("id").or(`full_name.ilike.${like},company_name.ilike.${like},customer_number.ilike.${like}`).limit(8),
+    digits.length >= 5 ? admin.from("customers").select("id").ilike("phone", `%${digits.slice(-9)}%`).limit(8) : Promise.resolve({ data: [] as { id: string }[] }),
+    admin.from("vehicles").select("id").or(vehicleOrFilter(needle)).limit(8),
+    admin.from("jobs").select("id").ilike("job_number", like).limit(6),
+  ]);
+  type J = { id: string; job_number: string; customer_id: string; vehicle_id: string; is_open: boolean };
+  const custIds = Array.from(new Set([...(custs ?? []), ...(phones ?? [])].map((c) => String(c.id))));
+  const carIds = (cars ?? []).map((v) => String(v.id));
+  const jobIds = (jobs ?? []).map((j) => String(j.id));
+  // The cars on record for the customers found (a car is on record even when every job on it is closed).
+  const { data: ownCarRows } = custIds.length ? await admin.from("vehicles").select("id, customer_id").in("customer_id", custIds).eq("is_active", true).limit(40) : { data: [] as { id: string; customer_id: string }[] };
+  const ownCars = (ownCarRows ?? []) as { id: string; customer_id: string }[];
+  // Every job of those cars and customers (open ones first, then the newest), then their cars and people.
+  const ors = [jobIds.length ? `id.in.(${jobIds.join(",")})` : "", carIds.length ? `vehicle_id.in.(${carIds.join(",")})` : "", custIds.length ? `customer_id.in.(${custIds.join(",")})` : ""].filter(Boolean);
+  const { data: jobRows } = ors.length ? await admin.from("jobs").select("id, job_number, customer_id, vehicle_id, is_open").or(ors.join(",")).order("is_open", { ascending: false }).order("gated_in_at", { ascending: false }).limit(80) : { data: [] as J[] };
+  const allJobs = (jobRows ?? []) as J[];
+  const vehIds = Array.from(new Set([...carIds, ...ownCars.map((v) => v.id), ...allJobs.map((j) => j.vehicle_id)]));
+  const peopleIds = Array.from(new Set([...custIds, ...allJobs.map((j) => j.customer_id)]));
+  const [{ data: vehRows }, { data: custRows }] = await Promise.all([
+    vehIds.length ? admin.from("vehicles").select(VPHOTO).in("id", vehIds) : Promise.resolve({ data: [] }),
+    peopleIds.length ? admin.from("customers").select("id, full_name, company_name, phone").in("id", peopleIds) : Promise.resolve({ data: [] }),
+  ]);
+  const vehOf = new Map(((vehRows ?? []) as unknown as (Vehicle & { customer_id: string; photo_path: string | null })[]).map((v) => [v.id, v]));
+  const extraPeople = Array.from(new Set(Array.from(vehOf.values()).map((v) => v.customer_id).filter((id) => !!id && !peopleIds.includes(id))));
+  const { data: moreCust } = extraPeople.length ? await admin.from("customers").select("id, full_name, company_name, phone").in("id", extraPeople) : { data: [] };
+  const custOf = new Map(([...(custRows ?? []), ...(moreCust ?? [])] as { id: string; full_name: string | null; company_name: string | null; phone: string | null }[]).map((c) => [String(c.id), c]));
+
+  // The groups, best first: a typed job number, each car found, then each car of each customer found.
+  type Group = { customerId: string; vehicleId: string | null; jobs: J[]; asked?: boolean };
+  const groups: Group[] = [];
+  for (const id of jobIds) {
+    const j = allJobs.find((x) => x.id === id);
+    if (j) groups.push({ customerId: j.customer_id, vehicleId: j.vehicle_id, jobs: [j], asked: true });
+  }
+  for (const vid of carIds) {
+    const v = vehOf.get(vid);
+    if (!v) continue;
+    const mine = allJobs.filter((j) => j.vehicle_id === vid);
+    groups.push({ customerId: mine.find((j) => j.is_open)?.customer_id ?? v.customer_id ?? mine[0]?.customer_id, vehicleId: vid, jobs: mine });
+  }
+  for (const cid of custIds) {
+    const theirCars = Array.from(new Set([...ownCars.filter((v) => v.customer_id === cid).map((v) => v.id), ...allJobs.filter((j) => j.customer_id === cid).map((j) => j.vehicle_id)]));
+    if (!theirCars.length) groups.push({ customerId: cid, vehicleId: null, jobs: [] });
+    for (const vid of theirCars) groups.push({ customerId: cid, vehicleId: vid, jobs: allJobs.filter((j) => j.vehicle_id === vid && j.customer_id === cid) });
+  }
+  // A car's candidates: the typed job, or up to three open jobs and the three newest that left (shown only while owing).
+  const candidates = (g: Group) => (g.asked ? g.jobs : [...g.jobs.filter((j) => j.is_open).slice(0, 3), ...g.jobs.filter((j) => !j.is_open).slice(0, 3)]);
+  const wanted: string[] = [];
+  for (const g of groups.slice(0, 16)) for (const j of candidates(g)) if (!wanted.includes(j.id) && wanted.length < 30) wanted.push(j.id);
+  const moneyOf = new Map((await Promise.all(wanted.map((id) => jobMoneyOf(id, settings)))).filter((x): x is JobMoney => !!x).map((m) => [m.jobId, m]));
+  const owing = (m: JobMoney | undefined) => !!m && m.balance !== null && m.balance > 0.005;
+
+  // The rows: one per job shown; the car alone when it has nothing open and nothing still owing.
+  const picks: { customerId: string; vehicleId: string | null; jobId: string | null }[] = [];
+  const shownJobs = new Set<string>();
+  const shownCars = new Set<string>();
+  for (const g of groups) {
+    if (picks.length >= 10) break;
+    if (!g.customerId || !custOf.has(g.customerId)) continue;
+    const carKey = `${g.customerId}:${g.vehicleId ?? ""}`;
+    const rows = candidates(g).filter((j) => moneyOf.has(j.id) && (g.asked || j.is_open || owing(moneyOf.get(j.id))));
+    for (const j of rows) {
+      if (shownJobs.has(j.id) || picks.length >= 10) continue;
+      shownJobs.add(j.id);
+      shownCars.add(`${j.customer_id}:${j.vehicle_id}`);
+      shownCars.add(carKey);
+      picks.push({ customerId: j.customer_id, vehicleId: j.vehicle_id, jobId: j.id });
+    }
+    if (shownCars.has(carKey) || picks.length >= 10) continue;
+    shownCars.add(carKey);
+    picks.push({ customerId: g.customerId, vehicleId: g.vehicleId, jobId: null });
+  }
+  const credits = new Map<string, number>();
+  await Promise.all(Array.from(new Set(picks.filter((p) => !p.jobId).map((p) => p.customerId))).map(async (cid) => credits.set(cid, await customerCredit(cid))));
+  const { thumbsFor } = await import("./media-urls");
+  const pictures = await thumbsFor("vehicle-photos", picks.map((p) => (p.vehicleId ? vehOf.get(p.vehicleId)?.photo_path : null)), 160);
+  return picks.map((p): PayerRow => {
+    const m = p.jobId ? (moneyOf.get(p.jobId) ?? null) : null;
+    const c = custOf.get(p.customerId)!;
+    const v = p.vehicleId ? (vehOf.get(p.vehicleId) ?? null) : null;
+    const credit = p.jobId ? 0 : (credits.get(p.customerId) ?? 0);
+    const moneyWords = m ? (m.balance === null ? "No approved total yet" : m.balance > 0.005 ? `Balance ${aed(m.balance)}` : "Paid in full") : credit > 0 ? `No open job · credit ${aed(credit)}` : v ? "No open job · nothing owed" : "No open job";
+    return {
+      key: `${p.customerId}:${p.vehicleId ?? ""}:${m ? m.jobId : ""}`,
+      customerId: p.customerId,
+      name: customerName(c),
+      phone: c.phone,
+      vehicleId: v?.id ?? null,
+      plate: v ? formatPlate(v) : "",
+      car: carOf(v),
+      jobId: m?.jobId ?? null,
+      jobNumber: m?.jobNumber ?? null,
+      pictureUrl: v?.photo_path ? (pictures.get(v.photo_path) ?? null) : null,
+      total: m?.total ?? null,
+      paid: m?.paid ?? 0,
+      balance: m?.balance ?? null,
+      gone: m ? !m.isOpen : false,
+      credit,
+      moneyWords: m && !m.isOpen ? `${moneyWords} · the car has left` : moneyWords,
+    };
+  });
+}
+
 export type AllocateResult = { error?: string; ok?: boolean; message?: string; needsNote?: { balance: number } };
 
 /**

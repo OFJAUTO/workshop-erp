@@ -44,3 +44,7 @@ export const revisionPartsReady = () => schemaReady("quotations", "revision_requ
  *  warning only (its answer cannot be stored), and the LPO gate refuses what needs no new column. */
 export const costConfirmReady = () => schemaReady("part_items", "cost_confirmed_aed, cost_confirmed_at, cost_confirmed_by");
 export const lineCostConfirmReady = () => schemaReady("quotation_lines", "cost_confirmed_aed, cost_confirmed_at, cost_confirmed_by, stock_item_id");
+
+/** Payment hand-over (2 November 2026, section 3): an advisor's "Payment received – send to accounts". Migration
+ *  20261203110000_payment_reports. Before it the button is not shown and nothing reads the table (nothing half-works). */
+export const paymentReportsReady = () => schemaReady("payment_reports", "id, status, payment_id, reminded_at, replaces_id");

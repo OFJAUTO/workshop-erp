@@ -6,6 +6,7 @@ import { can, type RoleId } from "@/lib/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { QUOTE_STATUS_LABELS } from "@/lib/quotes";
+import { vehicleOrFilter } from "@/lib/plate-search";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,8 @@ export async function GET(request: NextRequest) {
   const quoteHits = await quotationHits(q, staff.role_id as RoleId);
   const compact = `%${q.replace(/[^\p{L}\p{N}]/gu, "")}%`;
   const [{ data: vehicles }, { data: customers }, { data: byNumber }] = await Promise.all([
-    admin.from("vehicles").select("id").or(`plate_number.ilike.${compact},vin.ilike.${like}`).limit(25),
+    // "GG 13706" finds the plate whose code and number the database keeps apart (2 November 2026, one rule with the Record payment window).
+    admin.from("vehicles").select("id").or(vehicleOrFilter(q)).limit(25),
     // Only the owner, advisors and accounts may find a car by its customer's name or phone (29 October 2026).
     can(staff.role_id as RoleId, "viewCustomers") ? admin.from("customers").select("id").or(`full_name.ilike.${like},company_name.ilike.${like},phone.ilike.${compact}`).limit(25) : Promise.resolve({ data: [] as { id: string }[] }),
     admin.from("jobs").select("id").ilike("job_number", like).limit(10),

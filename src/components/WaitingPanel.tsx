@@ -11,6 +11,10 @@ import { declinedFollowUps } from "@/lib/declined";
 import { handbacksFor } from "@/lib/quote-lead";
 import { Button, Card, LinkButton } from "./ui";
 import type { BankFees } from "@/lib/bank-fees";
+import { reportWaitingItems } from "@/lib/payment-reports";
+import { PaymentReportActions } from "./PaymentReport";
+import { reasonsFor } from "@/lib/reasons";
+import { isUuid } from "@/lib/uuid";
 
 export type ExtraWaiting = {
   jobId: string;
@@ -31,7 +35,7 @@ export type ExtraWaiting = {
   /** A longer explanation, shown on hover (the line itself stays short). */
   hint?: string;
   /** The exact action right on the row instead of a link. */
-  inline?: { kind: "confirm_payment"; paymentId: string } | { kind: "record_deposit"; deposit: RecordDepositData } | { kind: "cheque_clear"; paymentId: string } | { kind: "declined_called"; ids: string[] };
+  inline?: { kind: "confirm_payment"; paymentId: string } | { kind: "record_deposit"; deposit: RecordDepositData } | { kind: "cheque_clear"; paymentId: string } | { kind: "declined_called"; ids: string[] } | { kind: "payment_report"; reportId: string; jobId: string; thumb: string | null; url: string | null; contentType?: string | null; path?: string | null; label: string };
 };
 
 type RowItem = WaitingItem & { amount?: string | null; urgency: Urgency; inline?: ExtraWaiting["inline"] };
@@ -41,7 +45,7 @@ const URGENCY_WORD: Record<Urgency, string> = { red: "Urgent", amber: "Today", g
 const URGENCY_CHIP: Record<Urgency, string> = { red: "bg-red-bar text-white", amber: "bg-amber-soft text-ink border border-amber-bar", grey: "bg-chip text-muted" };
 const ORDER: Record<Urgency, number> = { red: 0, amber: 1, grey: 2 };
 
-function Row({ i, owner, charges }: { i: RowItem; owner: boolean; charges: BankFees }) {
+function Row({ i, owner, charges, jobCard, readOnly, queryReasons }: { i: RowItem; owner: boolean; charges: BankFees; /** Accounts have no Jobs menu: every car row also opens its job card (2 November 2026). */ jobCard: string | null; readOnly: boolean; queryReasons: string[] }) {
   return (
     <li className={`py-2 pl-3 border-l-4 ${URGENCY_BAR[i.urgency]} flex flex-wrap items-center gap-x-3 gap-y-1 text-sm`} title={i.hint} data-waiting-row data-waiting-job={i.jobId} data-urgency={i.urgency}>
       <span className={`inline-flex min-h-6 items-center rounded-control px-1.5 text-[10px] font-bold uppercase tracking-[0.06em] ${URGENCY_CHIP[i.urgency]}`}>{URGENCY_WORD[i.urgency]}</span>
@@ -49,7 +53,10 @@ function Row({ i, owner, charges }: { i: RowItem; owner: boolean; charges: BankF
       {i.car ? <span className="text-muted">{i.car}</span> : null}
       <span className="flex-1 min-w-[12rem]">{i.what}{i.amount ? <span className="font-bold"> · {i.amount}</span> : null}</span>
       <span className="text-xs text-muted whitespace-nowrap">{owner ? `${i.role.replace(/_/g, " ")} · ` : ""}{i.wait ? `waiting ${i.wait}` : ""}</span>
-      {i.inline?.kind === "record_deposit" ? (
+      {jobCard ? <LinkButton href={jobCard} size="md" tone="ghost" data-waiting-job-card>Job card</LinkButton> : null}
+      {i.inline?.kind === "payment_report" ? (
+        <PaymentReportActions reportId={i.inline.reportId} jobId={i.inline.jobId} thumb={i.inline.thumb} url={i.inline.url} contentType={i.inline.contentType ?? null} path={i.inline.path ?? null} label={i.inline.label} readOnly={readOnly} actionLabel={i.actionLabel} reasons={queryReasons} />
+      ) : i.inline?.kind === "record_deposit" ? (
         <RecordDeposit d={i.inline.deposit} charges={charges} label={i.actionLabel} />
       ) : i.inline?.kind === "cheque_clear" ? (
         <form action={setChequeStatus.bind(null, i.inline.paymentId)}>
@@ -93,10 +100,14 @@ export async function WaitingPanel({ staff, extra: given = [] }: { staff: Curren
   const pendingCharges = ["owner", "service_advisor", "accounts"].includes(staff.role_id)
     ? (await loadChargeEntries({ status: "pending" })).filter((e) => pendingDays(e.created_at) >= remindDays && (staff.role_id !== "service_advisor" || e.created_by === staff.id)).map((e): ExtraWaiting => ({ jobId: `pc:${e.id}`, plate: e.plate ?? e.customer, car: e.car, what: `Pending charge ${pendingDays(e.created_at)} days · ${e.what}`, amount: `AED ${e.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`, actionLabel: "Open", href: `/pending-charges?open=${e.id}`, always: true, urgency: "amber", since: e.created_at, hint: "Not in the workshop: collect it (send the proforma again, or at the next visit)." }))
     : [];
-  const extra = [...given, ...followUps, ...handbacks, ...pendingCharges];
+  // 2 November 2026, section 3: payments advisors sent to accounts (accounts and the owner record or query them; an
+  // advisor sees his own that came back with a query).
+  const reports = await reportWaitingItems(staff, settings);
+  const extra = [...given, ...followUps, ...handbacks, ...pendingCharges, ...reports];
   const items = await loadWaitingOnYou(staff, settings);
   const owner = staff.role_id === "owner";
   const charges = bankFeesOf(settings);
+  const queryReasons = reasonsFor(settings, "payment_query");
   const wt = workingTimeOf(settings);
   const now = new Date();
   const replaced = new Set(extra.filter((e) => e.replaces).map((e) => e.jobId));
@@ -137,7 +148,11 @@ export async function WaitingPanel({ staff, extra: given = [] }: { staff: Curren
           </span>
         </summary>
         <ul className="mt-1 divide-y divide-line">
-          {all.map((i, idx) => <Row key={`${i.jobId}-${idx}`} i={i} owner={owner} charges={charges} />)}
+          {all.map((i, idx) => {
+            const reportJob = i.inline?.kind === "payment_report" ? i.inline.jobId : null;
+            const jobCard = staff.role_id === "accounts" ? (reportJob ? `/jobs/${reportJob}` : isUuid(i.jobId) ? `/jobs/${i.jobId}` : null) : null;
+            return <Row key={`${i.jobId}-${idx}`} i={i} owner={owner} charges={charges} jobCard={jobCard} readOnly={!!staff.viewingAs} queryReasons={queryReasons} />;
+          })}
         </ul>
       </details>
     </Card>

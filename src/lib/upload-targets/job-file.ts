@@ -9,7 +9,7 @@ import { reopenZoho } from "@/lib/zoho-sync";
 import { NOT_ALLOWED, checkLater, grantActor, isRefusal, refuse, rowExists, signedView, type Actor, type RegisterContext, type TargetSpec, type UploadBody } from "./common";
 
 /** The kinds of job file (the same list as the job_files_kind_check constraint: a new kind needs both). */
-export const JOB_FILE_KINDS = ["work_photo", "additional_work", "wash_photo", "gate_out_photo", "delivery_photo", "handover_photo", "supplier_invoice", "qc_postscan", "return_photo", "bodyshop_photo", "bodyshop_removed", "payment_proof", "odometer_out"];
+export const JOB_FILE_KINDS = ["work_photo", "additional_work", "wash_photo", "gate_out_photo", "delivery_photo", "handover_photo", "supplier_invoice", "qc_postscan", "return_photo", "bodyshop_photo", "bodyshop_removed", "payment_proof", "odometer_out", "payment_report"];
 
 const kindOf = (body: UploadBody) => String(body.kind ?? "");
 
@@ -19,6 +19,8 @@ const jobExists = (jobId: string) => rowExists("jobs", jobId);
 function kindAllowed(roleId: string | null, kind: string, caption?: unknown): boolean {
   // Payment proofs belong to whoever records payments: accounts and the owner.
   if (kind === "payment_proof") return roleId === "owner" || roleId === "accounts";
+  // The slip an advisor sends to accounts with "Payment received – send to accounts" (2 November 2026).
+  if (kind === "payment_report") return roleId === "owner" || roleId === "accounts" || roleId === "service_advisor";
   return roleId !== "team_leader" || kind === "bodyshop_photo" || (kind === "work_photo" && String(caption ?? "").startsWith("Film plotter"));
 }
 

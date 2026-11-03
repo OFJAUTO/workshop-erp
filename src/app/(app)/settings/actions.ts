@@ -582,6 +582,9 @@ export async function saveMoneyLimits(formData: FormData) {
   const farBelow = formData.has("part_cost_far_below_percent") ? num("part_cost_far_below_percent", 1, 100) : undefined;
   const similar = formData.has("part_cost_similar_percent") ? num("part_cost_similar_percent", 0, 100) : undefined;
   const markupWarn = formData.has("part_markup_warn_percent") ? num("part_markup_warn_percent", 50, 1000000) : undefined;
+  // Payment hand-over (2 November 2026, section 3): a payment an advisor sent and not recorded within these working hours reminds accounts and the owner.
+  const reportHours = formData.has("payment_report_reminder_hours") ? num("payment_report_reminder_hours", 1, 24) : undefined;
+  if (reportHours === null) redirect(`/settings?error=${encodeURIComponent("Reported payments: remind after 1 to 24 working hours.")}#money-limits`);
   if (askBelow === null || farBelow === null || similar === null || markupWarn === null) redirect(`/settings?error=${encodeURIComponent("Part costs: ask under 0 to 10,000 AED; flag under 1 to 100 %; similar 0 to 100 %; markup warning 50 to 1,000,000 %.")}#money-limits`);
   const admin = createAdminClient();
   const rows = [
@@ -592,6 +595,7 @@ export async function saveMoneyLimits(formData: FormData) {
     ...(farBelow !== undefined ? [{ key: "part_cost_far_below_percent", label: "Parts: flag a cost under this percent of the last price paid for the same part number", value: farBelow }] : []),
     ...(similar !== undefined ? [{ key: "part_cost_similar_percent", label: "Parts: a cheap cost bought before within this percent is not asked again", value: similar }] : []),
     ...(markupWarn !== undefined ? [{ key: "part_markup_warn_percent", label: "Quotations: warn on a part markup over (%)", value: markupWarn }] : []),
+    ...(reportHours !== undefined && reportHours !== null ? [{ key: "payment_report_reminder_hours", label: "Payment reported by an advisor and not recorded: remind accounts and the owner after (working hours)", value: Math.round(reportHours) }] : []),
   ];
   for (const r of rows) await admin.from("settings").upsert({ ...r, updated_by: staff.id }, { onConflict: "key" });
   revalidatePath("/settings");

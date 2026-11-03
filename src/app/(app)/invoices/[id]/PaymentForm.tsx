@@ -35,7 +35,16 @@ export function PaymentForm({
   hidden = null,
   extra = null,
   balanceLabel = "the balance",
+  prefill = null,
+  fixedKey = null,
+  initialProofs = null,
 }: {
+  /** Opened from an advisor's payment report (2 November 2026): what he sent fills the form; accounts check and confirm. */
+  prefill?: { amount: number; method: string; authCode: string | null; reference: string | null } | null;
+  /** The receipt's key is fixed (the report's id): one report makes one receipt, never two. */
+  fixedKey?: string | null;
+  /** Proofs already on the server for the fixed key (the advisor's slip). */
+  initialProofs?: JobFile[] | null;
   /** The form's own key name (one per place a payment can go); by default the invoice or the job. */
   tag?: string | null;
   /** Extra hidden fields sent with the payment (the Record payment window: the customer's account, the car). */
@@ -65,18 +74,21 @@ export function PaymentForm({
   /** The number the tax invoice will get when this payment settles the proforma. */
   nextTaxNumber?: string | null;
 }) {
-  const first = expected && methods.includes(expected) ? expected : methods[0] ?? "";
+  const first = prefill && methods.includes(prefill.method) ? prefill.method : expected && methods.includes(expected) ? expected : methods[0] ?? "";
   const [method, setMethod] = useState(first);
-  const [mode, setMode] = useState<"full" | "partial">(balance && balance > 0 ? "full" : "partial");
-  const [amount, setAmount] = useState("");
-  const [reference, setReference] = useState("");
-  const [authCode, setAuthCode] = useState("");
+  const prefillFull = !!prefill && !!balance && Math.abs(prefill.amount - balance) < 0.005;
+  const [mode, setMode] = useState<"full" | "partial">(prefill ? (prefillFull ? "full" : "partial") : balance && balance > 0 ? "full" : "partial");
+  const [amount, setAmount] = useState(prefill && !prefillFull ? prefill.amount.toFixed(2) : "");
+  const [reference, setReference] = useState(prefill?.reference ?? "");
+  const [authCode, setAuthCode] = useState(prefill?.authCode ?? "");
   const [confirming, setConfirming] = useState(false);
   const formRef = useRef<HTMLFormElement>(null);
   // The form's own key ties the proof to the payment. It stays the same across a reload or a new version (a proof still
   // waiting on the device stays with this form) and is renewed once a payment with it is recorded.
   const formTag = tag ?? (invoiceId ? `payment:${invoiceId}` : `payment:job:${jobId ?? proofJobId ?? "none"}`);
-  const { key: clientKey, renew } = useFormKey(formTag, proofJobId);
+  const formKey = useFormKey(formTag, proofJobId);
+  const clientKey = fixedKey ?? formKey.key;
+  const renew = formKey.renew;
   // The page came back with "message" after this form was submitted: that payment is recorded, the key is spent (a reused
   // key would be taken for the same payment, "already recorded"). The page's own list of recorded keys says the same.
   useRenewAfterAnswer(formTag, clientKey, renew);
@@ -85,7 +97,7 @@ export function PaymentForm({
   }, [spentKeys, clientKey, renew]);
   // The proofs the server has for THIS key (a new key starts with none).
   const [proofState, setProofState] = useState<{ key: string | null; files: JobFile[] }>({ key: null, files: [] });
-  if (proofState.key !== clientKey) setProofState({ key: clientKey, files: [] });
+  if (proofState.key !== clientKey) setProofState({ key: clientKey, files: clientKey && clientKey === fixedKey ? (initialProofs ?? []) : [] });
   const proofs = proofState.key === clientKey ? proofState.files : [];
   const [proofWait, setProofWait] = useState<FilesWaiting>({ count: 0, stopped: 0 });
   const rule = charges[method];
@@ -110,6 +122,7 @@ export function PaymentForm({
         {returnTo ? <input type="hidden" name="return_to" value={returnTo} /> : null}
         {invoiceId ? <input type="hidden" name="invoice_id" value={invoiceId} /> : null}
         {jobId ? <input type="hidden" name="job_id" value={jobId} /> : null}
+        {fixedKey ? <input type="hidden" name="report_id" value={fixedKey} /> : null}
         <input type="hidden" name="method" value={method} />
         <input type="hidden" name="client_key" value={clientKey ?? ""} />
         <input type="hidden" name="amount" value={mode === "full" && balance ? balance.toFixed(2) : amount} />
@@ -166,7 +179,8 @@ export function PaymentForm({
                   accept="any"
                   label="Take photo / attach"
                   compact
-                  removable
+                  removable={!fixedKey}
+                  alsoKinds={fixedKey ? ["payment_report"] : undefined}
                   onAdded={(f) => setProofState((s) => (f.refId === s.key && !s.files.some((x) => x.id === f.id) ? { ...s, files: [...s.files, f] } : s))}
                   onRemoved={(f) => setProofState((s) => ({ ...s, files: s.files.filter((x) => x.id !== f.id) }))}
                   onPending={setProofWait}

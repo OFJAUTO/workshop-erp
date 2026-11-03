@@ -30,6 +30,8 @@ export type MoneyRowData = {
   issuedAt: string;
   lastAt: string;
   paidAt: string | null;
+  /** An advisor sent a payment to accounts that waits to be recorded: his first name (2 November 2026, section 3). */
+  reportedBy: string | null;
 };
 
 type InvJoin = Record<string, unknown> & {
@@ -78,10 +80,11 @@ export async function loadMoneyRows(settings: Settings, opts: { scope: "open" | 
     }
   }
   const liveIds = invoices.filter((i) => i.inv.status === "issued" && (i.inv.kind === "tax_invoice" || (i.inv.kind === "proforma" && !i.inv.converted_to))).map((i) => i.inv.id);
-  const [{ data: payRows }, { data: approved }, pictures] = await Promise.all([
+  const [{ data: payRows }, { data: approved }, pictures, reported] = await Promise.all([
     liveIds.length ? admin.from("payments").select(PAYMENT_SELECT).in("invoice_id", liveIds).eq("is_active", true) : Promise.resolve({ data: [] as Record<string, unknown>[] }),
     jobsExtra.length ? admin.from("quotations").select("job_id").in("job_id", jobsExtra.map((j) => j!.id)).eq("status", "approved").eq("is_active", true) : Promise.resolve({ data: [] as { job_id: string }[] }),
     signCarPictures([...invoices.map((i) => i.job?.vehicle?.photo_path), ...jobsExtra.map((j) => j?.vehicle?.photo_path)]),
+    import("./payment-reports").then((m) => m.waitingReportByJob()),
   ]);
   const payments = ((payRows ?? []) as Record<string, unknown>[]).map(toPayment);
   const approvedJobs = new Set(((approved ?? []) as { job_id: string }[]).map((a) => a.job_id));
@@ -110,6 +113,7 @@ export async function loadMoneyRows(settings: Settings, opts: { scope: "open" | 
       declinedOut: !!job.declined_out_at,
       now,
       waitingHours,
+      reported: reported.get(job.id) ? { by: reported.get(job.id)!.by } : null,
     });
     const lastAt = [doc?.issued_at, doc?.sent_at, ...pays.map((p: PaymentRow) => p.received_at)].filter((x): x is string => !!x).sort().at(-1) ?? doc?.issued_at ?? new Date(now).toISOString();
     const v = job.vehicle;
@@ -132,6 +136,7 @@ export async function loadMoneyRows(settings: Settings, opts: { scope: "open" | 
       issuedAt: doc?.issued_at ?? new Date(now).toISOString(),
       lastAt,
       paidAt: bal?.paidAt ?? null,
+      reportedBy: reported.get(job.id)?.by ?? null,
     };
   };
   for (const [jobId, invs] of byJob) {
@@ -183,13 +188,3 @@ export async function loadMoneyTiles(rows: MoneyRowData[]): Promise<MoneyTiles> 
   };
 }
 
-export type CounterPayment = PaymentRow & { byName: string; byRole: string; invoiceNumber: string | null; jobId: string | null; plate: string | null };
-
-/** Payments recorded at the counter by an advisor that accounts have not confirmed yet. */
-export async function loadCounterPaymentsToConfirm(): Promise<CounterPayment[]> {
-  const admin = createAdminClient();
-  const { data } = await admin.from("payments").select(PAYMENT_SELECT + ", by:staff!payments_received_by_fkey(display_name, role_id), invoice:invoices(number), job:jobs(id, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").eq("is_active", true).eq("status", "recorded").is("verified_at", null).order("received_at", { ascending: false }).limit(100);
-  return ((data ?? []) as unknown as (Record<string, unknown> & { by: { display_name: string; role_id: string } | null; invoice: { number: string } | null; job: { id: string; vehicle: Parameters<typeof formatPlate>[0] | null } | null })[])
-    .filter((r) => r.by && r.by.role_id !== "owner" && r.by.role_id !== "accounts")
-    .map((r) => ({ ...toPayment(r), byName: r.by?.display_name ?? "", byRole: r.by?.role_id ?? "", invoiceNumber: r.invoice?.number ?? null, jobId: r.job?.id ?? null, plate: r.job?.vehicle ? formatPlate(r.job.vehicle) : null }));
-}

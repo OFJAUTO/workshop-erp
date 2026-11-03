@@ -22,14 +22,15 @@ export function MoneyStepLine({ state, compact = false }: { state: MoneyState; c
   );
 }
 
-/** One car on the accounts screens: money only, no workshop detail. */
+/** One car on the accounts screens: money only, no workshop detail. The row opens the money page; "Job card" opens the
+ *  car's job card (accounts have no Jobs menu, 2 November 2026). */
 export function MoneyRow({ r, href }: { r: MoneyRowData; href?: string }) {
   const doc = r.taxInvoice ?? r.proforma;
   const to = href ?? `/jobs/${r.jobId}/invoice`;
   const tone = r.state.chip.tone === "ink" ? "ink" : r.state.chip.tone;
   return (
-    <Link href={to} className="block" data-money-row={r.jobId} data-money-step={r.state.current}>
-      <div className={`rounded-card border bg-white px-4 py-3 flex flex-wrap items-center gap-3 hover:border-ink ${r.state.waitingHours ? "border-red-bar" : "border-line"}`}>
+    <div className={`rounded-card border bg-white flex flex-wrap items-stretch hover:border-ink ${r.state.waitingHours ? "border-red-bar" : "border-line"}`} data-money-row={r.jobId} data-money-step={r.state.current}>
+      <Link href={to} className="min-w-0 flex-1 px-4 py-3 flex flex-wrap items-center gap-3" data-money-row-open>
         <CarThumb url={r.pictureUrl} alt={r.plate} size="sm" />
         <div className="flex flex-col min-w-44">
           <span className="font-extrabold">{r.plate}</span>
@@ -48,7 +49,8 @@ export function MoneyRow({ r, href }: { r: MoneyRowData; href?: string }) {
           {doc ? <span className="font-semibold">{money(r.total)}</span> : <span className="text-xs text-muted">No proforma yet</span>}
           {doc && r.balance > 0.005 ? <span className="text-xs font-bold text-red">{money(r.balance)} due</span> : doc ? <span className="text-xs font-bold text-green">Paid{r.paidAt ? ` ${formatDayTime(r.paidAt)}` : ""}</span> : null}
         </div>
-      </div>
-    </Link>
+      </Link>
+      <Link href={`/jobs/${r.jobId}`} className="shrink-0 min-h-11 w-full px-4 flex items-center justify-center text-xs font-bold underline underline-offset-4 border-t border-line sm:w-auto sm:border-t-0 sm:border-l" data-money-row-job-card>Job card</Link>
+    </div>
   );
 }

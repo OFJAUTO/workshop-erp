@@ -3,10 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/auth";
 import type { BankFees } from "@/lib/bank-fees";
-import { allocatePayment, paymentChoices, type AllocateResult, type PaymentChoices } from "@/lib/customer-money";
-import { customerName } from "@/lib/customer-view";
+import { allocatePayment, paymentChoices, payerRows, type AllocateResult, type PayerRow, type PaymentChoices } from "@/lib/customer-money";
 import { formatPlate } from "@/lib/types";
+import { reportForWindow, type WindowReport } from "@/lib/payment-reports";
+import { firstName } from "@/lib/payment-report-rules";
 import { greetingNameOf } from "@/lib/messages";
+import { reasonsFor } from "@/lib/reasons";
 import { round2 } from "@/lib/money";
 import { methodsFor } from "@/lib/money-steps";
 import { DEFAULT_UNDO_MINUTES } from "@/lib/money-undo";
@@ -28,56 +30,33 @@ import { isUuid } from "@/lib/uuid";
 type Money = { id: string; display_name: string; role_id: string; viewingAs?: unknown; is_head_accountant?: boolean };
 const mayRecord = (s: Money) => !s.viewingAs && can(s.role_id as RoleId, "recordPayments");
 
-export type ChoicesAnswer = { error?: string; choices?: PaymentChoices; methods?: string[]; charges?: BankFees; isOwner?: boolean };
+export type ChoicesAnswer = { error?: string; choices?: PaymentChoices; methods?: string[]; charges?: BankFees; isOwner?: boolean; /** Opened from an advisor's payment report: what he sent, to pre-fill the form (2 November 2026, section 3). */ report?: WindowReport | null; /** The one-tap reasons for a Query. */ queryReasons?: string[] };
 
-export async function loadPaymentChoices(input: { jobId?: string | null; customerId?: string | null; vehicleId?: string | null }): Promise<ChoicesAnswer> {
+export async function loadPaymentChoices(input: { jobId?: string | null; customerId?: string | null; vehicleId?: string | null; reportId?: string | null }): Promise<ChoicesAnswer> {
   const staff = await requireStaff();
   if (!mayRecord(staff)) return { error: "Payments are recorded by accounts or the owner." };
-  for (const v of [input.jobId, input.customerId, input.vehicleId]) if (v && !isUuid(v)) return { error: "Not found." };
+  for (const v of [input.jobId, input.customerId, input.vehicleId, input.reportId]) if (v && !isUuid(v)) return { error: "Not found." };
   const settings = await getSettings();
-  const choices = await paymentChoices(input, settings);
-  if (!choices) return { error: "Customer not found." };
-  return { choices, methods: methodsFor(staff.role_id), charges: bankFeesOf(settings), isOwner: staff.role_id === "owner" };
+  // A payment an advisor sent to accounts: the window opens on its car's job, pre-filled with what he sent.
+  const report = input.reportId ? await reportForWindow(input.reportId, settings) : null;
+  if (input.reportId && !report) return { error: "The reported payment was not found." };
+  const all = await paymentChoices(report ? { jobId: report.jobId } : input, settings);
+  if (!all) return { error: "Customer not found." };
+  // Opened on a report: the money goes on the report's own car (the report is recorded with it, one report one receipt).
+  // Another car or the customer's account is "Record a different payment instead" - without the report.
+  const own = report ? all.targets.filter((t) => t.jobId === report.jobId) : all.targets;
+  const choices = report && own.length ? { ...all, targets: own, suggested: own[0].key } : all;
+  return { choices, methods: methodsFor(staff.role_id), charges: bankFeesOf(settings), isOwner: staff.role_id === "owner", report, queryReasons: report ? reasonsFor(settings, "payment_query") : undefined };
 }
 
-export type PayerHit = { customerId: string; name: string; phone: string | null; vehicleId: string | null; car: string | null; jobId: string | null; jobNumber: string | null };
+export type PayerHit = PayerRow;
 
-/** Find the payer by customer name, mobile, customer number, plate, VIN or job number (owner and accounts). */
+/** Find the payer by customer name, mobile, customer number, plate ("GG 13706"), VIN or job number (owner and accounts):
+ *  each row shows the car's picture, plate, make and model, the customer, the job and what is left to pay. */
 export async function searchPayers(q: string): Promise<{ error?: string; hits?: PayerHit[] }> {
   const staff = await requireStaff();
   if (!mayRecord(staff)) return { error: "Payments are recorded by accounts or the owner." };
-  const needle = q.trim().replace(/[%,()]/g, " ").trim();
-  if (needle.length < 2) return { hits: [] };
-  const admin = createAdminClient();
-  const digits = needle.replace(/\D/g, "");
-  const like = `%${needle}%`;
-  const vehicleSelect = "id, customer_id, kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name)";
-  const [{ data: custs }, { data: phones }, { data: cars }, { data: jobs }] = await Promise.all([
-    admin.from("customers").select("id, full_name, company_name, phone").or(`full_name.ilike.${like},company_name.ilike.${like},customer_number.ilike.${like}`).limit(8),
-    digits.length >= 5 ? admin.from("customers").select("id, full_name, company_name, phone").ilike("phone", `%${digits.slice(-9)}%`).limit(8) : Promise.resolve({ data: [] }),
-    admin.from("vehicles").select(vehicleSelect).or(`plate_number.ilike.${like},vin.ilike.${like}`).limit(8),
-    admin.from("jobs").select(`id, job_number, customer_id, vehicle:vehicles(${vehicleSelect})`).ilike("job_number", like).limit(6),
-  ]);
-  const people = new Map<string, { full_name: string | null; company_name: string | null; phone: string | null }>();
-  for (const c of [...(custs ?? []), ...(phones ?? [])]) people.set(String(c.id), c as { full_name: string | null; company_name: string | null; phone: string | null });
-  type V = Parameters<typeof formatPlate>[0] & { id: string; customer_id: string; model_year: number | null; make: { name: string } | null; model: { name: string } | null };
-  const carWords = (v: V) => [formatPlate(v), [v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" ").toUpperCase()].filter(Boolean).join(" · ");
-  const extra = new Set<string>([...((cars ?? []) as unknown as V[]).map((v) => v.customer_id), ...((jobs ?? []) as { customer_id: string }[]).map((j) => j.customer_id)].filter((id) => !people.has(id)));
-  if (extra.size) {
-    const { data: more } = await admin.from("customers").select("id, full_name, company_name, phone").in("id", Array.from(extra));
-    for (const c of more ?? []) people.set(String(c.id), c as { full_name: string | null; company_name: string | null; phone: string | null });
-  }
-  const hits: PayerHit[] = [];
-  for (const j of (jobs ?? []) as unknown as { id: string; job_number: string; customer_id: string; vehicle: V | null }[]) {
-    const c = people.get(j.customer_id);
-    if (c) hits.push({ customerId: j.customer_id, name: customerName(c), phone: c.phone, vehicleId: j.vehicle?.id ?? null, car: j.vehicle ? carWords(j.vehicle) : null, jobId: j.id, jobNumber: j.job_number });
-  }
-  for (const v of (cars ?? []) as unknown as V[]) {
-    const c = people.get(v.customer_id);
-    if (c && !hits.some((h) => h.vehicleId === v.id)) hits.push({ customerId: v.customer_id, name: customerName(c), phone: c.phone, vehicleId: v.id, car: carWords(v), jobId: null, jobNumber: null });
-  }
-  for (const [id, c] of people) if (!hits.some((h) => h.customerId === id)) hits.push({ customerId: id, name: customerName(c), phone: c.phone, vehicleId: null, car: null, jobId: null, jobNumber: null });
-  return { hits: hits.slice(0, 12) };
+  return { hits: await payerRows(q, await getSettings()) };
 }
 
 export type RecordAnywhereState = {
@@ -92,6 +71,8 @@ export type RecordAnywhereState = {
   receiptMessage?: string;
   phoneDigits?: string;
   where?: string;
+  /** Recorded from an advisor's report: "Anas is told: Recorded ✓ RCT-00043." */
+  told?: string;
   /** The undo window (1 November 2026, B3): when it was recorded and how long it may be undone. */
   recordedAt?: string;
   undoMinutes?: number;
@@ -142,7 +123,12 @@ export async function recordPaymentAnywhere(_prev: RecordAnywhereState, formData
   const where = inv?.number ? `on ${inv.kind === "proforma" ? "proforma" : "tax invoice"} ${inv.number}${job?.job_number ? ` (${job.job_number})` : ""}` : job?.job_number ? `as an advance on ${job.job_number} – it comes off the invoice by itself` : "on the customer's account (not allocated)";
   refreshMoney((p.job_id as string | null) ?? null, String(p.customer_id), (p.vehicle_id as string | null) ?? null);
   const undo = { recordedAt: new Date().toISOString(), undoMinutes: Number((settings as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES };
-  return { ok: true, ...undo, number: String(p.number), paymentId: String(p.id), clientKey, receiptUrl: path, receiptShort, receiptMessage: message, phoneDigits: String(cust?.phone ?? "").replace(/[^\d]/g, ""), where, at: Date.now() };
+  // Recorded from an advisor's payment report: he is told "Recorded ✓ RCT-…" (the window says so).
+  const reportId = String(formData.get("report_id") ?? "");
+  const { data: rep } = isUuid(reportId) ? await admin.from("payment_reports").select("status, reported_by").eq("id", reportId).maybeSingle() : { data: null };
+  const { data: reporter } = rep?.status === "recorded" ? await admin.from("staff").select("display_name").eq("id", rep.reported_by).maybeSingle() : { data: null };
+  const told = reporter?.display_name ? `${firstName(String(reporter.display_name))} is told: Recorded ✓ ${p.number}.` : undefined;
+  return { ok: true, ...undo, number: String(p.number), paymentId: String(p.id), clientKey, receiptUrl: path, receiptShort, receiptMessage: message, phoneDigits: String(cust?.phone ?? "").replace(/[^\d]/g, ""), where, told, at: Date.now() };
 }
 
 export type AllocateState = (AllocateResult & { at?: number }) | null;

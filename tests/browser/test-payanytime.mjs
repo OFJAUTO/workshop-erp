@@ -30,9 +30,10 @@ const pdfText = async (buf) => {
 const dialog = (page) => page.locator("[data-record-payment-dialog]");
 const text = async (loc) => ((await loc.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
 
-async function openFrom(page, url) {
+async function openFrom(page, url, scope = null) {
   await go(page, url);
-  const btn = page.locator("[data-record-payment-open]").first();
+  // On the job card the button must sit in the money tile itself (2 November 2026, section 3: J-00969).
+  const btn = page.locator(scope ? `${scope} [data-record-payment-open]` : "[data-record-payment-open]").first();
   if (!(await btn.count())) return false;
   await btn.click();
   await dialog(page).waitFor({ timeout: 15000 });
@@ -95,8 +96,8 @@ try {
     const state = (await sql("select status, is_open from public.jobs where id = $1", [jobId]))[0];
     for (const role of ["owner", "accounts"]) {
       const page = who[role];
-      const opened = await openFrom(page, `${base}/jobs/${jobId}`);
-      check(`A ${st.name} (${state?.status}${state?.is_open ? "" : ", gone"}): ${role} has Record payment on the job card`, opened);
+      const opened = await openFrom(page, `${base}/jobs/${jobId}`, "[data-money-tile]");
+      check(`A ${st.name} (${state?.status}${state?.is_open ? "" : ", gone"}): ${role} has Record payment inside the job card's money tile`, opened);
       if (!opened) continue;
       const suggested = await dialog(page).locator('[data-pay-target][aria-pressed="true"]').getAttribute("data-pay-target").catch(() => null);
       check(`A ${st.name}: ${role} – the window suggests this job`, !!suggested && suggested !== "credit", String(suggested));
@@ -129,7 +130,26 @@ try {
   const shortReceipt = await dialog(owner.page).locator("[data-send-receipt]").count();
   check("B: Send the receipt is offered in the window", shortReceipt === 1);
   await dialog(owner.page).locator("[data-record-payment-finish]").click();
-  await openFrom(accounts.page, `${base}/jobs/${jobId}`);
+  // B2 (2 November 2026, section 3): the J-00969 sequence - the owner recorded an advance; accounts open the job card and
+  // find Record payment in the money tile, next to the balance that is left.
+  {
+    const totalB = (await sql("select total_aed::float8 as t from public.quotations where job_id = $1 and status = 'approved' order by version desc limit 1", [jobId]))[0]?.t ?? 0;
+    await go(accounts.page, `${base}/jobs/${jobId}`);
+    const tileB = await text(accounts.page.locator("[data-paid-so-far]"));
+    const leftB = Math.round((totalB - 400) * 100) / 100;
+    check("B2: J-00969 copy – after the owner's advance accounts see Record payment in the tile", (await accounts.page.locator("[data-money-tile] [data-record-payment-open]").count()) === 1);
+    check("B2: with Paid so far AED 400.00 · Balance next to it", /Paid so far AED 400.00/.test(tileB) && tileB.includes(`Balance AED ${leftB.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`), tileB);
+    await accounts.page.locator("[data-money-tile]").screenshot({ path: shot("B2-accounts-tile-after-owner-advance.png") });
+    // V: the owner in View as accounts sees the same button, greyed, with the words (View as records nothing).
+    const accId = (await sql("select id::text as id from public.staff where role_id = 'accounts' and is_active order by display_name limit 1"))[0]?.id;
+    await owner.context.request.post(`${base}/api/view-as/set`, { data: { kind: "view", id: accId } });
+    await go(owner.page, `${base}/jobs/${jobId}`);
+    const ro = owner.page.locator("[data-money-tile] [data-record-payment-readonly]");
+    check("V: owner viewing as accounts – the tile shows Record payment greyed with 'View as is read-only – use Act as to record'", (await ro.count()) === 1 && /View as is read-only – use Act as to record/.test(await text(ro)) && (await owner.page.locator("[data-record-payment-open]").count()) === 0, await text(ro));
+    await owner.page.locator("[data-money-tile]").screenshot({ path: shot("V-view-as-read-only.png") });
+    await owner.context.request.post(`${base}/api/view-as/set`, { data: { kind: "none" } });
+  }
+  await openFrom(accounts.page, `${base}/jobs/${jobId}`, "[data-money-tile]");
   const linkNo = await pay(accounts.page, { method: "link", amount: 200, auth: code("L") });
   check("B: accounts – payment-link payment with auth code", !!linkNo);
   await dialog(accounts.page).locator("[data-record-payment-finish]").click();
@@ -163,6 +183,10 @@ try {
 
   /* ---------------- D. A customer with no job and no car at all (owner; transfer with its proof) ---------------- */
   await sql("insert into public.customers (id, customer_type, full_name, phone) values ($1, 'individual', 'E2E NO JOB PAYER', '+971500000099')", [NEW_CUST]);
+  // D2 (2 November 2026): accounts have the same button on the customer page as the owner.
+  const accCust = await openFrom(accounts.page, `${base}/customers/${NEW_CUST}`);
+  check("D2: accounts – the customer page has Record payment (the customer's account offered)", accCust && (await dialog(accounts.page).locator('[data-pay-target="credit"]').count()) === 1);
+  if (accCust) await dialog(accounts.page).locator("[data-record-payment-close]").click();
   const custOpened = await openFrom(owner.page, `${base}/customers/${NEW_CUST}`);
   const onlyCredit = (await dialog(owner.page).locator("[data-pay-target]").count()) === 1 && (await dialog(owner.page).locator('[data-pay-target="credit"]').count()) === 1;
   check("D: a customer with no job has Record payment; the only place is the customer's account", custOpened && onlyCredit);
@@ -256,6 +280,22 @@ try {
     check("H: Pay opens the Record payment window on that car's job", !!ok);
     await owner.page.screenshot({ path: shot("H-search-pay-window.png") });
   }
+
+  /* ---------------- H2. The window's own search (accounts): "S 30303" finds the car; each row shows what is needed ---------------- */
+  await go(accounts.page, `${base}/invoices`);
+  await accounts.page.locator("[data-record-payment-open]").first().click();
+  await dialog(accounts.page).waitFor();
+  await dialog(accounts.page).locator("[data-payer-search-input]").fill("S 30303");
+  const jobNoG = (await sql("select job_number from public.jobs where id = $1", [seedG.jobId]))[0]?.job_number;
+  const rowG = dialog(accounts.page).locator(`[data-payer-hit][data-payer-job="${jobNoG}"]`);
+  const gotRow = await until(async () => (await rowG.count()) > 0, 40, 400);
+  const carG = gotRow ? await text(rowG.locator("[data-payer-car]")) : "";
+  const whoG = gotRow ? await text(rowG.locator("[data-payer-who]")) : "";
+  const balG = gotRow ? await text(rowG.locator("[data-payer-balance]")) : "";
+  check("H2: the plate with its code ('S 30303') finds the car in the window", !!gotRow);
+  check("H2: the row has the car picture box, plate and make, the customer and job number, and the balance", gotRow && (await rowG.locator("[data-car-thumb]").count()) === 1 && /S 30303/i.test(carG) && whoG.includes(jobNoG) && /^Balance AED [\d,]+\.\d\d$/.test(balG), `${carG} | ${whoG} | ${balG}`);
+  await dialog(accounts.page).screenshot({ path: shot("H2-window-search-rows.png") });
+  await dialog(accounts.page).locator("[data-record-payment-close]").click();
 } finally {
   await owner.browser.close();
   await accounts.browser.close();

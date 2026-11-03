@@ -33,6 +33,7 @@ import { HomeHeader } from "@/components/HomeHeader";
 import { workSidesForJobs } from "@/lib/staff-picker";
 import { loadQuoteHistory } from "@/lib/quote-history-data";
 import { additionalWaitingChip, pickItems } from "@/lib/quote-history";
+import { paymentReportsReady } from "@/lib/schema-ready";
 
 type Row = JobRow & {
   parts_pricing_done_at?: string | null;
@@ -192,7 +193,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
   return (
     <>
-      <LiveRefresh tables={["jobs", "gate_ins", "invoices"]} showUpdated />
+      <LiveRefresh tables={["jobs", "gate_ins", "invoices", ...((await paymentReportsReady()) ? ["payment_reports"] : [])]} showUpdated />
       <HomeHeader staff={staff} gateIn={can(role, "gateIn")} />
 
       <WaitingPanel staff={staff} extra={role === "service_advisor" || role === "owner" ? [...moneyWaiting, ...finalChecks, ...(role === "owner" ? await lpoApprovalsWaiting() : [])] : []} />

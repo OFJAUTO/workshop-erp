@@ -94,20 +94,29 @@ await section("2 counter cash by accounts", async () => {
   await ab.close();
 });
 
-/* ---------------- 3. Customer says paid ---------------- */
+/* ---------------- 3. Customer says paid: since 2 November 2026 the advisor sends the payment to accounts with the slip ---------------- */
 await section("3 customer says paid", async () => {
   const { browser, page } = await browserFor("service_advisor", { viewport: { width: 1366, height: 1200 } });
+  const advName = (await sql("select display_name from public.staff where role_id = 'service_advisor' and is_active order by display_name limit 1"))[0]?.display_name ?? "";
+  const advFirst = advName.trim().split(/\s+/)[0];
   await go(page, `${base}/jobs/${jobId}/invoice`);
-  await page.locator("[data-customer-says-paid]").click();
-  await page.waitForURL((u) => /message=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
-  const flagged = await until(async () => (await sql("select customer_says_paid_at from public.invoices where id = $1", [proformaId]))[0]?.customer_says_paid_at, 30, 500);
-  check("3: the proforma is flagged customer says paid", !!flagged);
-  const notif = await until(async () => (await sql("select title from public.notifications where type = 'customer_says_paid' and job_id = $1 limit 1", [jobId]))[0], 30, 500);
-  check("3: accounts are told to check the bank", !!notif && /Customer says paid: Dubai S 30303/.test(notif.title), notif?.title);
+  check("3: the old one-line 'Customer says paid' form is replaced by the payment report", (await page.locator("[data-customer-says-paid]").count()) === 0 && (await page.locator('[data-says-paid-section] [data-payment-report-open="new"]').count()) === 1);
+  await page.locator('[data-says-paid-section] [data-payment-report-open="new"]').click();
+  const d = page.locator("[data-payment-report-dialog]");
+  await d.waitFor();
+  await d.locator('[data-report-method="transfer"]').click();
+  await d.locator("[data-report-reference]").fill("12345");
+  await d.locator('[data-job-file-upload] input[type="file"]').first().setInputFiles({ name: "transfer.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64") });
+  await until(async () => (await d.locator("[data-report-photo-missing]").count()) === 0, 60, 500);
+  await d.locator("[data-report-send]").click();
+  const reported = await until(async () => (await sql("select status, amount_aed::float8 as a, method from public.payment_reports where job_id = $1 order by reported_at desc limit 1", [jobId]))[0], 30, 500);
+  check("3: the report waits for accounts with the balance by transfer", reported?.status === "waiting" && reported.a === 845 && reported.method === "transfer", JSON.stringify(reported));
+  const notif = await until(async () => (await sql("select title from public.notifications where type = 'payment_reported' and job_id = $1 limit 1", [jobId]))[0], 30, 500);
+  check("3: accounts are told with the plate, amount and method", !!notif && /^Payment reported · J-\d+ · DUBAI S 30303 · AED 845\.00 · Bank transfer · from /.test(notif.title), notif?.title);
   await go(page, `${base}/jobs/${jobId}/invoice`);
-  check("3: the chip says checking", /Customer says paid, checking/.test(plainText(await page.content())));
+  check("3: the chip says the payment is reported, checking", new RegExp(`Payment reported by ${advFirst}, checking`).test(plainText(await page.content())));
   const card = await fetchAs(`/jobs/${jobId}`, "service_advisor");
-  check("3: the job card shows the same chip", /Customer says paid, checking/.test(plainText(card.text)));
+  check("3: the job card shows the same chip", new RegExp(`Payment reported by ${advFirst}, checking`).test(plainText(card.text)));
   await browser.close();
 });
 
@@ -117,6 +126,11 @@ await section("4 final confirmation and the tax invoice", async () => {
   await go(page, `${base}/jobs/${jobId}/invoice`);
   check("4: accounts may record every method", (await page.locator("[data-method]").count()) === 5 && (await page.locator('[data-method="transfer"]').count()) === 1);
   check("4: the expected method is pre-selected", (await page.locator('[data-method="transfer"]').getAttribute("aria-pressed")) === "true");
+  // Since 3 November 2026 the advisor's report (section 3) has its own "Record it"; while it waits the page's own form is
+  // folded as "Record a different payment". Recorded here with the same amount, method and reference, it still answers it.
+  const fold = page.locator("[data-what-now] details[data-record-block][data-folded]");
+  check("4: while the advisor's report waits, the page's own form is folded as 'Record a different payment'", (await fold.count()) === 1 && /Record a different payment/.test((await fold.locator("summary").textContent()) ?? "") && (await page.locator("[data-what-now-report] [data-record-payment-open]").count()) === 1);
+  if (await fold.count()) await fold.locator("summary").click();
   await page.locator("[data-reference]").fill("12345");
   // A transfer now needs its proof photo before it can be recorded.
   // Since 28 October the proof goes straight to storage through the job-file uploader (the old "proof" field is gone);
@@ -139,6 +153,9 @@ await section("4 final confirmation and the tax invoice", async () => {
   // The tax invoice is written first and the proforma marked converted a moment later: wait for that last step.
   const pro = (await until(async () => { const r = (await sql("select converted_to, customer_says_paid_at from public.invoices where id = $1", [proformaId]))[0]; return r?.converted_to ? r : null; }, 30, 500)) ?? (await sql("select converted_to, customer_says_paid_at from public.invoices where id = $1", [proformaId]))[0];
   check("4: the proforma became the tax invoice and the checking flag is cleared", pro?.converted_to === tax?.id && !pro?.customer_says_paid_at);
+  // Recorded straight from the money page with the same amount and method: the advisor's report is closed by it.
+  const rep = await until(async () => (await sql("select status from public.payment_reports where job_id = $1 order by reported_at desc limit 1", [jobId]))[0]?.status === "recorded", 20, 500);
+  check("4: the advisor's report for the same amount and method is recorded by this payment", !!rep);
   const notif = await until(async () => (await sql("select title, body from public.notifications where type = 'invoice_paid' and job_id = $1 limit 1", [jobId]))[0], 30, 500);
   check("4: the advisor is told Paid: plate, amount", !!notif && /^Paid: Dubai S 30303, AED 945\.00$/.test(notif.title), notif?.title);
   await go(page, `${base}/jobs/${jobId}/invoice`);

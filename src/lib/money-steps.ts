@@ -62,6 +62,8 @@ export type MoneyInput = {
   now?: number;
   /** Hours a sent proforma may wait before the wait counts as long (default 24). */
   waitingHours?: number;
+  /** An advisor sent a payment he took to accounts and it waits to be recorded (2 November 2026, section 3). */
+  reported?: { by: string } | null;
 };
 
 export type MoneyAction = "prepare_proforma" | "send_proforma" | "record_payment" | "send_tax_invoice" | "gate_out" | "none";
@@ -99,6 +101,7 @@ export function moneyState(i: MoneyInput): MoneyState {
   if (i.taxInvoice) {
     if (!paidInFull && !onCredit) {
       const waiting = i.taxInvoice.sent_at ? Math.floor((now - Date.parse(i.taxInvoice.sent_at)) / 3600000) : null;
+      if (i.reported) return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: `Payment reported by ${i.reported.by}, checking`, tone: "amber" }, action: "record_payment", actionLabel: "Record the reported payment", waitingHours: waiting !== null && waiting >= limitHours ? waiting : null, live };
       return { current: "payment", done: ["job_done", "proforma_sent"], chip: i.paid > 0 ? { text: `Part paid · ${money(i.balance)} due`, tone: "amber" } : i.chequePending > 0 ? { text: "Cheque pending", tone: "amber" } : { text: `Tax invoice issued, ${money(i.balance)} due`, tone: "amber" }, action: "record_payment", actionLabel: "Record payment", waitingHours: waiting !== null && waiting >= limitHours ? waiting : null, live };
     }
     if (!i.taxInvoice.sent_at) return { current: "tax_invoice", done: ["job_done", "proforma_sent", "payment"], chip: { text: onCredit ? `On credit · ${money(i.balance)} due` : "Paid · tax invoice to send", tone: onCredit ? "amber" : "green" }, action: "send_tax_invoice", actionLabel: "Send the tax invoice", waitingHours: null, live };
@@ -109,6 +112,7 @@ export function moneyState(i: MoneyInput): MoneyState {
     if (!i.proforma.sent_at) return { current: "proforma_sent", done: ["job_done"], chip: { text: "Proforma ready to send", tone: "ink" }, action: "send_proforma", actionLabel: "Send the proforma", waitingHours: null, live };
     const waited = Math.floor((now - Date.parse(i.proforma.sent_at)) / 3600000);
     const long = waited >= limitHours;
+    if (i.reported) return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: `Payment reported by ${i.reported.by}, checking`, tone: "amber" }, action: "record_payment", actionLabel: "Record the reported payment", waitingHours: long ? waited : null, live };
     if (i.proforma.customer_says_paid_at) return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: "Customer says paid, checking", tone: "amber" }, action: "record_payment", actionLabel: "Confirm the payment", waitingHours: long ? waited : null, live };
     if (i.paid > 0) return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: `Part paid · ${money(i.balance)} due`, tone: "amber" }, action: "record_payment", actionLabel: "Record payment", waitingHours: long ? waited : null, live };
     if (i.chequePending > 0) return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: "Cheque pending clearance", tone: "amber" }, action: "record_payment", actionLabel: "Record payment", waitingHours: long ? waited : null, live };

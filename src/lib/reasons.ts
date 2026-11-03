@@ -19,6 +19,7 @@ export const REASON_CONTEXTS = [
   { key: "remove_part", label: "Part removed: not needed" },
   { key: "special_move", label: "Special move past a gate" },
   { key: "credit_note", label: "Credit note" },
+  { key: "payment_query", label: "Accounts query a payment an advisor sent" },
 ] as const;
 export type ReasonContext = (typeof REASON_CONTEXTS)[number]["key"];
 
@@ -38,6 +39,7 @@ export const DEFAULT_REASONS: Record<ReasonContext, string[]> = {
   remove_part: ["Duplicate", "Already covered by another part", "Technician mistake", "Not required for this job", "Other"],
   special_move: ["Customer collects today", "Owner's decision", "Work done outside the system", "Waiting is pointless for this car"],
   credit_note: ["Wrong amount invoiced", "Work not done", "Goodwill", "Customer complaint", "Duplicate invoice"],
+  payment_query: ["Not in the bank yet", "Photo unclear", "Amount differs", "Auth code missing", "Already recorded"],
 };
 
 /** The reasons of one place from Settings, the defaults when nothing was saved. */

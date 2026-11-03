@@ -8,16 +8,16 @@ import { authCodeProblem, authCodeWhere, cleanAuthCode } from "@/lib/auth-code";
  * panel alike: 6 letters or digits from the card slip or the payment confirmation, typed in capitals, required. It is
  * the key that matches the payment to the bank's settlement report.
  */
-export function AuthCodeInput({ method, value, onChange, name = "auth_code" }: { method: string; value: string; onChange: (v: string) => void; name?: string }) {
+export function AuthCodeInput({ method, value, onChange, name = "auth_code", optional = false }: { method: string; value: string; onChange: (v: string) => void; name?: string; /** The advisor's payment report: accounts type it when they record if it is missing (2 November 2026). */ optional?: boolean }) {
   const problem = value ? authCodeProblem(method, value) : null;
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-xs font-semibold text-muted">Auth code (from {authCodeWhere(method)}, required)</span>
+      <span className="text-xs font-semibold text-muted">Auth code (from {authCodeWhere(method)}, {optional ? "if you have it" : "required"})</span>
       <Input
         name={name}
         value={value}
         onChange={(e) => onChange(cleanAuthCode(e.target.value).slice(0, 6))}
-        required
+        required={!optional}
         minLength={6}
         maxLength={6}
         pattern="[A-Za-z0-9]{6}"

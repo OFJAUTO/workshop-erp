@@ -33,7 +33,13 @@ import { depositState } from "@/lib/deposits";
 import { STAGE_BOX_CLASS, STAGE_BOX_TITLE, type StageBoxState } from "@/lib/stage-style";
 import { RecordPaymentButton } from "@/components/RecordPaymentHost";
 import { UnallocatedList } from "@/components/UnallocatedList";
-import { unallocatedOf } from "@/lib/customer-money";
+import { jobMoneyOf, unallocatedOf } from "@/lib/customer-money";
+import { LiveRefresh } from "@/components/LiveRefresh";
+import { PaymentReportButton, PaymentReportLines, ReportMethodWords } from "@/components/PaymentReport";
+import { loadReports } from "@/lib/payment-reports";
+import { firstName, stillOwes } from "@/lib/payment-report-rules";
+import { paymentReportsReady } from "@/lib/schema-ready";
+import { reasonsFor } from "@/lib/reasons";
 
 export const dynamic = "force-dynamic";
 
@@ -99,6 +105,10 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   // The card slips and transfer proofs, signed for one hour.
   const proofUrls = await signJobFiles([...payments, ...depositRows].map((p) => p.proof_path).filter((x): x is string => !!x));
   const creditDays = Number(creditCust?.credit_terms_days) || 0;
+  // 2 November 2026, section 3: payments advisors took and sent to accounts (they record them or query them back).
+  const reportsOn = await paymentReportsReady();
+  const jobReports = reportsOn ? await loadReports({ jobId: id, settings }) : [];
+  const waitingReport = jobReports.find((r) => r.status === "waiting") ?? null;
   const money = moneyState({
     jobStatus: job.status,
     isOpen: job.is_open,
@@ -113,6 +123,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
     creditDays,
     declinedOut: !!stepJob?.declined_out_at,
     waitingHours: Number(settings.payment_waiting_hours) || 24,
+    reported: waitingReport ? { by: firstName(waitingReport.reporter) } : null,
   });
   const links = live ? await paymentLinksOf(live.id) : [];
   const payLink = currentPaymentLink(links);
@@ -128,6 +139,15 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const canVerify = can(role, "verifyPayments") && acting;
   // 1 November 2026: recording is ALWAYS possible for accounts and the owner - before the proforma, and after the car left.
   const mayPay = can(role, "recordPayments") && !staff.viewingAs;
+  // The owner in View as sees the Record payment buttons greyed ("View as is read-only").
+  const viewPay = can(role, "recordPayments") && !!staff.viewingAs;
+  const mayReport = role === "service_advisor" && !staff.viewingAs && reportsOn;
+  // THE rule for the advisor's button, the same as the job card's: something is owed (open or gone alike).
+  const reportMoney = mayReport ? await jobMoneyOf(id, settings) : null;
+  const reportBalance = reportMoney?.balance ?? null;
+  const reportOwes = stillOwes(reportMoney);
+  // A report waits: every other Record button on this page names itself "a different payment" (the report has its own).
+  const otherPay = waitingReport ? "Record a different payment" : null;
   const credit = mayPay ? await unallocatedOf({ customerId: job.customer_id }) : [];
   const phoneDigits = (customer?.phone ?? "").replace(/[^\d]/g, "");
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
@@ -206,6 +226,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
 
   return (
     <>
+      <LiveRefresh tables={["payments", "invoices", "jobs", ...(reportsOn ? ["payment_reports"] : [])]} jobId={id} />
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`Invoice · ${formatPlate(vehicle)}`}
@@ -245,12 +266,18 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
 
           <Card className="flex flex-col gap-2 border-ink" data-what-now>
             <SectionLabel>What to do now</SectionLabel>
+            {waitingReport && (mayPay || viewPay) ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-control border-2 border-amber-bar bg-amber-soft p-3" data-what-now-report>
+                <span className="min-w-[12rem] flex-1 text-sm font-semibold">Payment reported by {firstName(waitingReport.reporter)} · AED {m(waitingReport.amount)} · <ReportMethodWords r={waitingReport} /> – record it.</span>
+                <RecordPaymentButton jobId={id} reportId={waitingReport.id} readOnly={viewPay} size="md" label="Record it" />
+              </div>
+            ) : null}
             {(() => {
               if (!job.is_open) {
-                return live && unpaid && mayPay ? (
+                return live && unpaid && (mayPay || viewPay) ? (
                   <div className="flex flex-col gap-2" data-late-record>
                     <p className="text-sm font-semibold">The car has left with AED {m(bal?.balance ?? 0)} still due on {live.number}. Record the payment when it arrives.</p>
-                    <div><RecordPaymentButton jobId={id} size="lg" label="Record payment" /></div>
+                    <div><RecordPaymentButton jobId={id} readOnly={viewPay} size="lg" label={otherPay ?? "Record payment"} /></div>
                   </div>
                 ) : <p className="text-sm text-muted">The car has left. Nothing to do here.</p>;
               }
@@ -260,7 +287,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                     <p className="text-sm font-semibold">Deposit of AED {m(outstandingDeposit)} to receive ({dep.quotationNumbers.join(", ")}).</p>
                     {canRecord ? <div><RecordDeposit d={depositPanel} charges={bankCharges} /></div> : null}
                     {canSend && !canRecord ? <div className="flex flex-col gap-1"><DepositRequestSend jobId={id} message={depositRequestMessage} phoneDigits={phoneDigits} requestedAt={(job as { deposit_requested_at?: string | null }).deposit_requested_at ?? null} /><span className="text-xs text-muted">Only accounts or the owner record the money.</span></div> : null}
-                    {!canRecord && !canSend ? <p className="text-sm text-muted">Waiting for the deposit: accounts record it when it arrives.</p> : null}
+                    {!canRecord && !canSend ? (viewPay ? <div><RecordPaymentButton jobId={id} readOnly size="md" label="Record the deposit" /></div> : <p className="text-sm text-muted">Waiting for the deposit: accounts record it when it arrives.</p>) : null}
                   </div>
                 );
               }
@@ -273,23 +300,40 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                     {canSend ? <ReadySendControl jobId={id} size="lg" token={proforma.token} shortLink={proformaShort} kind="proforma" siteUrl={site} messageTemplate={readyTemplate} phoneDigits={phoneDigits} sentAt={proforma.sent_at} expectedMethod={proforma.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={proforma.token ? { href: `/api/pdf/invoice/${proforma.token}`, fileName: `OFJ Proforma ${proforma.number}.pdf` } : null} /> : <p className="text-sm text-muted">The advisor sends {proforma.number} to the customer.</p>}
                     {canRecord ? (
                       <details className="border-t border-line pt-2" data-record-block data-folded>
-                        <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold text-muted">Record a payment before the proforma is sent</summary>
+                        <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold text-muted">{otherPay ? `${otherPay} (not the one ${firstName(waitingReport?.reporter)} reported)` : "Record a payment before the proforma is sent"}</summary>
                         <div className="pt-2"><PaymentForm invoiceId={live!.id} jobId={null} proofJobId={id} spentKeys={spentKeys} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} /></div>
                       </details>
-                    ) : null}
+                    ) : viewPay ? <div><RecordPaymentButton jobId={id} readOnly size="md" label="Record a payment" /></div> : null}
                   </div>
                 );
               }
               if (live && unpaid && canRecord) {
+                const form = <PaymentForm invoiceId={live!.id} jobId={null} proofJobId={id} spentKeys={spentKeys} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} />;
+                // A payment an advisor sent waits: "Record it" above opens it with his slip; this form is for a DIFFERENT
+                // payment, folded so the reported one is never recorded twice by mistake.
+                if (waitingReport) {
+                  return (
+                    <details className="border-t border-line pt-2" data-record-block data-folded>
+                      <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold text-muted">{otherPay} (not the one {firstName(waitingReport.reporter)} reported)</summary>
+                      <div className="pt-2 flex flex-col gap-2">
+                        {creditDays ? <p className="text-sm font-semibold">Credit terms: {creditDays} days. The car may leave; record the payment here when it arrives.</p> : null}
+                        {form}
+                      </div>
+                    </details>
+                  );
+                }
                 return (
                   <div className="flex flex-col gap-2" data-record-block>
                     {creditDays ? <p className="text-sm font-semibold">Credit terms: {creditDays} days. The car may leave; record the payment here when it arrives.</p> : <p className="text-sm font-semibold">Record the payment against {live!.number}.</p>}
-                    <PaymentForm invoiceId={live!.id} jobId={null} proofJobId={id} spentKeys={spentKeys} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} />
+                    {form}
                     {creditDays && can(role, "gateOut") && acting ? <div><LinkButton href={`/jobs/${id}/gate-out`} size="md" tone="secondary">Gate out on credit</LinkButton></div> : null}
                   </div>
                 );
               }
               if (live && unpaid) {
+                // The owner in View as accounts sees the button accounts have, greyed - never "Waiting for accounts".
+                if (viewPay && !waitingReport) return <div className="flex flex-col gap-2"><p className="text-sm font-semibold">Record the payment against {live.number}.</p><div><RecordPaymentButton jobId={id} readOnly size="lg" label="Record payment" /></div></div>;
+                if (viewPay) return null;
                 return (
                   <div className="flex flex-col gap-2">
                     <p className="text-sm text-muted" data-waiting-accounts>{proforma?.sent_at ? `Proforma sent ${formatDayTime(proforma.sent_at)} · ` : ""}{proforma?.expected_payment_method ? `Expected: ${PAYMENT_METHOD_LABELS[proforma.expected_payment_method] ?? proforma.expected_payment_method} · ` : ""}Waiting for accounts to record the payment.</p>
@@ -311,8 +355,10 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
               return canRecord ? (
                 <div className="flex flex-col gap-2" data-advance-record>
                   <p className="text-sm font-semibold">No proforma yet{draft.lines.length ? ` · balance AED ${m(balanceDue)}` : ""}. A payment now is recorded as an advance (no VAT) with its own receipt, and comes off the invoice by itself.</p>
-                  <div><RecordPaymentButton jobId={id} size="lg" label="Record a payment" /></div>
+                  <div><RecordPaymentButton jobId={id} size={otherPay ? "md" : "lg"} tone={otherPay ? "secondary" : "primary"} label={otherPay ?? "Record a payment"} /></div>
                 </div>
+              ) : viewPay ? (
+                <div><RecordPaymentButton jobId={id} readOnly size="lg" label={otherPay ?? "Record a payment"} /></div>
               ) : <p className="text-sm text-muted">Nothing to do yet – the proforma is created by itself when the car is Ready.</p>;
             })()}
             {proforma && !taxInvoice && role === "owner" && acting ? (
@@ -352,8 +398,20 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                 {payments.map((p) => paymentLine(p, false))}
               </ul>
             )}
+            {jobReports.length || proforma?.customer_says_paid_at || (mayReport && reportOwes) ? (
+              <div className="flex flex-col gap-2 border-t border-line pt-3" data-says-paid-section>
+                <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Customer says paid</span>
+                <PaymentReportLines reports={jobReports} viewerId={staff.id} canRecord={can(role, "recordPayments")} canReport={role === "service_advisor" || role === "owner"} readOnly={!!staff.viewingAs} balance={reportBalance} expected={proforma?.expected_payment_method ?? null} isOwner={role === "owner"} reasons={reasonsFor(settings, "payment_query")} />
+                {mayReport && reportOwes ? (
+                  <div className="flex flex-col gap-1">
+                    <div><PaymentReportButton jobId={id} balance={reportBalance} expected={proforma?.expected_payment_method ?? null} /></div>
+                    <span className="text-xs text-muted">Took the money at the counter? Send it to accounts with the photo of the slip, receipt or transfer; they record it and you are told.</span>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {proforma?.customer_says_paid_at ? <p className="text-xs text-muted">Customer said paid {formatDateTime(proforma.customer_says_paid_at)}{proforma.customer_says_paid_method ? ` by ${PAYMENT_METHOD_LABELS[proforma.customer_says_paid_method] ?? proforma.customer_says_paid_method}` : ""}. Accounts check the bank and record it.</p> : null}
-            {live && unpaid && acting && !proforma?.customer_says_paid_at && (role === "service_advisor" || role === "owner") ? (
+            {!reportsOn && live && unpaid && acting && !proforma?.customer_says_paid_at && (role === "service_advisor" || role === "owner") ? (
               <form action={customerSaysPaid.bind(null, live.id)} className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
                 <input type="hidden" name="return_to" value={here} />
                 <input type="hidden" name="method" value={proforma?.expected_payment_method ?? ""} />

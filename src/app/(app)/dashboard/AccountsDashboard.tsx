@@ -3,14 +3,15 @@ import { HomeHeader } from "@/components/HomeHeader";
 import { MoneyRow } from "@/components/MoneyRow";
 import { WaitingPanel } from "@/components/WaitingPanel";
 import { accountsWaitingExtra } from "@/lib/accounts-waiting";
-import {Badge, Button, Card, LinkButton, SectionLabel} from "@/components/ui";
+import { Card, LinkButton, SectionLabel } from "@/components/ui";
+import { PaymentReportsCard } from "@/components/PaymentReportsCard";
+import { paymentReportsReady } from "@/lib/schema-ready";
 import type { CurrentStaff } from "@/lib/auth";
 import { formatDayTime } from "@/lib/format";
 import { METHOD_LABELS } from "@/lib/invoice-data";
-import { loadCounterPaymentsToConfirm, loadMoneyRows, loadMoneyTiles, type MoneyTiles } from "@/lib/money-data";
+import { loadMoneyRows, loadMoneyTiles, type MoneyTiles } from "@/lib/money-data";
 import { depositsNotInvoiced } from "@/lib/deposits";
 import type { Settings } from "@/lib/settings";
-import { verifyPaymentAction } from "@/app/(app)/invoices/actions";
 
 const money = (n: number) => `AED ${Math.round(n).toLocaleString("en-GB")}`;
 
@@ -36,32 +37,7 @@ export function MoneyTilesRow({ t }: { t: MoneyTiles }) {
   );
 }
 
-/** "Confirm today's counter payments": cash and card taken by advisors, one Confirmed button each. */
-export async function CounterPaymentsCard({ canConfirm, returnTo }: { canConfirm: boolean; returnTo: string }) {
-  const list = await loadCounterPaymentsToConfirm();
-  if (!list.length) return null;
-  return (
-    <Card className="flex flex-col gap-2 border-ink" data-counter-payments>
-      <SectionLabel right={`${list.length}`}>Confirm today&apos;s counter payments</SectionLabel>
-      <p className="text-xs text-muted">Recorded by advisors at the counter. Tick each one once the cash or the card slip is with you.</p>
-      <ul className="divide-y divide-line">
-        {list.map((p) => (
-          <li key={p.id} className="py-2 flex flex-wrap items-center gap-3 text-sm" data-counter-row={p.number}>
-            <span className="font-semibold">{p.number}</span>
-            <span>{p.plate ?? p.invoiceNumber ?? ""}</span>
-            <Badge tone="neutral">{METHOD_LABELS[p.method]}</Badge>
-            <span className="text-muted">{formatDayTime(p.received_at)} · by {p.byName}</span>
-            <Badge tone="amber">Recorded by advisor, to confirm</Badge>
-            <span className="ml-auto font-semibold">AED {p.amount_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span>
-            {canConfirm ? <form action={verifyPaymentAction.bind(null, p.id)}><input type="hidden" name="return_to" value={returnTo} /><Button type="submit" size="md" tone="secondary">Confirmed</Button></form> : null}
-          </li>
-        ))}
-      </ul>
-    </Card>
-  );
-}
-
-/** The accounts dashboard: money only. Tiles, the counter payments to confirm, and every open car from Ready onwards with its money step. */
+/** The accounts dashboard: money only. Tiles, the payments advisors sent to record, and every open car from Ready onwards with its money step. */
 export async function AccountsDashboard({ staff, settings }: { staff: CurrentStaff; settings: Settings }) {
   const rows = await loadMoneyRows(settings, { scope: "open" });
   const tiles = await loadMoneyTiles(rows);
@@ -70,11 +46,12 @@ export async function AccountsDashboard({ staff, settings }: { staff: CurrentSta
   const deposits = await depositsNotInvoiced();
   return (
     <>
-      <LiveRefresh tables={["invoices", "payments", "jobs", "purchase_orders"]} />
+      <LiveRefresh tables={["invoices", "payments", "jobs", "purchase_orders", ...((await paymentReportsReady()) ? ["payment_reports"] : [])]} />
       <HomeHeader staff={staff} actions={<LinkButton href="/invoices" tone="secondary" size="lg">Invoices and payments</LinkButton>} />
       <MoneyTilesRow t={tiles} />
       <WaitingPanel staff={staff} extra={await accountsWaitingExtra()} />
-      <CounterPaymentsCard canConfirm={!staff.viewingAs} returnTo="/dashboard" />
+      {/* 2 November 2026: the advisors' payments to record (where the old counter-payments card was; advisors never record). */}
+      <PaymentReportsCard staff={staff} settings={settings} />
       {deposits.length ? (
         <section className="flex flex-col gap-3" data-deposits-not-invoiced>
           <SectionLabel right={`${deposits.length}`}>Deposits received, not yet on an invoice</SectionLabel>

@@ -217,6 +217,9 @@ const DEFAULTS = {
   part_cost_far_below_percent: 50,
   part_cost_similar_percent: 20,
   part_markup_warn_percent: 500,
+  /** Payment hand-over (2 November 2026, section 3): a payment an advisor sent to accounts and not recorded or queried
+   *  within these WORKING hours reminds accounts and the owner once (Settings > Money). */
+  payment_report_reminder_hours: 4,
   pin_needed_above_aed: 100,
   wash_board_show_times: false,
   /** The Testing phase (Clear test data): off unless the owner switched it on - a missing row is OFF (1 November 2026, C2). */

@@ -81,6 +81,8 @@ export default async function VehiclePage({
   const title = [v.make?.name, v.model?.name, v.variant].filter(Boolean).join(" ");
   // 1 November 2026: a payment can always be recorded from the car page - with or without a job, open or long gone.
   const mayPay = can(role, "recordPayments") && !staff.viewingAs;
+  // The owner in View as sees the same button, greyed ("View as is read-only", 2 November 2026).
+  const viewPay = can(role, "recordPayments") && !!staff.viewingAs;
   const carCredit = can(role, "viewInvoices") && v.customer ? await unallocatedOf({ vehicleId: v.id }) : [];
 
   return (
@@ -95,7 +97,7 @@ export default async function VehiclePage({
             {!v.is_active ? <Badge tone="red">Inactive</Badge> : null}
           </span>
         }
-        actions={canEdit || mayPay ? <>{mayPay && v.customer ? <RecordPaymentButton vehicleId={v.id} customerId={v.customer.id} size="lg" tone="secondary" /> : null}{canEdit ? <LinkButton href={`/vehicles/${v.id}/edit`}>Edit</LinkButton> : null}</> : undefined}
+        actions={canEdit || mayPay || viewPay ? <>{(mayPay || viewPay) && v.customer ? <RecordPaymentButton vehicleId={v.id} customerId={v.customer.id} readOnly={viewPay} size="lg" tone="secondary" /> : null}{canEdit ? <LinkButton href={`/vehicles/${v.id}/edit`}>Edit</LinkButton> : null}</> : undefined}
       />
 
       {message ? <Notice tone="success">{message}</Notice> : null}

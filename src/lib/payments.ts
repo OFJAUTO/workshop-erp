@@ -38,6 +38,8 @@ export type PaymentInput = {
   overNote?: string | null;
   /** Measure an advance on a job against the approved total (the Record payment forms). The deposit panel keeps its own rule. */
   overCheck?: boolean;
+  /** Recorded from an advisor's payment report (2 November 2026, section 3): the report is closed by this receipt. */
+  reportId?: string | null;
 };
 export type PaymentResult = { error?: string; ok?: boolean; number?: string; paymentId?: string; pendingOwner?: boolean; message?: string; /** The same client key was already used: this is that earlier receipt (its amount and method). */ repeat?: { amount: number; method: string }; /** More than what is left and no note yet: the form asks for one. */ needsOverNote?: { balance: number }; token?: string | null };
 
@@ -180,6 +182,12 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     if (method !== "cheque") await tryEnqueueZoho(input.invoiceId ? "payment" : "deposit", String(created.id), jobId ?? null, actor.id);
     if (jobId) await notifyStaff(await advisorsOf(jobId), { type: "payment_received", title: `Payment received · ${created.number}`, body: `${money(amount)} by ${method}${input.invoiceId ? "" : " (deposit)"}`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : `/jobs/${jobId}` });
     if (!verifies) await notifyRoles(["accounts"], { type: "payment_verify", title: `Payment to verify · ${created.number}`, body: `${actor.display_name} recorded ${money(amount)} by ${method}. Tick it once the money is confirmed.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : "/invoices" });
+    // An advisor's payment report is answered by its receipt: the one it was recorded from, or one waiting on this job for
+    // the same amount and method (recorded another way). Its advisor hears "Recorded ✓ RCT-…".
+    if (jobId) {
+      const { afterReceiptForReports } = await import("./payment-reports");
+      await afterReceiptForReports({ id: String(created.id), number: String(created.number), amount, method, jobId, authCode: needsAuthCode(method) ? authCode : null, reference: input.reference ?? (method === "cheque" ? (input.cheque?.number ?? null) : null) }, input.reportId ?? null, { id: actor.id, display_name: actor.display_name }).catch((e) => logAppError(`record payment: report after ${created.number}`, e, { staffId: actor.id, jobId }));
+    }
     if (over && !isOwner) await notifyRoles(["owner"], { type: "payment_void", title: `Payment above the balance recorded · ${created.number}`, body: `${money(amount)} by ${method} against a balance of ${money(balance ?? 0)}, by ${actor.display_name}: ${overNote}`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : jobId ? `/jobs/${jobId}/invoice` : "/invoices" });
   } catch (err) {
     await logAppError(`record payment: after ${created.number}`, err, { staffId: actor.id, jobId, detail: { paymentId: created.id } });
@@ -244,6 +252,9 @@ export async function voidPayment(paymentId: string, actor: Actor, reason: strin
   } else if (where) await reopenZoho(p.is_deposit ? "deposit" : "payment", paymentId);
   if (p.job_id) await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment_void", note: `${p.number} (${money(p.amount_aed)}) voided by ${actor.display_name}: ${clean}`, created_by: actor.id });
   if (p.job_id && p.invoice_id) await settleJob(p.job_id, p.invoice_id, actor.id);
+  // A receipt that answered an advisor's payment report: the report waits for accounts again (never "Recorded ✓" on a voided receipt).
+  const { reopenReportsOfPayment } = await import("./payment-reports");
+  await reopenReportsOfPayment(paymentId, { id: actor.id, display_name: actor.display_name }, { word: "voided", reason: clean }).catch((e) => logAppError(`void payment: report after ${p.number}`, e, { staffId: actor.id, jobId: p.job_id }));
   await notifyRoles(["owner"], { type: "payment_void", title: `Receipt voided · ${p.number}`, body: `${money(p.amount_aed)} voided by ${actor.display_name}: ${clean}`, jobId: p.job_id, href: p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices" });
   return { ok: true, number: p.number, message: `${p.number} voided.` };
 }
@@ -304,5 +315,8 @@ export async function undoPayment(paymentId: string, actor: Actor, settings: Set
   await admin.from("zoho_outbox").delete().in("kind", ["payment", "deposit"]).eq("record_id", paymentId).eq("status", "pending").is("zoho_id", null);
   if (p.job_id) await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment_void", note: `${p.number} (${money(p.amount_aed)}) undone by ${actor.display_name} within ${minutes} minutes`, created_by: actor.id });
   if (p.job_id && p.invoice_id) await settleJob(p.job_id, p.invoice_id, actor.id);
+  // A receipt made from an advisor's payment report: the report waits for accounts again (2 November 2026, section 3).
+  const { reopenReportsOfPayment } = await import("./payment-reports");
+  await reopenReportsOfPayment(paymentId, { id: actor.id, display_name: actor.display_name }).catch(() => null);
   return { ok: true, number: p.number, message: `${p.number} undone.` };
 }
