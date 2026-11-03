@@ -43,10 +43,10 @@ function docLineOf(l: InvoiceLineRow, compReason: string | null = null): Section
   return {
     quantity,
     // A spare part: its one name with the side ("HEADLIGHT – FRONT LEFT"); the type stays in the small grey line.
-    description: l.section === "parts" ? partLineName(l.description, l.positions, null) : l.description,
+    description: l.section === "parts" ? partLineName(l.description, l.positions, null, { quantity: Number(l.quantity) || 1, unit: l.unit ?? null }) : l.description,
     positions: l.section === "parts" ? null : positionsWords(l.positions)?.toUpperCase() || null,
     details: l.hours !== null ? detailsWithoutHours(l.details) : l.details,
-    qty: l.hours !== null ? qtyText(l.quantity, l.hours) : qtyText(l.quantity),
+    qty: l.hours !== null ? qtyText(l.quantity, l.hours) : qtyText(l.quantity, null, l.section === "parts" ? (l.unit ?? null) : null),
     rate: l.unit_price,
     amount: l.amount_aed,
     complimentary: comp || l.amount_aed === 0,
@@ -377,8 +377,10 @@ export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise
     const disc = l.discount_percent !== null && l.discount_percent !== undefined ? l.discount_percent : list > 0 ? round2((1 - l.unit_cost / list) * 100) : 0;
     const net = round2(l.quantity * l.unit_cost);
     const vat = round2(net * (vatPercent / 100));
-    const positions = l.part_item_id ? (bundle.parts ?? []).find((p) => p.id === l.part_item_id)?.positions : null;
-    return { partNumber: realPartNumber(l.part_number), name: l.description, sub: positionsWords(positions) || null, qty: qtyText(l.quantity), list, disc: Math.max(0, disc), net, vat, total: round2(net + vat) };
+    const part = l.part_item_id ? (bundle.parts ?? []).find((p) => p.id === l.part_item_id) : null;
+    const positions = part?.positions ?? null;
+    // Section 9: the supplier reads "8 L" (litres) or "2 sets"; the price beside it is per unit.
+    return { partNumber: realPartNumber(l.part_number), name: l.description, sub: positionsWords(positions) || null, qty: qtyText(l.quantity, null, part?.unit ?? null), list, disc: Math.max(0, disc), net, vat, total: round2(net + vat) };
   });
   // The supplier's own charges on this order (courier, freight): one row each, after the parts.
   for (const c of bundle.charges ?? []) {

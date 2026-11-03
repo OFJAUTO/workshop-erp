@@ -4,6 +4,7 @@ import type { ExtraWaiting } from "@/components/WaitingPanel";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
 import { pricesToFix } from "./part-cost-history";
+import { PLANNING_STATUSES, pricingTodoOf } from "./pricing-done";
 
 const PLATE_SELECT = "kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant";
 type PlateRow = Parameters<typeof formatPlate>[0];
@@ -22,14 +23,14 @@ export async function partsWaitingExtra(): Promise<ExtraWaiting[]> {
     car: e.car || null,
     what: `ESTIMATE ${e.number} – car not here yet: ${estimateTaskWords(e)}`,
     amount: null,
-    actionLabel: e.toPrice ? "Price the parts" : "Check the price",
+    actionLabel: e.toPrice ? "Price the parts" : e.toCheck ? "Check the price" : "Send to advisor",
     href: `/parts/estimate/${e.id}`,
     always: true,
     urgency: e.toPrice ? "amber" : "grey",
     since: e.since,
-    hint: "The advisor's estimate before the car arrives: price each part he named, or check the price he typed.",
+    hint: "The advisor's estimate before the car arrives: price each part he named, or check the price he typed, then press Pricing done – send to advisor.",
   }));
-  return [...(await pricesToFixItem()), ...estimates, ...(await orderNowItems())];
+  return [...(await pricesToFixItem()), ...estimates, ...(await pricingToSendItems()), ...(await orderNowItems())];
 }
 
 async function orderNowItems(): Promise<ExtraWaiting[]> {
@@ -86,4 +87,49 @@ async function pricesToFixItem(): Promise<ExtraWaiting[]> {
     since: null,
     hint: "A cost of AED 1.00 or a supplier like OFJ Additional makes the profit look bigger than it is: put the real price, the real supplier, or From our stock.",
   }];
+}
+
+/**
+ * Section 10 (3 November 2026): a car whose parts are all priced but not sent to the advisor ("Pricing done – send to
+ * advisor" not pressed), or whose changes wait for the send, stays on Parts' list with one button; once sent it leaves
+ * (pricingTodoOf, the same rule as the parts desk). A car with parts still to price is already on the list through its
+ * quotation's step.
+ */
+async function pricingToSendItems(): Promise<ExtraWaiting[]> {
+  const admin = createAdminClient();
+  const { data: jobRows } = await admin
+    .from("jobs")
+    .select(`id, job_number, status, parts_pricing_done_at, parts_pricing_reopened_at, vehicle:vehicles(${PLATE_SELECT}, model_year, make:vehicle_makes(name), model:vehicle_models(name))`)
+    .eq("is_open", true)
+    .not("status", "in", `(${PLANNING_STATUSES.join(",")})`)
+    .or("parts_pricing_done_at.is.null,parts_pricing_reopened_at.not.is.null")
+    .limit(300);
+  const jobs = (jobRows ?? []) as unknown as { id: string; job_number: string; status: string; parts_pricing_done_at: string | null; parts_pricing_reopened_at: string | null; vehicle: (PlateRow & { make?: { name: string } | null; model?: { name: string } | null }) | null }[];
+  if (!jobs.length) return [];
+  const ids = jobs.map((j) => j.id);
+  const [{ data: partRows }, { data: reqRows }] = await Promise.all([
+    admin.from("part_items").select("job_id, is_active, confirm_status, order_status, cost_aed, priced_at, removed_at").in("job_id", ids).eq("is_active", true),
+    admin.from("part_requests").select("job_id, status").in("job_id", ids).eq("is_active", true).eq("status", "open"),
+  ]);
+  const parts = (partRows ?? []) as { job_id: string; is_active: boolean; confirm_status: string | null; order_status: string | null; cost_aed: number | string | null; priced_at: string | null; removed_at: string | null }[];
+  const reqs = (reqRows ?? []) as { job_id: string; status: string }[];
+  const out: ExtraWaiting[] = [];
+  for (const j of jobs) {
+    const mine = parts.filter((p) => p.job_id === j.id);
+    if (pricingTodoOf(j, reqs.filter((r) => r.job_id === j.id), mine) !== "to_send") continue;
+    out.push({
+      jobId: j.id,
+      plate: j.vehicle ? formatPlate(j.vehicle) : j.job_number,
+      car: [j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ") || null,
+      what: `${j.job_number}: ${j.parts_pricing_done_at && j.parts_pricing_reopened_at ? "prices changed" : "all parts priced"} – send to the advisor`,
+      amount: null,
+      actionLabel: "Send to advisor",
+      href: `/parts/${j.id}#pricing`,
+      always: true,
+      urgency: "amber",
+      since: mine.map((p) => p.priced_at).filter((x): x is string => !!x).sort().slice(-1)[0] ?? null,
+      hint: "Every part is priced, but the advisor does not know yet: press Pricing done – send to advisor at the bottom of the car's parts page.",
+    });
+  }
+  return out;
 }

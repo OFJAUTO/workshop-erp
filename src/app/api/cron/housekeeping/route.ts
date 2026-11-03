@@ -21,6 +21,7 @@ import { monthKey, monthLabel, monthlySummary, shiftMonth } from "@/lib/owner-re
 import { loadDocAlerts } from "@/lib/doc-reminders-data";
 import { depositsWaiting } from "@/lib/deposits";
 import { paymentReportsHourly } from "@/lib/payment-reports";
+import { releaseHeldPricingHourly } from "@/lib/pricing-send";
 
 /**
  * Runs every hour (Vercel cron). Two jobs:
@@ -66,6 +67,7 @@ function housekeepingWords(report: Record<string, number>): string {
     invoiceMissingReminders: ["missing supplier invoice reminder", "missing supplier invoice reminders"], stockLow: ["low stock alert", "low stock alerts"], stockCount: ["monthly stock count request", "monthly stock count requests"],
     bodyshopLate: ["late bodyshop stage", "late bodyshop stages"], bodyshopDueOut: ["bodyshop car due out tomorrow", "bodyshop cars due out tomorrow"], monthlySummary: ["monthly summary sent", "monthly summaries sent"],
     paymentReportsLate: ["reported payment reminder", "reported payment reminders"],
+    pricingReleased: ["held parts change sent to the advisor", "held parts changes sent to the advisor"],
   };
   const parts = Object.entries(report)
     .filter(([, n]) => n > 0)
@@ -485,6 +487,15 @@ async function runHousekeeping(): Promise<Record<string, number>> {
     report.paymentReportsLate = await paymentReportsHourly(settings);
   } catch {
     report.paymentReportsLate = -1;
+  }
+
+  // 28. Parts changes held for a "Pricing done – send to advisor" nobody pressed, on a car now in planning (approved by
+  // a path other than the customer's link, which releases them at once): they go to the advisor in the one notification
+  // (review of 3 November 2026: a held notice is never lost).
+  try {
+    report.pricingReleased = await releaseHeldPricingHourly();
+  } catch {
+    report.pricingReleased = -1;
   }
 
   // 24. Supplier invoices still missing ("to follow"): Parts are reminded once a day per LPO until the

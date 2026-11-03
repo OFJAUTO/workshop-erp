@@ -8,6 +8,7 @@ import { blankToNull } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { ensurePartRequests, labourRateFor, logQuoteEvent, refreshQuoteTotals } from "@/lib/quote-data";
+import { reopenPricingFor } from "@/lib/parts-pricing";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -135,6 +136,8 @@ export async function decideAdditionalWork(id: string, formData: FormData) {
   await admin.from("quotation_lines").insert({ quotation_id: q.id, position: 0, line_type: "labour", title: a.remark, details: note ?? "Found by the technician during the work", group_label: "Additional work", source_type: "manual", labour_rate: labourRateFor(settings, job.department), quantity: 1, created_by: staff.id, updated_by: staff.id });
   if (a.parts_needed) {
     await admin.from("part_requests").insert({ job_id: a.job_id, source_type: "manual", source_key: `additional:${a.id}`, label: a.parts_needed, requested_text: `Additional work: ${a.remark}`, created_by: staff.id, updated_by: staff.id });
+    // A new request after the prices were sent opens the pricing again (section 10).
+    await reopenPricingFor(a.job_id, staff.id);
     await notifyRoles(["parts"], { type: "parts_request", title: `Parts to price · ${job.job_number}`, body: `${a.parts_needed} (additional work)`, jobId: a.job_id, href: `/parts/${a.job_id}` });
   }
   await ensurePartRequests(a.job_id, staff.id);

@@ -45,6 +45,19 @@ export const revisionPartsReady = () => schemaReady("quotations", "revision_requ
 export const costConfirmReady = () => schemaReady("part_items", "cost_confirmed_aed, cost_confirmed_at, cost_confirmed_by");
 export const lineCostConfirmReady = () => schemaReady("quotation_lines", "cost_confirmed_aed, cost_confirmed_at, cost_confirmed_by, stock_item_id");
 
+/** Quantity + unit on every parts form (section 9, 3 November 2026): a part's unit (pieces, litres, sets), an estimate
+ *  part's asked quantity, its quantity change stamps and the shared row's list price and supplier discount. Migration
+ *  20261203160000_part_units. Before it the quantity still changes and is logged; the unit stays pieces everywhere and
+ *  nothing reads or writes the new columns. */
+export const partUnitsReady = async () => (await schemaReady("part_items", "unit")) && (await schemaReady("quotation_lines", "unit, asked_quantity, quantity_changed_at, quantity_changed_by, list_price_aed, supplier_discount_percent"));
+/** The extra columns of an estimate's part line, read once they exist (attachPartLineExtras in quote-data.ts). */
+export const PART_LINE_EXTRA_SELECT = "id, unit, asked_quantity, quantity_changed_at, quantity_changed_by, list_price_aed, supplier_discount_percent";
+
+/** "Pricing done – send to advisor" on an estimate (section 10, 3 November 2026): the send kept on the estimate.
+ *  Migration 20261203170000_estimate_pricing_done. Before it the button still sends the ONE notification, but the
+ *  estimate leaves the parts desk's list by itself once nothing is left to price or check (as it always did). */
+export const estimatePricingReady = () => schemaReady("quotations", "parts_priced_at, parts_priced_by");
+
 /** Payment hand-over (2 November 2026, section 3): an advisor's "Payment received – send to accounts". Migration
  *  20261203110000_payment_reports. Before it the button is not shown and nothing reads the table (nothing half-works). */
 export const paymentReportsReady = () => schemaReady("payment_reports", "id, status, payment_id, reminded_at, replaces_id");

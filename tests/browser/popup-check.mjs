@@ -167,6 +167,9 @@ export async function runPopups() {
   await check(p, "Delete the ticked parts", "[data-delete-confirm]", async () => { await click(p, "[data-select-all]"); await click(p, "[data-delete-all]"); }, findings, shots);
   await goto(p, pUrl);
   await check(p, "Copy list for supplier", "[data-supplier-list]", () => p.getByRole("button", { name: /Copy list for supplier/ }).first().click(), findings, shots);
+  // Section 10 (3 November 2026): "Pricing done – send to advisor" with a part not priced lists it above the button.
+  await goto(p, pUrl);
+  await check(p, "Pricing done: parts not priced yet", "[data-pricing-open-list]", () => click(p, "[data-pricing-done]"), findings, shots);
 
   // "Quotation complete": every question it asks on the way, then the send window. A part request nobody priced
   // would block it, so it counts as not available here.

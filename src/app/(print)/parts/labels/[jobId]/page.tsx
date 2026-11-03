@@ -9,6 +9,8 @@ import { getSettings } from "@/lib/settings";
 import { ensureQrLink, qrUrl, stickerLogoDataUrl, stickerSettings } from "@/lib/stickers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { StickerSheet } from "./StickerSheet";
+import { partUnitsReady } from "@/lib/schema-ready";
+import { qtyWithUnit } from "@/lib/part-units";
 
 export const dynamic = "force-dynamic";
 
@@ -43,12 +45,19 @@ export default async function PartLabelsPage({ params, searchParams }: { params:
     const qr = await qrDataUrl(qrUrl("TESTCODE"), 300);
     labels.push({ key: "test-1", qr, name: "Front brake pads set (sample)", index: 1, count: 2, date: formatDate(new Date().toISOString()) });
   } else {
-    const { data } = await admin.from("part_items").select(PART_FULL_SELECT + ", fitted_at").eq("job_id", jobId).eq("is_active", true).gt("received_qty", 0).order("created_at");
+    const unitsReady = await partUnitsReady();
+    const { data } = await admin.from("part_items").select(PART_FULL_SELECT + ", fitted_at" + (unitsReady ? ", unit" : "")).eq("job_id", jobId).eq("is_active", true).gt("received_qty", 0).order("created_at");
     const parts = ((data ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...toPartFull(r), fitted_at: (r.fitted_at as string | null) ?? null })).filter((p) => (!part && !wanted.size) || p.id === part || wanted.has(p.id)).filter((p) => p.issue_status !== "confirmed" || !!part || wanted.has(p.id));
     for (const p of parts) {
       const code = await ensureQrLink("part", { jobId, refId: p.id }, staff.id);
       const qr = await qrDataUrl(qrUrl(code), 300);
-      const count = Math.max(1, Math.round(Number(p.received_qty) || Number(p.confirmed_quantity ?? p.quantity) || 1));
+      const qty = Number(p.received_qty) || Number(p.confirmed_quantity ?? p.quantity) || 1;
+      // Section 9 (3 November 2026): a fluid in litres is ONE sticker saying the litres ("ENGINE OIL · 8 L"), never one per litre.
+      if (p.unit === "l") {
+        labels.push({ key: `${p.id}-1`, qr, name: `${p.description} · ${qtyWithUnit(qty, "l")}`, index: 1, count: 1, date: null, pos: stickerPosition(p.positions, 1, 1) });
+        continue;
+      }
+      const count = Math.max(1, Math.round(qty));
       for (let n = 1; n <= count; n++) labels.push({ key: `${p.id}-${n}`, qr, name: p.description, index: n, count, date: null, pos: stickerPosition(p.positions, n, count) });
     }
   }

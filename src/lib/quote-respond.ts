@@ -1,4 +1,5 @@
 import { replaceProformaAfterRevision } from "./invoice-flow";
+import { releaseHeldPricing } from "./pricing-send";
 import { startersOf } from "./quote-lead";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { createTrip, loadDrivers } from "./delivery";
@@ -173,6 +174,9 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
   const noParts = !extra && !lines.some((l) => l.line_type === "part") && !parts.some((p) => p.order_status !== "none");
   if (noParts) await admin.from("jobs").update({ plan_parts_done_at: now, plan_parts_by: null, plan_parts_ready_date: now.slice(0, 10) }).eq("id", job.id);
   await admin.from("job_events").insert({ job_id: job.id, event_type: "status_change", from_status: job.status, to_status: toStatus, note: `Quotation ${q.number} approved by ${answer.name}: ${lines.length} line${lines.length === 1 ? "" : "s"}, ${totalText} with VAT${extra ? ` (additional work, ${madeLines} new line${madeLines === 1 ? "" : "s"} on the work order)` : " · planning starts with Parts"}`, created_by: answer.by ?? null });
+  // Parts changes still held for a "Pricing done – send to advisor" nobody pressed reach the advisor now, in the one
+  // notification (review of 3 November 2026): once the car is in planning nothing asks for that send any more.
+  await releaseHeldPricing(job.id);
   const body = `${answer.name} approved ${q.number} (${totalText}). ${extra ? [madeLines ? "Additional work: the new lines are on the work order." : "", newStages.length ? `New bodyshop stages: ${newStages.join(", ")}.` : ""].filter(Boolean).join(" ") || "Additional work approved." : "Planning: Parts first, then the managers, then the advisor."}`;
   await notifyStaff(advisors, { type: "quote_approved", title: `Quotation approved · ${job.job_number}`, body, jobId: job.id, href: `/jobs/${job.id}` });
   // The workshop managers and Parts never see the customer's name (29 October 2026): "The customer approved …".

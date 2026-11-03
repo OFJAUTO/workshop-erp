@@ -57,12 +57,13 @@ export async function renderQuotePdf(bundle: QuoteBundle, settings: Settings): P
     const title = l.line_type === "part" && number && l.title.endsWith(`(${number})`) ? l.title.slice(0, -(number.length + 2)).trim() : l.title;
     return {
       // A part: its ONE name with the side and the type ("HEADLIGHT – FRONT LEFT · GENUINE"); other lines as saved (capitals).
-      description: l.line_type === "part" ? partLineName(title, l.positions, partTypeText(l)) : title,
+      // Section 9: litres and sets say so after the name ("ENGINE OIL – ROLLS-ROYCE GENUINE · 8 L").
+      description: l.line_type === "part" ? partLineName(title, l.positions, partTypeText(l), { quantity: Number(l.quantity) || 1, unit: l.unit ?? null }) : title,
       // The positions of a job on their own line (ALL 4, FRONT PAIR…); then a part's availability in plain words (Today, Tomorrow, In 2 days) as the small grey line.
       positions: l.line_type === "part" ? null : positionsWords(l.positions)?.toUpperCase() || null,
       details: l.package_items ? packageDetailsText(l.package_items) : [l.line_type === "part" ? partAvailabilityText(part ?? null, today) : null, l.details, !l.package_items && lineIsPpf(l, kindOfService.get(l.service_id ?? "") ?? null) ? cutWords(l.cut_method, l.cut_note) : null, lineTintWords(l, kindOfService.get(l.service_id ?? "") ?? null, tintSpec, tintLimit)].filter(Boolean).join(" · ") || null,
       quantity: Number(l.quantity) || 1,
-      qty: l.line_type === "labour" ? qtyText(l.quantity, l.hours ?? 0) : qtyText(l.quantity || 1),
+      qty: l.line_type === "labour" ? qtyText(l.quantity, l.hours ?? 0) : qtyText(l.quantity || 1, null, l.line_type === "part" ? (l.unit ?? null) : null),
       rate: unit,
       amount,
       complimentary: isComplimentary(l) || amount === 0,

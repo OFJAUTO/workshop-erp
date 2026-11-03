@@ -7,6 +7,7 @@ import { unpricedEstimateParts, waitingWords } from "./estimate-parts";
 import { positionsQtyMismatch, positionsWords } from "./parts-list";
 import { packageItemLabels, packageLineCost, plainPpfFilm, type PackageCosting } from "./package-cost";
 import { lineIsPpf } from "./ppf-cut";
+import { unitSuffix, type PartUnit } from "./part-units";
 
 export const LINE_TYPES = [
   { value: "labour", label: "Labour" },
@@ -143,6 +144,15 @@ export type QuoteLine = {
   below_cost_cost_aed?: number | null;
   /** The approver's name, filled in by the loader for the screen. */
   below_cost_by_name?: string | null;
+  /** Section 9 (3 November 2026, migration 20261203160000): a part's unit (pieces, litres, sets; the cost is per unit),
+   *  the quantity the advisor asked for before the parts desk changed it, and when and by whom it changed; an estimate
+   *  part's list price and supplier discount (the shared Parts row). Read once the columns exist (attachPartLineExtras). */
+  unit?: PartUnit | null;
+  asked_quantity?: number | null;
+  quantity_changed_at?: string | null;
+  quantity_changed_by?: string | null;
+  list_price_aed?: number | null;
+  supplier_discount_percent?: number | null;
 };
 
 export type QuoteRow = {
@@ -356,6 +366,8 @@ export type PartItem = {
   answered_by: string | null;
   /** "Front left", "Rear"... carried from the technician's parts list. */
   positions?: string[] | null;
+  /** Section 9: pieces, litres or sets (the cost is per unit); read once the column exists. */
+  unit?: PartUnit | null;
 };
 
 export const PART_TYPE_LABELS: Record<string, string> = { genuine: "Genuine", oem: "OEM", aftermarket: "Aftermarket", used: "Used" };
@@ -1386,9 +1398,11 @@ const SIDE_WORDS = /\b(front|rear|left|right|lh|rh|fl|fr|rl|rr|all\s*4|all four|
  * A part's ONE name on every document and customer page (1 November 2026, B1): "HEADLIGHT – FRONT LEFT · GENUINE".
  * The side is added only when the name does not already say it, the part type after a dot, all in capitals.
  */
-export function partLineName(title: string, positions?: string[] | null, typeText?: string | null): string {
+export function partLineName(title: string, positions?: string[] | null, typeText?: string | null, qty?: { quantity: number; unit?: PartUnit | null } | null): string {
   const side = positions?.length && !SIDE_WORDS.test(title) ? ` – ${positionsWords(positions).toUpperCase()}` : "";
-  return `${title.toUpperCase()}${side}${typeText ? ` · ${typeText.toUpperCase()}` : ""}`;
+  // Section 9 (3 November 2026): litres and sets say so after the name ("ENGINE OIL – ROLLS-ROYCE GENUINE · 8 L").
+  const unit = qty ? unitSuffix(qty.quantity, qty.unit) : "";
+  return `${title.toUpperCase()}${side}${typeText ? ` · ${typeText.toUpperCase()}` : ""}${unit}`;
 }
 /** The positions a job can take on the quotation. */
 export const JOB_POSITIONS = ["Front left", "Front right", "Rear left", "Rear right", "Front", "Rear", "Left", "Right"] as const;

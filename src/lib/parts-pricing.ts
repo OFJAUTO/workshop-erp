@@ -3,7 +3,10 @@ import { dubaiDate } from "@/lib/jobs";
 import { cleanPartNumber, daysFromDate, pricingSummary, rowState, type PricingSummary, type RowFlags, type RowState, type RowValues } from "@/lib/parts-rows";
 import { isSettledStatus } from "@/lib/part-cost-check";
 import { costCheckValues, costChecksFor, type CostCheck } from "@/lib/part-cost-history";
-import { costConfirmReady } from "@/lib/schema-ready";
+import { costConfirmReady, partUnitsReady } from "@/lib/schema-ready";
+import { cleanUnit, requestUnitOf } from "@/lib/part-units";
+import { awaitingSend, inPricingPhase } from "@/lib/pricing-done";
+import { PAST_QUOTE } from "@/lib/parts-steps";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isTyreName, parseTyreSpec, tyreSizeIn } from "@/lib/tyres";
 
@@ -16,9 +19,11 @@ import { isTyreName, parseTyreSpec, tyreSizeIn } from "@/lib/tyres";
 export const PRICING_PART_SELECT = "id, part_request_id, description, original_description, part_number, part_type, brand, tyre_spec, list_price_aed, discount_percent, cost_aed, supplier, availability, delivery_date, quantity, confirmed_quantity, confirm_status, is_active, created_at, removed_at, removed_by, removed_reason, discount_approval_status, option_group, order_status, stock_item_id, final_cost_aed";
 /** The pricing select with "Yes, real price" once the database has it (migration 20261203100000_part_costs). */
 export async function pricingPartSelect(): Promise<string> {
-  return (await costConfirmReady()) ? `${PRICING_PART_SELECT}, cost_confirmed_aed` : PRICING_PART_SELECT;
+  const base = (await costConfirmReady()) ? `${PRICING_PART_SELECT}, cost_confirmed_aed` : PRICING_PART_SELECT;
+  // Section 9 (3 November 2026): the part's unit once the database keeps it (migration 20261203160000).
+  return (await partUnitsReady()) ? `${base}, unit` : base;
 }
-export const PRICING_REQUEST_SELECT = "id, label, status, quantity, closed_reason, created_at, removed_at, removed_by, removed_reason";
+export const PRICING_REQUEST_SELECT = "id, label, status, quantity, unit, closed_reason, created_at, removed_at, removed_by, removed_reason";
 
 export type PricingPart = {
   id: string;
@@ -51,9 +56,11 @@ export type PricingPart = {
   cost_confirmed_aed?: number | string | null;
   /** The cost that really stands once ordered: the supplier invoice price or the stock average. */
   final_cost_aed?: number | string | null;
+  /** Section 9: pieces, litres or sets (read once the column exists). */
+  unit?: string | null;
 };
 
-export type PricingRequest = { id: string; label: string; status: string; quantity: number | string | null; closed_reason: string | null; created_at: string; removed_at?: string | null; removed_by?: string | null; removed_reason?: string | null };
+export type PricingRequest = { id: string; label: string; status: string; quantity: number | string | null; unit?: string | null; closed_reason: string | null; created_at: string; removed_at?: string | null; removed_by?: string | null; removed_reason?: string | null };
 
 const text = (n: number | string | null | undefined) => (n === null || n === undefined ? "" : String(n));
 
@@ -81,6 +88,7 @@ export function valuesOfPart(p: PricingPart, today: string, check?: CostCheck | 
     availability: p.availability ?? "",
     days: p.availability === "to_order" ? daysFromDate(p.delivery_date, today) : "",
     qty: String(Number(p.confirmed_quantity ?? p.quantity) || 1),
+    unit: cleanUnit(p.unit) ?? "pc",
     ...tyreValues(p.description, p.tyre_spec, p.brand),
   };
 }
@@ -100,7 +108,8 @@ export function tyreValues(name: string, raw: unknown, brand: string | null): Pi
 
 /** The row values of a request that has no part yet: empty, with the usual part type offered. */
 export function valuesOfRequest(r: PricingRequest, defaultType = ""): RowValues {
-  return { part_number: "", part_type: defaultType, brand: "", list_price: "", discount: "", cost_aed: "", supplier: "", availability: "", days: "", qty: String(Number(r.quantity) || 1), ...tyreValues(r.label, null, null) };
+  // The unit a request stands for: sets and litres as stored, else read from the name (a stored "pc" is nobody's choice).
+  return { part_number: "", part_type: defaultType, brand: "", list_price: "", discount: "", cost_aed: "", supplier: "", availability: "", days: "", qty: String(Number(r.quantity) || 1), unit: requestUnitOf(r.label, r.unit), ...tyreValues(r.label, null, null) };
 }
 
 export type PricingRow = {
@@ -158,4 +167,43 @@ export async function loadPricingRows(jobId: string, defaultType = ""): Promise<
   const checks = await costChecksFor(parts.filter((p) => p.is_active !== false), parts.filter((p) => p.is_active !== false));
   const rows = pricingRowsOf(requests, parts, today, defaultType, checks);
   return { rows, summary: pricingSummary(rows.map((r) => r.state)), today, parts, requests, checks };
+}
+
+type PricingJob = { id: string; status: string; parts_pricing_done_at: string | null; parts_pricing_reopened_at: string | null };
+
+/**
+ * A new part on a car (the advisor's "+ Add a part", a service's parts, additional work, a revised inspection, a part
+ * Parts add themselves) opens the pricing again by itself (section 10, 3 November 2026): the car is back on the parts
+ * desk's list and the advisor hears it with the one send. Before the customer's approval only a pricing already sent
+ * needs opening (an unsent one is open anyway); past the approval, once the work started, the pricing opens whether or
+ * not it was ever sent (review of 3 November 2026: a car approved before Parts pressed the button used to hold the new
+ * part's notices with nothing asking for a send). Nothing in planning (the revision flow takes those). Returns the
+ * stamp written, or null.
+ */
+export async function reopenPricingFor(jobId: string, by: string | null): Promise<string | null> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("jobs").select("id, status, parts_pricing_done_at, parts_pricing_reopened_at").eq("id", jobId).maybeSingle();
+  const job = data as PricingJob | null;
+  if (!job || job.parts_pricing_reopened_at || !inPricingPhase(job)) return null;
+  if (!job.parts_pricing_done_at && !PAST_QUOTE.includes(job.status)) return null;
+  const now = new Date().toISOString();
+  await admin.from("jobs").update({ parts_pricing_reopened_at: now, parts_pricing_reopened_by: by, ...(by ? { updated_by: by } : {}) }).eq("id", jobId).is("parts_pricing_reopened_at", null);
+  return now;
+}
+
+/**
+ * THE gate for every per-part notice to the advisor (not available, quantity, removed, split, changed after the
+ * quotation went out): true when it is held for the send - exactly while a send is expected (awaitingSend) - and then
+ * the job is marked as having changes waiting (parts_pricing_reopened_at), so the car stays on the parts desk's list
+ * until "Pricing done – send to advisor" and the customer's approval releases it if nobody pressed it. False: tell the
+ * advisor now. The job object is updated in place, so later checks in the same save agree.
+ */
+export async function holdForSend(job: PricingJob, by: string | null): Promise<boolean> {
+  if (!awaitingSend(job)) return false;
+  if (!job.parts_pricing_reopened_at) {
+    const now = new Date().toISOString();
+    await createAdminClient().from("jobs").update({ parts_pricing_reopened_at: now, parts_pricing_reopened_by: by, ...(by ? { updated_by: by } : {}) }).eq("id", job.id).is("parts_pricing_reopened_at", null);
+    job.parts_pricing_reopened_at = now;
+  }
+  return true;
 }

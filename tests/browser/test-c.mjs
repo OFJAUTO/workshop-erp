@@ -94,9 +94,9 @@ await section("3-12-13 Parts table", async () => {
   check("the fixed bar starts beside the menu, not over it (11)", bar >= 200, String(bar));
   check("Sign out sits under the person's name (11)", (await page.locator("details:has(summary[aria-label='Your menu']) button:has-text('Sign out')").count()) === 1);
   const heads = await page.locator("div.hidden.md\\:grid span").allTextContents();
-  check("columns: Part, Qty, Part number, Type, List, Disc %, Net, Supplier, Availability (3)", ["Part", "Qty", "Part number", "Type", "List", "Disc %", "Net", "Supplier", "Availability"].every((h) => heads.includes(h)), heads.join("|"));
+  check("columns: Part, Qty, Part number, Type, List, Disc %, Net, Supplier, Availability (3)", ["Part", "Qty", "Part number", "Type", "List", "Disc %", "Net", "Supplier", "Availability"].every((h) => heads.some((x) => x === h || (h === "Net" && /^Net\b/.test(x)))), heads.join("|"));
   // The request's own row (the stage seed already has priced parts on the job).
-  const rowOf = () => page.locator("div.rounded-control.border", { has: page.getByRole("button", { name: /^Brake pads$|^Front brake pads, set$/ }) }).first();
+  const rowOf = () => page.locator("div.rounded-control.border", { has: page.getByRole("button", { name: /^Brake pads(?: ?FRONT)?$|^Front brake pads, set(?: ?FRONT)?$/i }) }).first();
   // Number boxes hand their figure on when left (or a second after typing stops): Tab out after each.
   const list = rowOf().locator("input[aria-label='List price']");
   await list.fill("500");
@@ -129,20 +129,22 @@ await section("3-12-13 Parts table", async () => {
   const mark = Number((await sql("select coalesce(max(id), 0) as m from public.notifications"))[0]?.m ?? 0);
   await rowOf().getByRole("button", { name: "One more" }).click();
   await sleep(2500);
-  check("quantity note on the row (12)", /Technician asked for 1, Parts changed to 2/.test(await rowOf().textContent() ?? ""));
+  // 3 November 2026 (section 9): the one wording of a quantity change.
+  check("quantity note on the row (12)", /Technician asked 1, Parts changed to 2/.test(await rowOf().textContent() ?? ""));
   const q2 = await sql("select confirmed_quantity, quantity from public.part_items where job_id = $1 and description = 'Brake pads'", [jobId]);
   check("quantity saved as the Parts quantity, the technician's kept (12)", Number(q2[0]?.confirmed_quantity) === 2 && Number(q2[0]?.quantity) === 1, JSON.stringify(q2));
-  // The save tells the advisor first and the manager after it; wait for both rather than a fixed moment.
+  // 3 November 2026 (section 10): while Parts are pricing the manager is told now and the advisor with "Pricing done –
+  // send to advisor" (the change folded into that one notification), never one notice per part.
   let told = [];
   for (let i = 0; i < 30; i++) {
     told = await sql("select s.role_id from public.notifications n join public.staff s on s.id = n.staff_id where n.id > $1 and n.job_id = $2", [mark, jobId]);
-    if (told.some((t) => t.role_id === "service_advisor") && told.some((t) => t.role_id === "workshop_manager")) break;
+    if (told.some((t) => t.role_id === "workshop_manager")) break;
     await sleep(500);
   }
-  check("advisor and workshop manager told of the quantity change (12)", told.some((t) => t.role_id === "service_advisor") && told.some((t) => t.role_id === "workshop_manager"), JSON.stringify(told));
+  check("the workshop manager is told of the quantity change, the advisor not per part (12)", told.some((t) => t.role_id === "workshop_manager") && !told.some((t) => t.role_id === "service_advisor"), JSON.stringify(told));
   // 13: the name, with the technician's words kept.
   // Since 13 October the name is corrected through the categorised picker: "Custom part" at the bottom takes a typed name.
-  await page.getByRole("button", { name: "Brake pads", exact: true }).first().click();
+  await page.getByRole("button", { name: /^Brake pads(?: ?FRONT)?$/i }).first().click();
   const picker = page.locator("[data-part-picker='rename']");
   await picker.locator("[data-custom-part-button]").click();
   await picker.locator("input[aria-label='Custom part name']").fill("Front brake pads, set");

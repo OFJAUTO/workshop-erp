@@ -47,6 +47,13 @@ export type RowValues = {
   /** "1" when the part is ordered, partly received or received: past pricing, so the stand-in supplier, the stock item
    *  and the cost question never make it "not finished" (a wrong cost there is fixed with "Correct the cost…"). */
   settled?: string;
+  /** Section 9 (3 November 2026): pieces ("pc"), litres ("l") or sets ("set"); the cost is per unit. Missing = pieces. */
+  unit?: string;
+  /** An estimate part priced by the advisor himself: "1" while the parts desk has not checked it (it holds the row until
+   *  "Price is right ✓" or the desk's own price); "checked" once the desk tapped "Price is right ✓" - the advisor's
+   *  price carries only a cost and a supplier, so the part number, type and availability are not asked for (review of
+   *  3 November 2026: the checked line used to stay "not priced" on the bar and in the advisor's notification). */
+  advisor_price?: string;
 };
 
 export type SupplierOption = { id: string; name: string; discount: number; byType: Record<string, number> };
@@ -113,7 +120,7 @@ export const ROW_STATE_WORDS: Record<RowState, string> = {
   not_finished: "not finished",
 };
 
-export type MissingField = "part_number" | "part_type" | "cost_aed" | "supplier" | "availability" | "days" | "tyre" | "cost_check" | "stock_item";
+export type MissingField = "part_number" | "part_type" | "cost_aed" | "supplier" | "availability" | "days" | "tyre" | "cost_check" | "stock_item" | "advisor_price";
 export type Missing = { field: MissingField; short: string; long: string };
 
 /** What Parts store when the supplier gives no part number (1 November 2026: the box used to get line numbers). */
@@ -163,10 +170,13 @@ export const daysComplete = (days: string | null | undefined) => /^\d+$/.test(St
 /** What a row still needs before it counts as priced: part number, type, a net price above 0, a supplier and its availability. */
 export function rowMissing(v: RowValues): Missing[] {
   const out: Missing[] = [];
-  if (v.tyre_row) {
+  // An advisor's own price the parts desk checked ("Price is right ✓"): his cost and supplier are the price - no part
+  // number, type or availability was ever asked of him.
+  const advisorChecked = v.advisor_price === "checked";
+  if (!advisorChecked && v.tyre_row) {
     if (!(v.tyre_brand ?? "").trim() || !/^\d{3}\/\d{2} R\d{2}$/.test(v.tyre_size ?? "")) out.push({ field: "tyre", short: "Tyre size and brand needed", long: "tyre size and brand needed" });
-  } else if (!v.part_number.trim()) out.push({ field: "part_number", short: "No part number", long: "no part number" });
-  if (!v.part_type.trim()) out.push({ field: "part_type", short: "No type", long: "no type" });
+  } else if (!advisorChecked && !v.part_number.trim()) out.push({ field: "part_number", short: "No part number", long: "no part number" });
+  if (!advisorChecked && !v.part_type.trim()) out.push({ field: "part_type", short: "No type", long: "no type" });
   const netText = v.cost_aed.trim();
   const net = netText === "" ? null : Number(netText.replace(",", "."));
   if (net === null || !Number.isFinite(net)) out.push({ field: "cost_aed", short: "No price", long: "no net price" });
@@ -176,10 +186,11 @@ export function rowMissing(v: RowValues): Missing[] {
   if (!v.supplier.trim()) out.push({ field: "supplier", short: "No supplier", long: "no supplier" });
   else if (!settled && isPlaceholderSupplier(v.supplier)) out.push({ field: "supplier", short: "Not a supplier", long: placeholderSupplierWords(v.supplier) });
   else if (!settled && isOurStock(v.supplier) && v.stock_item !== undefined && !v.stock_item.trim()) out.push({ field: "stock_item", short: "Pick the stock item", long: "from our stock: pick the stock item (From our stock…)" });
-  if (v.availability !== "in_stock" && v.availability !== "to_order") out.push({ field: "availability", short: "No availability", long: "no availability" });
-  else if (v.availability === "to_order" && !daysComplete(v.days)) out.push({ field: "days", short: "No days", long: "days to arrive missing" });
+  if (!advisorChecked && v.availability !== "in_stock" && v.availability !== "to_order") out.push({ field: "availability", short: "No availability", long: "no availability" });
+  else if (!advisorChecked && v.availability === "to_order" && !daysComplete(v.days)) out.push({ field: "days", short: "No days", long: "days to arrive missing" });
   // The cost question holds the row only while it is about the cost on the row and its answer can be stored.
   if (!settled && v.cost_ask && v.cost_ask_hold === "1" && sameCost(v.cost_ask_for, v.cost_aed)) out.push({ field: "cost_check", short: "Real price?", long: v.cost_ask });
+  if (v.advisor_price === "1") out.push({ field: "advisor_price", short: "Check the advisor's price", long: "the advisor's price to check (Price is right ✓)" });
   return out;
 }
 

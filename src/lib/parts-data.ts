@@ -4,6 +4,8 @@ import { PART_SELECT, toPart } from "./quote-data";
 import type { PartItem } from "./quotes";
 import { createAdminClient } from "./supabase/admin";
 import { poCharges, type SupplierCharge } from "./supplier-charges";
+import { partUnitsReady } from "./schema-ready";
+import { pageAllIn } from "./page-all";
 import { sidesToRelease } from "./job-sides";
 import type { Side } from "./teams";
 
@@ -150,6 +152,19 @@ export const JOB_BRIEF_SELECT = "id, job_number, status, is_open, customer_id, g
 export type SupplierRow = { id: string; name: string; trn: string | null; vat_registered: boolean | null; phone: string | null; email: string | null; address: string | null; payment_terms: string | null };
 export type PoBundle = { po: PurchaseOrderRow; lines: PoLineRow[]; job: JobBrief | null; names: Map<string, string>; parts: PartFull[]; supplier: SupplierRow | null; /** Courier, freight: "Other charges" on this LPO, already in its total. */ charges: SupplierCharge[] };
 
+/**
+ * Each part's unit (pieces, litres, sets) for LPO cards and supplier copies, once the database keeps it (review of 3
+ * November 2026: the Copy text said "× 8" for 8 L of oil). Empty before the units database change: every part is pieces.
+ */
+export async function partUnitsOf(partIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const ids = Array.from(new Set(partIds.filter(Boolean)));
+  if (!ids.length || !(await partUnitsReady())) return out;
+  const rows = await pageAllIn<{ id: string; unit: string | null }>(ids, (piece, from, to) => createAdminClient().from("part_items").select("id, unit").in("id", piece).order("id").range(from, to)).catch(() => [] as { id: string; unit: string | null }[]);
+  for (const r of rows) if (r.unit) out.set(r.id, r.unit);
+  return out;
+}
+
 export async function loadPurchaseOrder(id: string): Promise<PoBundle | null> {
   const admin = createAdminClient();
   const { data: raw } = await admin.from("purchase_orders").select(PO_SELECT).eq("id", id).maybeSingle();
@@ -158,7 +173,8 @@ export async function loadPurchaseOrder(id: string): Promise<PoBundle | null> {
   const [{ data: lines }, { data: job }, { data: parts }, { data: supplier }, charges] = await Promise.all([
     admin.from("purchase_order_lines").select(PO_LINE_SELECT).eq("po_id", id).eq("is_active", true).order("position"),
     admin.from("jobs").select(JOB_BRIEF_SELECT).eq("id", po.job_id).maybeSingle(),
-    admin.from("part_items").select(PART_FULL_SELECT).eq("po_id", id).eq("is_active", true),
+    // Section 9: the LPO's lines say litres and sets ("8 L") once the database keeps the unit.
+    admin.from("part_items").select((await partUnitsReady()) ? `${PART_FULL_SELECT}, unit` : PART_FULL_SELECT).eq("po_id", id).eq("is_active", true),
     po.supplier_id ? admin.from("suppliers").select("id, name, trn, vat_registered, phone, email, address, payment_terms").eq("id", po.supplier_id).maybeSingle() : Promise.resolve({ data: null }),
     poCharges(id),
   ]);

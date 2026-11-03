@@ -95,15 +95,20 @@ await section("A pricing table and PDF import", async () => {
   check("17: 'Our stock' as the supplier saves In stock (no LPO later)", !!stock, stock ? JSON.stringify(stock) : `${JSON.stringify(await sql("select description, supplier, availability from public.part_items where job_id = $1 and is_active", [jobId]))} · ${await req.locator("[data-status-line]").textContent()}`);
   await sleep(1200);
 
-  // 6. Pricing done locks the rows; Edit reopens; Send updated prices tells the advisor.
+  // 6. "Pricing done – send to advisor" (section 10, 3 November 2026) locks the rows; Edit reopens; "Send updated prices"
+  // tells the advisor ONCE ("Prices updated on J-…"). The answer shows in the bar (no page jump).
   await go(page, `${base}/parts/${jobId}`);
-  const btn = page.locator("[data-pricing-bar] button", { hasText: /^Pricing done$/ });
-  check("6: the bar offers Pricing done once every row is priced", (await btn.count()) === 1, await page.locator("[data-pricing-bar]").textContent());
-  await btn.click();
-  if (await page.locator("[data-pricing-bar] button", { hasText: /^Send what you have$/ }).count()) { console.log("   (rows still open: " + (await page.locator("[data-bar-text]").textContent()) + ")"); await page.locator("[data-pricing-bar] button", { hasText: /^Send what you have$/ }).click(); }
-  await afterSubmit(page);
-  check("6: Pricing done turns green and locks the rows", (await page.locator("[data-pricing-locked]").count()) === 1 && (await page.locator("[data-pricing-edit]").count()) === 1 && (await row.locator("input[aria-label='Part number']").count()) === 0 && (await page.locator("[data-add-part]").count()) === 0, urlText(page).slice(-100));
-  const notifiedDone = (await sql("select count(*)::int as n from public.notifications where job_id = $1 and title like 'Parts pricing done%'", [jobId]))[0]?.n ?? 0;
+  const btn = page.locator("[data-pricing-bar] [data-pricing-done]");
+  check("6: the bar offers Pricing done – send to advisor", (await btn.count()) === 1 && /Pricing done – send to advisor/.test((await btn.textContent()) ?? ""), await page.locator("[data-pricing-bar]").textContent());
+  const sendNow = async () => {
+    await page.locator("[data-pricing-bar] [data-pricing-done]").click();
+    await sleep(500);
+    if (await page.locator("[data-pricing-send-anyway]").count()) { console.log("   (rows still open: " + (await page.locator("[data-pricing-open-list]").textContent()) + ")"); await page.locator("[data-pricing-send-anyway]").click(); }
+  };
+  await sendNow();
+  await until(async () => ((await page.locator("[data-pricing-locked]").count()) ? 1 : null), 40, 500);
+  check("6: Pricing done turns green and locks the rows", (await page.locator("[data-pricing-locked]").count()) === 1 && (await page.locator("[data-pricing-edit]").count()) === 1 && (await row.locator("input[aria-label='Part number']").count()) === 0 && (await page.locator("[data-add-part]").count()) === 0, await page.locator("[data-pricing-bar]").textContent());
+  const notifiedDone = (await sql("select count(*)::int as n from public.notifications where job_id = $1 and (title like 'All parts priced on%' or title like 'Parts priced on%')", [jobId]))[0]?.n ?? 0;
   check("6: the advisor is told Pricing done", notifiedDone >= 1);
   // The job board shows Priced.
   const { browser: ob, page: op } = await browserFor("owner", { viewport: { width: 1366, height: 900 } });
@@ -112,23 +117,23 @@ await section("A pricing table and PDF import", async () => {
   check("6: the job board shows a green Priced chip on the car", /Priced/.test((await card.textContent().catch(() => "")) ?? ""), ((await card.textContent().catch(() => "")) ?? "").slice(0, 160));
   // Edit → change a price → Send updated prices.
   await page.locator("[data-pricing-edit]").click();
-  await afterSubmit(page);
-  const reopenedUi = await until(async () => ((await page.locator("[data-pricing-editing]").count()) === 1 && (await page.locator("[data-pricing-bar] button", { hasText: /^Send updated prices$/ }).count()) === 1 && (await row.locator("input[aria-label='Part number']").count()) === 1 ? 1 : null), 30, 500);
-  check("6: Edit reopens the rows and the bar offers Send updated prices", !!reopenedUi, `${urlText(page).slice(-90)} · editing ${await page.locator("[data-pricing-editing]").count()} · buttons ${JSON.stringify(await page.locator("[data-pricing-bar] button").allTextContents())} · pn inputs ${await row.locator("input[aria-label='Part number']").count()}`);
+  const reopenedUi = await until(async () => ((await page.locator("[data-pricing-editing]").count()) === 1 && /Send updated prices/.test((await page.locator("[data-pricing-bar] [data-pricing-done]").textContent().catch(() => "")) ?? "") && (await row.locator("input[aria-label='Part number']").count()) === 1 ? 1 : null), 30, 500);
+  check("6: Edit reopens the rows and the bar offers Send updated prices", !!reopenedUi, `editing ${await page.locator("[data-pricing-editing]").count()} · buttons ${JSON.stringify(await page.locator("[data-pricing-bar] button").allTextContents())} · pn inputs ${await row.locator("input[aria-label='Part number']").count()}`);
+  const supSel = row.locator("select[aria-label='Supplier']");
+  const supVal = await supSel.locator("option").evaluateAll((os) => (os.find((o) => o.value && !o.value.startsWith("__") && !/our stock/i.test(o.textContent ?? "")) ?? {}).value ?? "");
+  if (supVal) { await supSel.focus(); await supSel.selectOption(supVal); await sleep(600); }
   await row.locator("input[aria-label='Cost before VAT']").fill("210");
   await page.keyboard.press("Tab");
   const changed = await until(async () => { const r = (await sql("select cost_aed from public.part_items where id = $1", [PA]))[0]; return Number(r?.cost_aed) === 210 ? r : null; }, 30, 500);
   check("6: a changed price saves while editing", !!changed);
-  // With a row still open the first tap outlines it and the second tap sends anyway.
-  const beforeSend = page.url();
-  await page.locator("[data-pricing-bar] button", { hasText: /^Send updated prices$/ }).first().click();
-  await sleep(800);
-  if (page.url() === beforeSend && (await page.locator("[data-pricing-bar] button", { hasText: /^Send updated prices$/ }).count())) await page.locator("[data-pricing-bar] button", { hasText: /^Send updated prices$/ }).first().click();
-  await page.waitForURL((u) => u.toString() !== beforeSend && /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
-  await sleep(800);
-  const changedNote = await until(async () => { const r = (await sql("select title, body from public.notifications where job_id = $1 and title like 'Prices changed on%' order by created_at desc limit 1", [jobId]))[0]; return r ?? null; }, 20, 500);
-  check("6: the advisor is told 'Prices changed on [car]'", !!changedNote && /Prices changed on .*30303/i.test(changedNote.title), changedNote?.title);
-  check("6: the rows are locked again after Send updated prices", (await page.locator("[data-pricing-locked]").count()) === 1 && /Updated prices sent/.test(urlText(page)));
+  const advisorNotesBefore = (await sql("select count(*)::int as n from public.notifications where job_id = $1 and type = 'parts_priced'", [jobId]))[0]?.n ?? 0;
+  await sleep(5200); // the form's one-tap lock (five seconds) from the first send
+  await sendNow();
+  await until(async () => (await sql("select parts_pricing_reopened_at from public.jobs where id = $1", [jobId]))[0]?.parts_pricing_reopened_at === null ? 1 : null, 40, 500);
+  const changedNote = await until(async () => { const r = (await sql("select title, body from public.notifications where job_id = $1 and title like 'Prices updated on%' order by created_at desc limit 1", [jobId]))[0]; return r ?? null; }, 20, 500);
+  check("6: the advisor is told ONCE 'Prices updated on J-…' (the price change while editing is folded in, never told on its own)", !!changedNote && /^Prices updated on J-\d+/.test(changedNote.title) && ((await sql("select count(*)::int as n from public.notifications where job_id = $1 and type = 'parts_priced'", [jobId]))[0]?.n ?? 0) - advisorNotesBefore <= (await sql("select count(distinct staff_id)::int as n from public.notifications where job_id = $1 and title like 'Prices updated on%'", [jobId]))[0]?.n, changedNote?.title);
+  await until(async () => ((await page.locator("[data-pricing-locked]").count()) ? 1 : null), 30, 500);
+  check("6: the rows are locked again after Send updated prices", (await page.locator("[data-pricing-locked]").count()) === 1);
   const reopened = (await sql("select parts_pricing_reopened_at from public.jobs where id = $1", [jobId]))[0];
   check("6: the reopened flag is cleared", reopened?.parts_pricing_reopened_at === null);
 

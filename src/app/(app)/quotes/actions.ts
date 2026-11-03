@@ -3,6 +3,7 @@
 import { declinedItemsOf, declinedNote, saveDeclinedWork } from "@/lib/declined";
 import { isQuickJob } from "@/lib/inspection-fee";
 import { cleanPartNumber, dateFromDays, isOurStock } from "@/lib/parts-rows";
+import { estimatePartState } from "@/lib/estimate-parts";
 import { costConfirmReady, lineCostConfirmReady } from "@/lib/schema-ready";
 import { dubaiDate } from "@/lib/jobs";
 import { recoveryElsewhere } from "@/lib/charges";
@@ -37,7 +38,7 @@ import { chargeTotalsByJob } from "@/lib/supplier-charges";
 import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 import { loadJobQuotes } from "@/lib/quote-history-data";
 import { compCostWords, compLinesOf, compProblem } from "@/lib/complimentary";
-import { compCostForBundle } from "@/lib/quote-data";
+import { attachPartLineExtras, compCostForBundle } from "@/lib/quote-data";
 
 function refresh(jobId: string | null, quotationId?: string) {
   if (jobId) {
@@ -243,37 +244,47 @@ async function estimateLineRows(estimateId: string, quotationId: string, by: str
   const partsReady = await costConfirmReady();
   const rows: Record<string, unknown>[] = [];
   const now = new Date().toISOString();
-  for (const l of ((estLines ?? []) as Record<string, unknown>[]).map(toLine).filter((x) => !x.fee_kind)) {
+  // Section 9 (3 November 2026): the unit, the advisor's asked quantity and the desk's list price and discount travel too.
+  const carried = await attachPartLineExtras(((estLines ?? []) as Record<string, unknown>[]).map(toLine));
+  for (const l of carried.filter((x) => !x.fee_kind)) {
     const row: Record<string, unknown> = { quotation_id: quotationId, position: l.position, ...COPY_FIELDS(l), source_type: "estimate", source_key: l.id, part_item_id: null, created_by: by, updated_by: by };
     if (l.line_type !== "part" || l.part_item_id || l.left_off) {
       rows.push(row);
       continue;
     }
-    const priced = l.unit_cost !== null && l.unit_cost !== undefined;
+    // THE estimate part rule (src/lib/estimate-parts.ts): priced by the desk (its whole row), or by the advisor. A cost
+    // alone is not a price (review of 3 November 2026: the desk's row saves as it is typed, so a half-typed line was
+    // carried as a priced part and put on the quotation): it comes over as a part not finished yet, with what was typed,
+    // for Parts to finish on the job; its line comes once it is priced.
+    const state = estimatePartState({ id: l.id, line_type: "part", title: l.title, unit_cost: l.unit_cost ?? null, price_requested_at: l.price_requested_at ?? null, priced_at: l.priced_at ?? null, priced_by_advisor: !!l.priced_by_advisor, price_checked_at: l.price_checked_at ?? null });
+    const priced = state === "priced" || state === "checked" || state === "advisor";
+    const halfTyped = !priced && l.unit_cost !== null && l.unit_cost !== undefined;
     const qty = Number(l.quantity) || 1;
-    const words = [`From estimate ${est?.number ?? ""}`, l.parts_note ? `note: ${l.parts_note}` : null, l.priced_by_advisor && !l.price_checked_at ? "priced by the advisor, not checked yet" : null].filter(Boolean).join(" · ");
+    const words = [`From estimate ${est?.number ?? ""}`, l.parts_note ? `note: ${l.parts_note}` : null, l.priced_by_advisor && !l.price_checked_at ? "priced by the advisor, not checked yet" : null, halfTyped ? "price not finished on the estimate" : null].filter(Boolean).join(" · ");
     const { data: req, error: reqError } = await admin
       .from("part_requests")
-      .insert({ job_id: jobId, source_type: "manual", source_key: `estimate:${l.id}`, label: l.title, positions: l.positions ?? [], quantity: qty, requested_text: words, status: priced ? "done" : "open", created_by: by, updated_by: by })
+      .insert({ job_id: jobId, source_type: "manual", source_key: `estimate:${l.id}`, label: l.title, positions: l.positions ?? [], quantity: l.asked_quantity ?? qty, ...(l.unit !== undefined ? { unit: l.unit ?? "pc" } : {}), requested_text: words, status: priced ? "done" : halfTyped ? "listed" : "open", created_by: by, updated_by: by })
       .select("id")
       .single();
     if (reqError || !req) {
-      // Already carried (a second press): the part item made then is the one to link.
-      const { data: again } = await admin.from("part_items").select("id, part_request_id").eq("job_id", jobId).eq("client_key", `estimate:${l.id}`).eq("is_active", true).maybeSingle();
-      if (again) rows.push({ ...row, part_item_id: again.id });
+      // Already carried (a second press): the part item made then is the one to link (once it is priced).
+      const { data: again } = await admin.from("part_items").select("id, part_request_id, priced_at").eq("job_id", jobId).eq("client_key", `estimate:${l.id}`).eq("is_active", true).maybeSingle();
+      if (again && again.priced_at) rows.push({ ...row, part_item_id: again.id });
       continue;
     }
-    if (!priced) continue;
+    if (!priced && !halfTyped) continue;
     const delivery = l.availability === "to_order" && l.delivery_days !== null && l.delivery_days !== undefined ? dateFromDays(String(l.delivery_days), dubaiDate()) : null;
     const { data: item, error: itemError } = await admin
       .from("part_items")
-      .insert({ job_id: jobId, client_key: `estimate:${l.id}`, part_request_id: req.id, description: l.title, quantity: qty, confirmed_quantity: qty, positions: l.positions ?? [], part_number: cleanPartNumber(l.part_number), part_type: l.part_type ?? null, cost_aed: l.unit_cost, supplier: l.supplier_text ?? null, availability: isOurStock(l.supplier_text) ? "in_stock" : (l.availability ?? null), delivery_date: delivery, stock_item_id: isOurStock(l.supplier_text) ? (extraOf.get(l.id)?.stock_item_id ?? null) : null, ...(partsReady && extraOf.get(l.id)?.cost_confirmed_aed !== null && extraOf.get(l.id)?.cost_confirmed_aed !== undefined ? { cost_confirmed_aed: extraOf.get(l.id)!.cost_confirmed_aed, cost_confirmed_at: now, cost_confirmed_by: by } : {}), confirm_status: "confirmed", confirmed_by: by, confirmed_at: now, priced_by: l.priced_by ?? by, priced_at: l.priced_at ?? now, added_by_role: l.priced_by_advisor ? "service_advisor" : "parts", created_by: by, updated_by: by })
+      .insert({ job_id: jobId, client_key: `estimate:${l.id}`, part_request_id: req.id, description: l.title, quantity: l.asked_quantity ?? qty, confirmed_quantity: qty, ...(l.unit !== undefined ? { unit: l.unit ?? "pc", list_price_aed: l.list_price_aed ?? null, discount_percent: l.supplier_discount_percent ?? null, ...(l.asked_quantity !== null && l.asked_quantity !== undefined && Math.abs(l.asked_quantity - qty) > 0.005 ? { quantity_changed_at: l.quantity_changed_at ?? now, quantity_changed_by: l.quantity_changed_by ?? by } : {}) } : {}), positions: l.positions ?? [], part_number: cleanPartNumber(l.part_number), part_type: l.part_type ?? null, brand: l.part_type && l.part_type !== "genuine" ? (l.brand ?? null) : null, cost_aed: l.unit_cost, supplier: l.supplier_text ?? null, availability: isOurStock(l.supplier_text) ? "in_stock" : (l.availability ?? null), delivery_date: delivery, stock_item_id: isOurStock(l.supplier_text) ? (extraOf.get(l.id)?.stock_item_id ?? null) : null, ...(partsReady && extraOf.get(l.id)?.cost_confirmed_aed !== null && extraOf.get(l.id)?.cost_confirmed_aed !== undefined ? { cost_confirmed_aed: extraOf.get(l.id)!.cost_confirmed_aed, cost_confirmed_at: now, cost_confirmed_by: by } : {}), confirm_status: "confirmed", confirmed_by: by, confirmed_at: now, ...(priced ? { priced_by: l.priced_by ?? by, priced_at: l.priced_at ?? now } : {}), added_by_role: l.priced_by_advisor ? "service_advisor" : "parts", created_by: by, updated_by: by })
       .select("id")
       .single();
     if (itemError || !item) {
       await admin.from("part_requests").update({ status: "open", updated_by: by }).eq("id", req.id);
       continue;
     }
+    // Not finished yet: Parts finish the row on the job; the quotation line comes from that save (syncPartLine).
+    if (!priced) continue;
     rows.push({ ...row, part_item_id: item.id });
   }
   return rows;

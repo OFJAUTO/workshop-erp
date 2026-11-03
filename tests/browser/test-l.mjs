@@ -80,8 +80,17 @@ await section("1 our stock part after sending", async () => {
   check("1: the Our stock part is on version 2 with its markup like any other part", !!line && Number(line.unit_cost) === 49 && Number(line.line_total) > 49, JSON.stringify(line));
   const ev = v2 ? await until(async () => (await sql("select note from public.quotation_events where quotation_id = $1 and event_type = 'parts_added' order by created_at desc limit 1", [v2]))[0] ?? null, 30, 500) : null;
   check("3: the quote history shows 'Parts added REAR BRAKE DISCS ×2'", /Parts added rear brake discs ×2/i.test(ev?.note ?? ""), ev?.note ?? "");
-  const note = await until(async () => (await sql("select title, href from public.notifications where job_id = $1 and type = 'quote_revised_by_parts' order by created_at desc limit 1", [jobId]))[0] ?? null, 30, 500);
-  check("3: the advisor gets 'Parts changed on J-xxx: send the revised quotation' with a one-tap link", /Parts changed on J-/.test(note?.title ?? "") && /send=1/.test(note?.href ?? ""), JSON.stringify(note));
+  // Section 10 (3 November 2026): while the pricing waits for "Pricing done – send to advisor" (never sent on this car)
+  // the per-part notice is held; the ONE send then tells the advisor and opens the revised version to send.
+  const perPart = await sql("select count(*)::int as n from public.notifications where job_id = $1 and type in ('quote_revised_by_parts', 'parts_priced')", [jobId]);
+  check("3: nothing per part while the pricing waits for its send", (perPart[0]?.n ?? 0) === 0, JSON.stringify(perPart));
+  await sleep(1500);
+  await page.locator("[data-pricing-done]").click();
+  await sleep(500);
+  // The stage seed's front brake pads have no supplier: the bar lists them; "Send what you have" sends the rest.
+  if (await page.locator("[data-pricing-send-anyway]").count()) await page.locator("[data-pricing-send-anyway]").click();
+  const note = await until(async () => (await sql("select title, href from public.notifications where job_id = $1 and type = 'parts_priced' order by created_at desc limit 1", [jobId]))[0] ?? null, 30, 500);
+  check("3: the advisor gets ONE 'Parts priced on J-xxx' that opens the revised quotation to send (one tap)", /priced on J-/.test(note?.title ?? "") && /send=1/.test(note?.href ?? ""), JSON.stringify(note));
   await browser.close();
   // Quote screen, PDF and link all carry the part.
   const pdf = await fetchAs(`/api/pdf/quotation/${v2}`, "owner");

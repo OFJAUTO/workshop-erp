@@ -105,7 +105,7 @@ export async function receiveFromShelf(partId: string, actor: StockActor, note: 
 }
 
 /** A part kept in stock: it joins the matching stock item (by part number, else by name), or starts one. */
-export async function addPartToStock(part: { id: string; description: string; part_number: string | null; cost_aed: number | string | null; quantity: number | string; confirmed_quantity?: number | string | null; supplier?: string | null }, actor: StockActor, jobId: string | null): Promise<{ error?: string; itemId?: string; itemName?: string }> {
+export async function addPartToStock(part: { id: string; description: string; part_number: string | null; cost_aed: number | string | null; quantity: number | string; confirmed_quantity?: number | string | null; supplier?: string | null; unit?: string | null }, actor: StockActor, jobId: string | null): Promise<{ error?: string; itemId?: string; itemName?: string }> {
   const admin = createAdminClient();
   const qty = Number(part.confirmed_quantity ?? part.quantity) || 1;
   const cost = part.cost_aed === null || part.cost_aed === undefined || part.cost_aed === "" ? null : Number(part.cost_aed);
@@ -120,7 +120,7 @@ export async function addPartToStock(part: { id: string; description: string; pa
     item = (data as { id: string; name: string } | null) ?? null;
   }
   if (!item) {
-    const { data, error } = await admin.from("stock_items").insert({ name: part.description.trim().slice(0, 120), unit: "pc", quantity: 0, minimum_level: 0, unit_cost: cost ?? 0, part_number: realPartNumber(part.part_number), created_by: actor.id, updated_by: actor.id }).select("id, name").single();
+    const { data, error } = await admin.from("stock_items").insert({ name: part.description.trim().slice(0, 120), unit: part.unit === "l" ? "L" : part.unit === "set" ? "set" : "pc", quantity: 0, minimum_level: 0, unit_cost: cost ?? 0, part_number: realPartNumber(part.part_number), created_by: actor.id, updated_by: actor.id }).select("id, name").single();
     if (error || !data) return { error: error?.message ?? "Could not add the stock item." };
     item = data;
   }

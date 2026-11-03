@@ -7,9 +7,9 @@ import { recoveryElsewhere } from "@/lib/charges";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { LINE_TYPES, belowCostAll, belowCostChangesIn, belowCostWords, effectiveMarkupPercent, floorProblem, minimumMarkupAed, needsPackageCosting, parseHours, priceSideKeys, recoveryTitle, round2, worseBelowCost, type BelowCost, type BelowCostOpts, type LineType, type QuoteHeaderForTotals, type QuoteLine } from "@/lib/quotes";
-import { LINE_SELECT, SERVICE_SELECT, approvalReasonsNow, attachBelowCost, labourRateFor, loadQuotation, minMarkupFor, refreshQuoteTotals, toLine, logQuoteEvent } from "@/lib/quote-data";
+import { LINE_SELECT, SERVICE_SELECT, approvalReasonsNow, attachBelowCost, attachPartLineExtras, labourRateFor, loadQuotation, minMarkupFor, refreshQuoteTotals, toLine, logQuoteEvent } from "@/lib/quote-data";
 import { belowCostOptsFor, flagBelowCost, headerOf, linesForBelowCost, stampBelowCost } from "@/lib/below-cost";
-import { belowCostReady, lineCostConfirmReady } from "@/lib/schema-ready";
+import { belowCostReady, lineCostConfirmReady, partUnitsReady } from "@/lib/schema-ready";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { toSnapshot } from "@/lib/packages";
@@ -19,6 +19,9 @@ import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 import { formatPlate, type PlateFields } from "@/lib/types";
 import { isOurStock, isPlaceholderSupplier, placeholderSupplierWords } from "@/lib/parts-rows";
 import { costCheckForLine } from "@/lib/part-cost-history";
+import { checkQuantity, cleanUnit, defaultUnitFor, qtyWithUnit, quantityChangeWords, whoOfRole, type PartUnit, type QtyWho } from "@/lib/part-units";
+import { setJobPartQuantity } from "@/lib/part-quantity";
+import { reopenPricingFor } from "@/lib/parts-pricing";
 
 type LinePatch = {
   package_key?: string | null;
@@ -28,6 +31,8 @@ type LinePatch = {
   details?: string | null;
   group_label?: string | null;
   quantity?: number | string;
+  /** Section 9 (3 November 2026): a part's unit, pieces ("pc"), litres ("l") or sets ("set"). */
+  unit?: string | null;
   unit_cost?: number | string | null;
   markup_percent?: number | string | null;
   /** A part's markup kept as a percentage of the cost ("percent") or as a fixed AED amount per unit ("aed"). */
@@ -176,6 +181,8 @@ export async function POST(request: NextRequest) {
   const recoveryTypes = (settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[];
   const stamp = { updated_by: staff.id };
   const refreshed = () => refreshQuoteTotals(q.id, settings, staff.id, { reopen: true });
+  // Section 9: the unit is kept once the database has the column (before it every part stays in pieces).
+  const unitsReady = await partUnitsReady();
 
   const cleanPatch = (p: LinePatch, current: Partial<QuoteLine> | null): Record<string, unknown> | string | { confirm: string } => {
     const out: Record<string, unknown> = {};
@@ -202,6 +209,21 @@ export async function POST(request: NextRequest) {
     if (p.source_type !== undefined) out.source_type = p.source_type && ["request", "item", "tyre", "manual"].includes(p.source_type) ? p.source_type : null;
     if (p.source_key !== undefined) out.source_key = p.source_key ? String(p.source_key).slice(0, 120) : null;
     if (p.quantity !== undefined) out.quantity = Math.max(0.01, n(p.quantity) ?? 1);
+    if (p.unit !== undefined) {
+      if (type !== "part") return "Only a part has a unit (pieces, litres or sets).";
+      const u = cleanUnit(p.unit);
+      if (!u) return "Choose pieces, litres or sets.";
+      if (unitsReady) out.unit = u;
+    }
+    // THE quantity check on a part (above zero; pieces and sets whole; litres to two decimals): on a new quantity, and on
+    // a new unit against the quantity the line keeps (review of 3 November 2026: 6.5 L switched to pieces was saved as
+    // 6.5 pieces and printed "6.50").
+    if (type === "part" && (out.quantity !== undefined || out.unit !== undefined)) {
+      const unitNow: PartUnit = (out.unit as PartUnit | undefined) ?? cleanUnit(current?.unit) ?? (unitsReady ? "pc" : "l");
+      const qtyNow = out.quantity !== undefined ? Number(out.quantity) : Number(current?.quantity) || 1;
+      const problem = checkQuantity(qtyNow, unitNow);
+      if (problem) return out.quantity === undefined ? `${problem} Change the quantity first, then the unit.` : problem;
+    }
     if (p.unit_cost !== undefined) {
       if (type === "part" && q.kind === "quotation") return "The cost of a part comes from Parts.";
       if (type === "part") return "Send the part to the parts desk, or use \"I have a price\".";
@@ -444,7 +466,8 @@ export async function POST(request: NextRequest) {
     };
     if (body.sendToDesk) {
       const ids = Array.isArray(body.sendToDesk.ids) ? body.sendToDesk.ids.map(String).slice(0, 100) : [];
-      const { data: rows } = ids.length ? await admin.from("quotation_lines").select("id, title, quantity, line_type, part_item_id, unit_cost, price_requested_at, is_active").eq("quotation_id", q.id).in("id", ids) : { data: [] };
+      const { data: rowsRaw } = ids.length ? await admin.from("quotation_lines").select(`id, title, quantity, line_type, part_item_id, unit_cost, price_requested_at, is_active${unitsReady ? ", unit" : ""}`).eq("quotation_id", q.id).in("id", ids) : { data: [] };
+      const rows = (rowsRaw ?? []) as unknown as { id: string; title: string | null; quantity: number | string; line_type: string; part_item_id: string | null; unit_cost: number | string | null; price_requested_at: string | null; is_active: boolean; unit?: string | null }[];
       const nameless = (rows ?? []).filter((l) => l.is_active && l.line_type === "part" && !l.part_item_id && !String(l.title ?? "").trim());
       if (nameless.length) return NextResponse.json({ error: "Type the name of the part first: the parts desk prices what it says." }, { status: 400 });
       const toSend = (rows ?? []).filter((l) => l.is_active && l.line_type === "part" && !l.part_item_id && (l.unit_cost === null || l.unit_cost === undefined) && !l.price_requested_at);
@@ -452,8 +475,18 @@ export async function POST(request: NextRequest) {
       const now = new Date().toISOString();
       const { error } = await admin.from("quotation_lines").update({ price_requested_at: now, price_requested_by: staff.id, ...stamp }).in("id", toSend.map((l) => l.id));
       if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      // Section 9 (3 November 2026): a fluid's name sends it in litres (ENGINE OIL, COOLANT…) unless a unit was chosen.
+      if (unitsReady) {
+        for (const l of toSend) {
+          const u = defaultUnitFor(String(l.title ?? ""));
+          if (u !== "pc" && (cleanUnit(l.unit) ?? "pc") === "pc") {
+            await admin.from("quotation_lines").update({ unit: u, ...stamp }).eq("id", l.id);
+            l.unit = u;
+          }
+        }
+      }
       await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "parts_to_desk", note: `${staff.display_name} sent ${toSend.length} part${toSend.length === 1 ? "" : "s"} to the parts desk to price: ${toSend.map((l) => l.title).join(", ")}`, created_by: staff.id });
-      await notifyRoles(["parts"], { type: "estimate_parts_to_price", title: `ESTIMATE ${q.number} – car not here yet: ${toSend.length} part${toSend.length === 1 ? "" : "s"} to price`, body: `${await vehicleWords()} · ${toSend.map((l) => `${l.title} × ${Number(l.quantity) || 1}`).join(", ")} · asked by ${staff.display_name}`, href: `/parts/estimate/${q.id}` });
+      await notifyRoles(["parts"], { type: "estimate_parts_to_price", title: `ESTIMATE ${q.number} – car not here yet: ${toSend.length} part${toSend.length === 1 ? "" : "s"} to price`, body: `${await vehicleWords()} · ${toSend.map((l) => `${l.title} × ${qtyWithUnit(Number(l.quantity) || 1, cleanUnit((l as { unit?: string | null }).unit) ?? "pc")}`).join(", ")} · asked by ${staff.display_name}`, href: `/parts/estimate/${q.id}` });
       await refreshed();
       return NextResponse.json({ ok: true, sent: toSend.length });
     }
@@ -512,6 +545,7 @@ export async function POST(request: NextRequest) {
       const { data: row } = await admin.from("part_catalogue").select("usage_count").eq("id", reqCatalogue).maybeSingle();
       if (row) await admin.from("part_catalogue").update({ usage_count: (Number(row.usage_count) || 0) + 1 }).eq("id", reqCatalogue);
     }
+    await reopenPricingFor(q.job_id, staff.id);
     await notifyRoles(["parts"], { type: "parts_request", title: `Part to price · ${job?.job_number ?? ""}`, body: `${description} × ${qty}, asked by ${staff.display_name} on ${q.number}.`, jobId: q.job_id, href: `/parts/${q.job_id}` });
     await refreshed();
     return NextResponse.json({ ok: true });
@@ -558,6 +592,8 @@ export async function POST(request: NextRequest) {
       const note = a.parts_note ? String(a.parts_note).trim() : "";
       if (note.length > LINE_TEXT_MAX) return NextResponse.json({ error: tooLongWords(note.length) }, { status: 400 });
       Object.assign(row, { unit_cost: null, markup_percent: Math.max(minMarkup, n(a.markup_percent) ?? minMarkup), quantity: Math.max(0.01, n(a.quantity) ?? 1), positions, parts_note: note || null });
+      // Section 9: a fluid named here starts in litres (the unit chosen on the line wins).
+      if (unitsReady) row.unit = cleanUnit((a as { unit?: string | null }).unit) ?? defaultUnitFor(String(a.title ?? ""));
     } else {
       const patch = cleanPatch(a, null);
       if (typeof patch === "string") return NextResponse.json({ error: patch }, { status: 400 });
@@ -598,6 +634,7 @@ export async function POST(request: NextRequest) {
     if (addGate && "stamps" in addGate) await stampAll(addGate.stamps, a.below_cost_reason, (l) => (l.id === NEW_ID ? created.id : l.id));
     if (linked) {
       await admin.from("part_requests").insert(linked.rows);
+      await reopenPricingFor(q.job_id as string, staff.id);
       await notifyRoles(["parts"], { type: "parts_request", title: `Parts to price · ${job?.job_number ?? ""}`, body: `${linked.rows.map((r) => r.label).join(", ")} for ${linked.name}.`, jobId: q.job_id, href: `/parts/${q.job_id}` });
     }
     if (type === "recovery" && row.recovery_provider_kind === "external") await rememberProvider(row.recovery_provider as string | null);
@@ -607,12 +644,23 @@ export async function POST(request: NextRequest) {
   if (body.patchLine) {
     const { data: curRaw } = await admin.from("quotation_lines").select(LINE_SELECT).eq("id", body.patchLine.id).eq("quotation_id", q.id).maybeSingle();
     if (!curRaw) return NextResponse.json({ error: "Line not found." }, { status: 404 });
-    const cur = toLine(curRaw as Record<string, unknown>);
+    const [cur] = await attachPartLineExtras([toLine(curRaw as Record<string, unknown>)]);
     const patch = cleanPatch(body.patchLine, cur);
     if (typeof patch === "string") return NextResponse.json({ error: patch }, { status: 400 });
     if ("confirm" in patch) return NextResponse.json({ error: patch.confirm, confirm: true }, { status: 409 });
     if (cur.part_item_id && "unit_cost" in patch) delete patch.unit_cost; // The cost of a listed part comes from Parts.
-    if (cur.part_item_id && "quantity" in patch) delete patch.quantity; // And its quantity from the technician.
+    if (cur.part_item_id && ("quantity" in patch || "unit" in patch)) {
+      // 3 November 2026: the advisor's quantity on a job's part is no longer dropped. THE quantity rule changes the part
+      // (refused in words once it is ordered), writes it on the job's history, tells Parts, and the line follows it.
+      if (!q.job_id) return NextResponse.json({ error: "This part has no job." }, { status: 400 });
+      const r = await setJobPartQuantity(q.job_id, cur.part_item_id, { qty: "quantity" in patch ? Number(patch.quantity) : null, unit: "unit" in patch ? String(patch.unit) : undefined }, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+      if (r.error) return NextResponse.json({ error: r.error }, { status: 400 });
+      delete patch.quantity;
+      delete patch.unit;
+    }
+    // An estimate's own part: the quantity or unit the advisor changes after the desk has it is written in the one wording.
+    const estQtyChange = !cur.part_item_id && cur.line_type === "part" && q.kind === "estimate" && (("quantity" in patch && Math.abs(Number(patch.quantity) - (Number(cur.quantity) || 1)) > 0.005) || ("unit" in patch && patch.unit !== (cur.unit ?? "pc")));
+    if (estQtyChange && unitsReady) Object.assign(patch, { quantity_changed_at: new Date().toISOString(), quantity_changed_by: staff.id, asked_quantity: null });
     const merged = { ...cur, ...patch } as QuoteLine;
     if (cur.line_type === "recovery") {
       // The customer's wording follows the type and the trips: "Recovery, closed box, two ways".
@@ -647,6 +695,19 @@ export async function POST(request: NextRequest) {
     if (typeof patch.details === "string") patch.details = capsText(patch.details);
     const { error } = await admin.from("quotation_lines").update({ ...patch, ...stamp }).eq("id", cur.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (estQtyChange && cur.price_requested_at) {
+      // Who set the quantity it had: the last person who changed it (the desk), else the advisor himself.
+      let askedBy: QtyWho = "advisor";
+      if (cur.quantity_changed_by) {
+        const { data: who } = await admin.from("staff").select("role_id").eq("id", cur.quantity_changed_by).maybeSingle();
+        if (who?.role_id) askedBy = whoOfRole(who.role_id as string);
+      }
+      const newQty = Number(patch.quantity ?? cur.quantity) || 1;
+      const newUnit = (cleanUnit(patch.unit ?? cur.unit) ?? "pc") as PartUnit;
+      const words = `${String(cur.title).toUpperCase()}: ${quantityChangeWords({ askedBy, asked: Number(cur.quantity) || 1, askedUnit: cur.unit ?? null, changedBy: whoOfRole(staff.role_id), now: newQty, unit: newUnit })}`;
+      await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "part_quantity", note: `${words} (${staff.display_name})`, created_by: staff.id });
+      await notifyRoles(["parts"], { type: "estimate_parts_to_price", title: `Quantity changed · ESTIMATE ${q.number}: ${String(cur.title).toUpperCase()} ${qtyWithUnit(newQty, newUnit)}`, body: `${words} (${staff.display_name}). The price per unit stands.`, href: `/parts/estimate/${q.id}` });
+    }
     if (gate && "stamps" in gate) await stampAll(gate.stamps, body.patchLine.below_cost_reason);
     // A cost typed (our cost, the trips' cost, the installer hours): never refused - a line it put below cost is written
     // down, the people in charge told, and "Before sending" stops it until the price is raised or the owner approves it.

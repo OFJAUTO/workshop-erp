@@ -46,7 +46,7 @@ import { handbackOf, startersOf, staffNamesOf } from "@/lib/quote-lead";
 import { HandbackBanner } from "@/components/HandbackBanner";
 import { recoveryProviderList } from "@/lib/recovery-providers";
 import { requestPartsGone, revisionPreview } from "@/lib/quote-versions";
-import { belowCostReady } from "@/lib/schema-ready";
+import { belowCostReady, partUnitsReady } from "@/lib/schema-ready";
 import { recoveryElsewhere } from "@/lib/charges";
 import { costLimitsOf } from "@/lib/part-cost-check";
 
@@ -166,6 +166,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
     // Placeholder costs (2 November 2026): a part markup over this warns; the parts whose cost question waits for Parts.
     partMarkupWarn: costLimitsOf(settings as unknown as Record<string, unknown>).markupWarnPercent,
+    unitsReady: await partUnitsReady(),
     costAsks: checks.costAsks,
     // 1 November 2026 (B2): the button follows THIS job's fee choice: none for a no-fee job ("Free full inspection"), else its own amount.
     inspectionFee: declinedRow?.inspection_fee_choice === "none" ? 0 : Number(declinedRow?.inspection_fee_aed ?? (job as { inspection_fee_aed?: number | string | null } | null)?.inspection_fee_aed ?? settings.inspection_fee_aed) || 0,

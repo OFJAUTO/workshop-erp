@@ -29,7 +29,7 @@ export type PartsStepsInput = {
 };
 
 /** The statuses from the Parts step on (STATUS_STAGE in jobs.ts at "parts" or later): the customer has approved the work. */
-const PAST_QUOTE = ["approved", "waiting_parts", "in_work", "pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"];
+export const PAST_QUOTE = ["approved", "waiting_parts", "in_work", "pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"];
 const NO_PARTS = "No parts on this car";
 /** True when the steps say the car needs no parts at all (approved, nothing to order). */
 export const noPartsNeeded = (steps: PartsStep[]) => steps[0]?.detail === NO_PARTS;

@@ -180,9 +180,25 @@ try {
     await sleep(3500);
     const pi = await sql("select id, cost_aed, availability from public.part_items where job_id = $1", [jobId]);
     check("part priced in stock", pi.length >= 1 && Number(pi[0].cost_aed) === 200, JSON.stringify(pi));
+    // Section 10 (3 November 2026): pricing a part tells the advisor NOTHING by itself; he hears it ONCE, when Parts press
+    // "Pricing done – send to advisor" at the bottom of the car's parts page.
+    const saidWhilePricing = await sql("select count(*)::int as n from public.notifications where id > $1 and job_id = $2 and staff_id = $3 and type = 'parts_priced'", [m, jobId, advisorId]);
+    check("6: nothing to the advisor per part while Parts price", (saidWhilePricing[0]?.n ?? 0) === 0, JSON.stringify(saidWhilePricing));
+    await page.locator("[data-pricing-done]").click();
+    // The send stamps the job, then writes the one notification: wait for the last step.
+    let one = [];
+    for (let i = 0; i < 40; i++) {
+      one = await sql("select title from public.notifications where id > $1 and job_id = $2 and staff_id = $3 and type = 'parts_priced' order by id", [m, jobId, advisorId]);
+      if (one.length) break;
+      await sleep(500);
+    }
+    await sleep(1000);
+    one = await sql("select title from public.notifications where id > $1 and job_id = $2 and staff_id = $3 and type = 'parts_priced' order by id", [m, jobId, advisorId]);
+    const jobNo = (await sql("select job_number from public.jobs where id = $1", [jobId]))[0]?.job_number;
+    check(`6: ONE notification to the advisor: 'All parts priced on ${jobNo}'`, one.length === 1 && one[0].title === `All parts priced on ${jobNo}`, JSON.stringify(one));
     await browser.close();
   }
-  await told("6 parts priced", m, jobId, [{ id: advisorId, label: "the advisor" }]);
+  await told("6 parts priced (Pricing done – send to advisor)", m, jobId, [{ id: advisorId, type: "parts_priced", label: "the advisor" }]);
 
   // 7. The advisor builds the quotation (a service line through the save route), completes and sends it.
   m = await mark();
@@ -273,8 +289,8 @@ try {
   {
     const { browser, page } = await browserForId(MANAGER_MECH);
     await go(page, `${base}/jobs/${jobId}`);
-    const box = page.locator(`input[name=technician][value='${techId}']`).first();
-    if (await box.count()) await tickTech(page, box);
+    // Since B1 (28 October 2026) the release form picks people on THE staff picker, not tick boxes.
+    await pickPerson(page.locator('[data-release-form="mechanical"]'), techId);
     const start = page.locator("input[name=start_date]");
     if ((await start.count()) && !(await start.inputValue())) await start.fill(new Date().toISOString().slice(0, 10));
     // Parts still on order: the manager starts with the available parts.

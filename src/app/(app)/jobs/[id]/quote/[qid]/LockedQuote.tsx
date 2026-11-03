@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { PositionsLine } from "@/components/PositionsLine";
 import { Badge, Card, SectionLabel } from "@/components/ui";
 import type { QuoteLock } from "@/lib/quote-lock";
+import { qtyWithUnit, unitOf } from "@/lib/part-units";
 import { aed, markupBoth, blockOf, discountLabelOf, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, type QuoteLine, type QuoteRow, type QuoteTotals , hasPackageLine } from "@/lib/quotes";
 
 /**
@@ -78,7 +79,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
                       <tr key={l.id} className={off ? "opacity-50" : ""} data-locked-line data-line-id={l.id}>
                         <td className="py-2 pr-2 align-top text-xs font-bold text-muted">{i + 1}</td>
                         <td className="py-2 pr-2 align-top"><Words text={l.title} className="font-semibold uppercase" /><PositionsLine positions={l.positions} />{l.left_off ? <Badge tone="neutral">Left off</Badge> : null}{isHidden(l) ? <Badge tone="neutral">Internal cost only</Badge> : null}{l.option_group && l.chosen === false ? <Badge tone="neutral">Not chosen</Badge> : null}</td>
-                        <td className="py-2 pr-2 align-top text-right">{l.quantity}</td>
+                        <td className="py-2 pr-2 align-top text-right whitespace-nowrap">{qtyWithUnit(Number(l.quantity) || 1, unitOf(l.unit))}</td>
                         {showProfit ? <><td className="py-2 pr-2 align-top text-right text-muted">{aed(l.unit_cost)}</td><td className="py-2 pr-2 align-top text-right text-muted">{markupBoth(l).percent === null ? "—" : `${markupBoth(l).percent!.toFixed(2)}%`}</td><td className="py-2 pr-2 align-top text-right text-muted">{aed(markupBoth(l).aed)}</td></> : null}
                         <td className="py-2 pr-2 align-top text-right">{off ? "" : aed(lineUnitPrice(l))}</td>
                         <td className="py-2 align-top text-right font-bold">{off ? aed(0) : aed(lineTotal(l))}</td>

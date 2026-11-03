@@ -203,7 +203,10 @@ if (!CLEAR_ONLY) await section("C bulk delete", async () => {
   check("C5: in the database only the ordered part is still live", liveAfter === 1 && liveBefore > 1, `${liveBefore} → ${liveAfter}`);
   const reqs = (await sql("select count(*)::int as n from public.part_requests where job_id = $1 and is_active", [jobId]))[0]?.n ?? 0;
   check("C6: the requests without a part went too", reqs === 0, `${reqs} live requests`);
-  const lines = (await sql("select count(*)::int as n from public.quotation_lines l join public.part_items p on p.id = l.part_item_id where p.job_id = $1 and l.is_active and p.is_active = false", [jobId]))[0]?.n ?? 0;
+  // The quotation lines follow one part after another after the rows have gone from the screen: wait for the last one.
+  // Only this job's quotations count (3 November 2026: a stray TEST line of another quotation pointed at the seed's part).
+  const linesNow = async () => (await sql("select count(*)::int as n from public.quotation_lines l join public.quotations q on q.id = l.quotation_id and q.job_id = $1 join public.part_items p on p.id = l.part_item_id where p.job_id = $1 and l.is_active and p.is_active = false", [jobId]))[0]?.n ?? 0;
+  const lines = (await until(async () => ((await linesNow()) === 0 ? "none" : null), 40, 500)) ? 0 : await linesNow();
   check("C6: deleted parts have no live quotation line", lines === 0);
   await browser.close();
 });

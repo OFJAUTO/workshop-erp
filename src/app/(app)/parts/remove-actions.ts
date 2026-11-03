@@ -7,7 +7,8 @@ import { getCurrentStaff, requireStaff } from "@/lib/auth";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { endingOf, type EndingKey } from "@/lib/part-endings";
 import { endOrderedPart, type EndResult } from "@/lib/part-endings-server";
-import { loadPricingRows } from "@/lib/parts-pricing";
+import { holdForSend, loadPricingRows } from "@/lib/parts-pricing";
+import { holdPerPartNotices } from "@/lib/pricing-done";
 import { supplierDiscount, type SupplierOption } from "@/lib/parts-rows";
 import { can, type RoleId } from "@/lib/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -24,7 +25,7 @@ function refresh(jobId: string) {
 }
 
 async function jobBrief(jobId: string) {
-  const { data } = await createAdminClient().from("jobs").select("id, job_number, department, gated_in_by, is_open").eq("id", jobId).maybeSingle();
+  const { data } = await createAdminClient().from("jobs").select("id, job_number, status, department, gated_in_by, is_open, parts_pricing_done_at, parts_pricing_reopened_at").eq("id", jobId).maybeSingle();
   return data;
 }
 
@@ -38,12 +39,8 @@ async function flagSent(jobId: string, by: string) {
   await createAdminClient().from("quotations").update({ parts_price_changed_at: new Date().toISOString(), updated_by: by }).eq("job_id", jobId).eq("is_active", true).in("status", ["sent", "opened", "approved", "urgent_requested", "pending_owner"]);
 }
 
-/** Every row Priced or Not available: the advisor is told (the same state function as the Parts table). */
-async function tellAdvisorIfComplete(jobId: string) {
-  const [{ summary }, job] = await Promise.all([loadPricingRows(jobId), jobBrief(jobId)]);
-  if (summary.open || !summary.total || !job) return;
-  await notifyStaff(await advisorsOf(jobId, job.gated_in_by), { type: "parts_priced", title: `Parts priced · ${job.job_number}`, body: `Every part on this car is priced or marked not available (${summary.text}). Finish the quotation.`, jobId, href: `/jobs/${jobId}` });
-}
+/* Section 10 (3 November 2026): no "Parts priced" after every change - the advisor hears it with "Pricing done – send
+   to advisor" (parts/actions.ts pricingDone), and while the pricing is open the per-part notices to him wait. */
 
 async function partsPerson(): Promise<{ id: string; display_name: string; role_id: string } | { error: string }> {
   const staff = await getCurrentStaff();
@@ -66,26 +63,30 @@ export async function removeNotNeeded(jobId: string, target: { partId?: string |
   const job = await jobBrief(jobId);
   if (!job || !job.is_open) return { error: "This job is closed." };
   const now = new Date().toISOString();
+  // Held for the send only while one is expected (the car then stays on the parts desk's list until it is pressed).
+  let held = false;
   let name = "";
   if (target.partId) {
     const { data: p } = await admin.from("part_items").select("id, description, order_status").eq("id", target.partId).eq("job_id", jobId).maybeSingle();
     if (!p) return { error: "Part not found." };
     if (p.order_status !== "none") return { error: "This part is already ordered: use \"Remove: not needed (ordered: choose its ending)\" in its menu." };
+    held = await holdForSend(job, staff.id);
     await admin.from("part_items").update({ is_active: false, removed_at: now, removed_by: staff.id, removed_reason: reason, updated_by: staff.id }).eq("id", p.id);
-    await syncLineForPart(jobId, p.id, staff.id);
+    await syncLineForPart(jobId, p.id, staff.id, { quiet: held });
     name = p.description;
   } else if (target.requestId) {
     const { data: r } = await admin.from("part_requests").select("id, label").eq("id", target.requestId).eq("job_id", jobId).maybeSingle();
     if (!r) return { error: "Request not found." };
+    held = await holdForSend(job, staff.id);
     await admin.from("part_requests").update({ status: "rejected", closed_reason: `Not needed: ${reason}`, removed_at: now, removed_by: staff.id, removed_reason: reason, updated_by: staff.id }).eq("id", r.id);
     name = r.label;
   } else return { error: "Nothing to remove." };
   await admin.from("job_events").insert({ job_id: jobId, event_type: "part_removed", note: `${name} removed by ${staff.display_name}: ${reason}`, created_by: staff.id });
   const n = { type: "parts_priced", title: `Part removed · ${job.job_number}`, body: `${name}: removed by ${staff.display_name} (${reason}). It is off the list and the quotation; Put back is on the Parts page.`, jobId, href: `/parts/${jobId}` };
-  await notifyStaff(await advisorsOf(jobId, job.gated_in_by), { ...n, href: `/jobs/${jobId}` });
+  // Still pricing: the advisor hears it with "Pricing done – send to advisor"; the manager is told now.
+  if (!held) await notifyStaff(await advisorsOf(jobId, job.gated_in_by), { ...n, href: `/jobs/${jobId}` });
   await notifyManagers(job.department ?? null, n);
   await flagSent(jobId, staff.id);
-  await tellAdvisorIfComplete(jobId);
   refresh(jobId);
   return { ok: true };
 }
@@ -165,8 +166,7 @@ export async function decideDiscountApproval(partId: string, formData: FormData)
     if (row?.state === "priced") {
       await admin.from("part_items").update({ priced_by: staff.id, priced_at: now, updated_by: staff.id }).eq("id", p.id);
       if (row.requestId) await admin.from("part_requests").update({ status: "done", updated_by: staff.id }).eq("id", row.requestId).in("status", ["open", "listed", "done"]);
-      await syncLineForPart(p.job_id, p.id, staff.id);
-      await tellAdvisorIfComplete(p.job_id);
+      await syncLineForPart(p.job_id, p.id, staff.id, { quiet: !!job && holdPerPartNotices(job) });
     }
     await admin.from("job_events").insert({ job_id: p.job_id, event_type: "discount_approval", note: `${p.description}: ${p.discount_percent}% discount from ${p.supplier ?? "?"} approved by ${staff.display_name}${note ? `: ${note}` : ""}`, created_by: staff.id });
     await notifyRoles(["parts"], { type: "parts_priced", title: `Discount approved · ${job?.job_number ?? ""}`, body: `${p.description}: ${p.discount_percent}% from ${p.supplier ?? "?"} approved by the owner.`, jobId: p.job_id, href: `/parts/${p.job_id}` });

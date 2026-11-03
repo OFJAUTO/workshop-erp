@@ -11,7 +11,7 @@ export async function loadCatalogue(): Promise<CatalogueRow[]> {
     name: r.name,
     needs_position: !!r.needs_position,
     usage_count: Number(r.usage_count) || 0,
-    unit: r.unit === "set" ? ("set" as const) : ("each" as const),
+    unit: r.unit === "set" ? ("set" as const) : r.unit === "l" ? ("l" as const) : ("each" as const),
     paired: !!r.paired,
     goes_with: Array.isArray(r.goes_with) ? r.goes_with.map(String).filter(Boolean) : [],
   }));

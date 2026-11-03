@@ -197,7 +197,7 @@ await section("D from our stock", async () => {
   await typeInto(picker.locator("[data-stock-new-shelf]"), "10");
   await shot(page, "d1-stock-add-1600", picker);
   await picker.locator("[data-stock-new-save]").click();
-  const item = await until(async () => (await sql("select id, quantity::float8 as qty, unit_cost::float8 as cost from public.stock_items where name ilike 'e2e engine oil 0w20 s2'"))[0], 30, 500);
+  const item = await until(async () => { const r = (await sql("select id, quantity::float8 as qty, unit_cost::float8 as cost from public.stock_items where name ilike 'e2e engine oil 0w20 s2'"))[0]; return r && r.qty === 10 ? r : null; }, 30, 500) ?? (await sql("select id, quantity::float8 as qty, unit_cost::float8 as cost from public.stock_items where name ilike 'e2e engine oil 0w20 s2'"))[0];
   check("D2: the stock item is on the list with its cost each and what is on the shelf (10)", item?.cost === 49 && item?.qty === 10, JSON.stringify(item));
   const linked = await until(async () => (await sql("select id from public.part_items where job_id = $1 and stock_item_id = $2 and is_active", [s.jobId, item?.id]))[0], 40, 500);
   const p = linked ? await partOf(linked.id) : null;
@@ -277,34 +277,37 @@ await section("F estimates", async () => {
   check("F1: 'Yes, real price' saves it with the answer kept", r2.status === 200 && l1row?.cost === 2.24 && l1row?.confirmed === 2.24, `${r2.status} ${JSON.stringify(l1row)}`);
   const r3 = await api("/api/quote/save", { quotationId: est, advisorPrice: { id: l1, cost: 50, supplier: "OFJ Additional" } }, adv);
   check("F1: a stand-in supplier is refused in words", r3.status === 400 && /"OFJ Additional" is not a supplier/.test(r3.json?.error ?? ""), `${r3.status} ${r3.json?.error}`);
-  // The parts desk prices the second part at AED 1.50.
+  // The parts desk prices the second part at AED 1.50 - on the shared Parts row (3 November 2026, section 9: the
+  // estimate desk uses the same row as a job's parts, saving as it is typed).
   const { browser, page } = await browserFor("parts", { viewport: { width: 1440, height: 900 } });
   await go(page, `${base}/parts/estimate/${est}`);
-  const card = page.locator(`[data-desk-part="${l2}"]`);
-  await typeInto(card.locator("[data-desk-part-number]"), "12");
-  await typeInto(card.locator("[data-desk-cost]"), "1.5");
-  await typeInto(card.locator("[data-desk-supplier]"), "ABU DHABI MOTORS L.L.C");
-  await card.locator("label", { hasText: /^In stock$/ }).first().click();
-  await card.locator("button[type=submit]", { hasText: /Save price/ }).click();
-  const lineErr = await until(async () => (/looks like a line number/.test((await card.textContent()) ?? "") ? 1 : null), 30, 400);
-  check("F2: the desk refuses a line number as the part number", !!lineErr);
-  await typeInto(card.locator("[data-desk-part-number]"), "E2E-CABIN-S2");
-  await card.locator("label", { hasText: /^In stock$/ }).first().click();
-  await card.locator("button[type=submit]", { hasText: /Save price/ }).click();
-  const deskAsk = card.locator("[data-desk-cost-ask]");
-  const deskShown = await until(async () => ((await deskAsk.count()) ? 1 : null), 30, 400);
-  check("F2: the desk is asked 'AED 1.50 – is this the real price?' beside Save", !!deskShown && /AED 1\.50 – is this the real price\?/.test((await deskAsk.textContent()) ?? ""));
+  const card = page.locator(`[data-row-key="${l2}"]`);
+  await until(async () => ((await card.count()) ? 1 : null), 30, 500);
+  await typeInto(card.locator("input[aria-label='Part number']"), "12");
+  const lineErr = await until(async () => (/looks like a line number/.test((await card.locator("[data-row-tag]").textContent()) ?? "") ? 1 : null), 30, 400);
+  check("F2: the desk refuses a line number as the part number", !!lineErr, (await card.locator("[data-row-tag]").textContent()) ?? "");
+  await typeInto(card.locator("input[aria-label='Part number']"), "E2E-CABIN-S2");
+  await card.locator("select[aria-label='Type']").selectOption("genuine");
+  const sup = card.locator("select[aria-label='Supplier']");
+  await sup.selectOption(await supplierOption(sup, REAL));
+  await sleep(400);
+  await typeInto(card.locator("input[aria-label='Cost before VAT']"), "1.5");
+  await card.locator("select[aria-label='Availability']").selectOption({ label: "In stock" });
+  const deskAsk = card.locator("[data-cost-ask]");
+  const deskShown = await until(async () => ((await deskAsk.count()) && /AED 1\.50 – is this the real price\?/.test((await deskAsk.textContent()) ?? "") ? 1 : null), 30, 400);
+  check("F2: the desk is asked 'AED 1.50 – is this the real price?' on the row, and the row is not finished", !!deskShown && (await card.getAttribute("data-row-state")) === "not_finished", (await deskAsk.textContent().catch(() => "")) ?? "");
   await shot(page, "f2-desk-cost-ask-1440", card);
-  await deskAsk.locator("[data-desk-cost-confirm]").click();
-  const l2row = await until(async () => { const r = (await sql("select unit_cost::float8 as cost, cost_confirmed_aed::float8 as confirmed, part_number from public.quotation_lines where id = $1", [l2]))[0]; return r?.cost === 1.5 ? r : null; }, 30, 500);
-  check("F2: Yes, real price saves AED 1.50 with the answer and the real part number", l2row?.confirmed === 1.5 && l2row?.part_number === "E2E-CABIN-S2", JSON.stringify(l2row));
+  await card.locator("[data-cost-confirm]").click();
+  const l2row = await until(async () => { const r = (await sql("select unit_cost::float8 as cost, cost_confirmed_aed::float8 as confirmed, part_number, priced_at from public.quotation_lines where id = $1", [l2]))[0]; return r?.cost === 1.5 && r?.confirmed === 1.5 ? r : null; }, 30, 500);
+  check("F2: Yes, real price saves AED 1.50 with the answer and the real part number (priced)", l2row?.confirmed === 1.5 && l2row?.part_number === "E2E-CABIN-S2" && !!l2row?.priced_at, JSON.stringify(l2row));
   // 3 November 2026 (review): the answer stands for this cost - saving the same price again (another availability) is not asked again.
   await go(page, `${base}/parts/estimate/${est}`);
-  const card2 = page.locator(`[data-desk-part="${l2}"]`);
-  await card2.locator("label", { hasText: /^Next day$|^1 day$/ }).first().click().catch(() => null);
-  await card2.locator("button[type=submit]", { hasText: /Save/ }).first().click();
+  const card2 = page.locator(`[data-row-key="${l2}"]`);
+  await until(async () => ((await card2.count()) ? 1 : null), 30, 500);
+  await card2.locator("select[aria-label='Availability']").selectOption({ label: "Next day" });
+  await page.keyboard.press("Tab");
   const resaved = await until(async () => { const r = (await sql("select availability, cost_confirmed_aed::float8 as confirmed from public.quotation_lines where id = $1", [l2]))[0]; return r?.availability === "to_order" ? r : null; }, 30, 500);
-  check("F3: saving AED 1.50 again with another availability is not asked again (the stored answer stands)", !!resaved && resaved.confirmed === 1.5 && (await card2.locator("[data-desk-cost-ask]").count()) === 0, JSON.stringify(resaved));
+  check("F3: saving AED 1.50 again with another availability is not asked again (the stored answer stands)", !!resaved && resaved.confirmed === 1.5 && (await card2.locator("[data-cost-ask]").count()) === 0, JSON.stringify(resaved));
   // The advisor's own price: the same cost typed again is not asked again either.
   const r4 = await api("/api/quote/save", { quotationId: est, advisorPrice: { id: l1, cost: 2.24, supplier: "ABU DHABI MOTORS L.L.C" } }, adv);
   check("F3: the advisor's same AED 2.24 again is saved without the question", r4.status === 200, `${r4.status} ${JSON.stringify(r4.json)}`);

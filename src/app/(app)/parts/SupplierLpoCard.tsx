@@ -7,8 +7,9 @@ import { PositionsLine } from "@/components/PositionsLine";
 import { SharePdfButton } from "@/components/SharePdfButton";
 import { Button } from "@/components/ui";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { perUnitMark, qtyWithUnit, unitOf } from "@/lib/part-units";
 
-export type SupplierLpoLine = { id: string; part_item_id: string; description: string; positions?: string[] | null; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number };
+export type SupplierLpoLine = { id: string; part_item_id: string; description: string; positions?: string[] | null; part_number: string | null; quantity: number; /** The part's unit (pieces, litres, sets): "× 8 L", the price per litre. */ unit?: string | null; unit_cost: number; expected_date: string | null; received_qty: number };
 /** A line whose part was given its ending (3 November 2026): cancelled (off the LPO), or returned / kept in stock (still on it). */
 export type EndedLpoLine = { lineId: string; description: string; partNumber: string | null; quantity: number; unitCost: number; state: "cancelled" | "return_pending" | "returned" | "stock"; words: string; onLpo: boolean };
 export type SupplierLpo = { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; lines: SupplierLpoLine[]; /** Courier, freight: in the total already. */ charges?: { id: string; description: string; amount_aed: number }[]; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null; ended?: EndedLpoLine[] };
@@ -40,7 +41,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
         `${po.number} · OFJ Automotive`,
         vin ? `VIN: ${vin}` : "",
         "",
-        ...po.lines.map((l) => `• ${realPartNumber(l.part_number) ? `${realPartNumber(l.part_number)} · ` : ""}${l.description}${positionsWords(l.positions) ? ` · ${positionsWords(l.positions)}` : ""} × ${l.quantity}${l.unit_cost ? ` · AED ${l.unit_cost.toFixed(2)}` : ""}`),
+        ...po.lines.map((l) => `• ${realPartNumber(l.part_number) ? `${realPartNumber(l.part_number)} · ` : ""}${l.description}${positionsWords(l.positions) ? ` · ${positionsWords(l.positions)}` : ""} × ${qtyWithUnit(l.quantity, unitOf(l.unit))}${l.unit_cost ? ` · AED ${l.unit_cost.toFixed(2)}${perUnitMark(unitOf(l.unit))}` : ""}`),
         ...(po.charges ?? []).map((c) => `• ${c.description} · AED ${c.amount_aed.toFixed(2)}`),
         ...(cancelledLines.length ? ["", "Cancelled:", ...cancelledLines.map((l) => `• ${l.partNumber ? `${l.partNumber} · ` : ""}${l.description} × ${l.quantity}`)] : []),
         "",
@@ -64,14 +65,14 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
           <li key={l.id} className="py-1.5 flex flex-wrap items-center gap-2 opacity-70" data-lpo-line data-lpo-line-ended={endedOf.get(l.id)!.state}>
             {realPartNumber(l.part_number) ? <span className="font-mono text-xs font-semibold">{realPartNumber(l.part_number)}</span> : null}
             <span className="flex flex-col"><span className="font-semibold">{l.description}</span><PositionsLine positions={l.positions} /></span>
-            <span className="text-muted">× {l.quantity} · AED {l.unit_cost.toFixed(2)}</span>
+            <span className="text-muted">× {qtyWithUnit(l.quantity, unitOf(l.unit))} · AED {l.unit_cost.toFixed(2)}{perUnitMark(unitOf(l.unit))}</span>
             <span className={`ml-auto inline-flex min-h-6 items-center rounded-full border px-2.5 text-[11px] font-bold ${endedOf.get(l.id)!.state === "return_pending" ? "border-amber-bar bg-amber-soft text-amber" : "border-line-strong bg-white text-ink"}`}>{endedOf.get(l.id)!.words}</span>
           </li>
         ) : (
           <li key={l.id} className={`py-1.5 flex flex-wrap items-center gap-2 ${l.received_qty >= l.quantity ? "rounded-control bg-green-soft px-2 text-green" : ""}`} data-lpo-line data-line-received={l.received_qty >= l.quantity ? "1" : "0"}>
             {realPartNumber(l.part_number) ? <span className="font-mono text-xs font-semibold">{realPartNumber(l.part_number)}</span> : null}
             <span className="flex flex-col"><span className="font-semibold">{l.description}</span><PositionsLine positions={l.positions} /></span>
-            <span className="text-muted">× {l.quantity} · AED {l.unit_cost.toFixed(2)}</span>
+            <span className="text-muted" data-lpo-line-qty={qtyWithUnit(l.quantity, unitOf(l.unit))}>× {qtyWithUnit(l.quantity, unitOf(l.unit))} · AED {l.unit_cost.toFixed(2)}{perUnitMark(unitOf(l.unit))}</span>
             {ordered ? (
               editing === l.part_item_id ? (
                 <form action={(fd) => { setEditing(null); return onSetDate(l.part_item_id, fd); }} className="ml-auto inline-flex items-center gap-1">
@@ -80,7 +81,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
                   <Button type="button" tone="ghost" size="md" onClick={() => setEditing(null)}>Cancel</Button>
                 </form>
               ) : (
-                <button type="button" disabled={!canManage} onClick={() => setEditing(l.part_item_id)} data-part-date className={`ml-auto inline-flex h-7 items-center rounded-full px-2.5 text-[11px] font-bold ${l.received_qty >= l.quantity ? "bg-green-soft text-green" : "border border-line-strong bg-white"}`}>
+                <button type="button" disabled={!canManage} onClick={() => setEditing(l.part_item_id)} data-part-date className={`ml-auto inline-flex h-9 items-center rounded-full px-2.5 text-[11px] font-bold ${l.received_qty >= l.quantity ? "bg-green-soft text-green" : "border border-line-strong bg-white"}`}>
                   {l.received_qty >= l.quantity ? "Here" : l.expected_date ? `Expected ${formatDate(l.expected_date)}` : "No date"}
                 </button>
               )

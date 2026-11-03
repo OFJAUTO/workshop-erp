@@ -6,7 +6,7 @@ import { aed, belowCostOf, partLineChanges, type LineForDiff, blockOf, cheapCost
 import { newToken } from "@/lib/media";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { belowCostReady, revisionPartsReady, schemaReady } from "@/lib/schema-ready";
+import { belowCostReady, partUnitsReady, revisionPartsReady, schemaReady } from "@/lib/schema-ready";
 import { capsText } from "@/lib/text-case";
 import { compactPartNumber } from "@/lib/price-import";
 import { costReferencesFor } from "@/lib/part-cost-history";
@@ -27,6 +27,9 @@ export const COPY_FIELDS = (l: QuoteLine) => ({
   cut_method: l.cut_method ?? null, cut_note: l.cut_note ?? null,
   side: l.side ?? null,
   film_colour: l.film_colour ?? null, film_code: l.film_code ?? null, tint_percent: l.tint_percent ?? null, recovery_paid_by: l.recovery_paid_by ?? null, recovery_mention_free: l.recovery_mention_free ?? false,
+  // Section 9 (3 November 2026): read only once the columns exist (attachPartLineExtras), so before the migration
+  // nothing here is sent (undefined keys are left out of the insert).
+  ...(l.unit !== undefined ? { unit: l.unit ?? "pc", asked_quantity: l.asked_quantity ?? null, list_price_aed: l.list_price_aed ?? null, supplier_discount_percent: l.supplier_discount_percent ?? null } : {}),
 });
 
 const REVISABLE = ["sent", "opened", "expired", "declined", "approved", "pending_owner", "urgent_requested"];
@@ -164,7 +167,7 @@ export async function requestPartsCleared(): Promise<{ revision_request_parts?: 
  * Where a part change lands on the job's quotation: the open draft when there is one; otherwise the next version is
  * started from the latest sent or approved one, and the advisor is told to send it. Parts never think about versions.
  */
-export async function quoteTargetFor(jobId: string, by: string | null, change?: string, ask: { partIds?: string[]; redOf?: () => Promise<string | null> } = {}): Promise<{ id: string; created: boolean } | null> {
+export async function quoteTargetFor(jobId: string, by: string | null, change?: string, ask: { partIds?: string[]; redOf?: () => Promise<string | null>; /** Section 10: Parts are still pricing (the job's pricing is open): the new version is made, the advisor hears it with the one "Pricing done – send to advisor" notification. */ quiet?: boolean } = {}): Promise<{ id: string; created: boolean } | null> {
   const admin = createAdminClient();
   const { data: latest } = await admin.from("quotations").select("id, number, version, status, job_id, created_by, sent_by, revision_allowed_at, revision_requested_at, revision_declined_at").eq("job_id", jobId).eq("kind", "quotation").eq("is_active", true).neq("status", "cancelled").order("version", { ascending: false }).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (!latest) return null;
@@ -207,7 +210,7 @@ export type RevisionOutcome =
  * credit note settles it); approved and not yet allowed = the owner is asked; otherwise the next version is made and
  * the advisor told to send it (an owner's permission covers that one revision).
  */
-async function revisionTargetOf(latest: RevisionRow, jobId: string, by: string | null, change: string | undefined, ask: { partIds?: string[]; redOf?: () => Promise<string | null> }): Promise<RevisionOutcome> {
+async function revisionTargetOf(latest: RevisionRow, jobId: string, by: string | null, change: string | undefined, ask: { partIds?: string[]; redOf?: () => Promise<string | null>; /** Section 10: told with the pricing send instead. */ quiet?: boolean }): Promise<RevisionOutcome> {
   const admin = createAdminClient();
   if (latest.status === "draft" || latest.status === "pending_owner") return { kind: "target", id: latest.id, created: false, version: null };
   if (!REVISABLE.includes(latest.status)) return { kind: "none" };
@@ -233,7 +236,7 @@ async function revisionTargetOf(latest: RevisionRow, jobId: string, by: string |
   if (latest.status === "approved") await admin.from("quotations").update({ revision_allowed_at: null, revision_allowed_by: null, ...(await requestPartsCleared()), updated_by: by }).eq("id", latest.id);
   const { data: job } = await admin.from("jobs").select("job_number, gated_in_by").eq("id", jobId).maybeSingle();
   const ids = Array.from(new Set([job?.gated_in_by, latest.created_by, latest.sent_by].filter((x): x is string => !!x)));
-  await notifyStaff(ids, { type: "quote_revised_by_parts", title: `Parts changed on ${job?.job_number ?? ""}: send the revised quotation`, body: `${latest.number} version ${r.version} is ready with the change from Parts. Check it and send it to the customer.`, jobId, href: `/jobs/${jobId}/quote/${r.id}?send=1` });
+  if (!ask.quiet) await notifyStaff(ids, { type: "quote_revised_by_parts", title: `Parts changed on ${job?.job_number ?? ""}: send the revised quotation`, body: `${latest.number} version ${r.version} is ready with the change from Parts. Check it and send it to the customer.`, jobId, href: `/jobs/${jobId}/quote/${r.id}?send=1` });
   return { kind: "target", id: r.id, created: true, version: r.version };
 }
 
@@ -438,7 +441,7 @@ export async function syncMissingParts(jobId: string, quotationId: string, by: s
  * The part's line on the quotation: made when the part is priced, kept in step afterwards, retired when the part goes.
  * With no quotation given, the change lands on the open draft or on a new version (see quoteTargetFor).
  */
-export async function syncPartLine(jobId: string, partId: string, by: string | null, quotationId?: string, opts: { /** A new version brought up to date: the caller judges below cost itself. */ quietBelow?: boolean } = {}): Promise<{ quotationId: string | null; created: boolean; change: "added" | "changed" | "removed" | null }> {
+export async function syncPartLine(jobId: string, partId: string, by: string | null, quotationId?: string, opts: { /** A new version brought up to date: the caller judges below cost itself. */ quietBelow?: boolean; /** Section 10: a new version made by this change is told with the pricing send, not on its own. */ quietRevision?: boolean } = {}): Promise<{ quotationId: string | null; created: boolean; change: "added" | "changed" | "removed" | null }> {
   const admin = createAdminClient();
   // A version named outright must still be open: an approved or replaced one refuses (and the attempt is written down).
   if (quotationId) {
@@ -482,7 +485,7 @@ export async function syncPartLine(jobId: string, partId: string, by: string | n
       home = (open?.id as string | undefined) ?? null;
     }
   }
-  const target = quotationId ? { id: quotationId, created: false } : home ? { id: home, created: false } : await quoteTargetFor(jobId, by, changeWords, { partIds: [partId], redOf });
+  const target = quotationId ? { id: quotationId, created: false } : home ? { id: home, created: false } : await quoteTargetFor(jobId, by, changeWords, { partIds: [partId], redOf, quiet: opts.quietRevision });
   if (!target) return { quotationId: null, created: false, change: null };
   const qid = target.id;
   const [{ data: pRaw }, { data: line }] = await Promise.all([
@@ -495,7 +498,9 @@ export async function syncPartLine(jobId: string, partId: string, by: string | n
   // Saved in capitals (1 November 2026, B1): the same words on the screen, the PDF and the customer's page.
   const title = capsText((p.customer_name ?? "").trim() || p.description);
   const qty = Number(p.confirmed_quantity ?? p.quantity) || 1;
-  const shared = { title, quantity: p.confirmed_quantity ?? p.quantity, unit_cost: p.cost_aed, part_type: p.part_type, brand: p.brand, option_group: p.option_group, positions: p.positions ?? null, updated_by: by };
+  // Section 9 (3 November 2026): the line follows its part's unit too (pieces, litres, sets), once the column exists.
+  const unitPart = (await partUnitsReady()) ? (await admin.from("part_items").select("unit").eq("id", partId).maybeSingle()).data : null;
+  const shared = { title, quantity: p.confirmed_quantity ?? p.quantity, unit_cost: p.cost_aed, part_type: p.part_type, brand: p.brand, option_group: p.option_group, positions: p.positions ?? null, ...(unitPart ? { unit: (unitPart.unit as string | null) ?? "pc" } : {}), updated_by: by };
   let change: "added" | "changed" | "removed" | null = null;
   let markupNote = "";
   if (p.confirm_status === "rejected" || !p.is_active) {

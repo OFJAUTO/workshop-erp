@@ -8,6 +8,7 @@ import type { CurrentStaff } from "@/lib/auth";
 import { partsSteps, stepPartOf, type PartsStepKey } from "@/lib/parts-steps";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
+import { pricingTodoOf } from "@/lib/pricing-done";
 
 /** The one thing to do next on a car's parts, per current step. */
 const STEP_ACTIONS: Record<PartsStepKey, { label: string; href: (jobId: string) => string }> = {
@@ -29,22 +30,26 @@ export async function PartsDashboard({ staff }: { staff: CurrentStaff }) {
   const today = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
   const [{ data: reqRows }, { data: partRows }, { data: poRows }] = await Promise.all([
     admin.from("part_requests").select("id, job_id, status").eq("is_active", true).eq("status", "open"),
-    admin.from("part_items").select("id, job_id, is_active, order_status, received_qty, quantity, confirmed_quantity, issue_status, availability, supplier, po_id, return_status, cost_aed, confirm_status, expected_date").eq("is_active", true),
+    admin.from("part_items").select("id, job_id, is_active, order_status, received_qty, quantity, confirmed_quantity, issue_status, availability, supplier, po_id, return_status, cost_aed, confirm_status, expected_date, priced_at, removed_at").eq("is_active", true),
     admin.from("purchase_orders").select("id, kind, status, supplier_invoice_status").eq("is_active", true),
   ]);
   const requests = (reqRows ?? []) as { id: string; job_id: string; status: string }[];
-  const parts = (partRows ?? []) as { id: string; job_id: string; is_active: boolean; order_status: string | null; received_qty: number | string; quantity: number | string; confirmed_quantity: number | string | null; issue_status: string | null; availability: string | null; supplier: string | null; po_id: string | null; return_status: string | null; cost_aed: number | string | null; confirm_status: string | null; expected_date: string | null }[];
+  const parts = (partRows ?? []) as { id: string; job_id: string; is_active: boolean; order_status: string | null; received_qty: number | string; quantity: number | string; confirmed_quantity: number | string | null; issue_status: string | null; availability: string | null; supplier: string | null; po_id: string | null; return_status: string | null; cost_aed: number | string | null; confirm_status: string | null; expected_date: string | null; priced_at: string | null; removed_at: string | null }[];
   const pos = (poRows ?? []) as { id: string; kind: string; status: string; supplier_invoice_status: string | null }[];
-  const jobIds = Array.from(new Set([...requests.map((r) => r.job_id), ...parts.map((p) => p.job_id)].filter(Boolean)));
+  // A car whose only changes wait for the send (not available, removed) is counted through its own mark.
+  const { data: heldRows } = await admin.from("jobs").select("id").eq("is_open", true).not("parts_pricing_reopened_at", "is", null).limit(300);
+  const jobIds = Array.from(new Set([...requests.map((r) => r.job_id), ...parts.map((p) => p.job_id), ...(heldRows ?? []).map((j) => j.id as string)].filter(Boolean)));
   const { data: jobRows } = jobIds.length ? await admin.from("jobs").select("id, job_number, status, is_open, gated_in_at, parts_pricing_done_at, parts_pricing_reopened_at, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, make:vehicle_makes(name), model:vehicle_models(name))").in("id", jobIds).eq("is_open", true).order("gated_in_at", { ascending: false }) : { data: [] };
   type JobRow = { id: string; job_number: string; status: string; gated_in_at: string; parts_pricing_done_at: string | null; parts_pricing_reopened_at: string | null; vehicle: (Parameters<typeof formatPlate>[0] & { make: { name: string } | null; model: { name: string } | null }) | null };
   const jobs = ((jobRows ?? []) as unknown as JobRow[]);
   const open = new Set(jobs.map((j) => j.id));
   const openParts = parts.filter((p) => open.has(p.job_id));
+  // Section 10 (3 November 2026): the same to-do rule as the parts desk - a car is on it until Pricing done – send to advisor.
+  const todoOf = new Map(jobs.map((j) => [j.id, pricingTodoOf(j, requests.filter((r) => r.job_id === j.id), parts.filter((p) => p.job_id === j.id))] as const));
   const unreceived = (p: (typeof parts)[number]) => Number(p.received_qty) < Number(p.confirmed_quantity ?? p.quantity);
 
   const tiles: { key: string; label: string; count: number; href: string }[] = [
-    { key: "to-price", label: "To price", count: requests.filter((r) => open.has(r.job_id)).length + openParts.filter((p) => p.cost_aed === null && p.confirm_status !== "rejected" && !p.return_status?.includes("removed")).length, href: "/parts" },
+    { key: "to-price", label: "Cars to price or send", count: Array.from(todoOf.values()).filter(Boolean).length, href: "/parts" },
     { key: "lpo-approval", label: "LPOs waiting for approval", count: pos.filter((p) => p.status === "pending_approval").length, href: "/parts/orders" },
     { key: "to-order", label: "To order (send to supplier)", count: pos.filter((p) => (p.kind === "supplier" || p.kind === "stock") && p.status === "approved").length, href: "/parts/orders" },
     { key: "arriving", label: "Arriving today", count: openParts.filter((p) => p.expected_date === today && unreceived(p)).length, href: "/parts/arrivals" },
@@ -72,7 +77,8 @@ export async function PartsDashboard({ staff }: { staff: CurrentStaff }) {
             {jobs.map((j) => {
               const steps = partsSteps({ jobStatus: j.status, pricingDoneAt: j.parts_pricing_done_at, pricingReopenedAt: j.parts_pricing_reopened_at, parts: parts.filter((p) => p.job_id === j.id).map((p) => stepPartOf(p)) });
               const current = steps.find((s) => s.state === "current");
-              const action = current ? STEP_ACTIONS[current.key] : null;
+              const todo = todoOf.get(j.id) ?? null;
+              const action = current ? (current.key === "pricing" && todo === "to_send" ? { label: "Send to advisor", href: (id: string) => `/parts/${id}#pricing` } : STEP_ACTIONS[current.key]) : null;
               const allDone = steps.every((s) => s.state === "done");
               return (
                 <li key={j.id} className="py-2.5 flex flex-wrap items-center gap-3" data-parts-car={j.id}>

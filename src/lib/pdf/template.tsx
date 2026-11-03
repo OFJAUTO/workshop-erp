@@ -6,7 +6,6 @@ import type { MoneyRow as DocMoneyRow } from "@/lib/doc-totals";
 /* eslint-disable jsx-a11y/alt-text -- react-pdf images are not HTML images */
 import { Document, Font, Image, Link, Page, Path, Polygon, StyleSheet, Svg, Text, View, type TextProps } from "@react-pdf/renderer";
 import { DIRHAM_PATH, DIRHAM_RATIO, DIRHAM_VIEWBOX, moneyDigits, type Currency } from "@/lib/money";
-import { hoursQty } from "@/lib/format";
 import { cleanDocTitle } from "@/lib/quotes";
 import { unbroken } from "@/lib/text-case";
 import type { Settings } from "@/lib/settings";
@@ -610,11 +609,8 @@ export function Tag({ text, color }: { text: string; color: string }) {
   return <Text style={[styles.tag, { color }]}>{text}</Text>;
 }
 
-/** The line's quantity text: "1.5 h" for labour, otherwise the number. */
-export function qtyText(quantity: number, hours?: number | null) {
-  if (hours !== null && hours !== undefined) return hoursQty(hours);
-  return Number.isInteger(quantity) ? String(quantity) : quantity.toFixed(2);
-}
+/** The line's quantity text: "1.5 h" for labour, "8 L" / "2 sets" for litres and sets, otherwise the number. */
+export { qtyText } from "./qty-text";
 
 
 /* ------------------------------------------------------------------------------------------------------------------

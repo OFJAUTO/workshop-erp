@@ -13,7 +13,8 @@ import { getSettings, type Settings } from "./settings";
 import { noChargeJob } from "./comp-data";
 import { createAdminClient } from "./supabase/admin";
 import { loadVisitMileage } from "./visit-mileage";
-import { gateOutMileageReady } from "./schema-ready";
+import { gateOutMileageReady, partUnitsReady } from "./schema-ready";
+import { cleanUnit, type PartUnit } from "./part-units";
 import { customerMileage } from "./mileage";
 import { realPartNumber } from "./parts-rows";
 
@@ -77,6 +78,8 @@ export type InvoiceLineRow = {
   cost_aed: number;
   quotation_line_id: string | null;
   part_item_id: string | null;
+  /** Section 9 (3 November 2026): a part line's unit (litres, sets), read from its quotation line or its part. */
+  unit?: PartUnit | null;
   /** Labour lines carry their hours so the PDF can print "1.5 h". */
   hours: number | null;
   /** Complimentary/Included word and the line's own discount, copied from the quotation line. */
@@ -222,7 +225,7 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
   const nameOf = new Map((people ?? []).map((p) => [p.id, p.display_name]));
   return {
     invoice,
-    lines: ((lines ?? []) as Record<string, unknown>[]).map(toInvoiceLine),
+    lines: await attachInvoiceUnits(((lines ?? []) as Record<string, unknown>[]).map(toInvoiceLine)),
     payments: ((payments ?? []) as Record<string, unknown>[]).map(toPayment),
     customer: (customer as InvoiceBundle["customer"]) ?? null,
     vehicle: (vehicle as unknown as InvoiceBundle["vehicle"]) ?? null,
@@ -232,6 +235,26 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
     issuedByName: invoice.issued_by ? (nameOf.get(invoice.issued_by) ?? null) : null,
     mileage: invoice.job_id && (await gateOutMileageReady()) ? await invoiceMileage(invoice.job_id) : null,
   };
+}
+
+/**
+ * Section 9 (3 November 2026): a part line's unit, from the quotation line it was made from (frozen once approved),
+ * else from its part. Pieces print as before; litres and sets print "· 8 L" and "8 L" in the QTY column. Nothing is
+ * read before the database change.
+ */
+export async function attachInvoiceUnits(lines: InvoiceLineRow[]): Promise<InvoiceLineRow[]> {
+  const parts = lines.filter((l) => l.section === "parts" && (l.quotation_line_id || l.part_item_id));
+  if (!parts.length || !(await partUnitsReady())) return lines;
+  const admin = createAdminClient();
+  const qIds = Array.from(new Set(parts.map((l) => l.quotation_line_id).filter((x): x is string => !!x)));
+  const pIds = Array.from(new Set(parts.map((l) => l.part_item_id).filter((x): x is string => !!x)));
+  const [{ data: ql }, { data: pi }] = await Promise.all([
+    qIds.length ? admin.from("quotation_lines").select("id, unit").in("id", qIds) : Promise.resolve({ data: [] as { id: string; unit: string | null }[] }),
+    pIds.length ? admin.from("part_items").select("id, unit").in("id", pIds) : Promise.resolve({ data: [] as { id: string; unit: string | null }[] }),
+  ]);
+  const ofLine = new Map(((ql ?? []) as { id: string; unit: string | null }[]).map((r) => [r.id, cleanUnit(r.unit)]));
+  const ofPart = new Map(((pi ?? []) as { id: string; unit: string | null }[]).map((r) => [r.id, cleanUnit(r.unit)]));
+  return lines.map((l) => (l.section !== "parts" ? l : { ...l, unit: (l.quotation_line_id ? ofLine.get(l.quotation_line_id) : null) ?? (l.part_item_id ? ofPart.get(l.part_item_id) : null) ?? null }));
 }
 
 /** The visit's mileage in and out, as the customer reads it on the invoice (30 October 2026). */

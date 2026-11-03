@@ -1,4 +1,8 @@
 import { LINE_TEXT_MAX } from "./text-limits";
+import { qtyWithUnit } from "./part-units";
+
+/** A parts-list unit as stored: litres and sets say so, everything else is pieces (3 November 2026: litres added). */
+const listUnit = (u: unknown): "pc" | "set" | "l" => (u === "set" ? "set" : u === "l" ? "l" : "pc");
 /**
  * The parts list gathered during the inspection: the technician picks parts from the owner's pool
  * (Settings > Parts list) under each finding, the list is reviewed at the end, the workshop manager
@@ -18,8 +22,8 @@ export type PartsListEntry = {
   item_key: string | null;
   source: "item" | "tyre" | "measure" | "custom";
   note: string | null;
-  /** "set" for parts sold per axle or per set. */
-  unit?: "pc" | "set";
+  /** "set" for parts sold per axle or per set, "l" for fluids sold by the litre. */
+  unit?: "pc" | "set" | "l";
 };
 
 export type CatalogueRow = {
@@ -29,7 +33,7 @@ export type CatalogueRow = {
   needs_position: boolean;
   usage_count: number;
   /** Sold per set (brake pads, wiper blades...): the choice is Front / Rear and the quantity counts sets. */
-  unit?: "each" | "set";
+  unit?: "each" | "set" | "l";
   /** Comes in pairs (control arms, discs, shock absorbers...): Front pair / Rear pair / All four, or one side only. */
   paired?: boolean;
   /** Parts offered alongside when this one is picked (a wear sensor with brake pads); never added by themselves. */
@@ -137,7 +141,7 @@ export function cleanPartsList(raw: unknown): PartsListEntry[] {
       item_key: e.item_key ? String(e.item_key).slice(0, 120) : null,
       source,
       note: e.note ? String(e.note).trim().slice(0, 300) || null : null,
-      unit: e.unit === "set" ? "set" : "pc",
+      unit: listUnit(e.unit),
     });
   }
   return out;
@@ -154,7 +158,7 @@ export type MergedPartLine = {
   item_key: string | null;
   source: PartsListEntry["source"];
   note: string | null;
-  unit: "pc" | "set";
+  unit: "pc" | "set" | "l";
   /** The entries behind the line. */
   entries: PartsListEntry[];
 };
@@ -166,7 +170,7 @@ export function mergePartsList(list: PartsListEntry[]): MergedPartLine[] {
     const key = e.name.trim().toLowerCase();
     const cur = map.get(key);
     if (!cur) {
-      map.set(key, { key, name: e.name.trim(), qty: e.qty, positions: [...e.positions], catalogue_id: e.catalogue_id, item_key: e.item_key, source: e.source, note: e.note, unit: e.unit === "set" ? "set" : "pc", entries: [e] });
+      map.set(key, { key, name: e.name.trim(), qty: e.qty, positions: [...e.positions], catalogue_id: e.catalogue_id, item_key: e.item_key, source: e.source, note: e.note, unit: listUnit(e.unit), entries: [e] });
       continue;
     }
     cur.qty = Math.round((cur.qty + e.qty) * 100) / 100;
@@ -206,10 +210,11 @@ export function goesWithOffers(entries: PartsListEntry[], catalogue: CatalogueRo
 
 /** The entry an accepted offer adds: same finding as the part it goes with, the axle as its position. */
 export function offerEntry(o: GoesWithOffer): PartsListEntry {
-  return { id: newEntryId(), catalogue_id: o.target.id, name: o.target.name, qty: 1, positions: o.axle ? [o.axle] : [], item_key: o.base.item_key, source: o.base.source === "tyre" || o.base.source === "measure" ? "item" : o.base.source, note: null, unit: o.target.unit === "set" ? "set" : "pc" };
+  return { id: newEntryId(), catalogue_id: o.target.id, name: o.target.name, qty: 1, positions: o.axle ? [o.axle] : [], item_key: o.base.item_key, source: o.base.source === "tyre" || o.base.source === "measure" ? "item" : o.base.source, note: null, unit: listUnit(o.target.unit) };
 }
 
-export function partsListLine(e: { name: string; qty: number; positions: string[]; unit?: "pc" | "set" }) {
+export function partsListLine(e: { name: string; qty: number; positions: string[]; unit?: "pc" | "set" | "l" }) {
+  if (e.unit === "l") return `${e.name}${e.positions.length ? ` · ${positionsWords(e.positions)}` : ""} · ${qtyWithUnit(e.qty, "l")}`;
   if (e.unit === "set") return `${e.name}${e.positions.length ? ` · ${positionsWords(e.positions)}` : ""} · ${e.qty} set${e.qty === 1 ? "" : "s"}`;
   const words = positionsWords(e.positions);
   // A paired part reads "Lower control arm - front pair - 2".

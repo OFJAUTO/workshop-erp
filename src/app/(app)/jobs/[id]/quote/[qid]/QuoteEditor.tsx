@@ -26,6 +26,8 @@ import { formatDayTime } from "@/lib/format";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
 import { ESTIMATE_PART_WORDS, estimatePartState, isEstimatePart, unpricedEstimateParts, waitingWords } from "@/lib/estimate-parts";
+import { QtyUnitBox } from "@/components/QtyUnitBox";
+import { perUnitWords, qtyWithUnit, unitOf } from "@/lib/part-units";
 import { parseNumber } from "@/lib/price-import";
 import { CompBox } from "@/app/(app)/quotes/CompBox";
 import { PackageItemsToggle } from "@/components/PackageItemsToggle";
@@ -151,6 +153,8 @@ function useQuoteAutosave(quotationId: string, onSaved: () => void, onConfirm: (
 
 export type EditorSettings = {
   labourRate: number;
+  /** Section 9 (3 November 2026): the unit choice (pieces, litres, sets) once the database keeps it. */
+  unitsReady?: boolean;
   minMarkup: number;
   /** Placeholder costs (2 November 2026): a part markup over this percent shows amber and asks once before sending. */
   partMarkupWarn?: number;
@@ -1793,7 +1797,14 @@ export function QuoteEditor({
                           </div>
                         </td>
                         <td className="py-2 pr-2 align-top text-xs text-muted whitespace-nowrap">{est ? (customerAvailabilityWords(l.availability, l.delivery_days) ?? "") : (customerAvailabilityWords(part?.availability, daysFromDate(part?.delivery_date, settings.today ?? "")) ?? "")}</td>
-                        <td className="py-2 pr-2 align-top text-right">{est && !disabled ? <Input value={num(l.quantity)} onChange={(e) => { const v = Number(e.target.value.replace(",", ".")); if (e.target.value !== "" && Number.isFinite(v) && v > 0) patch(l.id, { quantity: v }); }} inputMode="decimal" className="min-h-9 text-right" style={{ width: "4.5rem" }} aria-label="Quantity" data-est-part-qty /> : l.quantity}</td>
+                        <td className="py-2 pr-2 align-top text-right" data-part-qty-cell={l.id}>
+                          {(est || (!!l.part_item_id && part?.order_status === "none" && !unchosen)) && !disabled ? (
+                            // 3 November 2026: the advisor's quantity on a job's part is saved (THE quantity rule, logged, Parts told).
+                            <QtyUnitBox qty={num(l.quantity)} unit={unitOf(l.unit)} onQty={(t) => { const v = Number(String(t).replace(",", ".")); if (t !== "" && Number.isFinite(v) && v > 0) patch(l.id, { quantity: v }); }} onUnit={(u) => patch(l.id, { unit: u }, true)} showUnit={!!settings.unitsReady} hook={est ? "data-est-part-qty" : "data-job-part-qty"} />
+                          ) : (
+                            <span className="whitespace-nowrap" data-part-qty-text>{qtyWithUnit(Number(l.quantity) || 1, unitOf(l.unit))}</span>
+                          )}
+                        </td>
                         <td className="py-2 pr-2 align-top text-right">{l.unit_cost === null ? "" : aed(l.unit_cost)}</td>
                         <td className="py-2 pr-2 align-top" data-markup-cell>
                           <div className="flex items-center justify-end gap-1.5">
@@ -1858,7 +1869,8 @@ export function QuoteEditor({
                           <td colSpan={8} className="pb-3">
                             <div className="flex flex-wrap items-end gap-2 rounded-control border border-line-strong bg-chip p-3">
                               <span className="w-full text-xs text-muted">A price you already have (a dealer on the phone). It shows as &quot;Priced by advisor&quot; inside the workshop only, and the parts desk checks it.</span>
-                              <label className="flex flex-col gap-1 text-xs font-semibold">Cost each, before VAT (AED)<Input value={ownPrice.cost} onChange={(e) => setOwnPrice({ ...ownPrice, cost: e.target.value })} inputMode="decimal" className="min-h-9" style={{ width: "8rem" }} data-est-own-cost /></label>
+                              <label className="flex flex-col gap-1 text-xs font-semibold">Cost {perUnitWords(unitOf(l.unit))}, before VAT (AED)<Input value={ownPrice.cost} onChange={(e) => setOwnPrice({ ...ownPrice, cost: e.target.value })} inputMode="decimal" className="min-h-9" style={{ width: "8rem" }} data-est-own-cost /></label>
+                              {Number(ownPrice.cost.replace(/,/g, "")) > 0 ? <span className="self-center text-xs font-semibold" data-est-own-total>= {aed(Number(ownPrice.cost.replace(/,/g, "")) * (Number(l.quantity) || 1))} for {qtyWithUnit(Number(l.quantity) || 1, unitOf(l.unit))}</span> : null}
                               <label className="flex flex-col gap-1 text-xs font-semibold">Supplier<Input value={ownPrice.supplier} onChange={(e) => setOwnPrice({ ...ownPrice, supplier: e.target.value })} className="min-h-9" style={{ width: "12rem" }} textCase="title" data-est-own-supplier /></label>
                               <Button type="button" size="md" disabled={!(Number(ownPrice.cost.replace(/,/g, "")) > 0) || !ownPrice.supplier.trim()} onClick={() => { const cost = Number(ownPrice.cost.replace(/,/g, "")); setLines((prev) => prev.map((x) => (x.id === l.id ? { ...x, unit_cost: cost, supplier_text: ownPrice.supplier.trim(), priced_by_advisor: true, price_checked_at: null } : x))); setDirty((d) => new Set(d).add(l.id)); save({ advisorPrice: { id: l.id, cost, supplier: ownPrice.supplier.trim() } }); setOwnPrice(null); }} data-est-own-save>Use this price</Button>
                               <Button type="button" tone="ghost" size="md" onClick={() => setOwnPrice(null)}>Cancel</Button>

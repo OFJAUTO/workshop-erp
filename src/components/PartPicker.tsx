@@ -87,7 +87,7 @@ export function PartPicker({
       const next = new Map(prev);
       const k = pickKey(row);
       if (next.has(k)) next.delete(k);
-      else next.set(k, { id: newEntryId(), catalogue_id: isPoolId(row.id) ? row.id : null, name: row.name, qty: 1, positions: [], item_key: itemKey, source, note: null, unit: row.unit === "set" ? "set" : "pc" });
+      else next.set(k, { id: newEntryId(), catalogue_id: isPoolId(row.id) ? row.id : null, name: row.name, qty: 1, positions: [], item_key: itemKey, source, note: null, unit: row.unit === "set" ? "set" : row.unit === "l" ? "l" : "pc" });
       return next;
     });
   }
@@ -138,7 +138,7 @@ export function PartPicker({
   );
   const posBtn = (on: boolean, big = false) => `${big ? "min-h-11 px-3 text-sm" : "min-h-9 px-2 text-xs"} rounded-control border font-bold ${on ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`;
 
-  const row = (c: CatalogueRow | { id: string; name: string; needs_position: boolean; category: string; unit?: "each" | "set"; paired?: boolean }, entry: PartsListEntry | undefined) => {
+  const row = (c: CatalogueRow | { id: string; name: string; needs_position: boolean; category: string; unit?: "each" | "set" | "l"; paired?: boolean }, entry: PartsListEntry | undefined) => {
     const key = entry ? keyOf(entry) : pickKey(c);
     const sides = sidesOf(c);
     const pairOn = (choice: (typeof PAIR_CHOICES)[number]) => !!entry && entry.positions.length === choice.positions.length && choice.positions.every((p) => entry.positions.includes(p));
@@ -154,7 +154,7 @@ export function PartPicker({
           <div className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-2">
             <span className="inline-flex items-center rounded-control border border-line-strong bg-white">
               <button type="button" aria-label="One less" onClick={() => update(key, { qty: Math.max(1, entry.qty - 1) })} className="min-h-10 w-10 text-lg font-bold">−</button>
-              <span className="min-w-8 px-1 text-center text-sm font-bold">{entry.qty}{entry.unit === "set" ? ` set${entry.qty === 1 ? "" : "s"}` : ""}</span>
+              <span className="min-w-8 px-1 text-center text-sm font-bold">{entry.qty}{entry.unit === "set" ? ` set${entry.qty === 1 ? "" : "s"}` : entry.unit === "l" ? " L" : ""}</span>
               <button type="button" aria-label="One more" onClick={() => update(key, { qty: entry.qty + 1 })} className="min-h-10 w-10 text-lg font-bold">+</button>
             </span>
             {c.paired ? (

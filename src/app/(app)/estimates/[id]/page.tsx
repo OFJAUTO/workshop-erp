@@ -1,5 +1,5 @@
 import { compJobChoices } from "@/lib/quote-data";
-import { belowCostReady } from "@/lib/schema-ready";
+import { belowCostReady, partUnitsReady } from "@/lib/schema-ready";
 import { damagedPanelsOf } from "@/lib/damage-data";
 import Link from "next/link";
 import { installerHistoryFor } from "@/lib/bodyshop";
@@ -146,6 +146,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           labourRate: labourRateFor(settings, null, vehicle?.make?.name ?? null),
           minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
           partMarkupWarn: costLimitsOf(settings as unknown as Record<string, unknown>).markupWarnPercent,
+          unitsReady: await partUnitsReady(),
           inspectionFee: Number(settings.inspection_fee_aed) || 0,
           discountLimit: Number(settings.discount_limit_percent) || 0,
           approvalAbove: Number(settings.quote_owner_approval_above_aed) || 0,

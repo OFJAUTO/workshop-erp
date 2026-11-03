@@ -1,5 +1,6 @@
 import { compApprovalReason, compCost, compLinesOf, type CompCost } from "./complimentary";
-import { BELOW_COST_SELECT, COMP_SELECT, belowCostReady, compReady } from "./schema-ready";
+import { BELOW_COST_SELECT, COMP_SELECT, PART_LINE_EXTRA_SELECT, belowCostReady, compReady, partUnitsReady } from "./schema-ready";
+import { cleanUnit, requestUnitOf } from "./part-units";
 import "server-only";
 import { createAdminClient } from "./supabase/admin";
 import { loadInspection, INSPECTION_BUCKET, type InspectionBundle, type InspectionMediaRow } from "./inspection-data";
@@ -9,7 +10,7 @@ import { ownerApprovalReasons, quoteTotals, lineTotal, round2, type PartItem, ty
 import { expectedFeeCost, type Settings } from "./settings";
 import { newToken } from "./media";
 import { dubaiDate } from "./jobs";
-import { loadPricingRows, pricingPartSelect, valuesOfPart, type PricingPart } from "./parts-pricing";
+import { loadPricingRows, pricingPartSelect, reopenPricingFor, valuesOfPart, type PricingPart } from "./parts-pricing";
 import { costChecksFor } from "./part-cost-history";
 import { rowState } from "./parts-rows";
 import { costingWithRolls, type PackageCostingBase } from "./package-cost";
@@ -94,6 +95,24 @@ export async function attachBelowCost<T extends QuoteLine>(lines: T[]): Promise<
   });
 }
 
+/**
+ * Section 9 (3 November 2026): the part lines' unit (pieces, litres, sets), the advisor's asked quantity, the quantity
+ * change stamps and the shared row's list price and supplier discount, once the columns exist (migration
+ * 20261203160000). Before it nothing is read and every line stays in pieces.
+ */
+export async function attachPartLineExtras<T extends QuoteLine>(lines: T[]): Promise<T[]> {
+  if (!lines.some((l) => l.line_type === "part") || !(await partUnitsReady())) return lines;
+  const qids = Array.from(new Set(lines.map((l) => l.quotation_id)));
+  const { data } = await createAdminClient().from("quotation_lines").select(PART_LINE_EXTRA_SELECT).in("quotation_id", qids).eq("line_type", "part");
+  const byId = new Map(((data ?? []) as unknown as { id: string; unit: string | null; asked_quantity: number | string | null; quantity_changed_at: string | null; quantity_changed_by: string | null; list_price_aed: number | string | null; supplier_discount_percent: number | string | null }[]).map((r) => [r.id, r]));
+  const n = (v: number | string | null) => (v === null || v === undefined || v === "" ? null : Number(v));
+  return lines.map((l) => {
+    const r = byId.get(l.id);
+    if (!r) return l;
+    return { ...l, unit: cleanUnit(r.unit) ?? "pc", asked_quantity: n(r.asked_quantity), quantity_changed_at: r.quantity_changed_at, quantity_changed_by: r.quantity_changed_by, list_price_aed: n(r.list_price_aed), supplier_discount_percent: n(r.supplier_discount_percent) };
+  });
+}
+
 /** One quotation or estimate with everything the builder and the customer page need. */
 export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
   const admin = createAdminClient();
@@ -124,7 +143,7 @@ export async function loadQuotation(id: string): Promise<QuoteBundle | null> {
   const nameOf = new Map((people ?? []).map((p) => [p.id, p.display_name]));
   return {
     quotation,
-    lines: await attachBelowCost(((lines ?? []) as Record<string, unknown>[]).map(toLine)),
+    lines: await attachPartLineExtras(await attachBelowCost(((lines ?? []) as Record<string, unknown>[]).map(toLine))),
     parts: ((parts ?? []) as Record<string, unknown>[]).map(toPart),
     requests: (requests ?? []) as PartRequest[],
     events: ((events ?? []) as { id: number; event_type: string; note: string | null; created_at: string; created_by: string | null }[]).map((e) => ({ ...e, by_name: e.created_by ? (nameOf.get(e.created_by) ?? null) : null })),
@@ -180,7 +199,7 @@ export async function loadQuoteSummaries(jobIds: string[]): Promise<Map<string, 
     admin.from("quotations").select("id, job_id, number, version, status, token, sent_at, opened_at, responded_at, approver_name, total_aed, approved_total_aed, valid_until, promised_at, created_at, completed_at, viewed_full_at").in("job_id", jobIds).eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false }),
     admin.from("part_items").select(`job_id, ${partSelect}`).in("job_id", jobIds).eq("is_active", true),
     admin.from("part_requests").select("job_id, status").in("job_id", jobIds).eq("is_active", true),
-    admin.from("jobs").select("id").in("id", jobIds).not("parts_pricing_done_at", "is", null),
+    admin.from("jobs").select("id").in("id", jobIds).not("parts_pricing_done_at", "is", null).is("parts_pricing_reopened_at", null),
   ]);
   const pricingDone = new Set((doneJobs ?? []).map((j) => j.id as string));
   for (const id of jobIds) out.set(id, { quotation: null, waitingPrices: 0, waitingConfirm: 0, rejectedParts: 0, openRequests: 0, partsTotal: 0, partsPriced: 0, labourTotal: 0, labourDone: 0 });
@@ -200,7 +219,9 @@ export async function loadQuoteSummaries(jobIds: string[]): Promise<Map<string, 
       s.partsTotal!++;
       // The same "priced" as the Parts table: part number, type, net above 0, a real supplier, availability, a real price.
       if (rowState(valuesOfPart(p, today, checks.get(p.id))) === "priced") s.partsPriced!++;
-      else s.waitingPrices++;
+      // Section 10 (3 November 2026): once Parts pressed "Pricing done – send to advisor" (even "Send what you have"),
+      // nothing waits on Parts any more: the quotation is the advisor's until Parts reopen the pricing.
+      else if (!pricingDone.has(p.job_id)) s.waitingPrices++;
     }
   }
   for (const r of (requests ?? []) as { job_id: string; status: string }[]) if (r.status === "open" && !pricingDone.has(r.job_id)) out.get(r.job_id)!.openRequests++;
@@ -259,7 +280,9 @@ export async function ensurePartRequests(jobId: string, by: string): Promise<num
         label: line.name,
         requested_text: [`× ${line.qty}`, positionsWords(line.positions), line.note ?? ""].filter(Boolean).join(" · "),
         quantity: line.qty,
-        unit: line.unit === "set" ? "set" : "pc",
+        // Sets and litres as listed, else read from the name: the technician never chooses a unit, so a listed fluid
+        // ("ENGINE OIL 0W-20") reaches Parts in litres (review of 3 November 2026).
+        unit: requestUnitOf(line.name, line.unit),
         positions: line.positions,
         note: line.note,
         catalogue_id: line.catalogue_id,
@@ -267,7 +290,10 @@ export async function ensurePartRequests(jobId: string, by: string): Promise<num
         updated_by: by,
       });
     }
-    if (rows.length) await admin.from("part_requests").insert(rows);
+    if (rows.length) {
+      await admin.from("part_requests").insert(rows);
+      await reopenPricingFor(jobId, by);
+    }
     return rows.length;
   }
   for (const i of bundle.items) {
@@ -297,7 +323,10 @@ export async function ensurePartRequests(jobId: string, by: string): Promise<num
       rows.push({ job_id: jobId, inspection_id: bundle.inspection.id, source_type: "tyre", source_key: p.key, label: `${p.label} tyre`, requested_text: `Replace ${action === "replace_now" ? "now" : "soon"}${m[`tyre_${p.key}_tread`] ? ` · ${m[`tyre_${p.key}_tread`]} mm` : ""}`, created_by: by, updated_by: by });
     }
   }
-  if (rows.length) await admin.from("part_requests").insert(rows);
+  if (rows.length) {
+    await admin.from("part_requests").insert(rows);
+    await reopenPricingFor(jobId, by);
+  }
   return rows.length;
 }
 

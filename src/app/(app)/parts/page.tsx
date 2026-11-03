@@ -13,7 +13,7 @@ import { Button, Input,Badge, Card, LinkButton, Notice, PageHeader, SectionLabel
 import { requirePermission } from "@/lib/auth";
 import { STATUS_LABELS, type JobStatus,formatWait, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
 import { REQUEST_SELECT } from "@/lib/quote-data";
-import { PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, toPartFull, toPo, toPoLine } from "@/lib/parts-data";
+import { PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, partUnitsOf, toPartFull, toPo, toPoLine } from "@/lib/parts-data";
 import { SupplierLpoCard } from "./SupplierLpoCard";
 import { emailSupplierLpo, markSupplierOrdered, setPartExpectedDate } from "./lpo-actions";
 import { gmailConfigured } from "@/lib/gmail";
@@ -28,6 +28,7 @@ import { PartsSteps } from "@/components/PartsSteps";
 import { realPartNumber } from "@/lib/parts-rows";
 import { pricesToFix } from "@/lib/part-cost-history";
 import { PricesToFix } from "./PricesToFix";
+import { pricingTodoOf } from "@/lib/pricing-done";
 
 export const dynamic = "force-dynamic";
 
@@ -60,7 +61,10 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   const noHomeCount = (await partsWithNoHome()).length + (await creditNotesAwaited()).length;
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull).map((p) => ({ ...p, advisor_added_label: p.added_by_role === "service_advisor" && !p.part_request_id ? "Added by advisor" : null }));
   const today = todayIso();
-  const jobIds = Array.from(new Set([...requests.map((r) => r.job_id), ...parts.map((p) => p.job_id)]));
+  // A car whose only changes wait for the send (a request marked not available, a part removed) has no open request
+  // and maybe no active part: it is listed through its own "changes waiting" mark (review of 3 November 2026).
+  const { data: heldRows } = await admin.from("jobs").select("id").eq("is_open", true).not("parts_pricing_reopened_at", "is", null).limit(300);
+  const jobIds = Array.from(new Set([...requests.map((r) => r.job_id), ...parts.map((p) => p.job_id), ...(heldRows ?? []).map((j) => j.id as string)]));
   const { data: jobRows } = jobIds.length ? await admin.from("jobs").select("id, job_number, is_open, status, parts_pricing_done_at, parts_pricing_reopened_at, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name)").in("id", jobIds) : { data: [] };
   const jobs = new Map(((jobRows ?? []) as unknown as JobInfo[]).filter((j) => j.is_open).map((j) => [j.id, j]));
   // ORDER NOW: every approved supplier or stock LPO as a big card with its own clock.
@@ -80,6 +84,8 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
     onLines.set(l.po_id, [...(onLines.get(l.po_id) ?? []), l]);
   }
   const onCharges = await chargesByPo(onIds);
+  // Each ORDER NOW line's unit (pieces, litres, sets): "× 8 L" on the card and in the supplier copy.
+  const unitOfPart = await partUnitsOf(Array.from(onLines.values()).flat().map((l) => l.part_item_id));
   const approverIds = Array.from(new Set(orderNowPos.map((p) => p.approved_by).filter((x): x is string => !!x)));
   const { data: approverRows } = approverIds.length ? await admin.from("staff").select("id, display_name").in("id", approverIds) : { data: [] as { id: string; display_name: string }[] };
   const approverName = new Map((approverRows ?? []).map((x) => [x.id, x.display_name]));
@@ -109,8 +115,19 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
     return { min, tone: min >= target * 120 ? "red" : min >= target * 60 ? "amber" : "neutral" } as const;
   };
 
-  const toPrice = requests.filter((r) => jobs.has(r.job_id) && r.status === "open");
-  const waitingPrice = parts.filter((p) => jobs.has(p.job_id) && p.cost_aed === null && p.confirm_status !== "rejected");
+  // Section 10 (3 November 2026): ONE rule for the to-do list (pricingTodoOf). A car is to price while a request is open
+  // or a part is not priced (also after "Send what you have": those lines stay the desk's); "priced – send to the
+  // advisor" while a send is expected and something waits for it; off the list once sent; back on it when a new part
+  // arrives (the pricing reopens).
+  const todoOf = new Map<string, "to_price" | "to_send">();
+  for (const j of jobs.values()) {
+    const t = pricingTodoOf(j, requests.filter((r) => r.job_id === j.id), parts.filter((p) => p.job_id === j.id));
+    if (t) todoOf.set(j.id, t);
+  }
+  const toPriceJobs = Array.from(todoOf.entries()).filter(([, t]) => t === "to_price").map(([id]) => id);
+  const toSendJobs = Array.from(todoOf.entries()).filter(([, t]) => t === "to_send").map(([id]) => id);
+  const toPrice = requests.filter((r) => todoOf.get(r.job_id) === "to_price" && r.status === "open");
+  const waitingPrice = parts.filter((p) => todoOf.get(p.job_id) === "to_price" && p.cost_aed === null && p.confirm_status !== "rejected" && p.order_status === "none");
   const toOrder = parts.filter((p) => jobs.has(p.job_id) && p.order_status === "to_order" && !p.po_id);
   // Deliveries expected = genuinely ordered. A part on a pending LPO sits under Waiting for owner approval; on an approved one it is ORDER NOW.
   const ordered = parts.filter((p) => jobs.has(p.job_id) && (p.order_status === "ordered" || p.order_status === "partly_received"));
@@ -196,7 +213,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
                   <span className="text-muted">· {po.supplier_name} · {lines.length} part{lines.length === 1 ? "" : "s"} · AED {po.total_cost_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span>
                   <span className={`ml-auto text-xs font-bold ${mins >= redMin ? "text-red" : mins >= amberMin ? "text-amber-bar" : "text-muted"}`} data-order-wait>Approved{po.approved_by ? ` by ${approverName.get(po.approved_by) ?? ""}` : ""}{po.approved_at ? ` ${formatDayTime(po.approved_at)}` : ""} · waiting {formatWait(mins, wt)}</span>
                 </span>
-                <SupplierLpoCard po={{ id: po.id, number: po.number, supplier_name: po.supplier_name, status: po.status, ordered_at: po.ordered_at, verify_token: po.verify_token, sent_at: po.sent_at, emailed_at: po.emailed_at, emailed_to: po.emailed_to, total_cost_aed: po.total_cost_aed, lines: lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: parts.find((x) => x.id === l.part_item_id)?.positions ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: onCharges.get(po.id) ?? [] }} vin={j?.vehicle?.vin ?? null} canManage={!staff.viewingAs} onOrdered={markSupplierOrdered.bind(null, po.id)} onSetDate={setPartExpectedDate} supplierEmail={po.supplier_id ? (supplierEmail.get(po.supplier_id) ?? null) : null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, po.id)} jobId={po.job_id} />
+                <SupplierLpoCard po={{ id: po.id, number: po.number, supplier_name: po.supplier_name, status: po.status, ordered_at: po.ordered_at, verify_token: po.verify_token, sent_at: po.sent_at, emailed_at: po.emailed_at, emailed_to: po.emailed_to, total_cost_aed: po.total_cost_aed, lines: lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: parts.find((x) => x.id === l.part_item_id)?.positions ?? null, unit: unitOfPart.get(l.part_item_id) ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: onCharges.get(po.id) ?? [] }} vin={j?.vehicle?.vin ?? null} canManage={!staff.viewingAs} onOrdered={markSupplierOrdered.bind(null, po.id)} onSetDate={setPartExpectedDate} supplierEmail={po.supplier_id ? (supplierEmail.get(po.supplier_id) ?? null) : null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, po.id)} jobId={po.job_id} />
               </Card>
             );
           })}
@@ -213,33 +230,46 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
                 <span className="text-sm"><span className="font-bold">{e.plate}</span> · {e.car}{e.advisor ? <span className="text-muted"> · Advisor {e.advisor}</span> : null}</span>
                 <span className="flex flex-wrap items-center gap-2 text-sm font-semibold text-amber">{estimateTaskWords(e)}{e.vin ? <CopyVin vin={e.vin} /> : <span className="text-xs font-normal text-muted">VIN not known yet</span>}</span>
               </span>
-              <LinkButton href={`/parts/estimate/${e.id}`} size="md" data-estimate-price-open>{e.toPrice ? "Price the parts" : "Check the price"}</LinkButton>
+              <LinkButton href={`/parts/estimate/${e.id}#pricing`} size="md" data-estimate-price-open>{e.toPrice ? "Price the parts" : e.toCheck ? "Check the price" : "Send to advisor"}</LinkButton>
             </Card>
           ))}
         </section>
       ) : null}
 
-      {toPrice.length || waitingPrice.length ? (
-      <section className="flex flex-col gap-3">
-        <SectionLabel right={`${toPrice.length + waitingPrice.length}`}>To price <span className="cursor-help font-normal text-muted" title={`What the technician asked for on the approved report. Target: ${target} working hours, amber past it, red at double.`}>ⓘ</span></SectionLabel>
-        {byJob(toPrice).map((jobId) => {
+      {toSendJobs.length ? (
+        <section className="flex flex-col gap-3" data-to-send-section={toSendJobs.length}>
+          <SectionLabel right={`${toSendJobs.length}`}>Priced – send to the advisor <span className="cursor-help font-normal text-muted" title="Every part on these cars is priced, but Pricing done – send to advisor was not pressed: the advisor does not know yet.">ⓘ</span></SectionLabel>
+          {toSendJobs.map((jobId) => (
+            <Card key={jobId} className="flex flex-wrap items-center gap-3 !border-ink" data-to-send-car={jobId}>
+              <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}#pricing`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{dotsOf(jobId)}</span>
+              <span className="text-sm font-semibold text-amber">{jobs.get(jobId)?.parts_pricing_reopened_at && jobs.get(jobId)?.parts_pricing_done_at ? "Changed since you sent it" : "Ready to send – the advisor does not know yet"}</span>
+              <LinkButton href={`/parts/${jobId}#pricing`} size="md" className="ml-auto" data-to-send-open>Send to advisor</LinkButton>
+            </Card>
+          ))}
+        </section>
+      ) : null}
+
+      {toPriceJobs.length ? (
+      <section className="flex flex-col gap-3" data-to-price-section={toPriceJobs.length}>
+        <SectionLabel right={`${toPriceJobs.length}`}>To price <span className="cursor-help font-normal text-muted" title={`What the technician asked for on the approved report. Target: ${target} working hours, amber past it, red at double. A car leaves this list when you press Pricing done – send to advisor.`}>ⓘ</span></SectionLabel>
+        {toPriceJobs.filter((jobId) => toPrice.some((r) => r.job_id === jobId) || !waitingPrice.some((p) => p.job_id === jobId)).map((jobId) => {
           const rows = toPrice.filter((r) => r.job_id === jobId);
-          const oldest = rows.map((r) => r.created_at).sort()[0];
+          const oldest = rows.map((r) => r.created_at).sort()[0] ?? parts.filter((p) => p.job_id === jobId).map((p) => p.created_at).sort()[0];
           const t = tone(oldest);
           return (
-            <Card key={jobId} className={`flex flex-col gap-1 ${t.tone === "red" ? "!border-red-bar" : t.tone === "amber" ? "!border-amber-bar" : ""}`}>
+            <Card key={jobId} className={`flex flex-col gap-1 ${t.tone === "red" ? "!border-red-bar" : t.tone === "amber" ? "!border-amber-bar" : ""}`} data-to-price-car={jobId}>
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{dotsOf(jobId)}<CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
                 <span className="flex items-center gap-2"><Badge tone={t.tone === "neutral" ? "outline" : t.tone}>waiting {formatWait(t.min, wt)}</Badge><LinkButton href={`/parts/${jobId}`} size="md">Price the parts</LinkButton></span>
               </div>
-              <details>
+              {rows.length ? <details>
                 <summary className="cursor-pointer text-sm font-semibold text-muted">{rows.length} request{rows.length === 1 ? "" : "s"}</summary>
                 <ul className="text-sm divide-y divide-line">
                   {rows.map((r) => (
                     <li key={r.id} className="py-1.5"><span className="font-semibold">{r.label}</span>{r.requested_text ? <span className="text-muted"> · {r.requested_text}</span> : null}</li>
                   ))}
                 </ul>
-              </details>
+              </details> : <span className="text-sm text-muted">Parts not finished: open the car to finish them.</span>}
             </Card>
           );
         })}

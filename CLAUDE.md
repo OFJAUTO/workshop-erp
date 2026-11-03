@@ -315,3 +315,59 @@ Lessons:
 - FormGuard dims the tapped submit button for five seconds, and ReleaseFormLock clears only the lock, so an answer shown in place must also wake the button;
 - a window that stays open after its save while its own row greys out (`opacity-60`) must be portalled to `document.body` (`EndDialog` is): inside the row it turned see-through, the rows below painted over it and Close could not be tapped (found by test-s7 C at integration);
 - `app_errors`' time column is `at`, not `created_at`; the pop-up check opens the ending's result window ("Ending saved (Returns and leftovers)", parts `…e79x`).
+
+Sections 9 and 10 of 2 November 2026 (built 3 November, review fixes the same day; migrations `20261203160000_part_units.sql` and `20261203170000_estimate_pricing_done.sql`, dormant behind `partUnitsReady`/`estimatePricingReady`; note `docs/2-nov-s9-10-note.md`; tests `npm run test:s9-qty|test:s10-pricing|test:s9-s10` plus unit tests `part-units` and `pricing-done`).
+
+E-00058: the estimate desk had its own form with "×1" as plain text, and there was no unit anywhere. ONE parts form now: `PartsTable` takes `estimate={id, number, preparing}` and its `Row` saves through `saveEstimatePartRow` (estimate-actions.ts maps RowValues onto the line; priced_at only when `rowState` is priced). The desk-only extras are `EstimateLineExtras` (Price is right ✓ sets the row's `advisor_price` to "checked" at once, `markChecked`; tell the advisor). `loadEstimateDesk`/`estimateBarMode`/`estimateAdvisors`/`estimateSentStamps` live in estimate-parts-data.ts.
+
+Units: pure `src/lib/part-units.ts`:
+- `cleanUnit`, `defaultUnitFor`, `checkQuantity`, `quantityChangeWords` ("Advisor asked 1, Parts changed to 8 L"), `qtyWithUnit`/`unitSuffix`/`perUnitWords`/`perUnitMark`, `partKindOf`/`lastQuantity`/`qtyMemoryWords`.
+- Review additions: `requestUnitOf(label, stored)` is THE request unit (a stored "pc" never hides litres; used by `valuesOfRequest`, `autoSavePartRow`, `ensurePartRequests` and the page's askedUnit). `stepQuantity` makes − and + step from the number (6.5 → 7.5 L). `askerOfRequest` is THE asker: an inspection request or `additional:` work is the technician's, whoever approved it; otherwise the maker, else `added_by_role`. It is used by the job parts page and by `askerOfPart`.
+
+Rows and documents:
+- ONE `QtyUnitBox`.
+- `TableRow.qtyChangedBy/savedQty` name who changed a quantity on the row.
+- `part_items.unit` and `quotation_lines.unit/asked_quantity/quantity_changed_*/list_price_aed/supplier_discount_percent` are read through `attachPartLineExtras`, `pricingPartSelect`, `attachInvoiceUnits`, `loadPurchaseOrder` and `partUnitsOf` (parts-data.ts, for the LPO cards' "× 8 L · AED 165.00/L" and their Copy text).
+- `partLineName(…, {quantity, unit})` and `qtyText(q, hours, unit)` print "· 8 L" and "8 L".
+
+The quantity rule on the server is `src/lib/part-quantity.ts` (`logPartQuantity`, `setJobPartQuantity`, which is lenient before the migration).
+- The save route refuses a quantity, or a unit-only change, that breaks `checkQuantity`.
+- `autoSavePartRow` checks the quantity against the unit the part will really have: typed, saved, its request's or its name's.
+- `src/lib/part-memory.ts` `lastQuantitiesFor` reads in 150-id pieces and pages.
+- A litre part prints one sticker.
+- `estimateLineRows` (gate-in) carries a half-typed estimate price as an unfinished part with no priced_at and no quotation line.
+
+Section 10: pure `src/lib/pricing-done.ts`:
+- `pricingProgress` gives "3 of 4 priced" (`count` includes removed lines).
+- `pricingDoneTitle(ref, p, again, auto)`: All parts priced / Parts priced n of m / Prices updated / Parts changes / No parts left / Parts not available.
+- `pricingDoneBody` (with `auto`).
+- `awaitingSend` = `holdPerPartNotices`: before approval until the first send, or once reopened; past approval only when reopened. A car past approval never sent holds nothing.
+- `jobPricingTodo`/`pricingTodoOf`: to_price while a request is open or a part is unpriced, also after a send ("Send what you have" leaves those lines the desk's) and on approved cars. to_send while `awaitingSend` and (a part priced since the send, or `parts_pricing_reopened_at`).
+- `estimateDeskTodo`/`estimateLineMoment`: per line by `estimatePartState`; with_desk is to price whatever was sent.
+
+`parts_pricing_reopened_at` means "changes wait for a send":
+- Edit sets it.
+- `reopenPricingFor` sets it on a new part: a sent pricing, or any car past approval in the pricing phase; never in planning; returns the stamp.
+- `holdForSend(job, by)` (parts-pricing.ts) is THE gate for every advisor per-part notice: not available, quantity, removed, split, changed after the quotation went out. It stamps the mark, so the car stays listed. /parts and the Parts dashboard also read jobs carrying the mark.
+
+THE send is `src/lib/pricing-send.ts`:
+- `sendJobPricing` is used by `pricingDone`. It folds `FOLDED_EVENTS`. It answers "Already sent … Nothing changed since." when sent and not reopened, and closes quietly after Edit with nothing changed.
+- `releaseHeldPricing` sends what is still held, by itself ("Parts changes on J-…"), from `applyCustomerResponse` and cron step 28 (`releaseHeldPricingHourly`, report key `pricingReleased`).
+
+The estimate send:
+- `estimatePricingDone` stamps `quotations.parts_priced_at`. Until that column exists, the send is read from the "parts_pricing_done" quotation event (`estimateSentStamps`). It answers "Already sent…" when nothing changed.
+- `loadEstimatesToPrice` reads open estimates page by page, then their lines through `pageAllIn`.
+
+ONE `PricingDoneBar` (useActionState):
+- Hooks: `data-pricing-bar/-progress/-done/-open-list/-open-line/-go/-go-next/-send-anyway/-sent/-sent-open/-locked/-edit/-editing/-jump-strip/-show-list`.
+- The answer shows in every mode until Edit.
+- Go to folds the list into one line and scrolls the row above the bar.
+
+`/parts`, the Parts tile, Parts' Waiting (`pricingToSendItems`) and `loadQuoteSummaries` follow the send.
+
+Lessons:
+- A `.select()` built from a template loses its type, so cast it.
+- A status-line chip must stay `h-5`, or test-f's same-height check fails.
+- A stored column default of 'pc' hides the name-based unit, so a request's "pc" is read as "no answer".
+- A rule that holds notifications must be the same rule that puts the car on a to-do list, or a held notice is lost.
+- A send button whose stamp column may not exist yet needs another record of the send (the history event), or the button never shows its answer and sends twice.

@@ -15,7 +15,7 @@ import { lpoProblemAdvice } from "@/lib/part-cost-check";
 import { invoiceHref } from "@/lib/supplier-invoices";
 import { realPartNumber } from "@/lib/parts-rows";
 import { changeWords } from "@/lib/price-change";
-import { PO_STATUS_LABELS, loadPurchaseOrder } from "@/lib/parts-data";
+import { PO_STATUS_LABELS, loadPurchaseOrder, partUnitsOf } from "@/lib/parts-data";
 import { partTypeText } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { reasonsFor } from "@/lib/reasons";
@@ -88,6 +88,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const supplierDigits = (bundle.supplier?.phone ?? "").replace(/[^\d]/g, "");
   const sendable = !isMain && po.status !== "pending_approval" && po.status !== "cancelled" && !!po.verify_token;
   const children = (lpos?.suppliers ?? []).filter((s) => s.po.parent_id === po.id);
+  // Each line's unit (pieces, litres, sets) for the cards' "× 8 L" and the supplier copy.
+  const unitOfPart = await partUnitsOf([...children.flatMap((s) => s.lines.map((l) => l.part_item_id)), ...bundle.lines.map((l) => l.part_item_id ?? "")]);
   // The main LPO while it waits: the lines grouped by supplier (the parts still point at it), a subtotal each.
   const groups = (() => {
     const m = new Map<string, typeof lines>();
@@ -163,7 +165,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             <section className="flex flex-col gap-3" data-supplier-lpos>
               <SectionLabel right={`${children.length}`}>Supplier LPOs</SectionLabel>
               {children.map((s) => (
-                <SupplierLpoCard key={s.po.id} po={{ id: s.po.id, number: s.po.number, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, sent_at: s.po.sent_at, emailed_at: s.po.emailed_at, emailed_to: s.po.emailed_to, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: bundle.parts.find((x) => x.id === l.part_item_id)?.positions ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges, ended: endedByPo.get(s.po.id) ?? [] }} vin={v?.vin ?? null} canManage={canManage} onOrdered={markSupplierOrdered.bind(null, s.po.id)} onSetDate={setPartExpectedDate} supplierEmail={supplierEmailOf.get(s.po.supplier_id ?? "") ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, s.po.id)} jobId={po.job_id} />
+                <SupplierLpoCard key={s.po.id} po={{ id: s.po.id, number: s.po.number, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, sent_at: s.po.sent_at, emailed_at: s.po.emailed_at, emailed_to: s.po.emailed_to, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: bundle.parts.find((x) => x.id === l.part_item_id)?.positions ?? null, unit: unitOfPart.get(l.part_item_id ?? "") ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges, ended: endedByPo.get(s.po.id) ?? [] }} vin={v?.vin ?? null} canManage={canManage} onOrdered={markSupplierOrdered.bind(null, s.po.id)} onSetDate={setPartExpectedDate} supplierEmail={supplierEmailOf.get(s.po.supplier_id ?? "") ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, s.po.id)} jobId={po.job_id} />
               ))}
             </section>
           ) : null}
@@ -286,7 +288,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             <Card className="flex flex-col gap-2 border-ink">
               <SectionLabel>Send it, then Ordered</SectionLabel>
               <p className="text-sm text-muted">Copy the text or send the PDF to {po.supplier_name}, then press Ordered: the arrival dates follow from the availability entered at pricing, and any date can be changed with a tap.</p>
-              <SupplierLpoCard po={{ id: po.id, number: po.number, supplier_name: po.supplier_name, status: po.status, ordered_at: po.ordered_at, verify_token: po.verify_token, sent_at: po.sent_at, emailed_at: po.emailed_at, emailed_to: po.emailed_to, total_cost_aed: po.total_cost_aed, lines: lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: bundle.parts.find((x) => x.id === l.part_item_id)?.positions ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: bundle.charges, ended: endedHere }} vin={v?.vin ?? null} canManage={canManage} onOrdered={markSupplierOrdered.bind(null, po.id)} onSetDate={setPartExpectedDate} supplierEmail={bundle.supplier?.email ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, po.id)} jobId={po.job_id} />
+              <SupplierLpoCard po={{ id: po.id, number: po.number, supplier_name: po.supplier_name, status: po.status, ordered_at: po.ordered_at, verify_token: po.verify_token, sent_at: po.sent_at, emailed_at: po.emailed_at, emailed_to: po.emailed_to, total_cost_aed: po.total_cost_aed, lines: lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: bundle.parts.find((x) => x.id === l.part_item_id)?.positions ?? null, unit: unitOfPart.get(l.part_item_id ?? "") ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: bundle.charges, ended: endedHere }} vin={v?.vin ?? null} canManage={canManage} onOrdered={markSupplierOrdered.bind(null, po.id)} onSetDate={setPartExpectedDate} supplierEmail={bundle.supplier?.email ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, po.id)} jobId={po.job_id} />
             </Card>
           ) : null}
           {(po.status === "ordered" || po.status === "partly_received") && canManage ? (

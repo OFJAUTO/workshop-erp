@@ -34,6 +34,9 @@ export const isEstimatePart = (l: Pick<EstimatePartLine, "line_type" | "part_ite
 export function estimatePartState(l: EstimatePartLine): EstimatePartState {
   if (l.unit_cost === null || l.unit_cost === undefined) return l.price_requested_at ? "with_desk" : "draft";
   if (l.priced_by_advisor) return l.price_checked_at ? "checked" : "advisor";
+  // 3 November 2026: the parts desk's row saves itself as it is typed (the shared Parts row), so a cost alone is not a
+  // price: the line is priced once the whole row is (priced_at is written then, and cleared when the row is undone).
+  if (!l.priced_at && l.price_requested_at) return "with_desk";
   return "priced";
 }
 
@@ -51,7 +54,7 @@ const counted = (l: EstimatePartLine) => l.is_active !== false && !l.left_off &&
 
 /** The estimate's part lines that still have no price, split by whether the parts desk has them. */
 export function unpricedEstimateParts(lines: EstimatePartLine[]): { notSent: EstimatePartLine[]; withDesk: EstimatePartLine[] } {
-  const open = lines.filter((l) => isEstimatePart(l) && counted(l) && (l.unit_cost === null || l.unit_cost === undefined));
+  const open = lines.filter((l) => isEstimatePart(l) && counted(l) && (estimatePartState(l) === "draft" || estimatePartState(l) === "with_desk"));
   return { notSent: open.filter((l) => !l.price_requested_at), withDesk: open.filter((l) => !!l.price_requested_at) };
 }
 

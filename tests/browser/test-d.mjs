@@ -7,6 +7,7 @@
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
+const until = async (fn, tries = 40, gap = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(gap); } return null; };
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 15 * 60 * 1000).unref();
 cleanupDb();
 
@@ -292,7 +293,9 @@ await section("U3 one part state", async () => {
     const shown = (await rowStates()).length;
     await page.getByRole("button", { name: /Show only unpriced/ }).click();
     await sleep(250);
-    const barAgrees = bar.includes(text) || (c.nf > 0 && new RegExp(`${c.nf} parts? not finished`).test(bar));
+    // Section 10: the bar says "n of m priced" (priced + not available of every line) with the rest in words.
+    const prog = (await page.locator("[data-pricing-progress]").getAttribute("data-pricing-progress").catch(() => "")) ?? "";
+    const barAgrees = prog === `${c.priced + c.na}/${c.priced + c.na + c.nf}` && (c.nf === 0 || new RegExp(`${c.nf} not finished`).test(bar));
     check(`U3 agreement, ${label}: counter ${JSON.stringify(c)} = rows = filter (${shown} shown) = bar`, c.priced === rows.priced && c.na === rows.na && c.nf === rows.nf && shown === states.length - rows.priced && barAgrees && (!want || (c.priced === want.priced && c.na === want.na && c.nf === want.nf)), `rows=${JSON.stringify(rows)} bar="${bar}"`);
   };
   // Names are sentence-cased by the database ("Front brake pads"), so the match ignores case.
@@ -331,35 +334,35 @@ await section("U3 one part state", async () => {
   await fill(rowOf("front brake pads"), { avail: "d3" });
   await fill(rowOf("rear brake discs"), { pn: "RD-2", list: "400", avail: "d2" });
   await agree("after pricing: one net 0, one not available", { priced: 3, na: 1, nf: 1 });
-  // Pricing done with one unfinished row: no browser prompt; the row goes red, the bar names it, Go to next and Send what you have appear.
-  const urlBefore = page.url();
-  await page.getByRole("button", { name: "Pricing done", exact: true }).click();
+  // Section 10 (3 November 2026): "Pricing done – send to advisor" with one unfinished row sends nothing: the open
+  // line is listed right above the button (Go to, Send what you have) and the row goes red.
+  const sentBefore = (await sql("select count(*)::int as n from public.notifications where job_id = $1 and type = 'parts_priced'", [jobId]))[0]?.n ?? 0;
+  await page.locator("[data-pricing-done]").click();
   await sleep(400);
-  const bar1 = await barText();
-  check("U3/12: the bar names the part and the missing piece: 1 part not finished · E2e disc: net price is 0", /1 part not finished · E2e disc: net price is 0/.test(bar1), bar1);
+  const list1 = ((await page.locator("[data-pricing-open-list]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check("U3/12: the bar lists the part and the missing piece instead of sending: 1 part not priced yet · E2E DISC · net price is 0", /1 part not priced yet/.test(list1) && /E2E DISC/i.test(list1) && /net price is 0/.test(list1), list1);
   check("U3/12: the unfinished row is outlined red, the others are not", (await page.locator("[data-row-state='not_finished'].border-red-bar").count()) === 1 && (await page.locator("[data-row-key].border-red-bar").count()) === 1);
-  check("U3/12: Go to next and Send what you have are offered; nothing was submitted", (await page.getByRole("button", { name: "Go to next" }).count()) === 1 && (await page.getByRole("button", { name: "Send what you have" }).count()) === 1 && page.url() === urlBefore);
+  check("U3/12: Go to and Send what you have are offered; nothing was sent", (await page.locator("[data-pricing-go]").count()) === 1 && (await page.locator("[data-pricing-send-anyway]").count()) === 1 && !(await sql("select parts_pricing_done_at from public.jobs where id = $1", [jobId]))[0]?.parts_pricing_done_at);
   await agree("after Pricing done was pressed", { priced: 3, na: 1, nf: 1 });
-  await page.getByRole("button", { name: "Go to next" }).click();
+  await page.locator("[data-pricing-go]").first().click();
   await sleep(600);
-  check("U3/12: Go to next puts the cursor in the net box of the red row", (await page.evaluate(() => document.activeElement?.getAttribute("aria-label"))) === "Cost before VAT", await page.evaluate(() => document.activeElement?.getAttribute("aria-label")));
+  check("U3/12: Go to puts the cursor in the net box of the red row", (await page.evaluate(() => document.activeElement?.getAttribute("aria-label"))) === "Cost before VAT", await page.evaluate(() => document.activeElement?.getAttribute("aria-label")));
   await page.keyboard.press("Control+a");
   await page.keyboard.type("80");
   await page.keyboard.press("Tab");
   await sleep(2600);
   check("U3/12: once fixed the row turns green and the count drops to none", (await rowOf("E2e disc").getAttribute("data-row-state")) === "priced" && (await page.locator("[data-row-key].border-red-bar").count()) === 0);
   await agree("every part priced or not available", { priced: 4, na: 1, nf: 0 });
-  check("U3: the bar says every part is priced or marked not available", /Every part is priced or marked not available \(4 priced, 1 not available\)/.test(await barText()), await barText());
-  check("U3: no 'Send what you have' when nothing is open", (await page.getByRole("button", { name: "Send what you have" }).count()) === 0);
-  const urlAtDone = page.url();
-  await page.getByRole("button", { name: "Pricing done", exact: true }).click();
-  await page.waitForURL((u) => u.toString() !== urlAtDone && /message=|error=/.test(u.toString()), { timeout: 25000 }).catch(() => null);
-  await sleep(800);
-  check("U3: Pricing done went straight through to the advisor", /Sent%20to%20the%20advisor|Sent\+to\+the\+advisor/.test(page.url()), page.url());
-  const job = (await sql("select parts_pricing_done_at from public.jobs where id = $1", [jobId]))[0];
-  check("U3: the job records pricing done", !!job?.parts_pricing_done_at);
-  const note = (await sql("select body from public.notifications where job_id = $1 and type = 'parts_priced' order by id desc limit 1", [jobId]))[0];
-  check("U3: the advisor's notification carries the breakdown (4 priced, 1 not available)", /4 priced, 1 not available/.test(note?.body ?? ""), note?.body ?? "");
+  check("U3: the bar says 5 of 5 priced, 1 not available", /5 of 5 priced/.test((await page.locator("[data-pricing-progress]").textContent()) ?? "") && /1 not available/.test(await barText()), await barText());
+  check("U3: no list and no 'Send what you have' when nothing is open", (await page.locator("[data-pricing-send-anyway]").count()) === 0);
+  await page.locator("[data-pricing-done]").click();
+  const job = await until(async () => (await sql("select parts_pricing_done_at from public.jobs where id = $1", [jobId]))[0]?.parts_pricing_done_at ? 1 : null, 40, 500);
+  check("U3: the job records pricing done", !!job);
+  const sentWords = await until(async () => ((await page.locator("[data-pricing-sent]").count()) ? (await page.locator("[data-pricing-sent]").textContent()) : null), 30, 500);
+  check("U3: the answer shows in the bar itself: All parts priced on J-… – sent to …", /All parts priced on J-\d+ – sent to /.test(sentWords ?? ""), sentWords ?? "");
+  const notes = await sql("select title, body from public.notifications where job_id = $1 and type = 'parts_priced' order by id desc", [jobId]);
+  const note = notes[0];
+  check("U3: the advisor's ONE notification carries the breakdown (5 of 5 priced, 1 not available)", notes.length - sentBefore >= 1 && /^All parts priced on J-/.test(note?.title ?? "") && /5 of 5 parts priced by .* \(1 not available\)/.test(note?.body ?? ""), `${note?.title} · ${note?.body}`);
   await browser.close();
   // The quotation reads the same state: 4 of 5 parts priced, the one not available listed, no open request holding it.
   const adv = await browserFor("service_advisor", { viewport: { width: 1366, height: 900 } });

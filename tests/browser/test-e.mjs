@@ -258,7 +258,11 @@ await section("10-11 remove and discounts", async () => {
   check("10: saved as removed with the reason; off the quotation", dbRemoved?.is_active === false && dbRemoved?.removed_reason === "Duplicate" && Number((await sql("select count(*)::int as n from public.quotation_lines ql join public.quotations q on q.id = ql.quotation_id where q.job_id = $1 and ql.line_type = 'part' and ql.is_active", [jobId]))[0]?.n) === 0, JSON.stringify(dbRemoved));
   check("10: removed parts drop out of the pricing count", before !== (await counter()) && !/removed/.test(await counter()), `${before} -> ${await counter()}`);
   const told = await sql("select s.role_id from public.notifications n join public.staff s on s.id = n.staff_id where n.job_id = $1 and n.title like 'Part removed%'", [jobId]);
-  check("10: the advisor and the workshop manager are told", told.some((t) => t.role_id === "service_advisor") && told.some((t) => t.role_id === "workshop_manager"), JSON.stringify(told));
+  // Section 10 (3 November 2026, review the same day): the car's prices were never sent, so the advisor hears the
+  // removal inside the one "Pricing done – send to advisor" notification; the manager is told now; the car keeps a mark
+  // that a change waits for the send (it stays on the parts desk's list until it is pressed).
+  const held = (await sql("select parts_pricing_reopened_at from public.jobs where id = $1", [jobId]))[0];
+  check("10: the workshop manager is told now; the advisor's notice waits for the send (the car is marked)", !told.some((t) => t.role_id === "service_advisor") && told.some((t) => t.role_id === "workshop_manager") && !!held?.parts_pricing_reopened_at, JSON.stringify({ told, held }));
   await removedRow.getByRole("button", { name: /^Undo$|^Put back$/ }).click();
   await waitState(rowOf("front brake pads"), "not_finished");
   check("10: Put back restores the part", (await sql("select is_active, removed_at from public.part_items where job_id = $1 and description ilike 'front brake pads'", [jobId]))[0]?.is_active === true && (await rowOf("front brake pads").getAttribute("data-row-state")) !== "removed");

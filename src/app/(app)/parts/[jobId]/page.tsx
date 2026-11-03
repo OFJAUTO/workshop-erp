@@ -35,9 +35,12 @@ import { SendLpoButton } from "./SendLpoButton";
 import { refusalsReady } from "@/lib/lpo";
 import { costChecksFor } from "@/lib/part-cost-history";
 import { isSettledStatus, settledCostProblem } from "@/lib/part-cost-check";
-import { costConfirmReady } from "@/lib/schema-ready";
+import { costConfirmReady, partUnitsReady } from "@/lib/schema-ready";
 import { endingOf, endingsFor, endingWords, type EndingPart } from "@/lib/part-endings";
 import { cancelledSupplierLpos, endedLinesOf } from "@/lib/part-endings-server";
+import { askerOfRequest, requestUnitOf, whoOfRole, type QtyWho } from "@/lib/part-units";
+import { lastQuantitiesFor } from "@/lib/part-memory";
+import { PLANNING_STATUSES } from "@/lib/pricing-done";
 
 export const dynamic = "force-dynamic";
 
@@ -56,13 +59,14 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const { message, error } = await searchParams;
   const admin = createAdminClient();
   const settings = await getSettings();
+  const unitsReady = await partUnitsReady();
   const [{ data: job }, { data: reqRows }, { data: partRows }, { data: supplierRows }, { data: names }, insp, catalogue, { data: lastImportRow }, lpos] = await Promise.all([
     admin.from("jobs").select("id, vehicle_id, job_number, status, is_open, parts_pricing_done_at, parts_pricing_reopened_at, plan_parts_done_at, plan_parts_ready_date, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, tyre_size_front, tyre_size_rear, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle(),
-    admin.from("part_requests").select(REQUEST_SELECT + ", removed_at, removed_by, removed_reason").eq("job_id", jobId).eq("is_active", true).order("created_at"),
+    admin.from("part_requests").select(REQUEST_SELECT + ", removed_at, removed_by, removed_reason, created_by").eq("job_id", jobId).eq("is_active", true).order("created_at"),
     // Removed parts ("not needed") stay on the list, greyed, with Put back.
-    admin.from("part_items").select(PART_SELECT + `, po_id, expected_date, received_qty, issue_status, return_status, replaced_part_id, replacement_part_id, not_needed_at, not_needed_reason, disposition, disposition_at, disposition_by, disposition_note, stock_item_id, final_cost_aed, exchange_status${(await refusalsReady()) ? ", refused_at, refused_by, refused_reason" : ""}${(await costConfirmReady()) ? ", cost_confirmed_aed" : ""}`).eq("job_id", jobId).or("is_active.eq.true,removed_at.not.is.null").order("created_at"),
+    admin.from("part_items").select(PART_SELECT + `, po_id, expected_date, received_qty, issue_status, return_status, replaced_part_id, replacement_part_id, not_needed_at, not_needed_reason, disposition, disposition_at, disposition_by, disposition_note, stock_item_id, final_cost_aed, exchange_status, quantity_changed_by${(await refusalsReady()) ? ", refused_at, refused_by, refused_reason" : ""}${(await costConfirmReady()) ? ", cost_confirmed_aed" : ""}${unitsReady ? ", unit" : ""}`).eq("job_id", jobId).or("is_active.eq.true,removed_at.not.is.null").order("created_at"),
     admin.from("suppliers").select("id, name, default_discount_percent, discount_by_type").eq("is_active", true).order("name"),
-    admin.from("staff").select("id, display_name").eq("is_active", true),
+    admin.from("staff").select("id, display_name, role_id").eq("is_active", true),
     loadInspection(jobId),
     loadCatalogue(),
     // The last price import still in force, for "Undo last import".
@@ -94,8 +98,15 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     return settledCostProblem({ cost_aed: p.cost_aed, final_cost_aed: (raw?.final_cost_aed as number | string | null | undefined) ?? null, supplier: p.supplier }) ?? costChecks.get(p.id)?.ask?.words ?? null;
   };
   const nameOf = new Map((names ?? []).map((n) => [n.id, n.display_name]));
+  // Section 9: who asked for a part, for the one wording of a quantity change ("Advisor asked 1, Parts changed to 8 L"):
+  // THE rule is askerOfRequest (a request from the inspection or the technician's additional work is the technician's,
+  // whoever approved it onto the list; any other its maker's; a part with no request whoever added it).
+  const roleOf = new Map((names ?? []).map((n) => [n.id as string, n.role_id as string]));
+  const askerOf = (r: PartRequest | null, p?: PartItem): QtyWho => askerOfRequest(r, r ? (roleOf.get(String((r as PartRequest & { created_by?: string | null }).created_by ?? "")) ?? null) : null, p?.added_by_role ?? "parts");
+  // Who last changed a part's quantity (Parts, the advisor on the quotation, the owner): named on the row.
+  const changedByOf = (p: PartItem): QtyWho | null => { const by = rawById.get(p.id)?.quantity_changed_by as string | null | undefined; return by && roleOf.has(by) ? whoOfRole(roleOf.get(by)) : null; };
   const dangers = insp ? inspectionDangerous(insp) : [];
-  const inPlanning = ["approved", "waiting_parts"].includes(job.status) && job.is_open;
+  const inPlanning = PLANNING_STATUSES.includes(job.status) && job.is_open;
   const types = ((settings.part_types ?? []) as string[]).map((t) => t.toLowerCase());
   const canPrice = can(role, "priceParts") && !staff.viewingAs && job.is_open;
   const canOrder = can(role, "managePurchaseOrders") && !staff.viewingAs && job.is_open;
@@ -136,6 +147,10 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     name: p.description,
     original: p.original_description ?? null,
     techQty: Number(p.quantity) || 1,
+    askedBy: askerOf(r, p),
+    askedUnit: unitsReady && r ? requestUnitOf(r.label, r.unit) : null,
+    qtyChangedBy: changedByOf(p),
+    savedQty: Number(p.confirmed_quantity ?? p.quantity) || 1,
     info: infoOf(r, p),
     shownPositions: p.positions?.length ? p.positions : (r?.positions ?? null),
     // The same values and state function as the server's counts (src/lib/parts-pricing.ts), so nothing can disagree.
@@ -164,13 +179,23 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     question: p.question_text,
     answer: p.answer_text ? `${nameOf.get(p.answered_by ?? "") ?? "Manager"}: ${p.answer_text}` : null,
     perSet: r?.unit === "set",
+    qtyMemory: memory[key] ?? null,
   });
+  // 9.3: the quantity used last time for each part on the same model (or make); this job itself never counts.
+  const wants: { key: string; name: string; catalogueId: string | null }[] = [];
+  for (const r of requests) {
+    const items = parts.filter((p) => p.part_request_id === r.id);
+    if (items.length) items.forEach((p, i) => wants.push({ key: i === 0 ? `req:${r.id}` : p.id, name: p.description, catalogueId: r.catalogue_id ?? null }));
+    else wants.push({ key: `req:${r.id}`, name: r.label, catalogueId: r.catalogue_id ?? null });
+  }
+  for (const p of parts.filter((p) => !p.part_request_id)) wants.push({ key: p.id, name: p.description, catalogueId: null });
+  const memory = canPrice ? await lastQuantitiesFor(job.vehicle_id, wants, [job.job_number]) : {};
   const rows: TableRow[] = [];
   for (const r of requests) {
     const items = parts.filter((p) => p.part_request_id === r.id);
     // The row keeps the request's key once its part exists, so the screen never redraws under someone's fingers.
     if (items.length) items.forEach((p, i) => rows.push(rowOfPart(p, r, i === 0 ? `req:${r.id}` : p.id)));
-    else if (r.status !== "rejected" || r.removed_at) rows.push({ key: `req:${r.id}`, requestId: r.id, partId: null, name: r.label, original: null, techQty: Number(r.quantity) || 1, info: infoOf(r), shownPositions: r.positions ?? null, values: valuesOfRequest(r, types[0] ?? ""), optionGroup: null, unavailable: r.status === "unavailable", closedReason: r.closed_reason, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: r.unit === "set", removed: r.removed_at ? { by: nameOf.get(r.removed_by ?? "") ?? "Parts", reason: r.removed_reason ?? "" } : null, waitingApproval: false });
+    else if (r.status !== "rejected" || r.removed_at) rows.push({ key: `req:${r.id}`, requestId: r.id, partId: null, name: r.label, original: null, techQty: Number(r.quantity) || 1, askedBy: askerOf(r), askedUnit: unitsReady ? requestUnitOf(r.label, r.unit) : null, qtyMemory: memory[`req:${r.id}`] ?? null, info: infoOf(r), shownPositions: r.positions ?? null, values: valuesOfRequest(r, types[0] ?? ""), optionGroup: null, unavailable: r.status === "unavailable", closedReason: r.closed_reason, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: r.unit === "set", removed: r.removed_at ? { by: nameOf.get(r.removed_by ?? "") ?? "Parts", reason: r.removed_reason ?? "" } : null, waitingApproval: false });
   }
   for (const p of parts.filter((p) => !p.part_request_id)) rows.push(rowOfPart(p, null, p.id));
 
@@ -190,7 +215,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     lpos.suppliers.length ? `${lpos.suppliers.length} supplier LPO${lpos.suppliers.length === 1 ? "" : "s"}` : "",
   ].filter(Boolean).join(" · ");
   const supplierEmailOf = new Map<string, string | null>(((lpos.suppliers).length ? (await admin.from("suppliers").select("id, email").in("id", (lpos.suppliers).map((s) => s.po.supplier_id).filter((x): x is string => !!x))).data ?? [] : []).map((s) => [s.id as string, (s.email as string | null) ?? null]));
-  const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[]; charges?: { id: string; description: string; amount_aed: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, sent_at: s.po.sent_at ?? null, emailed_at: s.po.emailed_at ?? null, emailed_to: s.po.emailed_to ?? null, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: (rawById.get(l.part_item_id)?.positions as string[] | null | undefined) ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges ?? [], ended: endedByPo.get(s.po.id) ?? [] });
+  const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[]; charges?: { id: string; description: string; amount_aed: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, sent_at: s.po.sent_at ?? null, emailed_at: s.po.emailed_at ?? null, emailed_to: s.po.emailed_to ?? null, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: (rawById.get(l.part_item_id)?.positions as string[] | null | undefined) ?? null, unit: (rawById.get(l.part_item_id)?.unit as string | null | undefined) ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges ?? [], ended: endedByPo.get(s.po.id) ?? [] });
   // Lines still being priced (not removed, refused or unavailable): "Send LPO for approval" names them first.
   const unfinishedNames = rows.filter((r) => !r.removed && !r.refused && !r.unavailable && rowState(r.values, { waitingApproval: r.waitingApproval }) === "not_finished").map((r) => r.name.toUpperCase());
   const car = [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
@@ -287,10 +312,10 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
       ) : null}
 
       <Card id="pricing" className="flex flex-col gap-2 overflow-visible">
-        <PartsTable tyreBrands={Array.from(new Set([...((settings.tyre_brands ?? []) as string[]), ...Object.keys((settings.tyre_brand_custom ?? {}) as Record<string, number>)]))} tyreModels={(settings.tyre_models ?? {}) as Record<string, string[]>} tyreSizes={{ front: v?.tyre_size_front ?? "", rear: v?.tyre_size_rear ?? "" }} jobId={jobId} rows={rows} suppliers={suppliers} types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]} canPrice={canPrice} car={[v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" ")} vin={v?.vin ?? null} openingLine={String(settings.supplier_quote_opening_line || "Please quote price and availability:")} catalogue={catalogue} lastImport={lastImport} pricingDoneAt={job.parts_pricing_done_at} onPricingDone={pricingDone.bind(null, jobId)} showBar={canPrice && !inPlanning} showCost={["owner", "service_advisor", "parts"].includes(role)} removeReasons={reasonsFor(settings, "remove_part")} pricingLocked={pricingLocked} onReopen={reopenPricing.bind(null, jobId)} reopenedAt={job.parts_pricing_reopened_at} extraCosts={["owner", "service_advisor", "parts"].includes(role) ? chargeRows.map((c) => ({ supplier: c.supplier, amount: c.amount })) : []} />
+        <PartsTable tyreBrands={Array.from(new Set([...((settings.tyre_brands ?? []) as string[]), ...Object.keys((settings.tyre_brand_custom ?? {}) as Record<string, number>)]))} tyreModels={(settings.tyre_models ?? {}) as Record<string, string[]>} tyreSizes={{ front: v?.tyre_size_front ?? "", rear: v?.tyre_size_rear ?? "" }} jobId={jobId} rows={rows} suppliers={suppliers} types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]} canPrice={canPrice} unitsReady={unitsReady} refLabel={job.job_number} car={[v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" ")} vin={v?.vin ?? null} openingLine={String(settings.supplier_quote_opening_line || "Please quote price and availability:")} catalogue={catalogue} lastImport={lastImport} pricingDoneAt={job.parts_pricing_done_at} onPricingDone={pricingDone.bind(null, jobId)} showBar={canPrice && !inPlanning} showCost={["owner", "service_advisor", "parts"].includes(role)} removeReasons={reasonsFor(settings, "remove_part")} pricingLocked={pricingLocked} onReopen={reopenPricing.bind(null, jobId)} reopenedAt={job.parts_pricing_reopened_at} extraCosts={["owner", "service_advisor", "parts"].includes(role) ? chargeRows.map((c) => ({ supplier: c.supplier, amount: c.amount })) : []} />
         {["owner", "service_advisor", "parts", "accounts"].includes(role) ? <SupplierChargesStrip jobId={jobId} charges={chargeRows} canEdit={canPrice} /> : null}
       </Card>
-      {canPrice && !inPlanning ? <div className="h-20" /> : null}
+      {canPrice && !inPlanning ? <div className="h-28" /> : null}
     </>
   );
 }

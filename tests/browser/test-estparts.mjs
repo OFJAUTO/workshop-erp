@@ -1,8 +1,9 @@
 // 30 October 2026: estimate parts priced by the parts desk (the estimate's separate "+ Part (estimate)" copy is gone).
 //  A  the advisor adds a part to an estimate with the SAME "+ Add a part" as a job quotation, names it, sets the
 //     quantity and a note for the parts desk, and sends it: [Send to parts desk to price].
-//  B  the parts desk sees "ESTIMATE E-… – car not here yet" with make, model, year and VIN, prices it (part number,
-//     type, cost, supplier, availability); the advisor is told.
+//  B  the parts desk sees "ESTIMATE E-… – car not here yet" with make, model, year and VIN, prices it on the SAME Parts
+//     row as a job's parts (3 November 2026: part number, type, net, supplier, availability, quantity), and the advisor
+//     is told ONCE when the desk presses "Pricing done – send to advisor".
 //  C  the advisor sees cost, selling (minimum markup) and total, and the profit counts it.
 //  D  a price the advisor already has: "Priced by advisor" (internal), the parts desk's "check this price" task,
 //     "Price is right ✓".
@@ -95,19 +96,27 @@ try {
   await pp.screenshot({ path: path.join(SHOTS, "B-parts-desk-list-1440.png") });
   await entry.locator("[data-estimate-price-open]").click();
   await pp.waitForURL(/\/parts\/estimate\//, { timeout: 20000 });
-  const deskRow = pp.locator(`[data-desk-part="${pads.id}"]`);
-  check("B the pricing page shows the part, quantity 2 and the advisor's note", /FRONT BRAKE PADS E2E/i.test(await text(deskRow)) && /× 2/.test(await text(deskRow)) && /OEM only, front axle/.test(await text(deskRow)) && /DUBAI D 91844/i.test(await text(pp.locator("[data-desk-car]"))));
-  await deskRow.locator("[data-desk-part-number]").fill("A0004209305");
-  await deskRow.locator("[data-desk-cost]").fill("450");
-  await deskRow.locator("[data-desk-supplier]").fill("E2e Supplier");
-  await pick(pp, "part_type", "Genuine");
-  await pick(pp, "availability", "1");
+  // 3 November 2026: the estimate is priced on the shared Parts row (the same as a job's parts).
+  await sql("insert into public.suppliers (name, default_discount_percent, discount_by_type, created_by) select 'E2e Supplier', 0, '{}'::jsonb, $1 where not exists (select 1 from public.suppliers where name ilike 'E2e Supplier')", [owner]);
+  await sql("update public.suppliers set is_active = true where name ilike 'E2e Supplier'");
+  await go(pp, `${base}/parts/estimate/${est.id}`);
+  const deskRow = pp.locator(`[data-row-key="${pads.id}"]`);
+  await deskRow.waitFor({ timeout: 20000 });
+  check("B the pricing page shows the part, quantity 2 and the advisor's note", /FRONT BRAKE PADS E2E/i.test(await text(deskRow)) && (await deskRow.locator("[data-part-qty]").inputValue()) === "2" && /OEM only, front axle/.test(await text(deskRow)) && /DUBAI D 91844/i.test(await text(pp.locator("[data-desk-car]"))));
+  await deskRow.locator("input[aria-label='Part number']").fill("A0004209305");
+  await deskRow.locator("select[aria-label='Type']").selectOption("genuine");
+  const supSel = deskRow.locator("select[aria-label='Supplier']");
+  await supSel.selectOption(await supSel.locator("option").evaluateAll((os) => (os.find((o) => /^E2e Supplier$/i.test((o.textContent ?? "").trim())) ?? {}).value ?? ""));
+  await deskRow.locator("input[aria-label='Cost before VAT']").fill("450");
+  await deskRow.locator("select[aria-label='Availability']").selectOption({ label: "Next day" });
+  await pp.keyboard.press("Tab");
   await pp.screenshot({ path: path.join(SHOTS, "B-parts-desk-pricing-1440.png") });
-  await deskRow.getByRole("button", { name: "Save price" }).click();
-  const priced = await until(async () => { const l = await lineOf("Front brake pads e2e"); return Number(l?.unit_cost) === 450 ? l : null; });
-  check("B the parts desk's price is on the line: cost 450, supplier, part number, genuine, next day", !!priced && priced.supplier_text === "E2e Supplier" && priced.part_number === "A0004209305" && priced.availability === "to_order" && Number(priced.delivery_days) === 1 && !priced.priced_by_advisor, JSON.stringify(priced));
+  const priced = await until(async () => { const l = await lineOf("Front brake pads e2e"); return Number(l?.unit_cost) === 450 && l?.availability === "to_order" && l?.supplier_text ? l : null; });
+  check("B the parts desk's price is on the line: cost 450, supplier, part number, genuine, next day", !!priced && /E2e Supplier/i.test(priced.supplier_text) && priced.part_number === "A0004209305" && priced.availability === "to_order" && Number(priced.delivery_days) === 1 && !priced.priced_by_advisor, JSON.stringify(priced));
+  check("B nobody is told per line: no 'Parts priced' notification yet", !(await sql("select title from public.notifications where staff_id = $1 and type = 'estimate_parts_priced' and href = $2", [advisor.id, `/estimates/${est.id}`]))[0]);
+  await pp.locator("[data-pricing-done]").click();
   const told = await until(async () => (await sql("select title from public.notifications where staff_id = $1 and type = 'estimate_parts_priced' and href = $2", [advisor.id, `/estimates/${est.id}`]))[0]);
-  check(`B the advisor (${advisor.display_name}) is told: "${told?.title ?? "?"}"`, !!told && /Parts priced/.test(told.title));
+  check(`B the advisor (${advisor.display_name}) is told ONCE: "${told?.title ?? "?"}"`, !!told && /^All parts priced on E-/.test(told.title));
   await pp.screenshot({ path: path.join(SHOTS, "B-parts-desk-priced-1440.png") });
 
   /* ---------------- C ---------------- */
@@ -140,7 +149,7 @@ try {
   await go(pp, `${base}/parts`);
   check("D the Parts desk entry now reads \"1 advisor price to check\"", /1 advisor price to check/.test(await text(pp.locator(`[data-estimate-to-price="${est.number}"]`))));
   await go(pp, `${base}/parts/estimate/${est.id}`);
-  await pp.locator(`[data-desk-part="${filter.id}"] [data-desk-price-right]`).click();
+  await pp.locator(`[data-row-key="${filter.id}"] [data-desk-price-right]`).click();
   check("D \"Price is right ✓\" checks it", !!(await until(async () => !!(await lineOf("Oil filter e2e"))?.price_checked_at)));
   await pp.screenshot({ path: path.join(SHOTS, "D-parts-desk-checked-1440.png") });
 

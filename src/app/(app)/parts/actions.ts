@@ -12,11 +12,15 @@ import { getCurrentStaff, requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { dubaiDate } from "@/lib/jobs";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
-import { loadPricingRows } from "@/lib/parts-pricing";
-import { NO_PART_NUMBER, OUR_STOCK, cleanPartNumber, dateFromDays, daysComplete, isOurStock, isPlaceholderSupplier, partNumberProblem, placeholderSupplierWords, realPartNumber, rowMissing, rowState, type RowValues } from "@/lib/parts-rows";
+import { holdForSend, reopenPricingFor } from "@/lib/parts-pricing";
+import { sendJobPricing } from "@/lib/pricing-send";
+import { NO_PART_NUMBER, OUR_STOCK, cleanPartNumber, dateFromDays, daysComplete, isOurStock, isPlaceholderSupplier, partNumberProblem, placeholderSupplierWords, realPartNumber, rowState, type RowValues } from "@/lib/parts-rows";
 import { costCheckValues, costChecksFor, forgetBoughtPrices, type PartForCheck } from "@/lib/part-cost-history";
 import { isSettledStatus } from "@/lib/part-cost-check";
-import { costConfirmReady } from "@/lib/schema-ready";
+import { costConfirmReady, partUnitsReady } from "@/lib/schema-ready";
+import { checkQuantity, cleanUnit, defaultUnitFor, requestUnitOf, type PartUnit } from "@/lib/part-units";
+import { askerOfPart, logPartQuantity } from "@/lib/part-quantity";
+import { holdPerPartNotices } from "@/lib/pricing-done";
 import { compactPartNumber } from "@/lib/price-import";
 import { receiveFromShelf, recordStockMovement } from "@/lib/stock";
 import { round2 } from "@/lib/money";
@@ -25,7 +29,6 @@ import { PARTS_BUCKET, PART_SELECT, toPart } from "@/lib/quote-data";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { formatPlate } from "@/lib/types";
 import { LINE_TEXT_MAX, lineTextOrError, tooLongWords } from "@/lib/text-limits";
 
 function refresh(jobId: string) {
@@ -37,7 +40,7 @@ function refresh(jobId: string) {
 }
 
 async function jobOf(jobId: string) {
-  const { data } = await createAdminClient().from("jobs").select("id, job_number, department, assigned_to, gated_in_by, is_open, vehicle_id, parts_pricing_done_at, parts_pricing_reopened_at").eq("id", jobId).maybeSingle();
+  const { data } = await createAdminClient().from("jobs").select("id, job_number, status, department, assigned_to, gated_in_by, is_open, vehicle_id, parts_pricing_done_at, parts_pricing_reopened_at").eq("id", jobId).maybeSingle();
   return data;
 }
 
@@ -51,18 +54,16 @@ async function draftQuotation(jobId: string) {
  * The part's line on the quotation (src/lib/quote-versions.ts): the open draft, or the next version when the latest one
  * was already sent or approved, with the advisor told to send it. Parts never think about versions.
  */
-export async function syncLineForPart(jobId: string, partId: string, by: string) {
-  await syncPartLine(jobId, partId, by);
+export async function syncLineForPart(jobId: string, partId: string, by: string, opts: { quiet?: boolean } = {}) {
+  await syncPartLine(jobId, partId, by, undefined, { quietRevision: opts.quiet });
 }
 
-/** When every request on the job is answered and every part has a price, the advisor hears about it. */
-/** Every row Priced or Not available (the one state function in src/lib/parts-rows.ts): the advisor is told with the breakdown. */
-async function tellAdvisorIfComplete(jobId: string) {
-  const [{ summary }, job] = await Promise.all([loadPricingRows(jobId), jobOf(jobId)]);
-  if (summary.open || !summary.total || !job) return;
-  const ids = await advisorsInCharge(jobId);
-  await notifyStaff(ids, { type: "parts_priced", title: `Parts priced · ${job.job_number}`, body: `Every part on this car is priced or marked not available (${summary.text}). Finish the quotation.`, jobId, href: `/jobs/${jobId}` });
-}
+/*
+ * Section 10 (3 November 2026): the advisor is no longer told "Parts priced" after every save of a priced row (J-00016
+ * got 94 of them during three imports). He hears it ONCE, when Parts press "Pricing done – send to advisor" (pricingDone
+ * below), with what changed folded in. While a send is expected the per-part notices to him wait (holdForSend in
+ * src/lib/parts-pricing.ts), and the car stays on the parts desk's list until it is pressed.
+ */
 
 const PART_TYPES = ["genuine", "oem", "aftermarket", "used"];
 
@@ -144,7 +145,6 @@ export async function savePartRows(jobId: string, requestId: string | null, _sta
   if (requestId) await admin.from("part_requests").update({ status: "done", updated_by: staff.id }).eq("id", requestId);
   for (const c of created) await syncLineForPart(jobId, c.id, staff.id);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_listed", note: `${rows.length} part${rows.length === 1 ? "" : "s"} priced by ${staff.display_name}${requestId ? "" : " (added without a request)"}`, created_by: staff.id });
-  await tellAdvisorIfComplete(jobId);
   refresh(jobId);
   return { success: `${rows.length} part${rows.length === 1 ? "" : "s"} saved and on the quotation.` };
 }
@@ -162,7 +162,6 @@ export async function updatePart(partId: string, _state: FormState, formData: Fo
   const { error } = await admin.from("part_items").update({ ...r.row, priced_by: staff.id, priced_at: new Date().toISOString(), updated_by: staff.id }).eq("id", partId);
   if (error) return { error: error.message, values };
   await syncLineForPart(p.job_id, partId, staff.id);
-  await tellAdvisorIfComplete(p.job_id);
   refresh(p.job_id);
   return { success: "Saved." };
 }
@@ -230,7 +229,6 @@ export async function coverRequest(requestId: string) {
   if (!r) redirect("/parts");
   await admin.from("part_requests").update({ status: "rejected", closed_reason: "Already covered in another request", updated_by: staff.id }).eq("id", requestId);
   await admin.from("job_events").insert({ job_id: r.job_id, event_type: "parts_request_closed", note: `${r.label}: already covered in another request (${staff.display_name})`, created_by: staff.id });
-  await tellAdvisorIfComplete(r.job_id);
   refresh(r.job_id);
   redirect(`/parts/${r.job_id}?message=${encodeURIComponent(`${r.label}: marked as covered elsewhere.`)}`);
 }
@@ -245,7 +243,6 @@ export async function closePartRequest(requestId: string, formData: FormData) {
   if (!note || note.length < 3) redirect(`/parts/${r.job_id}?error=${encodeURIComponent("Say why the request is closed.")}`);
   await admin.from("part_requests").update({ status: "rejected", closed_reason: note, updated_by: staff.id }).eq("id", requestId);
   await admin.from("job_events").insert({ job_id: r.job_id, event_type: "parts_request_closed", note: `${r.label}: closed by ${staff.display_name}: ${note}`, created_by: staff.id });
-  await tellAdvisorIfComplete(r.job_id);
   refresh(r.job_id);
   redirect(`/parts/${r.job_id}?message=${encodeURIComponent("Request closed.")}`);
 }
@@ -264,13 +261,14 @@ export async function markRequestUnavailable(requestId: string, formData: FormDa
   if (error) redirect(`/parts/${r.job_id}?error=${encodeURIComponent(error.message)}`);
   await admin.from("job_events").insert({ job_id: r.job_id, event_type: "parts_unavailable", note: `${r.label}: not available (${staff.display_name})${note ? `: ${note}` : ""}`, created_by: staff.id });
   const job = await jobOf(r.job_id);
-  if (job) {
+  // Held for the send only while one is expected; the car then stays on the parts desk's list until it is pressed.
+  const held = job ? await holdForSend(job, staff.id) : false;
+  if (job && !held) {
     const ids = await advisorsInCharge(r.job_id);
     await notifyStaff(ids, { type: "parts_priced", title: `Part not available · ${job.job_number}`, body: `${r.label}: not available${note ? ` (${note})` : ""}. Offer the customer another way or leave it off the quotation.`, jobId: r.job_id, href: `/jobs/${r.job_id}` });
   }
-  await tellAdvisorIfComplete(r.job_id);
   refresh(r.job_id);
-  redirect(`/parts/${r.job_id}?message=${encodeURIComponent("Marked not available. The advisor has been told.")}`);
+  redirect(`/parts/${r.job_id}?message=${encodeURIComponent(held ? "Marked not available. The advisor hears it with Pricing done – send to advisor." : "Marked not available. The advisor has been told.")}`);
 }
 
 /** Take a part off the job (wrong listing). Its quotation line goes with it. */
@@ -292,7 +290,7 @@ export async function removePart(partId: string) {
    Evening of 11 October 2026: the Parts table saves itself row by row.
    --------------------------------------------------------------------------- */
 
-export type RowSave = { /** The tyre details when the row is a tyre (brand, model, size, year, marks). */ tyre?: TyreSpec | null; requestId: string | null; partId: string | null; optionOf?: string | null; /** The row's key on the screen: a save that races an earlier one finds the part it made. */ clientKey?: string | null; name?: string | null; part_number?: string; part_type?: string; brand?: string; list_price?: string; discount?: string; cost_aed?: string; supplier?: string; availability?: string; days?: string; quantity?: string | number; /** A part added by Parts from the picker: its positions ("Front left", "Rear pair"...). */ positions?: string[]; /** "From our stock…" (2 November 2026): the stock item; its average cost is the part's cost. null takes it off. */ stockItemId?: string | null; /** "Yes, real price": the cost each on the screen when it was tapped (stored only when it is the cost saved). */ costConfirmed?: number | null };
+export type RowSave = { /** The tyre details when the row is a tyre (brand, model, size, year, marks). */ tyre?: TyreSpec | null; requestId: string | null; partId: string | null; optionOf?: string | null; /** The row's key on the screen: a save that races an earlier one finds the part it made. */ clientKey?: string | null; name?: string | null; part_number?: string; part_type?: string; brand?: string; list_price?: string; discount?: string; cost_aed?: string; supplier?: string; availability?: string; days?: string; quantity?: string | number; /** Section 9: pieces ("pc"), litres ("l") or sets ("set"); the cost is per unit. */ unit?: string; /** A part added by Parts from the picker: its positions ("Front left", "Rear pair"...). */ positions?: string[]; /** "From our stock…" (2 November 2026): the stock item; its average cost is the part's cost. null takes it off. */ stockItemId?: string | null; /** "Yes, real price": the cost each on the screen when it was tapped (stored only when it is the cost saved). */ costConfirmed?: number | null };
 
 /**
  * A custom part name typed by Parts (not in the owner's pool) is counted, so names used more than once are
@@ -326,12 +324,13 @@ async function jobAdvisorIds(jobId: string, gatedInBy: string | null) {
 }
 
 /** A part changed after the quotation went out (price, quantity or name): the quotation is flagged and the advisor told. */
-async function flagSentQuotations(jobId: string, job: { job_number: string; gated_in_by: string | null }, what: string, by: { id: string; display_name: string }) {
+async function flagSentQuotations(jobId: string, job: { id: string; job_number: string; gated_in_by: string | null; status: string; parts_pricing_done_at: string | null; parts_pricing_reopened_at: string | null }, what: string, by: { id: string; display_name: string }) {
   const admin = createAdminClient();
   const { data: sentQs } = await admin.from("quotations").select("id, number").eq("job_id", jobId).eq("is_active", true).in("status", ["sent", "opened", "approved", "urgent_requested", "pending_owner"]);
   if (!(sentQs ?? []).length) return;
   await admin.from("quotations").update({ parts_price_changed_at: new Date().toISOString() }).in("id", (sentQs ?? []).map((q) => q.id));
-  await notifyStaff(await jobAdvisorIds(jobId, job.gated_in_by), { type: "parts_priced", title: `Part changed after the quotation went out · ${job.job_number}`, body: `${what}. Check ${(sentQs ?? []).map((q) => q.number).join(", ")}.`, jobId, href: `/jobs/${jobId}` });
+  // Still pricing (Edit after the send): the flag and the history now, the advisor with "Send updated prices".
+  if (!(await holdForSend(job, by.id))) await notifyStaff(await jobAdvisorIds(jobId, job.gated_in_by), { type: "parts_priced", title: `Part changed after the quotation went out · ${job.job_number}`, body: `${what}. Check ${(sentQs ?? []).map((q) => q.number).join(", ")}.`, jobId, href: `/jobs/${jobId}` });
   await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_price_changed", note: `${what} by ${by.display_name} after the quotation was sent`, created_by: by.id });
 }
 
@@ -385,11 +384,40 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
   }
   // "From our stock…" (2.3): the stock item's average cost is the part's cost; a typed cost is never used for it.
   const confirmReady = await costConfirmReady();
-  const { data: stored } = partId ? await admin.from("part_items").select(`stock_item_id, option_group, supplier, order_status, disposition, disposition_at, return_status${confirmReady ? ", cost_confirmed_aed" : ""}`).eq("id", partId).maybeSingle() : { data: null };
-  const storedRow = stored as unknown as { stock_item_id: string | null; option_group: string | null; supplier: string | null; order_status: string | null; disposition: string | null; disposition_at: string | null; return_status: string | null; cost_confirmed_aed?: number | string | null } | null;
+  const unitsReady = await partUnitsReady();
+  const { data: stored } = partId ? await admin.from("part_items").select(`stock_item_id, option_group, supplier, order_status, disposition, disposition_at, return_status${confirmReady ? ", cost_confirmed_aed" : ""}${unitsReady ? ", unit" : ""}`).eq("id", partId).maybeSingle() : { data: null };
+  const storedRow = stored as unknown as { stock_item_id: string | null; option_group: string | null; supplier: string | null; order_status: string | null; disposition: string | null; disposition_at: string | null; return_status: string | null; cost_confirmed_aed?: number | string | null; unit?: string | null } | null;
   // A part given its ending (cancelled with the supplier, returned, kept in stock) is off the job: a save from a screen
   // opened before that never changes it again (3 November 2026).
   if (storedRow && endingOf(storedRow)) return { error: "This part was given its ending (not needed): nothing more to change on it." };
+  // Section 9 (3 November 2026): the unit typed on the row (pieces, litres, sets) once the database keeps it, and THE
+  // quantity check (above zero; pieces and sets whole) against the unit the part will really have: typed, else the
+  // saved part's, else for a new part its request's or its name's (review of 3 November 2026: a supplier import of
+  // "ENGINE OIL 0W-20 … 6.5" was refused as pieces before the new part's litres were worked out).
+  const storedUnit: PartUnit | null = unitsReady ? (cleanUnit(storedRow?.unit) ?? "pc") : null;
+  const unitTyped: PartUnit | null = unitsReady ? cleanUnit(row.unit) : null;
+  let unitForCheck: PartUnit = unitTyped ?? storedUnit ?? "l";
+  if (unitsReady && !unitTyped && !storedRow) {
+    if (row.optionOf) {
+      const { data: baseUnit } = await admin.from("part_items").select("unit").eq("id", row.optionOf).maybeSingle();
+      unitForCheck = cleanUnit((baseUnit as { unit?: string | null } | null)?.unit) ?? defaultUnitFor(String(row.name ?? ""));
+    } else if (row.requestId) {
+      const { data: reqUnitRow } = await admin.from("part_requests").select("label, unit").eq("id", row.requestId).maybeSingle();
+      unitForCheck = requestUnitOf(String(row.name ?? "").trim() || String(reqUnitRow?.label ?? ""), reqUnitRow?.unit);
+    } else unitForCheck = defaultUnitFor(String(row.name ?? ""));
+  }
+  if (qty !== null) {
+    const problem = checkQuantity(qty, unitForCheck);
+    if (problem) return { error: problem };
+  }
+  // A new part (a row saved for the first time, an option, a part Parts add) opens a pricing that was sent, or one past
+  // the customer's approval, so the car is back on the list and the advisor hears it with the one send.
+  if (!partId) {
+    const reopenedAt = await reopenPricingFor(jobId, staff.id);
+    if (reopenedAt) job.parts_pricing_reopened_at = reopenedAt;
+  }
+  // A send is expected: the advisor's per-part notices wait for "Pricing done – send to advisor" (section 10).
+  const held = holdPerPartNotices(job);
   let stockItemId: string | null = fromStock ? (row.stockItemId === undefined ? (storedRow?.stock_item_id ?? null) : row.stockItemId) : null;
   // A part priced "Our stock" before the rule (no stock item) keeps saving as it was (never unpriced for it; Prices to
   // fix lists it); anything newly set to Our stock comes from a stock item, so its cost is the stock list's (2.3).
@@ -453,9 +481,10 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
   if (description.length > LINE_TEXT_MAX) return { error: tooLongWords(description.length) };
   let requestId = row.requestId;
   const changes: string[] = [];
-  let qtyChange: { from: number; to: number } | null = null;
+  let qtyChange: { from: number; to: number; fromUnit: PartUnit | null; toUnit: PartUnit | null } | null = null;
+  let askerFor: { part_request_id: string | null; added_by_role?: string | null } = { part_request_id: row.requestId };
   if (partId) {
-    const { data: cur } = await admin.from("part_items").select("id, cost_aed, description, original_description, part_request_id, quantity, confirmed_quantity").eq("id", partId).eq("job_id", jobId).maybeSingle();
+    const { data: cur } = await admin.from("part_items").select("id, cost_aed, description, original_description, part_request_id, quantity, confirmed_quantity, added_by_role").eq("id", partId).eq("job_id", jobId).maybeSingle();
     if (!cur) return { error: "Part not found." };
     previousCost = cur.cost_aed === null ? null : Number(cur.cost_aed);
     const patch: Record<string, unknown> = { ...fields, ...approval, ...(confirmNow ? { cost_confirmed_aed: cost, cost_confirmed_at: now, cost_confirmed_by: staff.id } : {}), ...(completeNow ? { priced_by: staff.id, priced_at: now } : {}), updated_by: staff.id };
@@ -466,20 +495,25 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
       changes.push(`${cur.description} renamed to ${description}`);
     } else description = cur.description;
     const curQty = Number(cur.confirmed_quantity ?? cur.quantity) || 1;
-    if (qty !== null && Math.abs(qty - curQty) > 0.001) {
-      patch.confirmed_quantity = qty;
+    const unitChanged = !!unitTyped && !!storedUnit && unitTyped !== storedUnit;
+    if (unitChanged) patch.unit = unitTyped;
+    if ((qty !== null && Math.abs(qty - curQty) > 0.001) || unitChanged) {
+      const to = qty ?? curQty;
+      patch.confirmed_quantity = to;
       patch.quantity_changed_at = now;
       patch.quantity_changed_by = staff.id;
-      qtyChange = { from: Number(cur.quantity) || curQty, to: qty };
-      changes.push(`${description}: quantity ${curQty} → ${qty}`);
+      qtyChange = { from: Number(cur.quantity) || curQty, to, fromUnit: storedUnit, toUnit: unitTyped ?? storedUnit };
+      changes.push(`${description}: quantity ${curQty} → ${to}${unitChanged ? ` (${unitTyped === "l" ? "litres" : unitTyped === "set" ? "sets" : "pieces"})` : ""}`);
     }
     requestId = cur.part_request_id ?? requestId;
+    askerFor = { part_request_id: cur.part_request_id, added_by_role: cur.added_by_role };
     const { error } = await admin.from("part_items").update(patch).eq("id", partId);
     if (error) return { error: error.message };
   } else {
     let quantity = qty ?? 1;
     let positions: string[] = [];
     let newGroup: string | null = null;
+    let newUnit: PartUnit = unitTyped ?? defaultUnitFor(description);
     if (row.optionOf) {
       const { data: base } = await admin.from("part_items").select("id, part_request_id, option_group, description, quantity, confirmed_quantity, positions").eq("id", row.optionOf).maybeSingle();
       if (!base) return { error: "Part not found." };
@@ -490,13 +524,17 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
       positions = (base.positions as string[] | null) ?? [];
       requestId = base.part_request_id;
     } else if (requestId) {
-      const { data: req } = await admin.from("part_requests").select("label, quantity, positions").eq("id", requestId).maybeSingle();
+      const { data: req } = await admin.from("part_requests").select("label, quantity, positions, unit, catalogue_id").eq("id", requestId).maybeSingle();
       if (!req) return { error: "Request not found." };
       description = description || req.label;
       quantity = qty ?? (Number(req.quantity) || 1);
       positions = (req.positions as string[] | null) ?? [];
       if (req.label && description !== req.label) changes.push(`${req.label} renamed to ${description}`);
-      if (Math.abs(quantity - (Number(req.quantity) || 1)) > 0.001) qtyChange = { from: Number(req.quantity) || 1, to: quantity };
+      // The unit the request stands for: sets and litres as stored, else read from the name (a stored "pc" is nobody's
+      // choice: the inspection's parts list stored it for every fluid too).
+      const reqUnit: PartUnit = requestUnitOf(description, req.unit);
+      newUnit = unitTyped ?? reqUnit;
+      if (Math.abs(quantity - (Number(req.quantity) || 1)) > 0.001 || (unitsReady && newUnit !== reqUnit)) qtyChange = { from: Number(req.quantity) || 1, to: quantity, fromUnit: unitsReady ? reqUnit : null, toUnit: unitsReady ? newUnit : null };
     }
     if (!description) return { error: "Type the part name." };
     // A part added by Parts from the picker brings its positions along.
@@ -504,7 +542,7 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
     const { data: req2 } = requestId ? await admin.from("part_requests").select("label, quantity").eq("id", requestId).maybeSingle() : { data: null };
     const { data: created, error } = await admin
       .from("part_items")
-      .insert({ job_id: jobId, client_key: clientKey, part_request_id: requestId, description, original_description: req2?.label && req2.label !== description ? req2.label : null, quantity: req2 ? Number(req2.quantity) || quantity : quantity, confirmed_quantity: quantity, positions, option_group: newGroup, ...fields, ...approval, ...(confirmNow ? { cost_confirmed_aed: cost, cost_confirmed_at: now, cost_confirmed_by: staff.id } : {}), ...(qtyChange ? { quantity_changed_at: now, quantity_changed_by: staff.id } : {}), confirm_status: "confirmed", confirmed_by: staff.id, confirmed_at: now, ...(complete ? { priced_by: staff.id, priced_at: now } : {}), added_by_role: role, created_by: staff.id, updated_by: staff.id })
+      .insert({ job_id: jobId, client_key: clientKey, part_request_id: requestId, description, original_description: req2?.label && req2.label !== description ? req2.label : null, quantity: req2 ? Number(req2.quantity) || quantity : quantity, confirmed_quantity: quantity, ...(unitsReady ? { unit: newUnit } : {}), positions, option_group: newGroup, ...fields, ...approval, ...(confirmNow ? { cost_confirmed_aed: cost, cost_confirmed_at: now, cost_confirmed_by: staff.id } : {}), ...(qtyChange ? { quantity_changed_at: now, quantity_changed_by: staff.id } : {}), confirm_status: "confirmed", confirmed_by: staff.id, confirmed_at: now, ...(complete ? { priced_by: staff.id, priced_at: now } : {}), added_by_role: role, created_by: staff.id, updated_by: staff.id })
       .select("id")
       .single();
     if (error || !created) return { error: error?.message ?? "Could not save the part." };
@@ -525,8 +563,7 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
       if (availability === "in_stock" || fromStock) await receiveFromShelf(partId, staff, `Replacement for ${job.job_number}, from our stock`);
       else await admin.from("part_items").update({ order_status: "to_order", updated_by: staff.id }).eq("id", partId).eq("order_status", "none");
       await admin.from("part_items").update({ order_status: "none", updated_by: staff.id }).eq("id", replaces).eq("order_status", "to_order").is("po_id", null);
-    } else await syncLineForPart(jobId, partId, staff.id);
-    await tellAdvisorIfComplete(jobId);
+    } else await syncLineForPart(jobId, partId, staff.id, { quiet: held });
   }
   if (partId) {
     // On an LPO still waiting for approval, the line follows; a part to order and on no LPO joins the one that waits.
@@ -540,10 +577,8 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
   }
   if (previousCost !== null && cost !== null && cost !== previousCost) changes.push(`${description}: price AED ${previousCost} → AED ${cost}`);
   if (qtyChange) {
-    const n = { type: "parts_priced", title: `Parts changed a quantity · ${job.job_number}`, body: `${description}: the technician asked for ${qtyChange.from}, Parts changed it to ${qtyChange.to}.`, jobId, href: `/parts/${jobId}` };
-    await notifyStaff(await jobAdvisorIds(jobId, job.gated_in_by), { ...n, href: `/jobs/${jobId}` });
-    await notifyManagers(job.department ?? null, n);
-    await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_quantity", note: `${description}: quantity changed from ${qtyChange.from} to ${qtyChange.to} by ${staff.display_name}`, created_by: staff.id });
+    // THE wording ("Advisor asked 1, Parts changed to 8 L"), on the job's history; the advisor hears it with the send.
+    await logPartQuantity(job, { name: description, asked: qtyChange.from, askedBy: await askerOfPart(askerFor), askedUnit: qtyChange.fromUnit, now: qtyChange.to, unit: qtyChange.toUnit, by: staff, from: "desk" });
   }
   if (changes.length) await flagSentQuotations(jobId, job, changes.join("; "), staff);
   if (askOwner && partId) {
@@ -776,11 +811,12 @@ export async function splitPart(jobId: string, partId: string, formData: FormDat
     await admin.from("part_items").insert({ job_id: jobId, part_request_id: p.part_request_id, description: r.name, original_description: original, quantity: r.qty, confirmed_quantity: r.qty, positions: p.positions ?? null, part_type: p.part_type, brand: p.brand, supplier: p.supplier, confirm_status: "confirmed", confirmed_by: staff.id, confirmed_at: now, added_by_role: staff.role_id, created_by: staff.id, updated_by: staff.id });
   }
   if (p.part_request_id) await admin.from("part_requests").update({ status: "listed", updated_by: staff.id }).eq("id", p.part_request_id).in("status", ["open", "listed", "done"]);
-  if (p.cost_aed !== null) await syncLineForPart(jobId, partId, staff.id);
+  const held = await holdForSend(job, staff.id);
+  if (p.cost_aed !== null) await syncLineForPart(jobId, partId, staff.id, { quiet: held });
   const what = `${original} split into ${lines.map((l) => `${l.name} × ${l.qty}`).join(", ")}`;
   await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_split", note: `${what} (${staff.display_name})`, created_by: staff.id });
   const n = { type: "parts_priced", title: `Parts split a bundled part · ${job.job_number}`, body: `${what}. The new parts are priced on their own.`, jobId, href: `/parts/${jobId}` };
-  await notifyStaff(await jobAdvisorIds(jobId, job.gated_in_by), { ...n, href: `/jobs/${jobId}` });
+  if (!held) await notifyStaff(await jobAdvisorIds(jobId, job.gated_in_by), { ...n, href: `/jobs/${jobId}` });
   await notifyManagers(job.department ?? null, n);
   await flagSentQuotations(jobId, job, what, staff);
   refresh(jobId);
@@ -804,51 +840,37 @@ export async function addSupplierQuick(name: string): Promise<{ error?: string; 
   return { supplier: { id: created.id, name: created.name, discount: 0, byType: {} } };
 }
 
-/** "Pricing done": the advisor is told and the next step is his, even if some parts have no price yet (he was asked first). */
-export async function pricingDone(jobId: string, formData: FormData) {
-  const staff = await requirePermission("priceParts");
-  const admin = createAdminClient();
-  const job = await jobOf(jobId);
-  if (!job || !job.is_open) redirect(`/parts/${jobId}?error=${encodeURIComponent("This job is closed.")}`);
-  // The same rows and the same state function as the table on the screen (src/lib/parts-pricing.ts): Priced, Not
-  // available and Removed never hold anything; only Not finished and Waiting for owner approval do.
-  const { rows, summary } = await loadPricingRows(jobId);
-  const open = summary.open;
-  const first = rows.find((r) => r.state === "not_finished");
-  const firstText = first ? `${first.name}: ${rowMissing(first.values).map((m) => m.long).join(", ") || "not finished"}` : null;
-  if (open && String(formData.get("force") ?? "") !== "1") redirect(`/parts/${jobId}?error=${encodeURIComponent(`${open} part${open === 1 ? " is" : "s are"} not finished${firstText ? ` (${firstText})` : ""}. Finish them, or choose Send what you have.`)}`);
-  const now = new Date().toISOString();
-  // "Send updated prices": Edit was pressed after Pricing done; the advisor hears that the prices changed on this car.
-  const reopened = !!job.parts_pricing_reopened_at;
-  await admin.from("jobs").update({ parts_pricing_done_at: now, parts_pricing_done_by: staff.id, parts_pricing_reopened_at: null, parts_pricing_reopened_by: null, updated_by: staff.id }).eq("id", jobId);
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_pricing_done", note: `${reopened ? "Updated prices sent" : "Pricing done"} by ${staff.display_name} (${summary.text})`, created_by: staff.id });
-  const ids = await advisorsInCharge(jobId);
-  if (reopened) {
-    const { data: jv } = await admin.from("jobs").select("vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle();
-    const veh = (jv?.vehicle as unknown as (Parameters<typeof formatPlate>[0] & { make: { name: string } | null; model: { name: string } | null }) | null) ?? null;
-    const car = veh ? `${formatPlate(veh)} ${[veh.make?.name, veh.model?.name].filter(Boolean).join(" ")}`.trim() : job.job_number;
-    const { data: sentQs } = await admin.from("quotations").select("number").eq("job_id", jobId).eq("is_active", true).in("status", ["sent", "opened", "approved", "urgent_requested", "pending_owner"]);
-    const sent = (sentQs ?? []).map((q) => q.number);
-    await notifyStaff(ids, { type: "parts_priced", title: `Prices changed on ${car}`, body: `${staff.display_name} sent updated prices (${summary.text}).${sent.length ? ` ${sent.join(", ")} was already sent to the customer: check it and send a revised version if needed.` : " Check the quotation."}`, jobId, href: `/jobs/${jobId}` });
-  } else {
-    await notifyStaff(ids, { type: "parts_priced", title: `Parts pricing done · ${job.job_number}`, body: open ? `${staff.display_name} sent what Parts have: ${summary.text}. The quotation is yours.` : `Every part is priced or marked not available (${summary.text}). Finish the quotation.`, jobId, href: `/jobs/${jobId}` });
+/**
+ * "Pricing done – send to advisor" (section 10, 3 November 2026): the advisor in charge gets ONE notification ("All parts
+ * priced on J-00970", or "Prices updated on …" after Edit) with what changed while pricing folded in, and the car leaves
+ * the parts desk's to-do list. With a part not priced yet nothing is sent unless Parts chose "Send what you have" (force):
+ * the screen lists those lines first, and the server says the same in words. Answered in the bar (no page jump). THE
+ * send itself is src/lib/pricing-send.ts (the customer's approval releases what was held through it too).
+ */
+export async function pricingDone(jobId: string, _state: FormState, formData: FormData): Promise<FormState> {
+  const staff = await getCurrentStaff();
+  if (!staff || staff.viewingAs) return { error: "Please sign in again." };
+  if (!can(staff.role_id as RoleId, "priceParts")) return { error: "Only Parts or the owner send the prices." };
+  const r = await sendJobPricing(jobId, { by: { id: staff.id, display_name: staff.display_name }, force: String(formData.get("force") ?? "") === "1" });
+  if (r.success) {
+    refresh(jobId);
+    revalidatePath(`/jobs/${jobId}/quote`, "layout");
   }
-  refresh(jobId);
-  revalidatePath(`/jobs/${jobId}/quote`, "layout");
-  redirect(`/parts/${jobId}?message=${encodeURIComponent(reopened ? "Updated prices sent to the advisor." : "Sent to the advisor.")}`);
+  return r;
 }
 
-/** "Edit" after Pricing done: the rows open again; the bar then offers "Send updated prices". A quotation already sent is pointed out. */
-export async function reopenPricing(jobId: string) {
-  const staff = await requirePermission("priceParts");
-  const admin = createAdminClient();
+/**
+ * "Edit" after the send: the rows open again; the bar then offers "Send updated prices" and says what is already with
+ * the customer. Answered in the bar (no page jump).
+ */
+export async function reopenPricing(jobId: string, _formData?: FormData): Promise<void> {
+  void _formData;
+  const staff = await getCurrentStaff();
+  if (!staff || staff.viewingAs || !can(staff.role_id as RoleId, "priceParts")) return;
   const job = await jobOf(jobId);
-  if (!job || !job.is_open) redirect(`/parts/${jobId}?error=${encodeURIComponent("This job is closed.")}`);
-  await admin.from("jobs").update({ parts_pricing_reopened_at: new Date().toISOString(), parts_pricing_reopened_by: staff.id, updated_by: staff.id }).eq("id", jobId);
-  const { data: sentQs } = await admin.from("quotations").select("number").eq("job_id", jobId).eq("is_active", true).in("status", ["sent", "opened", "approved", "urgent_requested", "pending_owner"]);
-  const sent = (sentQs ?? []).map((q) => q.number);
+  if (!job || !job.is_open) return;
+  await createAdminClient().from("jobs").update({ parts_pricing_reopened_at: new Date().toISOString(), parts_pricing_reopened_by: staff.id, updated_by: staff.id }).eq("id", jobId);
   refresh(jobId);
-  redirect(`/parts/${jobId}?message=${encodeURIComponent(sent.length ? `Editing. ${sent.join(", ")} was already sent to the customer: every change flags it and the advisor is told. Press Send updated prices when done.` : "Editing. Press Send updated prices when done.")}`);
 }
 
 /** A catalogue diagram on a priced part, from the row's menu. */
