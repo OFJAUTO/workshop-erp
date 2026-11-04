@@ -106,9 +106,22 @@ check("C: nothing is left to add; the red bill's line stays", (await p.locator("
 await p.screenshot({ path: shot("c-added.png") });
 await p.locator("[data-zoho-sync-cancel]").click();
 
+/* ---------- D. Fix 3 (4 November 2026): every row carries its amount and its why ---------- */
+await sql("update public.purchase_orders set supplier_invoice_number = '0023', supplier_invoice_amount = 800, supplier_invoice_status = 'received' where id = $1", [poG.id]);
+const [c4] = await sql("insert into public.customers (customer_number, customer_type, full_name, phone, created_by, updated_by) values ('E2E-Z4', 'individual', 'E2E ZOHO FOUR', '+971500000094', null, null) returning id");
+await sql("insert into public.zoho_outbox (kind, record_id, status, zoho_result) values ('contact', $1, 'pending', $2::jsonb)", [c4.id, stub]);
+await go(p, `${base}/zoho?show=pending`);
+const rowTexts = await p.locator("[data-zoho-row='pending']").allTextContents();
+const payRow = rowTexts.find((t) => /LPO-E2EZG-1/.test(t)) ?? "";
+check("D: the supplier payment row shows the supplier, the bill it pays and the amount", /E2e Golden Zone/i.test(payRow) && /bill 0023/.test(payRow) && /AED [\d,]/.test(payRow), payRow.slice(0, 200));
+check("D: and WHY it waits, with the failed bill named", /waits for the .*bill, which failed/i.test(payRow) && /TRN/.test(payRow), payRow.slice(0, 260));
+const freeRow = rowTexts.find((t) => /E2E ZOHO FOUR/i.test(t)) ?? "";
+check("D: a row with nothing holding it still says why (its turn)", /Nothing is holding it/.test(freeRow), freeRow.slice(0, 160));
+await p.screenshot({ path: shot("d-rows-amount-why.png"), fullPage: true });
+
 await own.browser.close();
 // The outbox rows this test made leave with it (cleanup knows the suppliers/POs; the contact rows are ours).
-await sql("delete from public.zoho_outbox where record_id in ($1, $2, $3) or record_id in ($4, $5)", [c1, c2, c3, poG.id, poP.id]);
+await sql("delete from public.zoho_outbox where record_id in ($1, $2, $3) or record_id in ($4, $5) or record_id = $6", [c1, c2, c3, poG.id, poP.id, c4.id]);
 // The customers themselves leave with the cleanup (their +9715000000… phones are the e2e pattern).
 await cleanupDb();
 summary();

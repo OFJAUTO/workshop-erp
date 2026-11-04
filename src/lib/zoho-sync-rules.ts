@@ -292,13 +292,23 @@ export function confirmQuestion(n: number, bookLabel: string): string {
 }
 
 /** Where a waiting or failed row's problem is FIXED, from its reason (the link beside the words). */
-export function reasonHref(reason: string | null | undefined): { href: string; label: string } | null {
+export function reasonHref(reason: string | null | undefined, ctx: { kind?: ZohoKind; recordId?: string | null } = {}): { href: string; label: string } | null {
   if (!reason) return null;
   if (/TRN/i.test(reason)) return { href: "/parts/suppliers?filter=no_trn", label: "Fix the supplier" };
+  // "You can specify Tax Treatment only for transactions within tax period" = the supplier invoice DATE is wrong
+  // (LPO-00035-2's bill was typed 28/10/2016): fixed on the LPO page, then Retry.
+  if (/tax period/i.test(reason) && (ctx.kind === "bill" || ctx.kind === "billpayment") && ctx.recordId) return { href: `/parts/orders/${ctx.recordId}`, label: "Open the LPO (fix the invoice date, then Retry)" };
   if (/mapping missing/i.test(reason)) return { href: "/settings/zoho/mapping", label: "Open the mapping" };
   if (/not connected|presses Connect/i.test(reason)) return { href: "/settings/zoho", label: "Open Zoho settings" };
   if (/cheque/i.test(reason)) return { href: "/invoices?show=awaiting", label: "Open the money list" };
   return null;
+}
+
+/** Fix 3 (4 November 2026): a waiting row with nothing holding it still says WHY it waits - its turn. */
+export function waitingTurnWords(mode: "manual" | "automatic"): string {
+  return mode === "manual"
+    ? "Nothing is holding it: it waits for Sync to Zoho (it goes with the next press)."
+    : "Nothing is holding it: it goes with the next five-minute run.";
 }
 
 /**
@@ -317,11 +327,11 @@ export type NeedLine = {
   href: string | null;
   hrefLabel: string | null;
 };
-export function needLineOf(child: { id: string; kind: ZohoKind; name: string | null }, parent: { kind: ZohoKind; name: string | null; state: "pending" | "failed" | "absent"; reason: string | null; id: string | null }): NeedLine {
+export function needLineOf(child: { id: string; kind: ZohoKind; name: string | null }, parent: { kind: ZohoKind; name: string | null; state: "pending" | "failed" | "absent"; reason: string | null; id: string | null; /** The parent DOCUMENT's id (the LPO, the invoice), for a fix link straight to it. */ recordId?: string | null }): NeedLine {
   const childWord = `${kindWord(child.kind)}${child.name ? ` ${child.name}` : ""}`;
   const parentWord = `${parent.name ? `${parent.name} ` : "its "}${kindWord(parent.kind).toLowerCase()}`;
   if (parent.state === "failed") {
-    const fix = reasonHref(parent.reason);
+    const fix = reasonHref(parent.reason, { kind: parent.kind, recordId: parent.recordId ?? null });
     return {
       rowId: child.id,
       rowKind: child.kind,

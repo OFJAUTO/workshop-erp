@@ -298,7 +298,7 @@ export async function selectionNeeds(children: PendingRow[], allPending: Pending
       }
       const failed = failedRows.find((r) => r.kind === parent.kind && r.record_id === parent.record);
       if (failed) {
-        out.push(needLineOf({ id: c.id, kind: c.kind, name: c.name }, { kind: parent.kind, name: parent.name, state: "failed", reason: failed.last_error, id: null }));
+        out.push(needLineOf({ id: c.id, kind: c.kind, name: c.name }, { kind: parent.kind, name: parent.name, state: "failed", reason: failed.last_error, id: null, recordId: parent.record }));
         continue;
       }
       out.push(needLineOf({ id: c.id, kind: c.kind, name: c.name }, { kind: parent.kind, name: parent.name, state: "absent", reason: null, id: null }));

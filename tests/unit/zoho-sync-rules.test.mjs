@@ -6,6 +6,7 @@
 const R = await import("../../src/lib/zoho-sync-rules.ts");
 const { syncModeOf, kindWord, kindCount, itemsWord, sortForPosting, buildPreview, confirmLabel, tallyItems, runWords, mergeItems, isRateLimitError, reminderDue, reminderWords, dubaiClock, dayWaitsForSync, manualCronWords, resultWords, POSTING_ORDER, PREVIEW_GROUPS, RUN_CAP_TEST_ROWS, KIND_WORDS, ZOHO_KINDS } = R;
 const { rowEffect, effectOfRow, doneOutcome, sendsOnPress, stuckWords, retryRefusal, reconDue, reconDaysDue, reconRunWords, RATE_LIMIT_WORDS, ACCOUNTS_WAIT_WORDS, SENDS_ON_PRESS_FILTER, RECON_DAYS_PER_RUN } = R;
+const { reasonHref, waitingTurnWords } = R;
 
 let failed = 0;
 const check = (name, ok, detail = "") => { if (!ok) failed++; console.log(`${ok ? "OK  " : "FAIL"} ${name}${detail ? ` · ${detail}` : ""}`); };
@@ -73,7 +74,7 @@ const many = Array.from({ length: RUN_CAP_TEST_ROWS + 30 }, (_, i) => row(`x${i}
 const capped = buildPreview(many, { now: NOW, cap: RUN_CAP_TEST_ROWS });
 check("OFJ TEST: one press sends at most the cap, the rest is named for later", capped.ids.length === RUN_CAP_TEST_ROWS && capped.later === 30);
 check("the REAL book has no cap", buildPreview(many, { now: NOW, cap: null }).later === 0);
-check("the confirm button names the action and the book", confirmLabel(12, "OFJ TEST") === "Yes, send 12 items to OFJ TEST" && confirmLabel(1, "OFJ TEST") === "Yes, send 1 item to OFJ TEST");
+check("the confirm button names the action and the book", confirmLabel(12, "OFJ TEST") === "Yes, sync and record 12 items to OFJ TEST" && confirmLabel(1, "OFJ TEST") === "Yes, sync and record 1 item to OFJ TEST");
 
 // Results.
 const items = [
@@ -179,6 +180,12 @@ check("a few days per run at most (Zoho's daily allowance)", reconDaysDue({ nowM
 check("a busy queue on automatic: nothing compared", reconDaysDue({ nowMs: dubai("2026-11-03", 9), rows: {}, firstUnsent: null, drainSaturated: true }).length === 0);
 check("yesterday keeps its hourly re-check while red", reconDaysDue({ nowMs: dubai("2026-11-03", 9), rows: { "2026-11-02": { status: "red", checked_at: new Date(dubai("2026-11-03", 7)).toISOString() } }, firstUnsent: null, drainSaturated: false, lookback: 1 }).join(",") === "2026-11-02");
 check("the words after a sync name each day compared", reconRunWords([{ day: "2026-10-31", status: "green" }, { day: "2026-11-01", status: "red" }]) === "Compared with Zoho: 2026-10-31 identical ✓ · 2026-11-01 a difference – see Reconciliation." && reconRunWords([]) === null);
+
+// Fix 3 (4 November 2026): the fix link follows the reason AND the document, and a free waiting row says why.
+check("a tax-period refusal on a bill links straight to its LPO", reasonHref("Zoho said: You can specify Tax Treatment only for transactions within tax period.", { kind: "billpayment", recordId: "abc" })?.href === "/parts/orders/abc");
+check("the same reason without a document keeps no link", reasonHref("You can specify Tax Treatment only for transactions within tax period.") === null);
+check("a TRN refusal still goes to the suppliers page", reasonHref("E2e Golden Zone needs its 15-digit TRN", { kind: "bill", recordId: "x" })?.href === "/parts/suppliers?filter=no_trn");
+check("a free waiting row says its turn (manual and automatic)", /Sync to Zoho/.test(waitingTurnWords("manual")) && /five-minute run/.test(waitingTurnWords("automatic")));
 
 console.log(failed ? `${failed} FAILED` : "all passed");
 process.exit(failed ? 1 : 0);

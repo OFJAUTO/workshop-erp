@@ -8,7 +8,7 @@ import { wentLiveOf, zohoOpenUrl, zohoWriteOrg, type OutboxRow } from "@/lib/zoh
 import { ZOHO_REAL_ORG_ID } from "@/lib/zoho";
 import { outboxDocs } from "@/lib/zoho-docs";
 import { loadRecentRuns, loadRun, pendingNeedsMap, waitingCounts } from "@/lib/zoho-manual";
-import { RUN_STALE_MS, SYNC_MODE_WORDS, kindWord, reasonHref, resultWords, retryRefusal, runWords, syncModeOf, type NeedLine, type PendingRow } from "@/lib/zoho-sync-rules";
+import { RUN_STALE_MS, SYNC_MODE_WORDS, kindWord, reasonHref, resultWords, retryRefusal, runWords, syncModeOf, waitingTurnWords, type NeedLine, type PendingRow } from "@/lib/zoho-sync-rules";
 import { pageAll } from "@/lib/page-all";
 import { backfillZoho, markZohoDoneByHand, retryZohoRow, tickGoLiveReview } from "./actions";
 import { ZohoSyncButton } from "./ZohoSyncButton";
@@ -72,7 +72,11 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
   const rows = filtered;
 
   // The document names, batched per kind (THE lookup shared with the Sync to Zoho window and the reminder).
-  const docs = await outboxDocs(rows);
+  // Fix 3 (4 November 2026, Mathew): every waiting or failed row shows its AMOUNT - a supplier bill or payment
+  // reads its real figure (a few reads per row); posted rows keep the cheap name (their green line carries
+  // Zoho's own figures already).
+  const liveRows = rows.filter((r) => r.status !== "synced");
+  const docs = new Map([...(await outboxDocs(rows.filter((r) => r.status === "synced"))), ...(await outboxDocs(liveRows, { billFigures: true }))]);
   const [waiting, runs, runView] = await Promise.all([waitingCounts(), loadRecentRuns(5), runParam ? loadRun(runParam) : Promise.resolve(null)]);
   // Why a waiting row waits (Mathew, 3 November 2026): the document it hangs on, with the fix link when that one is red.
   const pendingShown: PendingRow[] = rows.filter((r) => r.status === "pending").map((r) => ({ id: r.id, kind: r.kind, record_id: r.record_id, enqueued_at: r.enqueued_at, last_error: r.last_error, claimed_at: null, name: docs.get(`${r.kind}:${r.record_id}`)?.name ?? null, amount: null }));
@@ -254,14 +258,18 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
                   {r.last_error && r.status !== "synced" ? (
                     <p className="text-sm text-red font-semibold" data-zoho-reason>
                       {r.last_error}
-                      {(() => { const fix = reasonHref(r.last_error); return fix ? <> <Link href={fix.href} className="underline underline-offset-4" data-zoho-fix-link>→ {fix.label}</Link></> : null; })()}
+                      {(() => { const fix = reasonHref(r.last_error, { kind: r.kind, recordId: r.record_id }); return fix ? <> <Link href={fix.href} className="underline underline-offset-4" data-zoho-fix-link>→ {fix.label}</Link></> : null; })()}
                     </p>
                   ) : null}
-                  {r.status === "pending" && whyMap.get(r.id) ? (
-                    <p className="text-sm text-muted" data-zoho-why>
-                      {whyMap.get(r.id)!.words}
-                      {whyMap.get(r.id)!.href ? <> <Link href={whyMap.get(r.id)!.href!} className="font-bold underline underline-offset-4" data-zoho-fix-link>→ {whyMap.get(r.id)!.hrefLabel ?? "Open"}</Link></> : null}
-                    </p>
+                  {r.status === "pending" ? (
+                    whyMap.get(r.id) ? (
+                      <p className="text-sm text-muted" data-zoho-why>
+                        {whyMap.get(r.id)!.words}
+                        {whyMap.get(r.id)!.href ? <> <Link href={whyMap.get(r.id)!.href!} className="font-bold underline underline-offset-4" data-zoho-fix-link>→ {whyMap.get(r.id)!.hrefLabel ?? "Open"}</Link></> : null}
+                      </p>
+                    ) : (
+                      <p className="text-sm text-muted" data-zoho-why>{waitingTurnWords(mode)}</p>
+                    )
                   ) : null}
                   <div className="flex flex-wrap items-center gap-2">
                     {r.zoho_id && org ? (

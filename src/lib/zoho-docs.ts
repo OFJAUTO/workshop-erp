@@ -93,7 +93,8 @@ export async function outboxDocs(rows: { kind: ZohoKind; record_id: string; zoho
       notForZoho: po.kind === "main" ? "a main LPO (the bills sit on its supplier LPOs)" : internal,
     });
     // "Paid to supplier" taken back in the ERP: before it reached Zoho nothing goes; after, the run removes it.
-    put(`billpayment:${po.id}`, `${po.number} · ${po.supplier_name}${money}`, gross, { inZoho: !!po.zoho_billpayment_id, gone: !po.supplier_paid_at, removable: true, notForZoho: internal });
+    // Fix 3 (4 November 2026, Mathew): a supplier payment names its supplier AND the bill it pays.
+    put(`billpayment:${po.id}`, `${po.number} · ${po.supplier_name}${po.supplier_invoice_number ? ` · bill ${po.supplier_invoice_number}` : ""}${money}`, gross, { inZoho: !!po.zoho_billpayment_id, gone: !po.supplier_paid_at, removable: true, notForZoho: internal });
   };
   const poIds = idsOf("bill", "billpayment");
   if (opts.billFigures) {
