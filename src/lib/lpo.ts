@@ -147,7 +147,9 @@ const lineOf = (p: PartFull, i: number) => ({ part_item_id: p.id, position: i + 
 export async function createMainLpo(jobId: string, by: Actor): Promise<{ error?: string; poId?: string; number?: string }> {
   const admin = createAdminClient();
   const { data: job } = await admin.from("jobs").select("id, job_number, is_open, status").eq("id", jobId).maybeSingle();
-  if (!job || !job.is_open) return { error: "This job is closed." };
+  // Part 4 (4 November 2026): a HELD job ("Order parts now" before the car arrives) is booked, not open —
+  // its LPO is raised exactly like any other and gate-in opens the job itself.
+  if (!job || (!job.is_open && job.status !== "booked")) return { error: "This job is closed." };
   const { toOrder, main } = await loadJobLpos(jobId);
   if (main && main.status === "pending_approval") return { error: `${main.number} is already waiting for approval.` };
   if (!toOrder.length) return { error: "Nothing to order: every approved part is from stock or already on an LPO." };

@@ -165,6 +165,16 @@ export async function cancelEstimateMoneyAction(estimateId: string, input: { rea
   return r;
 }
 
+/** Part 4: Order parts now on an accepted estimate — the held job + the main LPO for approval. */
+export async function orderEstimatePartsNowAction(estimateId: string): Promise<{ error?: string; words?: string; jobId?: string }> {
+  const staff = await requireStaff();
+  if (staff.viewingAs) return { error: "View as is read-only." };
+  const { orderEstimatePartsNow } = await import("@/lib/estimate-money");
+  const r = await orderEstimatePartsNow(estimateId, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+  if (!r.error) revalidatePath(`/estimates/${estimateId}`);
+  return { error: r.error, words: r.held, jobId: r.jobId };
+}
+
 /** An unpaid proforma is voided with a reason (owner + accounts; logged). */
 export async function voidEstimateProformaAction(estimateId: string, invoiceId: string, reason: string): Promise<{ error?: string }> {
   const staff = await requireStaff();

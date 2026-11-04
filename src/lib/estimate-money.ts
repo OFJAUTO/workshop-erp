@@ -497,6 +497,62 @@ export async function cancelEstimateWithMoney(estimateId: string, input: { reaso
   return { cnId: cn?.id ?? null, cnNumber: cn?.number ?? null, words };
 }
 
+/**
+ * Part 4 (4 November 2026): ORDER PARTS NOW on an ACCEPTED estimate — before the car arrives. A held
+ * job shell is made once (status 'booked', is_open false, like the bodyshop bookings; gate-in reuses it,
+ * so the parts, the LPOs and later the money all sit on the ONE job). The estimate's priced part lines
+ * become part requests and priced parts through THE one converter (estimateLineRows — idempotent by
+ * client_key, so Start quotation later never doubles them), and the main LPO goes for approval under the
+ * normal rules; with no advance received the owner sees the warning at approval and may approve anyway.
+ */
+export async function orderEstimatePartsNow(estimateId: string, staff: { id: string; display_name: string; role_id: string }): Promise<{ error?: string; jobId?: string; jobNumber?: string; lpoNumber?: string; held?: string }> {
+  if (!["owner", "service_advisor"].includes(staff.role_id)) return { error: "Advisors or the owner order an estimate's parts." };
+  const admin = createAdminClient();
+  const e = await loadEstimate(estimateId);
+  if (!e || !e.is_active || e.deleted_at) return { error: "Estimate not found." };
+  if (e.status !== "approved") return { error: "The customer has not accepted this estimate yet." };
+  if (e.cancelled_at) return { error: "This estimate was cancelled." };
+  if (e.carried_job_id || e.job_id) return { error: "The car is here: order the parts from the job's Parts page." };
+  if (!e.vehicle_id) return { error: "The estimate has no car on record." };
+  // At least one PRICED part line (the parts desk priced it, or the advisor did).
+  const { data: partLines } = await admin.from("quotation_lines").select("id, line_type, priced_at, supplier_text, unit_cost").eq("quotation_id", e.id).eq("is_active", true).eq("line_type", "part");
+  const priced = ((partLines ?? []) as { priced_at: string | null; unit_cost: number | string | null }[]).filter((l) => l.priced_at && l.unit_cost !== null);
+  if (!priced.length) return { error: "No priced parts on this estimate yet: send them to the parts desk to price first." };
+  // The held job: made once per estimate family (gate-in reuses it).
+  const fam = await familyIdsOf([e.id]);
+  const famIds = fam.get(e.id)?.ids ?? [e.id];
+  const { data: existing } = await admin.from("jobs").select("id, job_number, status, is_open").in("estimate_id", famIds).limit(1).maybeSingle();
+  if (existing && existing.status !== "booked") return { error: `${existing.job_number} already carries this estimate.` };
+  let job = existing as { id: string; job_number: string } | null;
+  if (!job) {
+    const now = new Date().toISOString();
+    const { data: made, error: jobErr } = await admin.from("jobs").insert({ vehicle_id: e.vehicle_id, customer_id: e.customer_id, status: "booked", stage: "quote", is_open: false, department: "mechanical", priority: "normal", gated_in_by: staff.id, advisor_id: staff.id, gated_in_at: now, booked_at: now, estimate_id: e.id, created_by: staff.id, updated_by: staff.id }).select("id, job_number").single();
+    if (jobErr || !made) {
+      await logAppError("order estimate parts: job", jobErr ?? new Error("no row"), { staffId: staff.id, detail: { estimateId } });
+      return { error: "Couldn't save – nothing was recorded. Try again or tell the owner." };
+    }
+    job = made as { id: string; job_number: string };
+    await admin.from("job_events").insert({ job_id: job.id, event_type: "estimate_attached", note: `${job.job_number} opened as a HELD job for ${e.number} (parts ordered before the car arrives). Gate-in opens this same job.`, created_by: staff.id });
+  }
+  // The estimate's priced part lines become requests + priced parts (idempotent by client_key).
+  const { estimateLineRows } = await import("@/app/(app)/quotes/actions");
+  await estimateLineRows(e.id, e.id, staff.id, job.id);
+  // The customer's acceptance of the ESTIMATE is the approval: the priced to-order parts become orderable
+  // (exactly what applyCustomerResponse stamps at a quotation's approval).
+  await admin.from("part_items").update({ order_status: "to_order", updated_by: staff.id }).eq("job_id", job.id).eq("is_active", true).eq("availability", "to_order").eq("order_status", "none").not("priced_at", "is", null);
+  // The main LPO under the NORMAL rules: built from every To order part, sent for the one-tap approval.
+  const { createMainLpo } = await import("./lpo");
+  const r = await createMainLpo(job.id, { id: staff.id, display_name: staff.display_name });
+  if (r.error) return { error: r.error };
+  const m = await estimateMoneyOf(e.id);
+  const noAdvance = !m || m.paid <= 0.005;
+  await admin.from("quotation_events").insert({ quotation_id: e.id, job_id: job.id, event_type: "parts_ordered_early", note: `Order parts now: ${priced.length} priced part${priced.length === 1 ? "" : "s"} sent for LPO approval (${r.number ?? ""}) on held job ${job.job_number} by ${staff.display_name}.${noAdvance ? " No advance received yet - the approver sees the warning." : ""}`, created_by: staff.id });
+  if (noAdvance) {
+    await notifyRoles(["owner"], { type: "po_approval", title: `LPO to approve, NO ADVANCE · ${e.number}`, body: `${r.number ?? "The LPO"} for ${e.number}'s parts (held job ${job.job_number}) - the car is not here and NOTHING is paid yet. You can approve anyway with a reason, or ask for the advance first.`, jobId: job.id, href: r.poId ? `/parts/orders/${r.poId}` : `/parts/${job.id}` });
+  }
+  return { jobId: job.id, jobNumber: job.job_number, lpoNumber: r.number, held: `${r.number ?? "The LPO"} sent for approval on ${job.job_number} – the parts are held for ${e.number} and the job opens at gate-in.${noAdvance ? " No advance received yet: the owner sees the warning at approval." : ""}` };
+}
+
 /** Part 3: an estimate past its date that HOLDS MONEY is never expired by itself — the people are told instead. */
 export async function estimateExpiryHold(q: { id: string; number: string }, settings: Settings): Promise<boolean> {
   void settings;

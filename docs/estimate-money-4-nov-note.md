@@ -145,9 +145,31 @@ treatment is already the advance rule and would not change).
   owner are told once ("AED 500.00 is paid on it, so it was NOT expired. Re-send, revise, or
   cancel it"), the hold is on the estimate's history, and a second run never repeats it.
 
-## Still to come (the task's remaining part)
+## Part 4 — ORDER PARTS NOW, before the car arrives (same day; THE TASK IS COMPLETE)
 
-- Part 4: "Order parts now" on an approved estimate with the no-advance owner warning.
+- On an **accepted estimate with priced parts**, advisors and the owner see **"Order parts now
+  (N priced)"** next to Book / Gate in. One tap:
+  1. a **HELD job** opens once (status booked, not on any list — exactly like the bodyshop
+     bookings; its history says "opened as a HELD job for E-xxxxx");
+  2. the estimate's priced part lines become part requests and priced parts through THE one
+     converter (idempotent — Start quotation later never doubles them), made orderable because
+     the customer's acceptance of the estimate IS the approval;
+  3. the **main LPO goes for the normal one-tap approval**. With NOTHING paid the owner's bell
+     says **"LPO to approve, NO ADVANCE"**, the LPO page warns "NO ADVANCE received on E-xxxxx
+     (AED 0.00 of … paid) – the car is not here yet", and approving anyway needs the owner's
+     reason (logged as "No advance received: …") — the same override rails as a missing deposit.
+- Parts that arrive are received on the held job as usual (the desk's search finds it; labels,
+  stickers, receiving all normal) — **held for E-xxxxx** until the car comes.
+- **At gate-in the held job IS the job**: the estimate stays ticked to carry, the same J-number
+  opens (one job, now open), the parts and LPOs are already on it, the money follows (Part 2),
+  and nothing is doubled.
+
+## Tests (whole task)
+
+`npm run test:estmoney1` — **89 checks** through the real screens: proformas (complete, partial,
+combined), bill-to, payments, links, reports, automatic tax invoices, gate-in carry, over-payment
+settlement, cancel with fee + refund, expiry hold, and Order parts now with the no-advance
+approval and the held-job gate-in. Plus unit `estimate-money` (21) and the reworked regressions.
 
 ## Assumptions (listed, not asked)
 

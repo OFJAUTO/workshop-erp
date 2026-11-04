@@ -63,8 +63,10 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
     // 30 October 2026: EVERY open estimate of the car (accepted, or still with the customer) carries over to the job.
     admin.from("quotations").select("id, number, status, total_aed, rounded_total_aed, sent_at, opened_at, responded_at, approver_name, created_at, additional_to_id").eq("kind", "estimate").eq("vehicle_id", v.id).in("status", OPEN_ESTIMATE_STATUSES).eq("is_active", true).is("deleted_at", null).is("carried_job_id", null).order("created_at"),
   ]);
-  const { data: attachedJobs } = (estimates ?? []).length ? await admin.from("jobs").select("estimate_id").in("estimate_id", (estimates ?? []).map((e) => e.id)) : { data: [] };
-  const used = new Set((attachedJobs ?? []).map((j) => j.estimate_id));
+  // Part 4 (4 November 2026): a HELD job (status 'booked', made by "Order parts now") never hides the
+  // estimate from the carry - gate-in opens that very job, parts and LPOs already on it.
+  const { data: attachedJobs } = (estimates ?? []).length ? await admin.from("jobs").select("estimate_id, status, is_open").in("estimate_id", (estimates ?? []).map((e) => e.id)) : { data: [] };
+  const used = new Set((attachedJobs ?? []).filter((j) => j.status !== "booked" || j.is_open).map((j) => j.estimate_id));
   // A car back within the comeback window: ask whether it is a comeback for one of its recent jobs.
   const windowDays = Number(settings.comeback_window_days) || 90;
   // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once

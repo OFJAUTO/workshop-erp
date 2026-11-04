@@ -63,7 +63,17 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   ]);
   const depositRequired = Number(q?.deposit_aed) || 0;
   const depositReceived = ((pays ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared")).reduce((a, p) => a + p.amount_aed, 0);
-  const depositShort = depositRequired > 0 && depositReceived + 0.005 < depositRequired ? `Deposit AED ${depositRequired.toLocaleString("en-GB")} not received yet${depositReceived > 0 ? ` (AED ${depositReceived.toLocaleString("en-GB")} received so far)` : ""}. Quotation ${q?.number}.` : null;
+  let depositShort = depositRequired > 0 && depositReceived + 0.005 < depositRequired ? `Deposit AED ${depositRequired.toLocaleString("en-GB")} not received yet${depositReceived > 0 ? ` (AED ${depositReceived.toLocaleString("en-GB")} received so far)` : ""}. Quotation ${q?.number}.` : null;
+  // Part 4 (4 November 2026): an LPO on a HELD job ("Order parts now" before the car arrives) with
+  // NOTHING paid on the estimate - the owner sees the warning and can approve anyway with a reason.
+  if (!depositShort && po.job_id) {
+    const { data: heldJob } = await admin.from("jobs").select("id, status, estimate_id").eq("id", po.job_id).maybeSingle();
+    if (heldJob?.status === "booked" && heldJob.estimate_id) {
+      const { estimateMoneyOf } = await import("@/lib/estimate-money");
+      const m = await estimateMoneyOf(String(heldJob.estimate_id)).catch(() => null);
+      if (m && m.paid <= 0.005) depositShort = `NO ADVANCE received on ${m.number} (AED 0.00 of ${m.total.toLocaleString("en-GB", { minimumFractionDigits: 2 })} paid) – the car is not here yet.`;
+    }
+  }
   const canApprove = can(role, "approvePurchaseOrders") && (role === "owner" || staff.is_head_accountant) && !staff.viewingAs;
   const canManage = can(role, "managePurchaseOrders") && !staff.viewingAs;
   const canPay = (role === "owner" || role === "accounts") && !staff.viewingAs;

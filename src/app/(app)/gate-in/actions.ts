@@ -212,8 +212,11 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const { data: carryRows } = carryIds.length
     ? await createAdminClient().from("quotations").select("id, number, status, vehicle_id, additional_to_id, carried_job_id, created_at").in("id", carryIds).eq("kind", "estimate").eq("is_active", true).is("deleted_at", null)
     : { data: [] as { id: string; number: string; status: string; vehicle_id: string | null; additional_to_id: string | null; carried_job_id: string | null; created_at: string }[] };
-  const { data: takenRows } = carryIds.length ? await createAdminClient().from("jobs").select("estimate_id").in("estimate_id", carryIds) : { data: [] as { estimate_id: string }[] };
-  const taken = new Set((takenRows ?? []).map((j) => j.estimate_id));
+  // Part 4 (4 November 2026): a HELD job (status 'booked', made by "Order parts now") does not take the
+  // estimate out of the carry - gate-in opens that very job, so its parts and LPOs are already on it.
+  const { data: takenRows } = carryIds.length ? await createAdminClient().from("jobs").select("id, estimate_id, status, is_open, vehicle_id").in("estimate_id", carryIds) : { data: [] as { id: string; estimate_id: string; status: string; is_open: boolean; vehicle_id: string }[] };
+  const taken = new Set((takenRows ?? []).filter((j) => j.status !== "booked" || j.is_open).map((j) => j.estimate_id));
+  const heldJob = (takenRows ?? []).find((j) => j.status === "booked" && !j.is_open && j.vehicle_id === vehicleId) ?? null;
   const carried = (carryRows ?? [])
     .filter((e) => e.vehicle_id === vehicleId && !e.carried_job_id && !taken.has(e.id) && CARRY_STATUSES.includes(e.status))
     .sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
@@ -229,8 +232,10 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const advisorInCharge = ["service_advisor", "owner"].includes(staff.role_id) ? staff.id : null;
   const jobFields = { ...(recheckOf ? { job_kind: "recheck", recheck_of: recheckOf.id } : {}), vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: comebackJob ? "high" : d.priority, department: booked || recheckOf ? "bodyshop" : d.department, gated_in_by: staff.id, estimate_id: estimate?.id ?? null, comeback_of: recheckOf ? null : comebackJob?.id ?? null, ...feeFields, ...(booked ? {} : { advisor_id: advisorInCharge }) };
   const nowIso = new Date().toISOString();
-  const { data: job, error: jobError } = booked
-    ? await createAdminClient().from("jobs").update({ ...jobFields, status: "gate_in_pending", stage: "gate_in", stage_entered_at: nowIso, gated_in_at: nowIso, is_open: true, updated_by: staff.id }).eq("id", booked.id).select("id, job_number").single()
+  // The job to open: a bodyshop booking, or the HELD job "Order parts now" made for a carried estimate.
+  const reuse = booked ?? (heldJob && !recheckOf ? { id: heldJob.id } : null);
+  const { data: job, error: jobError } = reuse
+    ? await createAdminClient().from("jobs").update({ ...jobFields, ...(booked ? {} : { department: d.department }), ...(heldJob && !estimate ? { estimate_id: heldJob.estimate_id } : {}), status: "gate_in_pending", stage: "gate_in", stage_entered_at: nowIso, gated_in_at: nowIso, is_open: true, updated_by: staff.id }).eq("id", reuse.id).select("id, job_number").single()
     : await supabase.from("jobs").insert(jobFields).select("id, job_number").single();
   if (jobError || !job) return { error: jobError?.message ?? "Could not open the job card.", values };
 

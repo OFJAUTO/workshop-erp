@@ -368,8 +368,9 @@ try {
   await own2.page.locator("[data-em-cancel-save]").click();
   const cn6 = await until(async () => (await sql("select id, number, total_aed::float as total, credit_of from public.invoices where estimate_id = $1 and kind = 'credit_note' and is_active", [e6.id]))[0]);
   check("J3: the credit note is the invoiced money less the AED 200 fee", !!cn6 && cn6.total === 850 && cn6.credit_of === inv6.id, JSON.stringify(cn6));
-  const e6After = (await sql("select status, cancel_reason from public.quotations where id = $1", [e6.id]))[0];
-  check("J4: the estimate is cancelled with the reason", e6After.status === "cancelled" && /sold the car/i.test(e6After.cancel_reason ?? ""));
+  // The credit note is written BEFORE the status flips: wait for the cancel itself, never read right after J3.
+  const e6After = await until(async () => (await sql("select status, cancel_reason from public.quotations where id = $1 and status = 'cancelled'", [e6.id]))[0]);
+  check("J4: the estimate is cancelled with the reason", !!e6After && /sold the car/i.test(e6After.cancel_reason ?? ""), JSON.stringify(e6After));
   const cn6Zoho = await sql("select kind, status, (zoho_result->>'hand_only') as hand from public.zoho_outbox where record_id = $1", [cn6.id]);
   check("J5: the advance-parent credit note is a by-hand Zoho row from birth", cn6Zoho.length === 1 && cn6Zoho[0].status === "failed" && cn6Zoho[0].hand === "true", JSON.stringify(cn6Zoho));
   check("J6: the words point at the refund on the credit note's page", await until(async () => /Record the refund of AED 850\.00/.test((await own2.page.locator("[data-em-done]").textContent().catch(() => "")) ?? ""), 20, 400));
@@ -411,6 +412,55 @@ try {
   await cronRun();
   const holdEvent2 = await sql("select count(*)::int as n from public.quotation_events where quotation_id = $1 and event_type = 'expiry_hold'", [e7.id]);
   check("K5: a second run never repeats the hold", holdEvent2[0].n === 1);
+
+  /* ---------- L. ORDER PARTS NOW: the held job, the LPO with the no-advance warning, gate-in reuses it ---------- */
+  const cust3 = (await sql("insert into public.customers (customer_type, full_name, phone) values ('individual', 'E2e Early Parts', '+971500000098') returning id"))[0].id;
+  const car3 = (await sql("insert into public.vehicles (customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, make_id, model_id, model_year, vin) values ($1, true, 'UAE', 'Dubai', 'P', '77310', $2, $3, 2021, 'E2EESTMONEYVIN03X') returning id", [cust3, mm.make_id, mm.model_id]))[0].id;
+  const e8 = (await sql("insert into public.quotations (kind, customer_id, vehicle_id, status, validity_days, vat_percent, total_aed, created_by, updated_by) values ('estimate', $1, $2, 'draft', 7, 5, 1890, $3, $3) returning id, number", [cust3, car3, advisor.id]))[0];
+  await sql("insert into public.quotation_lines (quotation_id, position, line_type, title, source_type, quantity, unit_cost, markup_percent, unit_price, line_total, supplier_text, part_number, availability, delivery_days, priced_at, priced_by, created_by, updated_by) values ($1, 1, 'part', 'E2E FRONT WISHBONE', 'manual', 2, 450, 100, 900, 1800, 'E2e Supplier', 'A2033304700', 'to_order', 2, now(), $2, $2, $2)", [e8.id, advisor.id]);
+  await sql("update public.quotations set status = 'approved', sent_at = now(), responded_at = now(), approver_name = 'EARLY' where id = $1", [e8.id]);
+  await go(adv.page, `${base}/estimates/${e8.id}`);
+  check("L1: Order parts now stands on the accepted estimate (1 priced)", /1 priced/.test((await adv.page.locator("[data-order-parts-now]").textContent().catch(() => "")) ?? ""));
+  await adv.page.locator("[data-order-parts-now]").click();
+  const heldWords = await until(async () => { const t = (await adv.page.locator("[data-order-parts-done]").textContent().catch(() => "")) ?? ""; return /sent for approval/i.test(t) ? t : null; }, 40, 500);
+  if (!heldWords) console.log("   card says:", ((await adv.page.locator("[data-order-parts-error]").textContent().catch(() => "")) ?? "(no error)"));
+  check("L2: the answer names the LPO, the held job and the no-advance warning", !!heldWords && /held for/i.test(heldWords) && /No advance received/i.test(heldWords), (heldWords ?? "").slice(0, 200));
+  const heldJob = (await sql("select id, job_number, status, is_open, estimate_id from public.jobs where vehicle_id = $1", [car3]))[0];
+  check("L3: the HELD job stands (booked, not open, the estimate on it)", !!heldJob && heldJob.status === "booked" && heldJob.is_open === false && heldJob.estimate_id === e8.id, JSON.stringify(heldJob));
+  const heldPart = (await sql("select id, client_key, cost_aed::float as cost, supplier, availability, priced_at is not null as priced from public.part_items where job_id = $1 and is_active", [heldJob.id]))[0];
+  check("L4: the priced part is on the held job through THE converter", !!heldPart && heldPart.cost === 450 && /^estimate:/.test(heldPart.client_key ?? "") && heldPart.priced, JSON.stringify(heldPart));
+  const heldLpo = (await sql("select id, number, status, kind from public.purchase_orders where job_id = $1", [heldJob.id]))[0];
+  if (!heldLpo) throw new Error("no LPO raised - stopping");
+  check("L5: the main LPO waits for the one-tap approval", !!heldLpo && heldLpo.kind === "main" && heldLpo.status === "pending_approval", JSON.stringify(heldLpo));
+  const noAdvBell = await sql("select count(*)::int as n from public.notifications where type = 'po_approval' and title like $1", [`LPO to approve, NO ADVANCE · ${e8.number}`]);
+  check("L6: the owner's bell says NO ADVANCE", noAdvBell[0].n >= 1);
+  // The owner approves anyway, with the reason (the no-advance override rides the deposit-override rails).
+  await go(own2.page, `${base}/parts/orders/${heldLpo.id}`);
+  const shortLine = ((await own2.page.locator("[data-deposit-short]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check("L7: the LPO page warns NO ADVANCE with the estimate's figures", /NO ADVANCE received on/.test(shortLine) && new RegExp(e8.number).test(shortLine), shortLine.slice(0, 160));
+  await own2.page.locator('textarea[name="override_reason"], input[name="override_reason"]').first().fill("Trusted customer, slow parts - ordering early");
+  await confirmMoney(own2.page, "lpo-approve");
+  const approved = await until(async () => (await sql("select status, deposit_override_reason from public.purchase_orders where id = $1 and status = 'approved'", [heldLpo.id]))[0]);
+  check("L8: approved anyway, the override reason logged as no-advance", !!approved && /^No advance received: Trusted customer/.test(approved.deposit_override_reason ?? ""), JSON.stringify(approved));
+  await own2.page.screenshot({ path: path.join(dir, "l1-no-advance-approved.png"), fullPage: true });
+  // THE CAR ARRIVES: gate-in reuses the held job - parts, LPOs and the estimate all on the ONE job.
+  await go(adv.page, `${base}/gate-in/new?vehicle=${car3}`);
+  for (const [n3, v3] of [["arrived_by", "customer_drove"], ["condition", "runs_drives"], ["fuel_level", "half"], ["cleanliness", "clean"], ["dash_cam", "no"], ["major_damage", "no"], ["keys_count", "1"], ["keys_keychain", "no"], ["old_parts_return", "no"], ["department", "mechanical"]]) await pick(adv.page, n3, v3);
+  const addr3 = adv.page.locator('textarea[name="location_address"]');
+  if (await addr3.count()) await addr3.fill("E2e early-parts address");
+  await adv.page.locator('input[name="mileage_display"]').pressSequentially("31000");
+  await adv.page.keyboard.press("Tab");
+  await adv.page.locator('input[name="requests"]:visible').first().pressSequentially("Fit the wishbones ordered early");
+  check("L9: the ordered estimate is still ticked to carry (the held job never blocks it)", (await adv.page.locator('input[name="carry_estimate"]:checked').count()) >= 1);
+  await chooseInspectionFee(adv.page, 1000);
+  await sleep(400);
+  await adv.page.getByText("Save and continue to photos and video").click();
+  await adv.page.waitForURL((u) => /\/media/.test(u.toString()), { timeout: 30000 }).catch(() => null);
+  const jobs3 = await sql("select id, job_number, status, is_open, estimate_id from public.jobs where vehicle_id = $1", [car3]);
+  check("L10: gate-in opened the SAME held job (one job, now open)", jobs3.length === 1 && jobs3[0].id === heldJob.id && jobs3[0].is_open === true && jobs3[0].status === "gate_in_pending", JSON.stringify(jobs3));
+  check("L11: the estimate carried onto it", (await sql("select carried_job_id from public.quotations where id = $1", [e8.id]))[0].carried_job_id === heldJob.id);
+  const parts3 = await sql("select count(*)::int as n from public.part_items where job_id = $1 and is_active", [heldJob.id]);
+  check("L12: still ONE part - nothing doubled by the arrival", parts3[0].n === 1);
 } finally {
   for (const b of browsers) await b.browser.close().catch(() => {});
   cleanupDb();

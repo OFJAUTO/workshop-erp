@@ -101,6 +101,17 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
     redirect(`${back}?message=${encodeURIComponent(`${po.number} refused \u2713 \u2014 Parts have been told${note ? " with your reason" : ""}; the parts are back under To order for a new LPO.`)}`);
   }
   const deposit = po.job_id ? await depositState(po.job_id) : null;
+  // Part 4 (4 November 2026): an LPO on a HELD job with NOTHING paid on the estimate takes the same
+  // owner-only override as a missing deposit ("no advance received", approve anyway with a reason).
+  let noAdvance: string | null = null;
+  if (!deposit?.short && po.job_id) {
+    const { data: heldJob } = await admin.from("jobs").select("id, status, estimate_id").eq("id", po.job_id).maybeSingle();
+    if (heldJob?.status === "booked" && heldJob.estimate_id) {
+      const { estimateMoneyOf } = await import("@/lib/estimate-money");
+      const m = await estimateMoneyOf(String(heldJob.estimate_id)).catch(() => null);
+      if (m && m.paid <= 0.005) noAdvance = `No advance received on ${m.number} (the car is not here yet).`;
+    }
+  }
   let override: { by: string; reason: string } | null = null;
   if (deposit?.short) {
     const reason = blankToNull(formData.get("override_reason"));
@@ -108,6 +119,11 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
     if (role !== "owner") redirect(`${back}?error=${encodeURIComponent(`${depositShortText(deposit)} Only the owner can approve without it.`)}`);
     if (!reason || reason.length < 3) redirect(`${back}?error=${encodeURIComponent("The deposit has not been recorded. Write the reason to override.")}`);
     override = { by: staff.id, reason };
+  } else if (noAdvance) {
+    const reason = blankToNull(formData.get("override_reason"));
+    if (role !== "owner") redirect(`${back}?error=${encodeURIComponent(`${noAdvance} Only the owner can approve without the advance.`)}`);
+    if (!reason || reason.length < 3) redirect(`${back}?error=${encodeURIComponent(`${noAdvance} Write the reason to approve anyway.`)}`);
+    override = { by: staff.id, reason: `No advance received: ${reason}` };
   }
   // A real cost before anything is ordered (2.2): an LPO raised before the rule (LPO-00038) is checked here too.
   if (po.job_id) {

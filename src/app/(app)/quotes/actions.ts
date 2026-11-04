@@ -234,7 +234,7 @@ export async function startQuotation(jobId: string) {
  * with its cost, supplier, part number and availability - and the quotation line keeps its markup (no re-pricing).
  * A part still without a price becomes an open request for Parts; its line comes back once Parts price it.
  */
-async function estimateLineRows(estimateId: string, quotationId: string, by: string, jobId: string): Promise<Record<string, unknown>[]> {
+export async function estimateLineRows(estimateId: string, quotationId: string, by: string, jobId: string): Promise<Record<string, unknown>[]> {
   const admin = createAdminClient();
   const { data: estLines } = await admin.from("quotation_lines").select(LINE_SELECT).eq("quotation_id", estimateId).eq("is_active", true).order("position");
   const { data: est } = await admin.from("quotations").select("number").eq("id", estimateId).maybeSingle();

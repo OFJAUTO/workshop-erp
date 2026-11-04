@@ -37,6 +37,7 @@ import { billToFromCustomer, type BillTo } from "@/lib/estimate-money-rules";
 import { estimateMoneyReady } from "@/lib/schema-ready";
 import { OPEN_ESTIMATE_STATUSES } from "@/lib/quote-history";
 import { EstimateMoneyCard, type MoneyCardFacts } from "./EstimateMoneyCard";
+import { OrderPartsNow } from "./OrderPartsNow";
 
 export const dynamic = "force-dynamic";
 
@@ -106,6 +107,10 @@ export default async function EstimatePage({ params, searchParams }: { params: P
     ? (((await createAdminClient().from("quotations").select("bill_to").eq("id", q.id).maybeSingle()).data?.bill_to as BillTo | null) ?? billToFromCustomer(customer))
     : billToFromCustomer(customer);
   const emShow = !!emFacts && (OPEN_ESTIMATE_STATUSES.includes(q.status as (typeof OPEN_ESTIMATE_STATUSES)[number]) || !!emFacts.proforma || emFacts.taxes.length > 0 || emFacts.paid > 0.005);
+  // Part 4: priced part lines on an accepted estimate can be ordered before the car arrives.
+  const emPricedParts = accepted && !attached
+    ? (((await createAdminClient().from("quotation_lines").select("id, priced_at, unit_cost").eq("quotation_id", q.id).eq("is_active", true).eq("line_type", "part")).data ?? []) as { priced_at: string | null; unit_cost: number | string | null }[]).filter((l) => l.priced_at && l.unit_cost !== null).length
+    : 0;
   const emCanCreate = mayManage || (!staff.viewingAs && role === "accounts");
   const emCanRecord = ["owner", "accounts"].includes(role) && !staff.viewingAs;
   const emRecordReadOnly = ["owner", "accounts"].includes(role) && !!staff.viewingAs;
@@ -159,6 +164,8 @@ export default async function EstimatePage({ params, searchParams }: { params: P
               <div className="flex flex-wrap gap-2">
                 <LinkButton href={`/calendar/new?customer=${q.customer_id}&vehicle=${q.vehicle_id ?? ""}`} size="md">Book the car into the calendar</LinkButton>
                 {can(role, "gateIn") && q.vehicle_id ? <LinkButton href={`/gate-in/new?vehicle=${q.vehicle_id}`} tone="secondary" size="md">Gate in now</LinkButton> : null}
+                {/* Part 4 (4 November 2026): the priced parts can be ordered before the car arrives. */}
+                {emPricedParts > 0 && ["owner", "service_advisor"].includes(role) && !staff.viewingAs ? <OrderPartsNow estimateId={q.id} pricedCount={emPricedParts} /> : null}
               </div>
             </>
           )}
