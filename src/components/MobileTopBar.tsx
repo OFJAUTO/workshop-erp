@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Logo } from "./Logo";
-import { SidebarNav, type NavItem } from "./SidebarNav";
+import { SidebarNav, type NavEntry } from "./SidebarNav";
 import { TopSearch } from "./TopSearch";
 
 /**
@@ -13,7 +13,7 @@ import { TopSearch } from "./TopSearch";
  * menu over the page; ✕, a tap outside, Escape or the phone's back button close it, and it closes after a page is
  * picked. Wider screens keep the sidebar (the Shell hides this bar there).
  */
-export function MobileTopBar({ nav, account, searchCustomers = true }: { nav: NavItem[]; /** The person's name and the Sign out form, at the bottom of the menu. */ account?: ReactNode; searchCustomers?: boolean }) {
+export function MobileTopBar({ nav, account, searchCustomers = true }: { nav: NavEntry[]; /** The person's name and the Sign out form, at the bottom of the menu. */ account?: ReactNode; searchCustomers?: boolean }) {
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
   const pushed = useRef(false);

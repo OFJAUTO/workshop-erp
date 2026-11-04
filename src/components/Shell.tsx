@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Logo } from "./Logo";
 import { Avatar } from "./ui";
-import { SidebarNav, type NavItem } from "./SidebarNav";
+import { SidebarNav, type NavEntry } from "./SidebarNav";
 import { BellDock } from "./BellDock";
 import { NotificationBell } from "./NotificationBell";
 import { ModeExit } from "./ModeExit";
@@ -23,7 +23,7 @@ export function Shell({
   sounds,
   children,
 }: {
-  nav?: NavItem[];
+  nav?: NavEntry[];
   /** May this person find a car by its customer? (the search box's words) */
   searchCustomers?: boolean;
   user?: { id: string; name: string; role: string; photoUrl: string | null };

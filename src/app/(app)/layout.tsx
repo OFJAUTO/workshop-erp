@@ -2,7 +2,7 @@ import { Suspense } from "react";
 import { chargesReady } from "@/lib/charges";
 import type { Metadata } from "next";
 import { Shell } from "@/components/Shell";
-import type { NavItem } from "@/components/SidebarNav";
+import type { NavEntry, NavItem } from "@/components/SidebarNav";
 import { getCurrentStaff, requireStaff } from "@/lib/auth";
 import { can, ROLE_LABELS, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -66,7 +66,31 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     zohoWaiting = count ?? 0;
   }
 
-  const entries: (NavItem & { show: boolean })[] = [
+  // Mathew's Parts management group (5 November 2026): the one main item's badge sums what waits
+  // inside - LPOs waiting for approval, and supplier invoices still to collect, enter or check
+  // (to follow, or entered and not checked, or queried; counted per LPO, so a rare invoice split
+  // over two LPOs counts twice here while the page groups it - the page is the truth).
+  let lposPending = 0;
+  let invoicesToCheck = 0;
+  if (["owner", "accounts", "parts"].includes(role)) {
+    const admin = createAdminClient();
+    const [a, b, c] = await Promise.all([
+      admin.from("purchase_orders").select("id", { count: "exact", head: true }).eq("status", "pending_approval").eq("is_active", true),
+      admin.from("purchase_orders").select("id", { count: "exact", head: true }).eq("supplier_invoice_status", "to_follow").eq("is_active", true).neq("kind", "main").neq("status", "cancelled").neq("status", "pending_approval"),
+      admin.from("purchase_orders").select("id", { count: "exact", head: true }).eq("supplier_invoice_status", "received").eq("is_active", true).neq("kind", "main").neq("status", "cancelled").neq("status", "pending_approval").or("supplier_invoice_checked_at.is.null,supplier_invoice_query.not.is.null"),
+    ]);
+    lposPending = a.count ?? 0;
+    invoicesToCheck = (b.count ?? 0) + (c.count ?? 0);
+  }
+  const partsManagementItems: (NavItem & { show: boolean })[] = [
+    { href: "/parts/orders", label: "LPOs", show: can(role, "viewPurchaseOrders") && role !== "service_advisor", badge: lposPending || undefined },
+    { href: "/supplier-invoices", label: "Supplier invoices", show: ["owner", "accounts", "parts"].includes(role), badge: invoicesToCheck || undefined },
+    { href: "/parts-accounts", label: "Parts accounts", show: can(role, "viewPartsAccounts") },
+    { href: "/parts/suppliers", label: "Suppliers", show: can(role, "manageSuppliers") },
+  ];
+  const partsManagement = { group: "parts-management", label: "Parts management", items: partsManagementItems.filter((i) => i.show).map(({ href, label, badge }) => ({ href, label, badge })) };
+
+  const entries: ((NavItem | typeof partsManagement) & { show: boolean })[] = [
     { href: "/home", label: "Home", show: role !== "gate_in" && role !== "technician" && role !== "qc_inspector" && role !== "team_leader" },
     { href: "/dashboard", label: "Dashboard", show: can(role, "viewDashboard") },
     { href: "/calendar", label: "Calendar", show: can(role, "viewCalendar") && role !== "accounts" && role !== "parts" },
@@ -81,9 +105,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/gate-in", label: "Gate in", show: can(role, "gateIn") },
     { href: "/jobs", label: "Jobs", show: can(role, "viewJobs") && role !== "accounts" },
     { href: "/parts", label: "Parts", show: can(role, "priceParts"), badge: role === "parts" ? partsPending : undefined },
-    { href: "/parts/orders", label: "LPOs", show: can(role, "viewPurchaseOrders") && role !== "service_advisor" },
+    { ...partsManagement, show: partsManagement.items.length > 0 },
     { href: "/parts/stock", label: "Stock", show: can(role, "manageStock") },
-    { href: "/parts/suppliers", label: "Suppliers", show: can(role, "manageSuppliers") },
     { href: "/qc", label: "Cars for QC", show: can(role, "doQc") },
     { href: "/wash", label: "Car wash", show: can(role, "washCars") },
     { href: "/workshop-load", label: "Workshop load", show: can(role, "manageWork") },
@@ -91,8 +114,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/scoreboard", label: "Scoreboard", show: can(role, "manageWork") },
     { href: "/comebacks", label: "Comebacks", show: can(role, "manageWork") },
     { href: "/invoices", label: "Invoices and payments", show: can(role, "viewInvoices") },
-    { href: "/parts-accounts", label: "Parts accounts", show: can(role, "viewPartsAccounts") },
-    { href: "/supplier-invoices", label: "Supplier invoices", show: ["owner", "accounts", "parts"].includes(role) },
     { href: "/pending-charges", label: "Pending charges", show: ["owner", "service_advisor", "accounts"].includes(role), badge: pendingCharges || undefined },
     { href: "/recovery", label: "Recovery", show: role === "owner" || role === "service_advisor" || role === "accounts" },
     { href: "/commissions", label: "Commissions", show: role === "owner" || role === "accounts" },
@@ -113,7 +134,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/audit", label: "Change log", show: can(role, "viewAudit") },
     { href: "/overrides", label: "Overrides", show: can(role, "viewOverrides") },
   ];
-  const nav: NavItem[] = entries.filter((n) => n.show).map(({ href, label, badge }) => ({ href, label, badge }));
+  const nav: NavEntry[] = entries.filter((n) => n.show).map((n) => ("group" in n ? { group: n.group, label: n.label, items: n.items } : { href: n.href, label: n.label, badge: n.badge }));
   const tabMode: TabMode | null = staff.viewingAs ? { kind: "view", id: staff.id, name: staff.display_name } : staff.actingAs ? { kind: "act", id: staff.id, name: staff.actingAs.forName } : null;
 
   return (

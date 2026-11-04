@@ -177,6 +177,8 @@ for (const role of roles) {
   const page = await discover(role.name);
   await page.goto(`${base}/`, { waitUntil: "load", timeout: 60000 });
   await ready(page);
+  // A closed menu group (Parts management) hides its sub-links: open every group before collecting.
+  for (const t of await page.locator("aside [data-nav-group]:not([data-nav-group-open]) [data-nav-group-toggle]").all()) await t.click();
   const hrefs = await page.evaluate(() => [...document.querySelectorAll("aside a[href], [data-menu-drawer] a[href]")].map((a) => a.getAttribute("href")).filter((h) => h && h.startsWith("/") && !h.startsWith("/api")));
   const landed = new URL(page.url()).pathname;
   const targets = slice([...new Set([landed, ...hrefs, ...extraPaths, ...(EXTRA_PAGES[role.name] ?? []), ...(role.name === "owner" ? seeded.staff : [])])]).filter((p) => !onlyPages.length || onlyPages.includes(p));
