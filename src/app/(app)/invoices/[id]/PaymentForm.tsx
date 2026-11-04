@@ -190,10 +190,11 @@ export function PaymentForm({
               {proofLine ? <span className="text-xs font-semibold text-amber-bar" data-proof-missing {...(proofWait.count && !proofWait.stopped ? { "data-proof-sending": "" } : {})}>{proofLine}</span> : null}
             </div>
           ) : (
-            // An invoice without a job (none today): the proof still goes with the form through the server.
+            // An invoice without a job (an estimate's proforma, a pending charge): the proof goes with the form through
+            // the server — unless the advisor's report already carries the slip (4 November 2026), which IS the proof.
             <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-muted">{method === "card" ? "Photo of the card slip (required)" : "Transfer proof: screenshot or photo (required)"}</span>
-              <input type="file" name="proof" accept="image/*,.pdf" required className="min-h-11 w-full max-w-72 rounded-control border border-line-strong bg-white px-3 py-2 text-sm file:mr-3 file:rounded-control file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white" data-proof-input />
+              <span className="text-xs font-semibold text-muted">{proofs.length ? "Proof: the advisor's slip is attached ✓ (add a clearer one if needed)" : method === "card" ? "Photo of the card slip (required)" : "Transfer proof: screenshot or photo (required)"}</span>
+              <input type="file" name="proof" accept="image/*,.pdf" required={proofs.length === 0} className="min-h-11 w-full max-w-72 rounded-control border border-line-strong bg-white px-3 py-2 text-sm file:mr-3 file:rounded-control file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white" data-proof-input {...(proofs.length ? { "data-proof-from-report": "1" } : {})} />
             </label>
           )
         ) : null}

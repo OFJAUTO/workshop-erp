@@ -30,7 +30,7 @@ import { isUuid } from "@/lib/uuid";
 type Money = { id: string; display_name: string; role_id: string; viewingAs?: unknown; is_head_accountant?: boolean };
 const mayRecord = (s: Money) => !s.viewingAs && can(s.role_id as RoleId, "recordPayments");
 
-export type ChoicesAnswer = { error?: string; choices?: PaymentChoices; methods?: string[]; charges?: BankFees; isOwner?: boolean; /** Opened from an advisor's payment report: what he sent, to pre-fill the form (2 November 2026, section 3). */ report?: WindowReport | null; /** The one-tap reasons for a Query. */ queryReasons?: string[] };
+export type ChoicesAnswer = { error?: string; choices?: PaymentChoices; methods?: string[]; charges?: BankFees; isOwner?: boolean; /** Opened from an advisor's payment report: what he sent, to pre-fill the form (2 November 2026, section 3). */ report?: WindowReport | null; /** The targets the report's pre-fill and receipt key apply to (its job, or its estimate's proforma). */ reportTargetKeys?: string[]; /** The one-tap reasons for a Query. */ queryReasons?: string[] };
 
 export async function loadPaymentChoices(input: { jobId?: string | null; customerId?: string | null; vehicleId?: string | null; reportId?: string | null }): Promise<ChoicesAnswer> {
   const staff = await requireStaff();
@@ -40,13 +40,17 @@ export async function loadPaymentChoices(input: { jobId?: string | null; custome
   // A payment an advisor sent to accounts: the window opens on its car's job, pre-filled with what he sent.
   const report = input.reportId ? await reportForWindow(input.reportId, settings) : null;
   if (input.reportId && !report) return { error: "The reported payment was not found." };
-  const all = await paymentChoices(report ? { jobId: report.jobId } : input, settings);
+  const all = await paymentChoices(report ? (report.jobId ? { jobId: report.jobId } : { customerId: report.customerId, vehicleId: report.vehicleId }) : input, settings);
   if (!all) return { error: "Customer not found." };
   // Opened on a report: the money goes on the report's own car (the report is recorded with it, one report one receipt).
   // Another car or the customer's account is "Record a different payment instead" - without the report.
-  const own = report ? all.targets.filter((t) => t.jobId === report.jobId) : all.targets;
+  // A report on an ESTIMATE (car not here yet): the one target is that estimate's own proforma.
+  const estProformaId = report?.estimateId ? (await (await import("@/lib/estimate-money")).estimateMoneyOf(report.estimateId))?.proforma?.id ?? null : null;
+  const own = report ? all.targets.filter((t) => (report.jobId ? t.jobId === report.jobId : !!estProformaId && t.invoiceId === estProformaId)) : all.targets;
   const choices = report && own.length ? { ...all, targets: own, suggested: own[0].key } : all;
-  return { choices, methods: methodsFor(staff.role_id), charges: bankFeesOf(settings), isOwner: staff.role_id === "owner", report, queryReasons: report ? reasonsFor(settings, "payment_query") : undefined };
+  // The window pre-fills and keys the receipt on the report ONLY on the report's own targets (job or estimate proforma).
+  const reportTargetKeys = report ? own.map((t) => t.key) : [];
+  return { choices, methods: methodsFor(staff.role_id), charges: bankFeesOf(settings), isOwner: staff.role_id === "owner", report, reportTargetKeys, queryReasons: report ? reasonsFor(settings, "payment_query") : undefined };
 }
 
 export type PayerHit = PayerRow;

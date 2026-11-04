@@ -27,7 +27,10 @@ type Actor = { id: string; display_name: string; role_id: string };
 
 export type PaymentReport = {
   id: string;
+  /** "" for a report on an ESTIMATE before the car arrives (then estimateId is set). */
   jobId: string;
+  estimateId?: string | null;
+  /** The job number — or the estimate's E-number for a car not here yet. */
   jobNumber: string;
   jobOpen: boolean;
   invoiceId: string | null;
@@ -75,11 +78,16 @@ const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDig
 const carWords = (v: V | null) => (v ? [v.make?.name, v.model?.name].filter(Boolean).join(" ").toUpperCase() : "");
 
 /** The reports, newest first, with their photos, names and the owner's one-line wording. Empty before the migration. */
-export async function loadReports(opts: { jobId?: string; ids?: string[]; status?: ReportStatus[]; reportedBy?: string; limit?: number; settings?: Settings } = {}): Promise<PaymentReport[]> {
+export async function loadReports(opts: { jobId?: string; estimateId?: string; ids?: string[]; status?: ReportStatus[]; reportedBy?: string; limit?: number; settings?: Settings } = {}): Promise<PaymentReport[]> {
   if (!(await paymentReportsReady())) return [];
   const admin = createAdminClient();
-  let q = admin.from("payment_reports").select(SELECT).eq("is_active", true);
+  // Reports on an ESTIMATE (4 November 2026): the columns exist only once that migration is applied.
+  const { estimateReportReady } = await import("./schema-ready");
+  const withEstimate = await estimateReportReady();
+  // estimate_id is a PLAIN uuid (no foreign key, so no embed): the numbers are read apart below.
+  let q = admin.from("payment_reports").select(withEstimate ? `${SELECT}, estimate_id` : SELECT).eq("is_active", true);
   if (opts.jobId) q = q.eq("job_id", opts.jobId);
+  if (opts.estimateId) q = withEstimate ? q.eq("estimate_id", opts.estimateId) : q.eq("id", "00000000-0000-0000-0000-000000000000");
   if (opts.ids) q = q.in("id", opts.ids.length ? opts.ids : ["00000000-0000-0000-0000-000000000000"]);
   if (opts.status) q = q.in("status", opts.status);
   if (opts.reportedBy) q = q.eq("reported_by", opts.reportedBy);
@@ -95,6 +103,10 @@ export async function loadReports(opts: { jobId?: string; ids?: string[]; status
     admin.from("payment_reports").select("id, replaces_id").in("replaces_id", ids).eq("is_active", true),
   ]);
   const nameOf = new Map((staff ?? []).map((s) => [String(s.id), String(s.display_name)]));
+  // The estimates' E-numbers (reports on a car not here yet), read apart: estimate_id carries no foreign key.
+  const estIds = Array.from(new Set(rows.map((r) => r.estimate_id as string | null).filter((x): x is string => !!x)));
+  const { data: estRows } = estIds.length ? await admin.from("quotations").select("id, number").in("id", estIds) : { data: [] as { id: string; number: string }[] };
+  const estNumberOf = new Map(((estRows ?? []) as { id: string; number: string }[]).map((e) => [e.id, e.number]));
   const filesOf = new Map<string, { id: string; storage_path: string; content_type: string | null; caption: string | null }[]>();
   for (const f of (files ?? []) as { id: string; storage_path: string; ref_id: string; content_type: string | null; caption: string | null }[]) filesOf.set(f.ref_id, [...(filesOf.get(f.ref_id) ?? []), f]);
   const replacedBy = new Map(((later ?? []) as { id: string; replaces_id: string }[]).map((l) => [l.replaces_id, l.id]));
@@ -122,8 +134,10 @@ export async function loadReports(opts: { jobId?: string; ids?: string[]; status
     const id = String(r.id);
     const base = {
       id,
-      jobId: String(r.job_id),
-      jobNumber: job?.job_number ?? "",
+      jobId: (r.job_id as string | null) ? String(r.job_id) : "",
+      estimateId: (r.estimate_id as string | null) ?? null,
+      // An estimate report's "job number" is its E-number: the one-line wording stays the owner's.
+      jobNumber: job?.job_number ?? (r.estimate_id ? (estNumberOf.get(String(r.estimate_id)) ?? "") : ""),
       jobOpen: !!job?.is_open,
       invoiceId: (r.invoice_id as string | null) ?? null,
       customerId: String(r.customer_id),
@@ -165,13 +179,13 @@ export async function loadReports(opts: { jobId?: string; ids?: string[]; status
 }
 
 /** One report for the Record payment window: what to pre-fill, its photos, and why it can't be recorded any more. */
-export type WindowReport = { id: string; jobId: string; status: ReportStatus; amount: number; method: string; authCode: string | null; reference: string | null; note: string | null; reporter: string; reportedAt: string; photos: JobFile[]; thumbs: Record<string, string>; line: string; methodWords: string; closed: string | null };
+export type WindowReport = { id: string; jobId: string; estimateId: string | null; customerId: string; vehicleId: string | null; status: ReportStatus; amount: number; method: string; authCode: string | null; reference: string | null; note: string | null; reporter: string; reportedAt: string; photos: JobFile[]; thumbs: Record<string, string>; line: string; methodWords: string; closed: string | null };
 
 export async function reportForWindow(reportId: string, settings: Settings): Promise<WindowReport | null> {
   if (!isUuid(reportId)) return null;
   const [r] = await loadReports({ ids: [reportId], settings });
   if (!r) return null;
-  return { id: r.id, jobId: r.jobId, status: r.status, amount: r.amount, method: r.method, authCode: r.authCode, reference: r.reference, note: r.note, reporter: r.reporter, reportedAt: r.reportedAt, photos: r.photos, thumbs: r.thumbs, line: r.line, methodWords: r.methodWords, closed: reportClosedWords({ status: r.status, paymentNumber: r.paymentNumber, queriedBy: r.queriedBy, queryNote: r.queryNote, reporter: r.reporter }) };
+  return { id: r.id, jobId: r.jobId, estimateId: r.estimateId ?? null, customerId: r.customerId, vehicleId: r.vehicleId, status: r.status, amount: r.amount, method: r.method, authCode: r.authCode, reference: r.reference, note: r.note, reporter: r.reporter, reportedAt: r.reportedAt, photos: r.photos, thumbs: r.thumbs, line: r.line, methodWords: r.methodWords, closed: reportClosedWords({ status: r.status, paymentNumber: r.paymentNumber, queriedBy: r.queriedBy, queryNote: r.queryNote, reporter: r.reporter }) };
 }
 
 /** Who records money and so hears about a report: every active accounts person and the owner, never the reporter himself. */
@@ -203,33 +217,36 @@ async function sameKeyAnswer(existing: { id: string; reported_by: string; job_id
  * again after a query replaces the queried one (and may carry its photo). A second report on a car that already has one
  * waiting asks once.
  */
-export async function createPaymentReport(actor: Actor, input: { id: string; jobId: string; amount: unknown; method: unknown; authCode?: unknown; reference?: unknown; note?: unknown; replacesId?: string | null; confirmSecond?: boolean }, settings: Settings): Promise<ReportResult> {
+export async function createPaymentReport(actor: Actor, input: { id: string; jobId?: string | null; estimateId?: string | null; amount: unknown; method: unknown; authCode?: unknown; reference?: unknown; note?: unknown; replacesId?: string | null; confirmSecond?: boolean }, settings: Settings): Promise<ReportResult> {
   if (!(await paymentReportsReady())) return { error: "This needs the database update of 2 November (payment hand-over). Ask the owner to apply it." };
   if (!(actor.role_id === "service_advisor" || actor.role_id === "owner")) return { error: actor.role_id === "accounts" ? "Accounts record the payment directly: use Record payment." : "Payments are sent to accounts by the advisors." };
-  if (!isUuid(input.id) || !isUuid(input.jobId)) return { error: "Reload the page and try again." };
+  // Money from the estimate (4 November 2026): the report may belong to an ESTIMATE before any job exists.
+  if (input.estimateId && !input.jobId) return createEstimateReport(actor, { ...input, estimateId: input.estimateId });
+  if (!isUuid(input.id) || !isUuid(input.jobId ?? "")) return { error: "Reload the page and try again." };
+  const jobId = String(input.jobId);
   const checked = checkReportInput(input);
   if ("error" in checked) return { error: checked.error };
   const c = checked.ok;
   const admin = createAdminClient();
-  const { data: job } = await admin.from("jobs").select("id, job_number, customer_id, vehicle_id").eq("id", input.jobId).maybeSingle();
+  const { data: job } = await admin.from("jobs").select("id, job_number, customer_id, vehicle_id").eq("id", jobId).maybeSingle();
   if (!job) return { error: "This car's record was not found." };
   // The same tap twice (its answer was lost): the report already made - if it is the same payment.
   const SAME_KEY = "id, reported_by, job_id, amount_aed, method, reported_at";
   const { data: same } = await admin.from("payment_reports").select(SAME_KEY).eq("id", input.id).maybeSingle();
-  if (same) return sameKeyAnswer(same as { id: string; reported_by: string; job_id: string; amount_aed: number; method: string; reported_at: string }, actor, input.jobId, c);
+  if (same) return sameKeyAnswer(same as { id: string; reported_by: string; job_id: string; amount_aed: number; method: string; reported_at: string }, actor, jobId, c);
   // Sent again after a query: the queried report on the same car, by the same advisor (or the owner).
   let replaced: { id: string; proof_path: string } | null = null;
   if (input.replacesId) {
     if (!isUuid(input.replacesId)) return { error: "The report to send again was not found." };
     const { data: old } = await admin.from("payment_reports").select("id, job_id, status, reported_by, proof_path, reported_at, queried_at, payment:payments(number)").eq("id", input.replacesId).eq("is_active", true).maybeSingle();
-    if (!old || old.job_id !== input.jobId) return { error: "The report to send again was not found on this car." };
+    if (!old || old.job_id !== jobId) return { error: "The report to send again was not found on this car." };
     if (old.status !== "queried") return { error: old.status === "recorded" ? `That payment is already recorded${(old.payment as unknown as { number: string } | null)?.number ? ` as ${(old.payment as unknown as { number: string }).number}` : ""} – nothing to send again.` : "Only a queried report is sent again." };
     if (old.reported_by !== actor.id && actor.role_id !== "owner") return { error: "Only the advisor who sent it (or the owner) sends it again." };
     replaced = { id: String(old.id), proof_path: String(old.proof_path) };
     // Money recorded on this car after the query may be this very payment (accounts found it in the bank): asked once.
     if (!input.confirmSecond) {
       const since = String(old.queried_at ?? old.reported_at);
-      const { data: after } = await admin.from("payments").select("number, amount_aed, method, received_by").eq("job_id", input.jobId).eq("is_active", true).in("status", ["recorded", "pending_owner"]).gte("created_at", since).order("created_at", { ascending: false }).limit(1);
+      const { data: after } = await admin.from("payments").select("number, amount_aed, method, received_by").eq("job_id", jobId).eq("is_active", true).in("status", ["recorded", "pending_owner"]).gte("created_at", since).order("created_at", { ascending: false }).limit(1);
       const p = (after ?? [])[0] as { number: string; amount_aed: number; method: string; received_by: string | null } | undefined;
       if (p) {
         const { data: who } = p.received_by ? await admin.from("staff").select("display_name").eq("id", p.received_by).maybeSingle() : { data: null };
@@ -238,12 +255,12 @@ export async function createPaymentReport(actor: Actor, input: { id: string; job
     }
   }
   // The photo is required: on the server already, under this report's id (a resend may keep the first one).
-  const { data: files } = await admin.from("job_files").select("id, storage_path").eq("job_id", input.jobId).eq("kind", "payment_report").eq("ref_id", input.id).is("removed_at", null).order("created_at");
+  const { data: files } = await admin.from("job_files").select("id, storage_path").eq("job_id", jobId).eq("kind", "payment_report").eq("ref_id", input.id).is("removed_at", null).order("created_at");
   const proofPath = ((files ?? [])[0]?.storage_path as string | undefined) ?? replaced?.proof_path ?? null;
   if (!proofPath) return { error: "Attach the photo of the slip, receipt or transfer first." };
   // Someone already reported a payment on this car that waits: asked once, never blocked.
   if (!input.confirmSecond) {
-    const { data: open } = await admin.from("payment_reports").select("id, amount_aed, method, reported_by, reported_at").eq("job_id", input.jobId).eq("status", "waiting").eq("is_active", true).order("reported_at", { ascending: false }).limit(1);
+    const { data: open } = await admin.from("payment_reports").select("id, amount_aed, method, reported_by, reported_at").eq("job_id", jobId).eq("status", "waiting").eq("is_active", true).order("reported_at", { ascending: false }).limit(1);
     const o = (open ?? [])[0] as { amount_aed: number; method: string; reported_by: string; reported_at: string } | undefined;
     if (o) {
       const { data: who } = await admin.from("staff").select("display_name").eq("id", o.reported_by).maybeSingle();
@@ -251,10 +268,10 @@ export async function createPaymentReport(actor: Actor, input: { id: string; job
       return { ask: "second", askWords: `${firstName((who?.display_name as string | undefined) ?? "Someone")} already reported ${aed(Number(o.amount_aed) || 0)} · ${methodWord(o.method)} at ${at}, still waiting for accounts. Send this one as well?` };
     }
   }
-  const money = await jobMoneyOf(input.jobId, settings);
+  const money = await jobMoneyOf(jobId, settings);
   const { error } = await admin.from("payment_reports").insert({
     id: input.id,
-    job_id: input.jobId,
+    job_id: jobId,
     invoice_id: money?.live?.id ?? null,
     customer_id: job.customer_id,
     vehicle_id: job.vehicle_id,
@@ -272,29 +289,105 @@ export async function createPaymentReport(actor: Actor, input: { id: string; job
   });
   if (error) {
     const { data: again } = await admin.from("payment_reports").select(SAME_KEY).eq("id", input.id).maybeSingle();
-    if (again) return sameKeyAnswer(again as { id: string; reported_by: string; job_id: string; amount_aed: number; method: string; reported_at: string }, actor, input.jobId, c);
+    if (again) return sameKeyAnswer(again as { id: string; reported_by: string; job_id: string; amount_aed: number; method: string; reported_at: string }, actor, jobId, c);
     const { logAppError, SAVE_FAILED } = await import("./app-errors");
-    await logAppError("payment report: insert", error, { staffId: actor.id, jobId: input.jobId });
+    await logAppError("payment report: insert", error, { staffId: actor.id, jobId: jobId });
     return { error: SAVE_FAILED };
   }
   if (replaced) await admin.from("payment_reports").update({ status: "withdrawn", withdrawn_reason: "Sent again after the query", withdrawn_by: actor.id, withdrawn_at: new Date().toISOString(), updated_by: actor.id }).eq("id", replaced.id).eq("status", "queried");
   const plate = await plateOf(String(job.vehicle_id));
   const words = `${aed(c.amount)} by ${methodWord(c.method).toLowerCase()}${c.authCode ? ` (auth ${c.authCode})` : c.reference ? ` (ref ${c.reference})` : ""}`;
-  await admin.from("job_events").insert({ job_id: input.jobId, event_type: "payment", note: `Payment reported by ${actor.display_name}: ${words}, slip attached${c.note ? ` – ${c.note}` : ""}. Waiting for accounts.${replaced ? " (Sent again after the query.)" : ""}`, created_by: actor.id });
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `Payment reported by ${actor.display_name}: ${words}, slip attached${c.note ? ` – ${c.note}` : ""}. Waiting for accounts.${replaced ? " (Sent again after the query.)" : ""}`, created_by: actor.id });
   const people = await moneyPeople(actor.id);
   const [r] = await loadReports({ ids: [input.id], settings });
   await notifyStaff(people.map((p) => p.id), {
     type: "payment_reported",
     title: `Payment reported · ${job.job_number} · ${plate.toUpperCase()} · ${aed(c.amount)} · ${methodWord(c.method)} · from ${firstName(actor.display_name)}`,
     body: `${[r?.car, r?.customer].filter(Boolean).join(" · ")} · slip attached · tap to record it${c.note ? ` · "${c.note}"` : ""}`,
-    jobId: input.jobId,
-    href: reportHref(input.jobId, input.id),
+    jobId: jobId,
+    href: reportHref(jobId, input.id),
   });
   return { ok: true, told: people.filter((p) => p.role_id === "accounts").map((p) => firstName(p.display_name)) };
 }
 
 /** Where a report opens: the job card with the Record payment window on it, pre-filled. */
 export const reportHref = (jobId: string, reportId: string) => `/jobs/${jobId}?pay-report=${reportId}#invoice`;
+/** A report on an ESTIMATE opens the estimate page the same way. */
+export const estimateReportHref = (estimateId: string, reportId: string) => `/estimates/${estimateId}?pay-report=${reportId}`;
+
+/**
+ * The advisor's report on an ESTIMATE before the car arrives (4 November 2026): the same rules as a job's —
+ * the slip first (stored under the report's own id in estimate-reports/), one key one report, a resend after
+ * a query, the second-report question — but the record is the estimate and the money goes to its proforma.
+ */
+async function createEstimateReport(actor: Actor, input: { id: string; estimateId: string; amount: unknown; method: unknown; authCode?: unknown; reference?: unknown; note?: unknown; replacesId?: string | null; confirmSecond?: boolean }): Promise<ReportResult> {
+  const { estimateReportReady } = await import("./schema-ready");
+  if (!(await estimateReportReady())) return { error: "Payment reports on an estimate need the database update first (waiting for apply)." };
+  if (!isUuid(input.id) || !isUuid(input.estimateId)) return { error: "Reload the page and try again." };
+  const checked = checkReportInput(input);
+  if ("error" in checked) return { error: checked.error };
+  const c = checked.ok;
+  const admin = createAdminClient();
+  const { data: est } = await admin.from("quotations").select("id, number, kind, customer_id, vehicle_id").eq("id", input.estimateId).maybeSingle();
+  if (!est || est.kind !== "estimate") return { error: "This estimate was not found." };
+  // The same tap twice: the report already made — if it is the same payment.
+  const { data: same } = await admin.from("payment_reports").select("id, reported_by, estimate_id, amount_aed, method, reported_at").eq("id", input.id).maybeSingle();
+  if (same) {
+    const s = same as { id: string; reported_by: string; estimate_id: string | null; amount_aed: number; method: string };
+    if (s.reported_by === actor.id && s.estimate_id === input.estimateId && Math.abs((Number(s.amount_aed) || 0) - c.amount) < 0.005 && s.method === c.method) return { ok: true, repeat: true };
+    return { error: `This window was already used to send ${aed(Number(s.amount_aed) || 0)} · ${methodWord(s.method)}. Nothing new was sent – attach the photo again and send this payment.`, renewKey: true };
+  }
+  // Sent again after a query.
+  let replaced: { id: string; proof_path: string } | null = null;
+  if (input.replacesId) {
+    if (!isUuid(input.replacesId)) return { error: "The report to send again was not found." };
+    const { data: old } = await admin.from("payment_reports").select("id, estimate_id, status, reported_by, proof_path, payment:payments(number)").eq("id", input.replacesId).eq("is_active", true).maybeSingle();
+    if (!old || old.estimate_id !== input.estimateId) return { error: "The report to send again was not found on this estimate." };
+    if (old.status !== "queried") return { error: old.status === "recorded" ? `That payment is already recorded${(old.payment as unknown as { number: string } | null)?.number ? ` as ${(old.payment as unknown as { number: string }).number}` : ""} – nothing to send again.` : "Only a queried report is sent again." };
+    if (old.reported_by !== actor.id && actor.role_id !== "owner") return { error: "Only the advisor who sent it (or the owner) sends it again." };
+    replaced = { id: String(old.id), proof_path: String(old.proof_path) };
+  }
+  // The slip: stored under the report's own id (estimate_report upload target), a resend may keep the first one.
+  const folder = `estimate-reports/${input.estimateId}/${input.id}`;
+  const { data: stored } = await admin.storage.from(JOB_FILES_BUCKET).list(folder, { limit: 1, sortBy: { column: "created_at", order: "asc" } });
+  const proofPath = stored?.length ? `${folder}/${stored[0].name}` : (replaced?.proof_path ?? null);
+  if (!proofPath) return { error: "Attach the photo of the slip, receipt or transfer first." };
+  // Someone already reported a payment on this estimate that waits: asked once, never blocked.
+  if (!input.confirmSecond) {
+    const { data: open } = await admin.from("payment_reports").select("id, amount_aed, method, reported_by, reported_at").eq("estimate_id", input.estimateId).eq("status", "waiting").eq("is_active", true).order("reported_at", { ascending: false }).limit(1);
+    const o = (open ?? [])[0] as { amount_aed: number; method: string; reported_by: string; reported_at: string } | undefined;
+    if (o) {
+      const { data: who } = await admin.from("staff").select("display_name").eq("id", o.reported_by).maybeSingle();
+      const at = new Date(o.reported_at).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dubai" });
+      return { ask: "second", askWords: `${firstName((who?.display_name as string | undefined) ?? "Someone")} already reported ${aed(Number(o.amount_aed) || 0)} · ${methodWord(o.method)} at ${at}, still waiting for accounts. Send this one as well?` };
+    }
+  }
+  const { estimateMoneyOf } = await import("./estimate-money");
+  const money = await estimateMoneyOf(input.estimateId);
+  const { error } = await admin.from("payment_reports").insert({
+    id: input.id, job_id: null, estimate_id: input.estimateId, invoice_id: money?.proforma?.id ?? null,
+    customer_id: est.customer_id, vehicle_id: est.vehicle_id, amount_aed: c.amount, method: c.method,
+    auth_code: c.authCode, reference: c.reference, note: c.note, proof_path: proofPath, status: "waiting",
+    reported_by: actor.id, replaces_id: replaced?.id ?? null, created_by: actor.id, updated_by: actor.id,
+  });
+  if (error) {
+    const { logAppError, SAVE_FAILED } = await import("./app-errors");
+    await logAppError("payment report: estimate insert", error, { staffId: actor.id });
+    return { error: SAVE_FAILED };
+  }
+  if (replaced) await admin.from("payment_reports").update({ status: "withdrawn", withdrawn_reason: "Sent again after the query", withdrawn_by: actor.id, withdrawn_at: new Date().toISOString(), updated_by: actor.id }).eq("id", replaced.id).eq("status", "queried");
+  const plate = est.vehicle_id ? await plateOf(String(est.vehicle_id)) : "";
+  const words = `${aed(c.amount)} by ${methodWord(c.method).toLowerCase()}${c.authCode ? ` (auth ${c.authCode})` : c.reference ? ` (ref ${c.reference})` : ""}`;
+  await admin.from("quotation_events").insert({ quotation_id: input.estimateId, job_id: null, event_type: "payment", note: `Payment reported by ${actor.display_name}: ${words}, slip attached${c.note ? ` – ${c.note}` : ""}. Waiting for accounts.${replaced ? " (Sent again after the query.)" : ""}`, created_by: actor.id });
+  const people = await moneyPeople(actor.id);
+  await notifyStaff(people.map((p) => p.id), {
+    type: "payment_reported",
+    title: `Payment reported · ${est.number}${plate ? ` · ${plate.toUpperCase()}` : ""} · ${aed(c.amount)} · ${methodWord(c.method)} · from ${firstName(actor.display_name)}`,
+    body: `Car not here yet · slip attached · tap to record it${c.note ? ` · "${c.note}"` : ""}`,
+    href: estimateReportHref(input.estimateId, input.id),
+  });
+  return { ok: true, told: people.filter((p) => p.role_id === "accounts").map((p) => firstName(p.display_name)) };
+}
 
 async function plateOf(vehicleId: string): Promise<string> {
   const { data } = await createAdminClient().from("vehicles").select("kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant, vin").eq("id", vehicleId).maybeSingle();
@@ -305,14 +398,17 @@ async function plateOf(vehicleId: string): Promise<string> {
  * Before a reported payment is recorded (paymentFromForm): the report must still wait, be for the same car, and the
  * receipt's key must be the report's own id - so one report makes one receipt, never two.
  */
-export async function reportToRecord(reportId: string, clientKey: string | null): Promise<{ error?: string; report?: { id: string; jobId: string; proofPath: string; amount: number; method: string } }> {
+export async function reportToRecord(reportId: string, clientKey: string | null): Promise<{ error?: string; report?: { id: string; jobId: string | null; estimateId: string | null; proofPath: string; amount: number; method: string } }> {
   if (!(await paymentReportsReady())) return { error: "This needs the database update of 2 November (payment hand-over)." };
   if (!isUuid(reportId)) return { error: "The reported payment was not found." };
-  const { data: r } = await createAdminClient().from("payment_reports").select("id, job_id, status, proof_path, amount_aed, method, payment:payments(number)").eq("id", reportId).eq("is_active", true).maybeSingle();
+  const { estimateReportReady } = await import("./schema-ready");
+  const withEstimate = await estimateReportReady();
+  const { data: raw } = await createAdminClient().from("payment_reports").select(withEstimate ? "id, job_id, estimate_id, status, proof_path, amount_aed, method, payment:payments(number)" : "id, job_id, status, proof_path, amount_aed, method, payment:payments(number)").eq("id", reportId).eq("is_active", true).maybeSingle();
+  const r = raw as unknown as (Record<string, unknown> & { id: string; job_id: string | null; estimate_id?: string | null; status: string; proof_path: string; amount_aed: number; method: string; payment: { number: string } | null }) | null;
   if (!r) return { error: "The reported payment was not found." };
   if (r.status !== "waiting") return { error: reportClosedWords({ status: r.status as ReportStatus, paymentNumber: ((r.payment as unknown as { number: string } | null)?.number) ?? null }) ?? "This report can't be recorded." };
   if (clientKey !== reportId) return { error: "Reload the page and open the reported payment again." };
-  return { report: { id: String(r.id), jobId: String(r.job_id), proofPath: String(r.proof_path), amount: Number(r.amount_aed) || 0, method: String(r.method) } };
+  return { report: { id: String(r.id), jobId: (r.job_id as string | null) ?? null, estimateId: ((r as { estimate_id?: string | null }).estimate_id as string | null) ?? null, proofPath: String(r.proof_path), amount: Number(r.amount_aed) || 0, method: String(r.method) } };
 }
 
 /**
@@ -324,18 +420,30 @@ export async function closeReportWithPayment(reportId: string, payment: { id: st
   const now = new Date().toISOString();
   const { data: before } = await admin.from("payment_reports").select("status").eq("id", reportId).maybeSingle();
   const wasQueried = before?.status === "queried";
-  const { data: done } = await admin.from("payment_reports").update({ status: "recorded", payment_id: payment.id, recorded_by: actor.id, recorded_at: now, updated_by: actor.id }).eq("id", reportId).in("status", ["waiting", "queried"]).select("id, job_id, reported_by, amount_aed, method");
-  const r = (done ?? [])[0] as { id: string; job_id: string; reported_by: string; amount_aed: number; method: string } | undefined;
+  const { estimateReportReady } = await import("./schema-ready");
+  const withEstimate = await estimateReportReady();
+  const { data: done } = await admin.from("payment_reports").update({ status: "recorded", payment_id: payment.id, recorded_by: actor.id, recorded_at: now, updated_by: actor.id }).eq("id", reportId).in("status", ["waiting", "queried"]).select(withEstimate ? "id, job_id, estimate_id, reported_by, amount_aed, method" : "id, job_id, reported_by, amount_aed, method");
+  const r = (done ?? [])[0] as unknown as { id: string; job_id: string | null; estimate_id?: string | null; reported_by: string; amount_aed: number; method: string } | undefined;
   if (!r) return;
-  const { data: job } = await admin.from("jobs").select("job_number").eq("id", r.job_id).maybeSingle();
   const differs = Math.abs((Number(r.amount_aed) || 0) - payment.amount) > 0.005 || r.method !== payment.method;
-  await admin.from("job_events").insert({ job_id: r.job_id, event_type: "payment", note: `${payment.number} recorded by ${actor.display_name} from the payment the advisor sent${wasQueried ? " (after the query)" : ""}${differs ? ` (reported ${aed(Number(r.amount_aed) || 0)} by ${methodWord(r.method).toLowerCase()}, recorded ${aed(payment.amount)} by ${methodWord(payment.method).toLowerCase()})` : ""}.`, created_by: actor.id });
+  const note = `${payment.number} recorded by ${actor.display_name} from the payment the advisor sent${wasQueried ? " (after the query)" : ""}${differs ? ` (reported ${aed(Number(r.amount_aed) || 0)} by ${methodWord(r.method).toLowerCase()}, recorded ${aed(payment.amount)} by ${methodWord(payment.method).toLowerCase()})` : ""}.`;
+  let where = "";
+  if (r.job_id) {
+    const { data: job } = await admin.from("jobs").select("job_number").eq("id", r.job_id).maybeSingle();
+    where = job?.job_number ?? "";
+    await admin.from("job_events").insert({ job_id: r.job_id, event_type: "payment", note, created_by: actor.id });
+  } else if (r.estimate_id) {
+    // A report on an estimate (car not here yet): the record goes on the estimate's history.
+    const { data: est } = await admin.from("quotations").select("number").eq("id", r.estimate_id).maybeSingle();
+    where = (est?.number as string | undefined) ?? "";
+    await admin.from("quotation_events").insert({ quotation_id: r.estimate_id, job_id: null, event_type: "payment", note, created_by: actor.id });
+  }
   await notifyStaff([r.reported_by], {
     type: "payment_report_recorded",
-    title: `Recorded ✓ ${payment.number} · ${job?.job_number ?? ""} · ${aed(payment.amount)}`,
+    title: `Recorded ✓ ${payment.number} · ${where} · ${aed(payment.amount)}`,
     body: `${actor.id ? `by ${firstName(actor.display_name)}` : "paid online through the payment page"}${wasQueried ? " · the query is settled, nothing to send again" : ""}${differs ? ` · you sent ${aed(Number(r.amount_aed) || 0)} by ${methodWord(r.method).toLowerCase()}` : ""}`,
-    jobId: r.job_id,
-    href: `/jobs/${r.job_id}#invoice`,
+    jobId: r.job_id ?? undefined,
+    href: r.job_id ? `/jobs/${r.job_id}#invoice` : r.estimate_id ? `/estimates/${r.estimate_id}` : "/invoices",
   });
 }
 
@@ -345,10 +453,14 @@ export async function closeReportWithPayment(reportId: string, payment: { id: st
  * - waiting, or queried back and now in the bank - unless its auth code or reference says it is a DIFFERENT payment
  * (pickReportForReceipt). The advisor's report is answered, never left waiting for money already in.
  */
-export async function afterReceiptForReports(payment: { id: string; number: string; amount: number; method: string; jobId: string; authCode?: string | null; reference?: string | null }, reportId: string | null, actor: { id: string | null; display_name: string }): Promise<void> {
+export async function afterReceiptForReports(payment: { id: string; number: string; amount: number; method: string; jobId?: string | null; estimateId?: string | null; authCode?: string | null; reference?: string | null }, reportId: string | null, actor: { id: string | null; display_name: string }): Promise<void> {
   if (!(await paymentReportsReady())) return;
   if (reportId) return closeReportWithPayment(reportId, payment, actor);
-  const { data } = await createAdminClient().from("payment_reports").select("id, amount_aed, status, auth_code, reference, reported_at").eq("job_id", payment.jobId).in("status", ["waiting", "queried"]).eq("is_active", true).eq("method", payment.method).order("reported_at").limit(20);
+  let q = createAdminClient().from("payment_reports").select("id, amount_aed, status, auth_code, reference, reported_at").in("status", ["waiting", "queried"]).eq("is_active", true).eq("method", payment.method);
+  if (payment.jobId) q = q.eq("job_id", payment.jobId);
+  else if (payment.estimateId && (await (await import("./schema-ready")).estimateReportReady())) q = q.eq("estimate_id", payment.estimateId);
+  else return;
+  const { data } = await q.order("reported_at").limit(20);
   const rows = (data ?? []) as { id: string; amount_aed: number; status: ReportStatus; auth_code: string | null; reference: string | null; reported_at: string }[];
   const pick = pickReportForReceipt(rows.map((r) => ({ id: r.id, amount: Number(r.amount_aed) || 0, status: r.status, authCode: r.auth_code, reference: r.reference, reportedAt: r.reported_at })), { amount: payment.amount, authCode: payment.authCode ?? null, reference: payment.reference ?? null });
   if (pick) await closeReportWithPayment(pick, payment, actor);
@@ -457,11 +569,11 @@ export async function reportWaitingItems(staff: { id: string; role_id: string },
       what: r.line,
       amount: null,
       actionLabel: "Record",
-      href: reportHref(r.jobId, r.id),
+      href: r.jobId ? reportHref(r.jobId, r.id) : r.estimateId ? estimateReportHref(r.estimateId, r.id) : "/invoices",
       always: true,
       urgency: r.late ? "red" : "amber",
       since: r.reportedAt,
-      hint: `${r.methodWords}${r.note ? ` · "${r.note}"` : ""}. Tap Record: the window opens pre-filled with the slip attached; check it and confirm, or Query it back to ${firstName(r.reporter)}.`,
+      hint: `${r.methodWords}${r.note ? ` · "${r.note}"` : ""}.${r.jobId ? "" : " The car is not here yet (an estimate's payment)."} Tap Record: the window opens pre-filled with the slip attached; check it and confirm, or Query it back to ${firstName(r.reporter)}.`,
       inline: { kind: "payment_report", reportId: r.id, jobId: r.jobId, thumb: r.photos[0] ? (r.thumbs[r.photos[0].path] || null) : null, url: r.photos[0]?.url ?? null, contentType: r.photos[0]?.contentType ?? null, path: r.photos[0]?.path ?? null, label: `${r.jobNumber} · ${methodWord(r.method)} slip` },
     }));
   }
@@ -475,11 +587,11 @@ export async function reportWaitingItems(staff: { id: string; role_id: string },
         what: `${r.jobNumber} · ${r.plate.toUpperCase()} · ${aed(r.amount)} · ${methodWord(r.method)} – "${r.queryNote ?? ""}" – ${firstName(r.queriedBy)}`,
         amount: null,
         actionLabel: "Open",
-        href: `/jobs/${r.jobId}#invoice`,
+        href: r.jobId ? `/jobs/${r.jobId}#invoice` : r.estimateId ? `/estimates/${r.estimateId}` : "/estimates",
         always: true,
         urgency: "amber" as const,
         since: r.queriedAt ?? r.reportedAt,
-        hint: "Open the job card: Send again with the right details, or Withdraw it.",
+        hint: "Open it: Send again with the right details, or Withdraw it.",
       }));
   }
   return [];

@@ -9,7 +9,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
  * recorded under the person who took it. Signed with a key made from the server's secret; it never leaves the place it
  * names, and it runs out after `GRANT_HOURS`.
  */
-export type UploadTarget = "gate_in" | "inspection" | "job_file" | "supplier_proof" | "commission_proof" | "credit_note" | "loose_item";
+export type UploadTarget = "gate_in" | "inspection" | "job_file" | "supplier_proof" | "commission_proof" | "credit_note" | "loose_item" | "estimate_report";
 
 export type UploadGrant = {
   /** The place: which kind of upload and its id (a job, an inspection, an LPO, a payment, a part). */

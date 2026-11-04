@@ -49,12 +49,21 @@ export async function paymentFromForm(staff: { id: string; display_name: string;
   // A payment an advisor sent to accounts (2 November 2026, section 3): it is recorded once, on its own car, under the
   // report's own id as the receipt's key; the advisor's slip is its proof.
   const reportId = blankToNull(formData.get("report_id"));
-  let report: { id: string; jobId: string; proofPath: string } | null = null;
+  let report: { id: string; jobId: string | null; estimateId?: string | null; proofPath: string } | null = null;
   if (reportId) {
     const { reportToRecord } = await import("./payment-reports");
     const r = await reportToRecord(reportId, clientKeyIn);
     if (r.error || !r.report) return out({ error: r.error ?? "The reported payment was not found." }, proofJobId);
-    if (unallocatedCustomer || proofJobId !== r.report.jobId) return out({ error: "This payment was reported on another car: record it on that car's job." }, proofJobId);
+    if (r.report.jobId) {
+      if (unallocatedCustomer || proofJobId !== r.report.jobId) return out({ error: "This payment was reported on another car: record it on that car's job." }, proofJobId);
+    } else if (r.report.estimateId) {
+      // A report on an ESTIMATE (car not here yet): the money goes against that estimate's proforma.
+      const { estimateOfInvoice } = await import("./estimate-money");
+      const est = invoiceId ? await estimateOfInvoice(invoiceId) : null;
+      if (unallocatedCustomer || !est || est.estimateId !== r.report.estimateId) return out({ error: "This payment was reported on an estimate: record it against that estimate's proforma." }, proofJobId);
+    } else {
+      return out({ error: "This payment was reported on another car: record it on that car's job." }, proofJobId);
+    }
     report = r.report;
   }
   const { data: proofRows } = !proofFile && proofJobId && isUuid(clientKeyIn) ? await admin.from("job_files").select("id, storage_path, kind").eq("job_id", proofJobId).in("kind", ["payment_proof", "payment_report"]).eq("ref_id", clientKeyIn).is("removed_at", null).order("created_at") : { data: [] };

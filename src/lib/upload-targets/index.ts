@@ -8,6 +8,7 @@ import { supplierProofTarget } from "./supplier-proof";
 import { commissionProofTarget } from "./commission-proof";
 import { creditNoteTarget } from "./credit-note";
 import { looseItemTarget } from "./loose-item";
+import { estimateReportTarget } from "./estimate-report";
 
 /** Every place a member of staff can send a file to, by name (the browser's queue names the place with each file). */
 export const UPLOAD_TARGETS: Record<UploadTarget, TargetSpec> = {
@@ -18,6 +19,7 @@ export const UPLOAD_TARGETS: Record<UploadTarget, TargetSpec> = {
   commission_proof: commissionProofTarget,
   credit_note: creditNoteTarget,
   loose_item: looseItemTarget,
+  estimate_report: estimateReportTarget,
 };
 
 export function targetOf(name: unknown): TargetSpec | null {

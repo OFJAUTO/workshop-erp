@@ -165,6 +165,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           canCreate={emCanCreate}
           canRecord={emCanRecord}
           recordReadOnly={emRecordReadOnly}
+          canReport={role === "service_advisor" && !staff.viewingAs}
           customerId={q.customer_id}
           vehicleId={q.vehicle_id ?? null}
           phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}

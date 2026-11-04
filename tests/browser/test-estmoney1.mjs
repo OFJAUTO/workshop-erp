@@ -48,7 +48,9 @@ async function pay(page, { target, method, amount, proof = false, reference = nu
     } else await d.locator("[data-proof-input]").setInputFiles({ name: "transfer-proof.png", mimeType: "image/png", buffer: png });
   }
   await pressRecord(d);
-  return until(async () => ((await d.locator("[data-record-payment-done]").count()) ? await d.locator("[data-record-payment-done]").getAttribute("data-record-payment-done") : null), 50, 500);
+  const done = await until(async () => ((await d.locator("[data-record-payment-done]").count()) ? await d.locator("[data-record-payment-done]").getAttribute("data-record-payment-done") : null), 50, 500);
+  if (!done) console.log("   window says:", (((await d.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ")).slice(-400));
+  return done;
 }
 
 const advisor = (await sql("select id from public.staff where role_id = 'service_advisor' and is_active order by created_at limit 1"))[0];
@@ -181,6 +183,63 @@ try {
   check("D5: Invoices and payments shows the car-not-here row", (await estRow.count()) === 1 && /Car not here yet/.test((await estRow.textContent()) ?? ""), ((await estRow.textContent().catch(() => "")) ?? "").slice(0, 120));
   check("D6: the e1 row (paid in full) is on the list too", (await acc.page.locator(`[data-money-row="estimate:${e1.id}"]`).count()) === 1);
   await acc.page.screenshot({ path: path.join(dir, "d2-money-list.png"), fullPage: true });
+
+  /* ---------- E. The advisor's payment link on the estimate (/p/ page, car not here yet) ---------- */
+  // The advance proforma became its tax invoice: a NEW partial proforma for part of the rest carries the link.
+  await go(adv.page, `${base}/estimates/${e2.id}`);
+  await adv.page.locator('[data-em-mode="partial"]').click();
+  await adv.page.locator('[data-em-partial-kind="aed"]').click();
+  await adv.page.locator("[data-em-partial-value]").pressSequentially("800", { delay: 15 });
+  await adv.page.locator("[data-em-issue]").click();
+  const pro3 = await until(async () => (await sql("select id, number, total_aed::float as total from public.invoices where estimate_id = $1 and kind = 'proforma' and status = 'issued' and is_active and converted_to is null", [e2.id]))[0]);
+  check("E0: a new partial proforma for the rest is out", !!pro3 && pro3.total === 800, JSON.stringify(pro3));
+  await closeSend(adv.page);
+  await go(adv.page, `${base}/estimates/${e2.id}`);
+  await adv.page.locator("[data-em-paylink]").click();
+  await adv.page.locator("[data-em-paylink-amount]").fill("");
+  await adv.page.locator("[data-em-paylink-amount]").pressSequentially("300", { delay: 15 });
+  await adv.page.locator("[data-em-paylink-go]").click();
+  check("E1: the link message is prepared with the amount", await until(async () => /payment link|Pay here/i.test((await adv.page.locator("[data-send-message]").textContent().catch(() => "")) ?? ""), 30, 400));
+  const linkMsg = (await adv.page.locator("[data-send-message]").textContent()) ?? "";
+  // A /p/ page shortens under the generic /m/ prefix (19 October: payment GATEWAY links are never shortened; ours is the page).
+  const short = (linkMsg.match(/https:\/\/\S+\/(p|m|d)\/\S+/) ?? [])[0] ?? null;
+  check("E2: the message carries OUR short link and AED 300.00", !!short && /300\.00/.test(linkMsg), linkMsg.slice(0, 160));
+  await closeSend(adv.page);
+  const req = (await sql("select token, amount_aed::float as amount, estimate_id, invoice_id from public.payment_requests where estimate_id = $1 and is_active", [e2.id]))[0];
+  check("E3: the request belongs to the estimate and its proforma", !!req && req.amount === 300 && req.invoice_id === pro3.id, JSON.stringify(req));
+  const pPage = await fetch(`${base}/p/${req.token}`).then((r) => r.text());
+  check("E4: the /p/ page names the estimate, the amount and the bank details", new RegExp(e2.number).test(pPage) && /300\.00/.test(pPage) && /IBAN|Account/i.test(pPage));
+
+  /* ---------- F. The advisor's "Payment received – send to accounts" on the estimate ---------- */
+  await go(adv.page, `${base}/estimates/${e2.id}`);
+  check("F1: the advisor has the report button", (await adv.page.locator("[data-payment-report-open]").count()) >= 1);
+  await adv.page.locator("[data-payment-report-open]").first().click();
+  const rd = adv.page.locator("[data-payment-report-dialog]");
+  await rd.waitFor({ timeout: 15000 });
+  await rd.locator("[data-report-amount]").fill("500");
+  await rd.locator('[data-report-method="transfer"]').click();
+  await rd.locator('input[type="file"]').setInputFiles({ name: "transfer-slip.png", mimeType: "image/png", buffer: png });
+  check("F2: the slip arrives through the estimate's own place", await until(async () => !(await rd.locator("[data-report-send]").isDisabled()), 60, 500));
+  await rd.locator("[data-report-send]").click();
+  check("F3: sent to accounts", await until(async () => (await rd.locator("[data-report-sent]").count()) > 0, 40, 500));
+  const rep = (await sql("select id, estimate_id, job_id, status, amount_aed::float as amount, proof_path from public.payment_reports where estimate_id = $1 and is_active", [e2.id]))[0];
+  check("F4: the report sits on the ESTIMATE with its slip", !!rep && rep.job_id === null && rep.status === "waiting" && rep.amount === 500 && /estimate-reports\//.test(rep.proof_path ?? ""), JSON.stringify(rep));
+  const bell = await sql("select n.href from public.notifications n join public.staff s on s.id = n.staff_id where n.type = 'payment_reported' and s.role_id = 'accounts' and n.href like $1 order by n.created_at desc limit 1", [`/estimates/${e2.id}%`]);
+  check("F5: accounts' bell opens the estimate with the window", bell.length === 1 && bell[0].href.includes(`pay-report=${rep.id}`));
+  // Accounts open it from the bell: the window offers ONLY the estimate's proforma, pre-filled with the report.
+  await go(acc.page, `${base}${bell[0].href}`);
+  const d6 = dialog(acc.page);
+  await d6.waitFor({ timeout: 15000 });
+  await until(async () => (await d6.locator("[data-pay-targets]").count()) > 0, 40, 300);
+  check("F6: the window opens on the report with the proforma as the one target", (await d6.locator(`[data-pay-target="inv:${pro3.id}"]`).count()) === 1);
+  console.log("   report keys:", await d6.getAttribute("data-report-keys"));
+  await acc.page.screenshot({ path: path.join(dir, "f1-report-window.png") });
+  const rct3 = await pay(acc.page, { method: "transfer", amount: 500, reference: "TRF-E2E-63" });
+  check("F7: the reported transfer is recorded", !!rct3);
+  const repDone = await until(async () => (await sql("select status, payment_id from public.payment_reports where id = $1 and status = 'recorded'", [rep.id]))[0]);
+  check("F8: the report is closed by its receipt", !!repDone && !!repDone.payment_id);
+  const advBell = await sql("select count(*)::int as n from public.notifications where staff_id = $1 and type = 'payment_report_recorded' and title like $2", [advisor.id, `%${e2.number}%`]);
+  check("F9: the advisor hears Recorded ✓ with the estimate named", (advBell[0]?.n ?? 0) >= 1);
 } finally {
   for (const b of browsers) await b.browser.close().catch(() => {});
   cleanupDb();

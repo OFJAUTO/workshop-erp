@@ -195,13 +195,15 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
     setDismissedAt(state?.at ?? 0);
     setNote("");
     // The report is recorded: another payment opens on the same car, not the report again.
-    if (who) load(who.reportId ? { jobId: answer?.report?.jobId ?? who.jobId ?? null } : who);
+    if (who) load(who.reportId ? (answer?.report?.jobId ? { jobId: answer.report.jobId } : { customerId: answer?.report?.customerId ?? who.customerId ?? null, vehicleId: answer?.report?.vehicleId ?? who.vehicleId ?? null }) : who);
   };
   const report = answer?.report ?? null;
+  const reportKeys = answer?.reportTargetKeys ?? [];
+  const onReportTarget = !!report && !!target && reportKeys.includes(target.key);
   const [queried, setQueried] = useState(false);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-ink/60 p-4 overflow-y-auto" role="dialog" aria-modal="true" aria-label="Record a payment" data-record-payment-dialog>
+    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-ink/60 p-4 overflow-y-auto" role="dialog" aria-modal="true" aria-label="Record a payment" data-record-payment-dialog data-report-keys={reportKeys.join(",")}>
       <div className="w-full max-w-2xl rounded-card bg-white p-5 shadow-xl flex flex-col gap-4 max-h-[calc(100dvh-2rem)] overflow-y-auto">
         <div className="flex items-start justify-between gap-3">
           <div className="flex flex-col gap-0.5 min-w-0">
@@ -308,7 +310,7 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
           <div className="flex flex-col gap-3 rounded-control border-2 border-line-strong p-4" data-report-closed>
             <p className="text-sm font-semibold">{queried ? `Queried – ${firstName(report.reporter)} is told.` : report.closed}</p>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" size="md" tone="secondary" onClick={() => { setQueried(false); load({ jobId: report.jobId }); }} data-record-without-report>Record a payment on this car</Button>
+              <Button type="button" size="md" tone="secondary" onClick={() => { setQueried(false); load(report.jobId ? { jobId: report.jobId } : { customerId: report.customerId, vehicleId: report.vehicleId }); }} data-record-without-report>Record a payment on this car</Button>
               <Button type="button" size="md" tone="ghost" onClick={onClose}>Close</Button>
             </div>
           </div>
@@ -324,7 +326,7 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
                 </span>
                 <PaymentReportQuery reportId={report.id} reasons={answer?.queryReasons} onDone={() => setQueried(true)} />
                 {/* The always-rule: a payment that is NOT this report is still recorded here, without the report. */}
-                <button type="button" className="min-h-11 basis-full text-left text-xs font-bold underline underline-offset-4" onClick={() => load({ jobId: report.jobId })} data-record-other-payment>
+                <button type="button" className="min-h-11 basis-full text-left text-xs font-bold underline underline-offset-4" onClick={() => load(report.jobId ? { jobId: report.jobId } : { customerId: report.customerId, vehicleId: report.vehicleId })} data-record-other-payment>
                   Record a different payment instead (this report keeps waiting)
                 </button>
               </div>
@@ -350,9 +352,9 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
             {target ? (
               <PaymentForm
                 key={`${target.key}:${dismissedAt}:${report?.id ?? ""}`}
-                prefill={report && target.jobId === report.jobId ? { amount: report.amount, method: report.method, authCode: report.authCode, reference: report.reference } : null}
-                fixedKey={report && target.jobId === report.jobId ? report.id : null}
-                initialProofs={report && target.jobId === report.jobId ? report.photos : null}
+                prefill={onReportTarget && report ? { amount: report.amount, method: report.method, authCode: report.authCode, reference: report.reference } : null}
+                fixedKey={onReportTarget && report ? report.id : null}
+                initialProofs={onReportTarget && report ? report.photos : null}
                 tag={target.kind === "unallocated" ? `payment:credit:${choices.customer.id}` : `payment:${target.key}`}
                 invoiceId={target.kind === "invoice" ? target.invoiceId : null}
                 jobId={target.kind === "job" ? target.jobId : null}

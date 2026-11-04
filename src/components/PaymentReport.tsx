@@ -7,6 +7,7 @@ import { ReleaseFormLock } from "@/components/forms";
 import { AuthCodeInput } from "@/components/AuthCodeInput";
 import { ReasonChips } from "@/components/ReasonChips";
 import { ViewerThumb } from "@/components/PhotoViewer";
+import { QueuedProofUpload } from "@/components/QueuedProofUpload";
 import { JobFileUpload, spendFormKey, useFormKey, type FilesWaiting, type JobFile } from "@/components/JobFileUpload";
 import { openRecordPayment } from "@/components/RecordPaymentHost";
 import { queryPaymentReportAction, reportPaymentAction, withdrawPaymentReportAction } from "@/app/(app)/jobs/[id]/payment-report-actions";
@@ -27,7 +28,7 @@ const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDig
 const timeOf = (iso: string) => new Date(iso).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dubai" });
 
 /** The advisor's button and window. `replaces` = sending a queried report again (its details and photo carried over). */
-export function PaymentReportButton({ jobId, balance, expected = null, replaces = null, label = "Payment received – send to accounts", size = "md", tone = "secondary", className = "" }: { jobId: string; balance: number | null; expected?: string | null; replaces?: PaymentReport | null; label?: string; size?: "md" | "lg"; tone?: "primary" | "secondary"; className?: string }) {
+export function PaymentReportButton({ jobId = null, estimateId = null, balance, expected = null, replaces = null, label = "Payment received – send to accounts", size = "md", tone = "secondary", className = "" }: { jobId?: string | null; /** A report on an ESTIMATE before the car arrives (4 November 2026): the slip goes with the estimate. */ estimateId?: string | null; balance: number | null; expected?: string | null; replaces?: PaymentReport | null; label?: string; size?: "md" | "lg"; tone?: "primary" | "secondary"; className?: string }) {
   const [open, setOpen] = useState(false);
   const [n, setN] = useState(0);
   return (
@@ -35,15 +36,18 @@ export function PaymentReportButton({ jobId, balance, expected = null, replaces 
       <Button type="button" size={size} tone={tone} className={`!whitespace-normal ${className}`} onClick={() => { setN((x) => x + 1); setOpen(true); }} data-payment-report-open={replaces ? "again" : "new"}>
         {label}
       </Button>
-      {open ? <ReportDialog key={n} jobId={jobId} balance={balance} expected={expected} replaces={replaces} onClose={() => setOpen(false)} /> : null}
+      {open ? <ReportDialog key={n} jobId={jobId} estimateId={estimateId} balance={balance} expected={expected} replaces={replaces} onClose={() => setOpen(false)} /> : null}
     </>
   );
 }
 
-function ReportDialog({ jobId, balance, expected, replaces, onClose }: { jobId: string; balance: number | null; expected: string | null; replaces: PaymentReport | null; onClose: () => void }) {
+function ReportDialog({ jobId = null, estimateId = null, balance, expected, replaces, onClose }: { jobId?: string | null; estimateId?: string | null; balance: number | null; expected: string | null; replaces: PaymentReport | null; onClose: () => void }) {
   const router = useRouter();
-  const tag = `payreport:${jobId}`;
-  const { key } = useFormKey(tag, jobId);
+  const place = jobId ?? estimateId ?? "";
+  const tag = `payreport:${place}`;
+  const { key } = useFormKey(tag, place);
+  // An estimate's slip goes to its own place (no job yet): sent by THE queue, Send works once it has arrived.
+  const [estSlip, setEstSlip] = useState(false);
   const [method, setMethod] = useState<string>(replaces?.method ?? (expected && (PAYMENT_METHODS as readonly string[]).includes(expected) ? expected : "card"));
   const [authCode, setAuthCode] = useState(replaces?.authCode ?? "");
   const [reference, setReference] = useState(replaces?.reference ?? "");
@@ -55,7 +59,7 @@ function ReportDialog({ jobId, balance, expected, replaces, onClose }: { jobId: 
   const [state, action, pending] = useActionState(reportPaymentAction, null);
   const [errorSeen, setErrorSeen] = useState<number | undefined>(undefined);
   const carried = replaces && !mine.length ? replaces.photos : [];
-  const hasPhoto = mine.length > 0 || carried.length > 0;
+  const hasPhoto = jobId ? mine.length > 0 || carried.length > 0 : estSlip || carried.length > 0;
   const sent = !!state?.ok;
   // The report is made: the key it was sent with is spent (only that one - the new key is never spent again), so the
   // next report on this car starts with a new one. A key already used for ANOTHER payment (a copied tab) is spent too:
@@ -93,7 +97,8 @@ function ReportDialog({ jobId, balance, expected, replaces, onClose }: { jobId: 
           </div>
         ) : (
           <form action={action} onSubmit={() => { sentKey.current = key; }} className="flex flex-col gap-3" data-report-form>
-            <input type="hidden" name="job_id" value={jobId} />
+            {jobId ? <input type="hidden" name="job_id" value={jobId} /> : null}
+            {estimateId ? <input type="hidden" name="estimate_id" value={estimateId} /> : null}
             <input type="hidden" name="report_id" value={key ?? ""} />
             <input type="hidden" name="method" value={method} />
             {replaces ? <input type="hidden" name="replaces_id" value={replaces.id} /> : null}
@@ -119,7 +124,7 @@ function ReportDialog({ jobId, balance, expected, replaces, onClose }: { jobId: 
             )}
             <div className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">Photo of the {method === "card" ? "card slip" : method === "transfer" ? "transfer (screenshot or photo)" : method === "cheque" ? "cheque" : method === "link" ? "payment confirmation" : "receipt"} (required)</span>
-              {key ? (
+              {key && jobId ? (
                 <JobFileUpload
                   jobId={jobId}
                   kind="payment_report"
@@ -138,6 +143,8 @@ function ReportDialog({ jobId, balance, expected, replaces, onClose }: { jobId: 
                   onRemoved={(f) => setPhotos((s) => ({ ...s, files: s.files.filter((x) => x.id !== f.id) }))}
                   onPending={setWait}
                 />
+              ) : key && estimateId ? (
+                <QueuedProofUpload key={key} target="estimate_report" scopeId={estimateId} extraFields={{ reportId: key }} onSent={() => { setEstSlip(true); setErrorSeen(state?.at ?? 0); }} label="Take photo / attach" data-report-estimate-slip="1" />
               ) : null}
               {carried.length ? <span className="text-xs text-muted" data-report-photo-carried>The first photo goes with it ({carried.length}); add a clearer one if accounts asked for it.</span> : null}
               {photoLine ? <span className="text-xs font-semibold text-amber-bar" data-report-photo-missing>{photoLine}</span> : null}
@@ -285,7 +292,7 @@ export function PaymentReportLines({ reports, viewerId, canRecord, canReport, re
   if (!shown.length && !again) return null;
   return (
     <>
-    {again ? <ReportDialog key={again.n} jobId={again.r.jobId} balance={balance} expected={expected} replaces={again.r} onClose={() => setAgain(null)} /> : null}
+    {again ? <ReportDialog key={again.n} jobId={again.r.jobId || null} estimateId={again.r.estimateId ?? null} balance={balance} expected={expected} replaces={again.r} onClose={() => setAgain(null)} /> : null}
     <ul className="flex flex-col gap-1.5" data-payment-report-lines>
       {shown.map((r) => {
         const mineToFix = !readOnly && canReport && (r.reporterId === viewerId || isOwner);

@@ -78,6 +78,22 @@ treatment is already the advance rule and would not change).
   filters; the money list rows; the fixed job-less receipt ("Paid in full" + the car).
 - Screenshots in `tests/browser/shots/estmoney/`.
 
+## Part 1b — the advisor's payment link and payment report on estimates (same day)
+
+- **Send payment link** (advisors, accounts, the owner) on an estimate with an OPEN proforma:
+  complete or partial amount, an optional pasted gateway link, OUR /p/ payment page naming the
+  estimate (its people read from the estimate — there is no job), the WhatsApp message from the
+  payment-request template, logged on the estimate, accounts told. A partial link counts itself
+  paid once that much has come in on the proforma (or the tax invoice it became) since the send.
+- **"Payment received – send to accounts"** works on estimates: the same dialog, the slip stored
+  under the estimate's own place (`estimate-reports/…`, the new `estimate_report` upload target —
+  no job file exists yet), the report on the estimate's history, accounts' bell and WAITING ON YOU
+  line open the estimate with the Record payment window pre-filled: the one target is the
+  estimate's proforma, the advisor's slip stands as the proof, the receipt's key is the report's
+  id (one report, one receipt), and the advisor hears "Recorded ✓" with the E-number.
+- Fixed on the way: the Record payment window's job-less form demanded a SECOND proof file even
+  when the advisor's slip was attached — the slip now stands as the proof there too.
+
 ## Still to come (the task's remaining parts)
 
 - Part 2: gate-in carries every proforma, payment and tax invoice onto the job ("Paid so far",

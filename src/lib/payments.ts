@@ -1,7 +1,7 @@
 import "server-only";
 import { DEFAULT_UNDO_MINUTES, mayUndo } from "./money-undo";
 import { afterPendingChargePayment } from "./charges";
-import { afterEstimatePayment } from "./estimate-money";
+import { afterEstimatePayment, estimateOfInvoice } from "./estimate-money";
 import { SAVE_FAILED, logAppError } from "@/lib/app-errors";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { INVOICE_SELECT, PAYMENT_SELECT, creditsOnDocs, invoiceBalance, toInvoice, toPayment, type PaymentRow } from "./invoice-data";
@@ -200,6 +200,13 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     if (jobId) {
       const { afterReceiptForReports } = await import("./payment-reports");
       await afterReceiptForReports({ id: String(created.id), number: String(created.number), amount, method, jobId, authCode, reference: input.reference ?? (method === "cheque" ? (input.cheque?.number ?? null) : null) }, input.reportId ?? null, { id: actor.id, display_name: actor.display_name }).catch((e) => logAppError(`record payment: report after ${created.number}`, e, { staffId: actor.id, jobId }));
+    } else if (input.invoiceId) {
+      // A payment on an ESTIMATE's proforma (car not here yet, 4 November 2026) answers the advisor's report too.
+      const est = await estimateOfInvoice(input.invoiceId).catch(() => null);
+      if (est) {
+        const { afterReceiptForReports } = await import("./payment-reports");
+        await afterReceiptForReports({ id: String(created.id), number: String(created.number), amount, method, estimateId: est.estimateId, authCode, reference: input.reference ?? (method === "cheque" ? (input.cheque?.number ?? null) : null) }, input.reportId ?? null, { id: actor.id, display_name: actor.display_name }).catch((e) => logAppError(`record payment: report after ${created.number}`, e, { staffId: actor.id }));
+      }
     }
     if (over && !isOwner) await notifyRoles(["owner"], { type: "payment_void", title: `Payment above the balance recorded · ${created.number}`, body: `${money(amount)} by ${method} against a balance of ${money(balance ?? 0)}, by ${actor.display_name}: ${overNote}`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : jobId ? `/jobs/${jobId}/invoice` : "/invoices" });
   } catch (err) {

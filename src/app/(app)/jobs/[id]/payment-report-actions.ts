@@ -27,11 +27,14 @@ export async function reportPaymentAction(_prev: ReportState, formData: FormData
   const staff = await requireStaff();
   if (staff.viewingAs) return { error: "View as is read-only – use Act as to send it.", at: Date.now() };
   const jobId = String(formData.get("job_id") ?? "");
+  // A report on an ESTIMATE before the car arrives (4 November 2026).
+  const estimateId = String(formData.get("estimate_id") ?? "");
   const r = await createPaymentReport(
     { id: staff.id, display_name: staff.display_name, role_id: staff.role_id },
     {
       id: String(formData.get("report_id") ?? ""),
-      jobId,
+      jobId: jobId || null,
+      estimateId: estimateId || null,
       amount: formData.get("amount"),
       method: formData.get("method"),
       authCode: formData.get("auth_code"),

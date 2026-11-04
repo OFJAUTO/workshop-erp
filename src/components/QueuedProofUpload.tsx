@@ -11,13 +11,13 @@ import { shrinkPhoto } from "@/lib/upload-client";
 import { newUuid } from "@/lib/uuid";
 
 /** The proof places this uploader serves: one document (a photo or a PDF) for one record. */
-export type ProofTarget = Extract<SendTarget, "supplier_proof" | "commission_proof" | "credit_note">;
+export type ProofTarget = Extract<SendTarget, "supplier_proof" | "commission_proof" | "credit_note" | "estimate_report">;
 
 /**
  * Where each place keeps its files (the server's own rule, src/lib/upload-targets): a file still on its way can be named
  * before it arrives, so a save made in the meantime picks it up the moment it lands (the server checks it really did).
  */
-const FOLDER: Record<ProofTarget, string> = { supplier_proof: "supplier-payments", commission_proof: "commission-payments", credit_note: "credit-notes" };
+const FOLDER: Record<ProofTarget, string> = { supplier_proof: "supplier-payments", commission_proof: "commission-payments", credit_note: "credit-notes", estimate_report: "estimate-reports" };
 const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "application/pdf": "pdf" };
 const MAX_BYTES = 20 * 1024 * 1024;
 
@@ -31,7 +31,7 @@ export type SentProof = { id: string; path: string; url: string | null; name: st
  * when it is a photo, kept there until OFJ's server confirms it, and sent by THE send queue. The newest pick is the one a
  * form hands over: `ready` once the server has it (its path), `waiting` while it is still on its way (the path it will have).
  */
-export function useQueuedProof({ target, scopeId, onSent }: { target: ProofTarget; scopeId: string; onSent?: (result: SentResult) => void }) {
+export function useQueuedProof({ target, scopeId, onSent, extraFields }: { target: ProofTarget; scopeId: string; onSent?: (result: SentResult) => void; /** Extra per-file fields the place needs (an estimate report names its report id). */ extraFields?: Record<string, string> }) {
   const [latest, setLatest] = useState<string | null>(null);
   const [sent, setSent] = useState<SentProof | null>(null);
   const [busy, setBusy] = useState(false);
@@ -85,7 +85,7 @@ export function useQueuedProof({ target, scopeId, onSent }: { target: ProofTarge
       const id = newUuid();
       setLatest(id);
       setSent(null);
-      await queue.add([{ id, blob: small.blob, contentType: small.type, name: file.name || null, fields: { fileType: small.type }, takenAt: Date.now() }]);
+      await queue.add([{ id, blob: small.blob, contentType: small.type, name: file.name || null, fields: { fileType: small.type, ...(extraFields ?? {}) }, takenAt: Date.now() }]);
     } catch {
       setError("Could not keep the file on this device. Try again.");
     } finally {
@@ -213,7 +213,7 @@ export function QueuedProofView({
   );
 }
 
-type QueuedProofUploadProps = { target: ProofTarget; scopeId: string; onSent?: (result: SentResult) => void } & Omit<Parameters<typeof QueuedProofView>[0], "proof">;
+type QueuedProofUploadProps = { target: ProofTarget; scopeId: string; onSent?: (result: SentResult) => void; extraFields?: Record<string, string> } & Omit<Parameters<typeof QueuedProofView>[0], "proof">;
 
 /**
  * The hook and the view in one, for a place that only needs the file to land (the page refreshes in `onSent`). A new
@@ -223,7 +223,7 @@ export function QueuedProofUpload(props: QueuedProofUploadProps) {
   return <QueuedProofUploadOne key={`${props.target}:${props.scopeId}`} {...props} />;
 }
 
-function QueuedProofUploadOne({ target, scopeId, onSent, ...view }: QueuedProofUploadProps) {
-  const proof = useQueuedProof({ target, scopeId, onSent });
+function QueuedProofUploadOne({ target, scopeId, onSent, extraFields, ...view }: QueuedProofUploadProps) {
+  const proof = useQueuedProof({ target, scopeId, onSent, extraFields });
   return <QueuedProofView proof={proof} {...view} />;
 }

@@ -2,8 +2,9 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createEstimateProformaAction, estimateProformaSendInfo, markEstimateProformaSent, voidEstimateProformaAction, type ProformaSendInfo } from "../money-actions";
+import { createEstimateProformaAction, estimateProformaSendInfo, markEstimateProformaSent, markEstimatePayLinkSent, prepareEstimatePayLink, voidEstimateProformaAction, type ProformaSendInfo } from "../money-actions";
 import { RecordPaymentButton } from "@/components/RecordPaymentHost";
+import { PaymentReportButton } from "@/components/PaymentReport";
 import { SendLinkDialog } from "@/components/SendLinkDialog";
 import { NumericInput } from "@/components/NumericInput";
 import { Badge, Button, Card, Input, SectionLabel } from "@/components/ui";
@@ -28,7 +29,7 @@ export type MoneyCardFacts = {
  * block (company, address, TRN, attention, PO number — may differ from the car's owner), send through
  * the one dialog, and the money recorded by accounts; the tax invoice follows by itself when paid.
  */
-export function EstimateMoneyCard({ estimateId, number, approved, money, billTo, canCreate, canRecord, recordReadOnly, customerId, vehicleId, phoneDigits }: {
+export function EstimateMoneyCard({ estimateId, number, approved, money, billTo, canCreate, canRecord, recordReadOnly, canReport = false, customerId, vehicleId, phoneDigits }: {
   estimateId: string;
   number: string;
   approved: boolean;
@@ -37,6 +38,8 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
   canCreate: boolean;
   canRecord: boolean;
   recordReadOnly: boolean;
+  /** Advisors (and the owner): "Payment received – send to accounts" on the estimate. */
+  canReport?: boolean;
   customerId: string;
   vehicleId: string | null;
   phoneDigits: string;
@@ -50,6 +53,10 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
   const [send, setSend] = useState<ProformaSendInfo | null>(null);
   const [voiding, setVoiding] = useState(false);
   const [voidWhy, setVoidWhy] = useState("");
+  const [linking, setLinking] = useState(false);
+  const [linkAmount, setLinkAmount] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkSend, setLinkSend] = useState<{ message: string; amount: number; phone: string | null } | null>(null);
   const [busy, start] = useTransition();
   const pro = money.proforma;
 
@@ -73,6 +80,14 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
     setVoiding(false);
     setVoidWhy("");
     router.refresh();
+  });
+  const doLink = () => start(async () => {
+    setError(null);
+    const amount = Number(linkAmount.replace(/,/g, "")) || Math.max(0, pro ? pro.total - money.paid : 0);
+    const r = await prepareEstimatePayLink(estimateId, amount, linkUrl.trim() === "" ? undefined : linkUrl);
+    if (r.error || !r.message) { setError(r.error ?? "Couldn't prepare the link."); return; }
+    setLinkSend({ message: r.message, amount: r.amount ?? amount, phone: r.phone ?? null });
+    setLinking(false);
   });
 
   const btBox = (
@@ -118,11 +133,26 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
           </p>
           <div className="flex flex-wrap gap-2">
             {canCreate ? <Button type="button" size="md" disabled={busy} onClick={openSend} data-em-send>Send to customer</Button> : null}
+            {canCreate ? <Button type="button" tone="secondary" size="md" disabled={busy} onClick={() => { setLinkAmount(String(Math.max(0, pro.total - money.paid).toFixed(2))); setLinking(!linking); }} data-em-paylink>Send payment link</Button> : null}
             {canRecord || recordReadOnly ? <RecordPaymentButton customerId={customerId} vehicleId={vehicleId} readOnly={recordReadOnly} size="md" tone="secondary" /> : null}
+            {canReport && !canRecord ? <PaymentReportButton estimateId={estimateId} balance={Math.max(0, pro.total - money.paid)} size="md" /> : null}
             {canRecord && !recordReadOnly ? (
               voiding ? null : <Button type="button" tone="ghost" size="md" onClick={() => setVoiding(true)} data-em-void>Void…</Button>
             ) : null}
           </div>
+          {linking ? (
+            <div className="flex flex-col gap-2 rounded-control border border-line p-3" data-em-paylink-form>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Amount (complete or partial)</span>
+                <NumericInput value={linkAmount} onChange={(e) => setLinkAmount((e.target as HTMLInputElement).value)} style={{ width: "9rem" }} data-em-paylink-amount />
+              </div>
+              <Input placeholder="Pay-now link from the bank's portal (optional)" value={linkUrl} onChange={(e) => setLinkUrl(e.target.value)} data-em-paylink-url spell={false} />
+              <div className="flex gap-2">
+                <Button type="button" size="md" disabled={busy} onClick={doLink} data-em-paylink-go>{busy ? "Preparing…" : "Prepare the message"}</Button>
+                <Button type="button" tone="ghost" size="md" onClick={() => setLinking(false)}>Back</Button>
+              </div>
+            </div>
+          ) : null}
           {voiding ? (
             <div className="flex flex-wrap items-center gap-2" data-em-void-form>
               <Input placeholder="Why is it voided? (logged)" value={voidWhy} onChange={(e) => setVoidWhy(e.target.value)} className="flex-1 min-w-56" data-em-void-reason />
@@ -170,6 +200,15 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
           pdf={send.token ? { href: `/api/pdf/invoice/${send.token}`, fileName: `OFJ Proforma ${send.number}.pdf` } : null}
           onSent={(how) => { void markEstimateProformaSent(estimateId, send.invoiceId!, how === "whatsapp" ? "WhatsApp" : "copied"); setSend(null); router.refresh(); }}
           onClose={() => setSend(null)}
+        />
+      ) : null}
+      {linkSend ? (
+        <SendLinkDialog
+          title={`Send the payment link · AED ${linkSend.amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`}
+          message={linkSend.message}
+          phoneDigits={(linkSend.phone ?? "").replace(/[^\d]/g, "") || phoneDigits}
+          onSent={() => { void markEstimatePayLinkSent(estimateId, linkSend.amount); setLinkSend(null); router.refresh(); }}
+          onClose={() => setLinkSend(null)}
         />
       ) : null}
     </Card>
