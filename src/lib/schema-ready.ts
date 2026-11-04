@@ -78,3 +78,5 @@ export const estimateMoneyReady = () => schemaReady("invoices", "estimate_id, bi
 /** The advisor's payment link and "Payment received - send to accounts" on an estimate (same migration). */
 export const estimatePayLinkReady = () => schemaReady("payment_requests", "estimate_id");
 export const estimateReportReady = () => schemaReady("payment_reports", "estimate_id");
+/** Part 3 (combined proformas): migration 20261204120000_estimate_money2. */
+export const estimateCombineReady = () => schemaReady("invoices", "covers_estimate_ids");

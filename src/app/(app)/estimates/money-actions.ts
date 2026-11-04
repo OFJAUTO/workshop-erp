@@ -46,14 +46,14 @@ async function sendInfoOf(estimateId: string, invoice: { id: string; number: str
 /** Issue the proforma (complete or partial) with the bill-to block, and hand back the filled message to send. */
 export async function createEstimateProformaAction(
   estimateId: string,
-  input: { mode: "complete" | "partial"; partialKind?: "percent" | "aed"; partialValue?: number; billTo?: Partial<Record<keyof BillTo, unknown>> | null; validityDays?: number | null },
+  input: { mode: "complete" | "partial"; partialKind?: "percent" | "aed"; partialValue?: number; billTo?: Partial<Record<keyof BillTo, unknown>> | null; validityDays?: number | null; combineIds?: string[] },
 ): Promise<ProformaSendInfo> {
   const staff = await requireStaff();
   if (!MAY_SEND.includes(staff.role_id) || staff.viewingAs) return { error: "Only advisors, accounts or the owner issue a proforma." };
   const settings = await getSettings();
   const r = await createEstimateProforma(
     estimateId,
-    { mode: input.mode, partial: input.mode === "partial" ? { kind: input.partialKind ?? "aed", value: Number(input.partialValue) } : undefined, billTo: input.billTo ?? null, validityDays: input.validityDays ?? null },
+    { mode: input.mode, partial: input.mode === "partial" ? { kind: input.partialKind ?? "aed", value: Number(input.partialValue) } : undefined, billTo: input.billTo ?? null, validityDays: input.validityDays ?? null, combineIds: (input.combineIds ?? []).filter((x) => typeof x === "string").slice(0, 10) },
     { id: staff.id, display_name: staff.display_name },
     settings,
   );
@@ -140,6 +140,29 @@ export async function markEstimatePayLinkSent(estimateId: string, amountIn: numb
   await notifyRoles(["accounts"], { type: "deposit_to_collect", title: `Payment link sent · ${e.number} · AED ${amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`, body: `${staff.display_name} sent the customer a payment link for the estimate (car not here yet). Record it when it arrives - the tax invoice follows by itself.`, href: `/estimates/${estimateId}` });
   revalidatePath(`/estimates/${estimateId}`);
   return { ok: true };
+}
+
+/** Part 3: the owner settles an over-payment (a revision down) — credit note kept as credit, or to refund. */
+export async function settleEstimateOverAction(estimateId: string, keep: "credit" | "refund", reason: string): Promise<{ error?: string; cnId?: string; cnNumber?: string; words?: string }> {
+  const staff = await requireStaff();
+  if (staff.viewingAs) return { error: "View as is read-only." };
+  const { settleEstimateOver } = await import("@/lib/estimate-money");
+  const r = await settleEstimateOver(estimateId, { keep, reason }, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id }, await getSettings());
+  if (!r.error) revalidatePath(`/estimates/${estimateId}`);
+  return r;
+}
+
+/** Part 3: the owner cancels an estimate that holds money — optional fee, then refund or customer credit. */
+export async function cancelEstimateMoneyAction(estimateId: string, input: { reason: string; fee: number; keep: "credit" | "refund" }): Promise<{ error?: string; cnId?: string | null; cnNumber?: string | null; words?: string }> {
+  const staff = await requireStaff();
+  if (staff.viewingAs) return { error: "View as is read-only." };
+  const { cancelEstimateWithMoney } = await import("@/lib/estimate-money");
+  const r = await cancelEstimateWithMoney(estimateId, input, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id }, await getSettings());
+  if (!r.error) {
+    revalidatePath(`/estimates/${estimateId}`);
+    revalidatePath("/estimates");
+  }
+  return r;
 }
 
 /** An unpaid proforma is voided with a reason (owner + accounts; logged). */

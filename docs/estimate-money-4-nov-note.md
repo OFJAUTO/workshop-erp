@@ -116,10 +116,37 @@ treatment is already the advance rule and would not change).
   "Prepaid AED X" on the grid, and the booking page says "AED 3,650.00 on E-00087, E-00088 – the
   money follows the car onto the job at gate-in."
 
-## Still to come (the task's remaining parts)
+## Part 3 — changes, cancellations and refunds (same day)
 
-- Part 3: revisions (top-up / credit / refund with credit notes), additional estimates' proformas,
-  cancel with refund-or-credit and the expiry holds.
+**A second database change joins the WAITING FOR APPLY list:** `20261204120000_estimate_money2.sql`
+(the combined proforma's covers column). Both files apply together when the owner says so.
+
+- **Revised UP after a payment**: the money card measures against the newest accepted version by
+  itself — "Part paid · AED X of new total" — and the advisor issues a top-up proforma (partial
+  or complete for the rest) exactly like the first one. Nothing new to learn.
+- **Revised DOWN below what was paid**: the card shows the over-payment in amber ("Paid AED
+  2,100.00 against a bill of AED 1,575.00 — AED 525.00 over"). The OWNER settles it with a reason:
+  **Keep as customer credit** or **Refund it** — either way a CREDIT NOTE is issued (the VAT
+  paper) against the right invoice: the full tax invoice when one is posted (the credit note goes
+  to Zoho and applies there), or the advance invoice (never in Zoho — the row is flagged "by
+  hand" from birth, with the exact words of what to do there). A refund is recorded on the credit
+  note's page (method + reference, logged, once only).
+- **Additional estimates**: each issues its own proforma as before, **or ONE COMBINED proforma**
+  — on the base estimate's card the advisor ticks the accepted additional estimates of the same
+  car and the single proforma carries every line and the one total; the additional estimate's
+  page says "Billed on PRO-xxxxx together with E-xxxxx", and the money is never counted twice.
+- **Cancel with money held** (owner only, from the money card): reason + an optional
+  **cancellation fee** that stays invoiced; the open proforma is voided (logged); what stands
+  invoiced beyond the fee becomes a credit note — refunded on its page or kept as the customer's
+  credit; the estimate is then cancelled with the reason. A cheque still clearing blocks it, and
+  the plain Cancel menu refuses with directions while money is on the estimate. Tax invoices are
+  NEVER deleted — only corrected by credit notes.
+- **Past its date with money held**: the hourly clean-up NEVER expires it. The advisor and the
+  owner are told once ("AED 500.00 is paid on it, so it was NOT expired. Re-send, revise, or
+  cancel it"), the hold is on the estimate's history, and a second run never repeats it.
+
+## Still to come (the task's remaining part)
+
 - Part 4: "Order parts now" on an approved estimate with the no-advance owner warning.
 
 ## Assumptions (listed, not asked)

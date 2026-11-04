@@ -6,7 +6,7 @@
 //   node --env-file=.env.test.local tests/browser/test-estmoney1.mjs    (test server on 3102)
 import path from "node:path";
 import { mkdirSync } from "node:fs";
-import { api, base, browserForId, chooseInspectionFee, cleanupDb, go, here, makeChecks, pressRecord, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserForId, chooseInspectionFee, cleanupDb, confirmMoney, go, here, makeChecks, pressRecord, sleep, sql } from "./pw-lib.mjs";
 
 const pick = (page, name, value) => page.locator(`input[name="${name}"][value="${value}"]`).first().evaluate((el) => el.click());
 
@@ -280,6 +280,137 @@ try {
   // The estimates are carried: their money rows leave the Invoices list, the estimate card points at the job.
   await go(acc.page, `${base}/invoices`);
   check("G7: the car-not-here rows are gone (the job's own rows carry it now)", (await acc.page.locator(`[data-money-row="estimate:${e1.id}"], [data-money-row="estimate:${e2.id}"]`).count()) === 0);
+
+  /* ---------- Part 3: changes, cancellations and refunds (a fresh car) ---------- */
+  const cust2 = (await sql("insert into public.customers (customer_type, full_name, company_name, phone) values ('company', 'Hans E2e', 'E2E NORD SHIPPING', '+971500000096') returning id"))[0].id;
+  const car2 = (await sql("insert into public.vehicles (customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, make_id, model_id, model_year, vin) values ($1, true, 'UAE', 'Dubai', 'N', '55210', $2, $3, 2022, 'E2EESTMONEYVIN02X') returning id", [cust2, mm.make_id, mm.model_id]))[0].id;
+  const mkEst2 = async (title, hours, rate, total, status = "approved") => {
+    const est = (await sql(`insert into public.quotations (kind, customer_id, vehicle_id, status, validity_days, vat_percent, total_aed, created_by, updated_by) values ('estimate', $1, $2, 'draft', 7, 5, ${total}, $3, $3) returning id, number`, [cust2, car2, advisor.id]))[0];
+    await sql("insert into public.quotation_lines (quotation_id, position, line_type, title, source_type, quantity, hours, labour_rate, line_total, created_by, updated_by) values ($1, 1, 'labour', $2, 'manual', 1, $3, $4, $5, $6, $6)", [est.id, title, hours, rate, hours * rate, advisor.id]);
+    await sql(`update public.quotations set status = '${status}', sent_at = now(), responded_at = now(), approver_name = 'HANS' where id = $1`, [est.id]);
+    return est;
+  };
+
+  /* H. One COMBINED proforma bills the base and the additional estimate together. */
+  const e3 = await mkEst2("E2E ENGINE MOUNTS", 4, 500, 2100);
+  const e4 = await mkEst2("E2E COOLANT FLUSH", 3, 350, 1102.5);
+  await sql("update public.quotations set additional_to_id = $1 where id = $2", [e3.id, e4.id]);
+  await go(adv.page, `${base}/estimates/${e3.id}`);
+  await adv.page.locator('[data-em-mode="complete"]').click();
+  check("H1: the accepted additional estimate is offered to bill together", (await adv.page.locator(`[data-em-combine="${e4.id}"]`).count()) === 1);
+  await adv.page.locator(`[data-em-combine="${e4.id}"]`).click();
+  await adv.page.locator("[data-em-billto-company]").fill("E2E NORD SHIPPING FZE");
+  await adv.page.locator("[data-em-issue]").click();
+  const proC = await until(async () => (await sql("select id, number, total_aed::float as total, covers_estimate_ids, issue_reason from public.invoices where estimate_id = $1 and kind = 'proforma' and status = 'issued' and is_active", [e3.id]))[0]);
+  check("H2: ONE combined proforma carries both estimates' lines and totals", !!proC && proC.total === 3202.5 && (proC.covers_estimate_ids ?? []).includes(e4.id) && new RegExp(`${e3.number} \\+ ${e4.number}`).test(proC.issue_reason ?? ""), JSON.stringify(proC));
+  const proCLines = await sql("select count(*)::int as n from public.invoice_lines where invoice_id = $1 and is_active", [proC.id]);
+  check("H3: two lines on it (one per estimate)", proCLines[0].n === 2);
+  await closeSend(adv.page);
+  await go(adv.page, `${base}/estimates/${e4.id}`);
+  check("H4: the additional estimate says it is billed on the combined proforma", (await adv.page.locator(`[data-em-combined-on="${proC.number}"]`).count()) === 1);
+
+  /* I. Revised DOWN after full payment: the owner settles the over-payment with a credit note. */
+  const e5 = await mkEst2("E2E GEARBOX SERVICE", 4, 500, 2100);
+  await go(adv.page, `${base}/estimates/${e5.id}`);
+  await adv.page.locator('[data-em-mode="complete"]').click();
+  await adv.page.locator("[data-em-issue]").click();
+  const pro5 = await until(async () => (await sql("select id, total_aed::float as total from public.invoices where estimate_id = $1 and kind = 'proforma' and status = 'issued' and is_active", [e5.id]))[0]);
+  check("I1: the complete proforma is out", !!pro5 && pro5.total === 2100);
+  await closeSend(adv.page);
+  await go(acc.page, `${base}/estimates/${e5.id}`);
+  await acc.page.locator("[data-record-payment-open]").first().click();
+  await dialog(acc.page).waitFor({ timeout: 15000 });
+  await until(async () => (await dialog(acc.page).locator("[data-pay-targets]").count()) > 0, 40, 300);
+  check("I2: paid in full (transfer)", !!(await pay(acc.page, { target: `inv:${pro5.id}`, method: "transfer", amount: 2100, proof: true, reference: "TRF-E2E-71" })));
+  const inv5 = await until(async () => (await sql("select id, number from public.invoices where estimate_id = $1 and kind = 'tax_invoice' and is_active", [e5.id]))[0]);
+  check("I3: the full tax invoice issued itself", !!inv5);
+  // The estimate is revised DOWN to 1,575 (the lock lets a status flip through; the line follows).
+  await sql("update public.quotations set status = 'draft' where id = $1", [e5.id]);
+  await sql("update public.quotations set total_aed = 1575 where id = $1", [e5.id]);
+  await sql("update public.quotation_lines set hours = 3, line_total = 1500 where quotation_id = $1", [e5.id]);
+  await sql("update public.quotations set status = 'approved' where id = $1", [e5.id]);
+  const own2 = await browserForId((await sql("select id from public.staff where role_id = 'owner' and is_active limit 1"))[0].id, { viewport: { width: 1440, height: 1100 } });
+  browsers.push(own2);
+  await go(own2.page, `${base}/estimates/${e5.id}`);
+  const overBox = own2.page.locator("[data-em-over]");
+  check("I4: the over-payment banner stands (AED 525.00 over)", (await overBox.count()) === 1 && (await overBox.getAttribute("data-em-over")) === "525.00");
+  await own2.page.locator("[data-em-over-reason]").fill("Revised down on the customer's call");
+  await own2.page.locator("[data-em-over-credit]").click();
+  const cn5 = await until(async () => (await sql("select id, number, total_aed::float as total, credit_of, estimate_id from public.invoices where estimate_id = $1 and kind = 'credit_note' and is_active", [e5.id]))[0]);
+  check("I5: the credit note for the difference is issued against the FULL invoice", !!cn5 && cn5.total === 525 && cn5.credit_of === inv5.id, JSON.stringify(cn5));
+  check("I6: the words say the credit stands (comes off at the job, or refund any time)", await until(async () => /stands as the customer's credit/i.test((await own2.page.locator("[data-em-done]").textContent().catch(() => "")) ?? ""), 20, 400));
+  const zohoCn = await sql("select kind from public.zoho_outbox where record_id = $1", [cn5.id]);
+  check("I7: the credit note joined the Zoho outbox (its parent invoice is posted)", zohoCn.some((z) => z.kind === "creditnote"));
+  await own2.page.screenshot({ path: path.join(dir, "i1-over-settled.png"), fullPage: true });
+
+  /* J. CANCEL with money held: fee kept, the rest refunded through the credit note. */
+  const e6 = await mkEst2("E2E SUSPENSION CHECK", 4, 500, 2100);
+  await go(adv.page, `${base}/estimates/${e6.id}`);
+  await adv.page.locator('[data-em-mode="partial"]').click();
+  await adv.page.locator('[data-em-partial-kind="percent"]').click();
+  await adv.page.locator("[data-em-partial-value]").pressSequentially("50", { delay: 15 });
+  await adv.page.locator("[data-em-issue]").click();
+  const pro6 = await until(async () => (await sql("select id from public.invoices where estimate_id = $1 and kind = 'proforma' and status = 'issued' and is_active", [e6.id]))[0]);
+  await closeSend(adv.page);
+  await go(acc.page, `${base}/estimates/${e6.id}`);
+  await acc.page.locator("[data-record-payment-open]").first().click();
+  await dialog(acc.page).waitFor({ timeout: 15000 });
+  await until(async () => (await dialog(acc.page).locator("[data-pay-targets]").count()) > 0, 40, 300);
+  check("J1: the 50% advance is paid", !!(await pay(acc.page, { target: `inv:${pro6.id}`, method: "transfer", amount: 1050, proof: true, reference: "TRF-E2E-72" })));
+  const inv6 = await until(async () => (await sql("select id, number, deposit_for_quotation_id from public.invoices where estimate_id = $1 and kind = 'tax_invoice' and is_active", [e6.id]))[0]);
+  check("J2: the advance tax invoice stands (deposit document)", !!inv6 && inv6.deposit_for_quotation_id === e6.id);
+  // A plain cancel is refused while money is on it; the owner cancels from the card with a fee.
+  await go(own2.page, `${base}/estimates/${e6.id}`);
+  await own2.page.locator("[data-em-cancel-open]").click();
+  await own2.page.locator("[data-em-cancel-reason]").fill("Customer sold the car");
+  await own2.page.locator("[data-em-cancel-fee]").pressSequentially("200", { delay: 15 });
+  await own2.page.locator('[data-em-cancel-keep="refund"]').click();
+  await own2.page.locator("[data-em-cancel-save]").click();
+  const cn6 = await until(async () => (await sql("select id, number, total_aed::float as total, credit_of from public.invoices where estimate_id = $1 and kind = 'credit_note' and is_active", [e6.id]))[0]);
+  check("J3: the credit note is the invoiced money less the AED 200 fee", !!cn6 && cn6.total === 850 && cn6.credit_of === inv6.id, JSON.stringify(cn6));
+  const e6After = (await sql("select status, cancel_reason from public.quotations where id = $1", [e6.id]))[0];
+  check("J4: the estimate is cancelled with the reason", e6After.status === "cancelled" && /sold the car/i.test(e6After.cancel_reason ?? ""));
+  const cn6Zoho = await sql("select kind, status, (zoho_result->>'hand_only') as hand from public.zoho_outbox where record_id = $1", [cn6.id]);
+  check("J5: the advance-parent credit note is a by-hand Zoho row from birth", cn6Zoho.length === 1 && cn6Zoho[0].status === "failed" && cn6Zoho[0].hand === "true", JSON.stringify(cn6Zoho));
+  check("J6: the words point at the refund on the credit note's page", await until(async () => /Record the refund of AED 850\.00/.test((await own2.page.locator("[data-em-done]").textContent().catch(() => "")) ?? ""), 20, 400));
+  await own2.page.screenshot({ path: path.join(dir, "j1-cancel-with-fee.png"), fullPage: true });
+  // The refund itself: recorded on the credit note's page (method + reference, logged).
+  await go(own2.page, `${base}/invoices/${cn6.id}`);
+  await own2.page.locator('[data-cn-refund] input[aria-label="Amount refunded with VAT"]').fill("850.00");
+  await own2.page.locator("[data-cn-refund]").getByText("Bank transfer", { exact: true }).click();
+  await own2.page.locator('[data-cn-refund] input[name="reference"]').fill("TRF-E2E-REFUND-72");
+  await confirmMoney(own2.page, "cn-refund");
+  const refunded = await until(async () => (await sql("select refund_paid_at, refund_amount_aed::float as amt, refund_reference from public.invoices where id = $1 and refund_paid_at is not null", [cn6.id]))[0]);
+  check("J7: the refund is recorded on the credit note (method and reference, logged)", !!refunded && refunded.amt === 850 && refunded.refund_reference === "TRF-E2E-REFUND-72", JSON.stringify(refunded));
+  await own2.page.screenshot({ path: path.join(dir, "j2-refund-recorded.png") });
+
+  /* K. Past its date with money held: NEVER expired by itself - the people are told once. */
+  const e7 = await mkEst2("E2E DETAILING PACKAGE", 2, 500, 1050, "sent");
+  await go(adv.page, `${base}/estimates/${e7.id}`);
+  await adv.page.locator('[data-em-mode="partial"]').click();
+  await adv.page.locator('[data-em-partial-kind="aed"]').click();
+  await adv.page.locator("[data-em-partial-value]").pressSequentially("500", { delay: 15 });
+  await adv.page.locator("[data-em-issue]").click();
+  const pro7 = await until(async () => (await sql("select id from public.invoices where estimate_id = $1 and kind = 'proforma' and status = 'issued' and is_active", [e7.id]))[0]);
+  await closeSend(adv.page);
+  await go(acc.page, `${base}/estimates/${e7.id}`);
+  await acc.page.locator("[data-record-payment-open]").first().click();
+  await dialog(acc.page).waitFor({ timeout: 15000 });
+  await until(async () => (await dialog(acc.page).locator("[data-pay-targets]").count()) > 0, 40, 300);
+  check("K1: AED 500 is paid on the sent estimate", !!(await pay(acc.page, { target: `inv:${pro7.id}`, method: "transfer", amount: 500, proof: true, reference: "TRF-E2E-73" })));
+  await sql("update public.quotations set valid_until = now() - interval '2 days' where id = $1", [e7.id]);
+  await sql("update public.quotations set status = 'sent' where id = $1", [e7.id]);
+  const cronRun = async () => (await fetch(`${base}/api/cron/housekeeping`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } })).json();
+  await cronRun();
+  const e7After = (await sql("select status from public.quotations where id = $1", [e7.id]))[0];
+  check("K2: past its date with money held, it is NOT expired", e7After.status === "sent", e7After.status);
+  const holdEvent = await sql("select count(*)::int as n from public.quotation_events where quotation_id = $1 and event_type = 'expiry_hold'", [e7.id]);
+  check("K3: the hold is on the history once", holdEvent[0].n === 1);
+  const holdBells = await sql("select count(*)::int as n from public.notifications where type = 'quote_expired' and title like $1", [`Estimate past its date, money held · ${e7.number}`]);
+  check("K4: the advisor and the owner are told", holdBells[0].n >= 2, `bells ${holdBells[0].n}`);
+  await cronRun();
+  const holdEvent2 = await sql("select count(*)::int as n from public.quotation_events where quotation_id = $1 and event_type = 'expiry_hold'", [e7.id]);
+  check("K5: a second run never repeats the hold", holdEvent2[0].n === 1);
 } finally {
   for (const b of browsers) await b.browser.close().catch(() => {});
   cleanupDb();

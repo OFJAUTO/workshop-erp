@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { createEstimateProformaAction, estimateProformaSendInfo, markEstimateProformaSent, markEstimatePayLinkSent, prepareEstimatePayLink, voidEstimateProformaAction, type ProformaSendInfo } from "../money-actions";
+import { cancelEstimateMoneyAction, createEstimateProformaAction, estimateProformaSendInfo, markEstimateProformaSent, markEstimatePayLinkSent, prepareEstimatePayLink, settleEstimateOverAction, voidEstimateProformaAction, type ProformaSendInfo } from "../money-actions";
 import { RecordPaymentButton } from "@/components/RecordPaymentHost";
 import { PaymentReportButton } from "@/components/PaymentReport";
 import { SendLinkDialog } from "@/components/SendLinkDialog";
@@ -22,6 +22,12 @@ export type MoneyCardFacts = {
   badgeTone: "green" | "amber" | null;
   paidWords: string | null;
   fullyInvoiced: boolean;
+  /** Part 3: paid more than the (revised) bill — the owner settles it with a credit note. */
+  over: number;
+  /** Part 3: billed on another estimate's combined proforma. */
+  combinedOn: { proformaNumber: string; baseNumber: string } | null;
+  /** Part 3: accepted additional estimates of the same car that can be billed together on ONE proforma. */
+  combineChoices: { id: string; number: string; total: number }[];
 };
 
 /**
@@ -29,7 +35,7 @@ export type MoneyCardFacts = {
  * block (company, address, TRN, attention, PO number — may differ from the car's owner), send through
  * the one dialog, and the money recorded by accounts; the tax invoice follows by itself when paid.
  */
-export function EstimateMoneyCard({ estimateId, number, approved, money, billTo, canCreate, canRecord, recordReadOnly, canReport = false, customerId, vehicleId, phoneDigits }: {
+export function EstimateMoneyCard({ estimateId, number, approved, money, billTo, canCreate, canRecord, recordReadOnly, canReport = false, isOwner = false, customerId, vehicleId, phoneDigits }: {
   estimateId: string;
   number: string;
   approved: boolean;
@@ -40,6 +46,8 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
   recordReadOnly: boolean;
   /** Advisors (and the owner): "Payment received – send to accounts" on the estimate. */
   canReport?: boolean;
+  /** Part 3: the owner settles over-payments and cancels an estimate that holds money. */
+  isOwner?: boolean;
   customerId: string;
   vehicleId: string | null;
   phoneDigits: string;
@@ -57,14 +65,37 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
   const [linkAmount, setLinkAmount] = useState("");
   const [linkUrl, setLinkUrl] = useState("");
   const [linkSend, setLinkSend] = useState<{ message: string; amount: number; phone: string | null } | null>(null);
+  const [combine, setCombine] = useState<Set<string>>(new Set());
+  const [overWhy, setOverWhy] = useState("");
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelWhy, setCancelWhy] = useState("");
+  const [cancelFee, setCancelFee] = useState("");
+  const [cancelKeep, setCancelKeep] = useState<"credit" | "refund">("credit");
+  const [done, setDone] = useState<{ words: string; cnId?: string | null } | null>(null);
   const [busy, start] = useTransition();
   const pro = money.proforma;
 
   const create = () => start(async () => {
     setError(null);
-    const r = await createEstimateProformaAction(estimateId, { mode, partialKind, partialValue: Number(partialValue.replace(/,/g, "")), billTo: bt });
+    const r = await createEstimateProformaAction(estimateId, { mode, partialKind, partialValue: Number(partialValue.replace(/,/g, "")), billTo: bt, combineIds: mode === "complete" ? Array.from(combine) : [] });
     if (r.error) { setError(r.error); return; }
     setSend(r);
+    router.refresh();
+  });
+  const settleOver = (keep: "credit" | "refund") => start(async () => {
+    setError(null);
+    const r = await settleEstimateOverAction(estimateId, keep, overWhy);
+    if (r.error) { setError(r.error); return; }
+    setDone({ words: r.words ?? "Settled.", cnId: r.cnId });
+    setOverWhy("");
+    router.refresh();
+  });
+  const doCancel = () => start(async () => {
+    setError(null);
+    const r = await cancelEstimateMoneyAction(estimateId, { reason: cancelWhy, fee: Number(cancelFee.replace(/,/g, "")) || 0, keep: cancelKeep });
+    if (r.error) { setError(r.error); return; }
+    setDone({ words: r.words ?? "Cancelled.", cnId: r.cnId });
+    setCancelOpen(false);
     router.refresh();
   });
   const openSend = () => start(async () => {
@@ -110,6 +141,29 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
         {money.badgeWords ? <Badge tone={money.badgeTone === "green" ? "green" : "amber"} data-em-badge={money.badgeWords}>{money.badgeWords}</Badge> : null}
       </div>
       {money.paidWords ? <p className="text-sm font-semibold" data-em-paid>{money.paidWords}</p> : null}
+      {money.combinedOn ? <p className="text-sm font-semibold" data-em-combined-on={money.combinedOn.proformaNumber}>Billed on <b>{money.combinedOn.proformaNumber}</b> together with {money.combinedOn.baseNumber} (one combined proforma).</p> : null}
+      {done ? (
+        <p className="rounded-control border-2 border-green bg-green-soft px-3 py-2 text-sm font-semibold" data-em-done>
+          {done.words}{done.cnId ? <> <a className="underline underline-offset-4" href={`/invoices/${done.cnId}`} data-em-cn-open>Open the credit note</a></> : null}
+        </p>
+      ) : null}
+      {money.over > 0.005 && money.pendingCheque <= 0.005 ? (
+        <div className="flex flex-col gap-2 rounded-control border-2 border-amber-bar bg-amber-soft p-3" data-em-over={money.over.toFixed(2)}>
+          <p className="text-sm font-bold">Paid {aed(money.paid)} against a bill of {aed(money.total)} — {aed(money.over)} over (the estimate was revised down, or paid twice).</p>
+          {isOwner ? (
+            <>
+              <Input placeholder="Why (goes on the credit note), e.g. revised down on the customer's call" value={overWhy} onChange={(e) => setOverWhy(e.target.value)} data-em-over-reason />
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="md" disabled={busy || overWhy.trim().length < 3} onClick={() => settleOver("credit")} data-em-over-credit>Keep as customer credit</Button>
+                <Button type="button" size="md" tone="secondary" disabled={busy || overWhy.trim().length < 3} onClick={() => settleOver("refund")} data-em-over-refund>Refund it…</Button>
+              </div>
+              <p className="text-xs text-muted">Either way a credit note is issued (the VAT paper). A refund is recorded on the credit note&apos;s page with the method and reference.</p>
+            </>
+          ) : (
+            <p className="text-xs text-muted">The owner settles the difference (credit note: refund, or customer credit).</p>
+          )}
+        </div>
+      ) : null}
 
       {money.taxes.length ? (
         <ul className="flex flex-col gap-1 text-sm">
@@ -174,6 +228,21 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
             </button>
           </div>
           {!approved ? <p className="text-xs text-muted">The customer has not accepted yet: only a partial (deposit) proforma can go out.</p> : null}
+          {mode === "complete" && money.combineChoices.length ? (
+            <div className="flex flex-col gap-1 rounded-control border border-line p-3" data-em-combine-box>
+              <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Bill together on this one proforma (accepted additional estimates of this car)</span>
+              {money.combineChoices.map((c) => {
+                const on = combine.has(c.id);
+                return (
+                  <button key={c.id} type="button" onClick={() => setCombine((s) => { const n = new Set(s); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); return n; })} aria-pressed={on} data-em-combine={c.id} className="flex min-h-11 items-center gap-2 rounded-control px-2 text-left text-sm">
+                    <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong text-transparent"}`}>✓</span>
+                    <span className="font-semibold">{c.number}</span>
+                    <span className="text-muted">{aed(c.total)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
           {mode === "partial" ? (
             <div className="flex flex-wrap items-center gap-2" data-em-partial>
               <span className="inline-flex shrink-0 overflow-hidden rounded-control border border-line-strong">
@@ -190,6 +259,24 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
       ) : (
         <p className="text-sm text-muted">No proforma is out. An advisor, accounts or the owner can issue one.</p>
       )}
+      {isOwner && money.paid > 0.005 ? (
+        <details className="text-sm" open={cancelOpen} onToggle={(e) => setCancelOpen((e.target as HTMLDetailsElement).open)} data-em-cancel>
+          <summary className="min-h-11 flex cursor-pointer items-center font-bold text-red" data-em-cancel-open>Cancel this estimate (money is paid on it)…</summary>
+          <div className="mt-2 flex flex-col gap-2 rounded-control border-2 border-red-bar p-3">
+            <Input placeholder="Why is it cancelled? (logged, on the credit note)" value={cancelWhy} onChange={(e) => setCancelWhy(e.target.value)} data-em-cancel-reason />
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Cancellation fee (AED, optional – stays invoiced)</span>
+              <NumericInput value={cancelFee} onChange={(e) => setCancelFee((e.target as HTMLInputElement).value)} style={{ width: "8rem" }} data-em-cancel-fee />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => setCancelKeep("credit")} aria-pressed={cancelKeep === "credit"} data-em-cancel-keep="credit" className={`min-h-11 rounded-control border px-3 text-sm font-bold ${cancelKeep === "credit" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Keep as customer credit</button>
+              <button type="button" onClick={() => setCancelKeep("refund")} aria-pressed={cancelKeep === "refund"} data-em-cancel-keep="refund" className={`min-h-11 rounded-control border px-3 text-sm font-bold ${cancelKeep === "refund" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Refund the rest</button>
+            </div>
+            <div><Button type="button" size="md" tone="secondary" disabled={busy || cancelWhy.trim().length < 3} onClick={doCancel} data-em-cancel-save>Cancel the estimate</Button></div>
+            <p className="text-xs text-muted">The open proforma is voided (logged). What stands invoiced beyond the fee becomes a credit note — refunded on its page, or kept as the customer&apos;s credit. A cheque still clearing blocks this.</p>
+          </div>
+        </details>
+      ) : null}
       {error ? <p className="text-sm font-semibold text-red" role="alert" data-em-error>{error}</p> : null}
 
       {send && send.message ? (

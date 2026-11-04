@@ -220,6 +220,11 @@ async function runHousekeeping(): Promise<Record<string, number>> {
   {
     const { data: stale } = await admin.from("quotations").select("id, number, kind, job_id, created_by, sent_by").in("status", ["sent", "opened"]).lt("valid_until", new Date().toISOString()).limit(100);
     for (const q of stale ?? []) {
+      // Part 3 (4 November 2026): an estimate that HOLDS MONEY is never expired by itself — the people are told once.
+      if (q.kind === "estimate") {
+        const { estimateExpiryHold } = await import("@/lib/estimate-money");
+        if (await estimateExpiryHold(q, settings).catch(() => false)) continue;
+      }
       await admin.from("quotations").update({ status: "expired" }).eq("id", q.id);
       await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: q.job_id, event_type: "quote_expired", note: `${q.number} expired without a reply` });
       // 1 November 2026: the advisor in charge (who started it), not the creator of the newest version.

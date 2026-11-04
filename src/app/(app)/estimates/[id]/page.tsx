@@ -80,6 +80,12 @@ export default async function EstimatePage({ params, searchParams }: { params: P
   // Money from the estimate (4 November 2026): dormant until the migration is applied.
   const emReady = await estimateMoneyReady();
   const em = emReady && !attached ? await estimateMoneyOf(q.id) : null;
+  // Part 3: accepted additional estimates of the same car that could join a COMBINED proforma.
+  const emSiblings = em && accepted && (await (await import("@/lib/schema-ready")).estimateCombineReady())
+    ? ((await createAdminClient().from("quotations").select("id, number, status, total_aed, rounded_total_aed, carried_job_id, job_id, cancelled_at, deleted_at, is_active").eq("kind", "estimate").eq("customer_id", q.customer_id).eq("vehicle_id", q.vehicle_id ?? "").eq("status", "approved").neq("number", q.number)).data ?? [])
+        .filter((s) => s.is_active && !s.deleted_at && !s.cancelled_at && !s.carried_job_id && !s.job_id)
+        .map((s) => ({ id: String(s.id), number: String(s.number), total: Number(s.rounded_total_aed ?? s.total_aed) || 0 }))
+    : [];
   const emFacts: MoneyCardFacts | null = em
     ? {
         proforma: em.proforma ? { id: em.proforma.id, number: em.proforma.number, total: em.proforma.total_aed, validUntil: (em.proforma as { valid_until?: string | null }).valid_until ?? null, sentAt: (em.proforma as { sent_at?: string | null }).sent_at ?? null, complete: em.proformaComplete } : null,
@@ -91,6 +97,9 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         badgeTone: em.badge.tone,
         paidWords: em.paidWords,
         fullyInvoiced: em.fullyInvoiced,
+        over: em.over,
+        combinedOn: em.combinedOn,
+        combineChoices: emSiblings,
       }
     : null;
   const emBillTo: BillTo = emReady
@@ -166,6 +175,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           canRecord={emCanRecord}
           recordReadOnly={emRecordReadOnly}
           canReport={role === "service_advisor" && !staff.viewingAs}
+          isOwner={isOwner && !staff.viewingAs}
           customerId={q.customer_id}
           vehicleId={q.vehicle_id ?? null}
           phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
