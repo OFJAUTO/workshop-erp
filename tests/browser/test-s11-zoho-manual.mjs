@@ -171,7 +171,8 @@ try {
       check("11.2: the payment still inside the undo window is NOT in it, and is named as held", (await preview.locator(`[data-zoho-preview-row="${OB.held}"]`).count()) === 0 && (await preview.locator("[data-zoho-preview-held]").count()) === 1, await text(preview.locator("[data-zoho-preview-held]")));
       check("11.2: the names carry the documents and amounts", /E2E-INV-S11-1 · AED 1,050\.00/.test(await text(preview.locator(`[data-zoho-preview-row="${OB.inv1}"]`))));
       const confirm = preview.locator("[data-zoho-sync-confirm]");
-      check("11.2: the confirm button names the action and the book", /^Yes, send \d+ items? to OFJ TEST$/.test(await text(confirm)) && !(await confirm.isDisabled()), await text(confirm));
+      // 3 November 2026 (A2): the button reads "Yes, sync and record N items to OFJ TEST" (Mathew's wording).
+      check("11.2: the confirm button names the action and the book", /^Yes, sync and record \d+ items? to OFJ TEST$/.test(await text(confirm)) && !(await confirm.isDisabled()), await text(confirm));
       await page.screenshot({ path: shot("preview-1366.png"), fullPage: false });
       await page.setViewportSize({ width: 390, height: 844 });
       await sleep(400);

@@ -14,6 +14,8 @@ mkdirSync(shots, { recursive: true });
 const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
+/** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
+const CLUSTER_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQCJ9dvEAAAAAElFTkSuQmCC", "base64");
 const shot = (page, name) => page.screenshot({ path: `${shots}/${name}.png`, fullPage: true }).catch(() => null);
 const today = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 55 * 60 * 1000).unref();
@@ -35,10 +37,12 @@ async function nextScreen(step, who, url, mustSee, shotName, opts = {}) {
     const ok = frag instanceof RegExp ? frag.test(body) : body.includes(frag);
     check(`${step} — R2 next screen shows "${frag instanceof RegExp ? frag.source : frag}"`, ok, body.slice(0, 260));
   }
-  if (url === "/dashboard") {
+  // "/home" is the role router (30 October 2026): owners/advisors land on /dashboard, technicians on
+  // /my-jobs, QC on /road-tests — each role's FIRST page, where the waiting panel lives.
+  if (url === "/home" || url === "/dashboard") {
     const open = await b.page.locator("[data-waiting-panel] details[open]").count();
     const empty = await b.page.locator("[data-waiting-empty]").count();
-    check(`${step} — R8 waiting list open by default`, open >= 1 || empty >= 1);
+    check(`${step} — R8 waiting list on the first page`, open >= 1 || empty >= 1);
   }
   await shot(b.page, shotName);
   await b.browser.close();
@@ -173,6 +177,14 @@ async function gateOutCollect(jobId, advisorId, pathKey) {
   await page.locator("input[name=collector_name]").fill("Sim Customer");
   await page.locator("input[name=keys_ok]").check();
   if (await page.locator("input[name=keychain_ok]").count()) await page.locator("input[name=keychain_ok]").check();
+  // 30 October 2026: the final km (never below gate-in) and the instrument-cluster photo come first.
+  if (await page.locator("[data-mileage-out]").count()) {
+    const giKm = (await sql("select mileage from public.gate_ins where job_id = $1 order by created_at desc limit 1", [jobId]))[0]?.mileage;
+    await page.locator("[data-mileage-out]").fill(String((Number(giKm) || 42010) + 5));
+    const png = CLUSTER_PNG;
+    await page.locator("[data-final-mileage] input[type=file]").first().setInputFiles({ name: "cluster.png", mimeType: "image/png", buffer: png });
+    await until(async () => (await sql("select id from public.job_files where job_id = $1 and kind = 'odometer_out' and removed_at is null", [jobId]))[0], 40, 500);
+  }
   await page.locator("input[name=handover_confirmed]").first().check();
   await page.getByRole("button", { name: /Gate out and close the job|Release free of charge/ }).first().click();
   await submitted(page);
@@ -213,7 +225,7 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
   const r1 = await fetch(`${base}/api/approve/${aToken}`, { method: "POST", body: new URLSearchParams({ approver_name: "Sim Customer", agree: "on" }), redirect: "manual" });
   check("a1: job card approved (customer)", r1.status === 303 && !/error=/.test(r1.headers.get("location") ?? ""));
   await told("a1", m, jobId, [{ id: advisorId, label: "the advisor" }, { role: "workshop_manager", id: MANAGER_MECH, label: "the manager" }]);
-  await nextScreen("a1", MANAGER_MECH, "/dashboard", [/assign a technician/i], "a1-manager-next");
+  await nextScreen("a1", MANAGER_MECH, "/home", [/assign a technician/i], "a1-manager-next");
 
   // a2. Manager assigns (with a road test) → QC's move.
   m = await mark();
@@ -233,7 +245,7 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
   }
   await told("a2", m, jobId, [{ id: techId, label: "the technician" }, { role: "qc_inspector", label: "QC" }]);
   check("a2: status pending_road_test — R4", (await sql("select status from public.jobs where id = $1", [jobId]))[0]?.status === "pending_road_test");
-  await nextScreen("a2", qc, "/dashboard", [/road test/i], "a2-qc-next");
+  await nextScreen("a2", qc, "/home", [/road test/i], "a2-qc-next");
 
   // a3. QC saves the road test → the technician's move.
   m = await mark();
@@ -248,7 +260,7 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
     await browser.close();
   }
   await told("a3", m, jobId, [{ id: techId, label: "the technician" }]);
-  await nextScreen("a3", techId, "/dashboard", [/inspection/i], "a3-tech-next", { viewport: { width: 800, height: 1280 }, touch: true });
+  await nextScreen("a3", techId, "/home", [/inspection/i], "a3-tech-next", { viewport: { width: 800, height: 1280 }, touch: true });
 
   // a4. Technician fills and submits the report (800px) → the manager's move.
   m = await mark();
@@ -280,7 +292,7 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
     await browser.close();
   }
   await told("a4", m, jobId, [{ role: "workshop_manager", id: MANAGER_MECH, label: "the manager" }]);
-  await nextScreen("a4", MANAGER_MECH, "/dashboard", [/Report submitted|reviews and approves/i], "a4-manager-next");
+  await nextScreen("a4", MANAGER_MECH, "/home", [/Report submitted|reviews and approves/i], "a4-manager-next");
 
   // a5. Manager approves the report → the advisor's and Parts' move.
   m = await mark();
@@ -299,12 +311,12 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
     await browser.close();
   }
   await told("a5", m, jobId, [{ id: advisorId, label: "the advisor" }, { role: "parts", label: "Parts" }]);
-  await nextScreen("a5", partsId, "/dashboard", [/price|Pricing/i], "a5-parts-next");
+  await nextScreen("a5", partsId, "/home", [/price|Pricing/i], "a5-parts-next");
 
   // a6. Parts price every request (to order, 2 days) → the advisor's move.
   m = await mark();
   await priceAllParts(jobId, partsId, "d2", "a6");
-  await nextScreen("a6", advisorId, "/dashboard", [/quotation/i], "a6-advisor-next");
+  await nextScreen("a6", advisorId, "/home", [/quotation/i], "a6-advisor-next");
 
   // a7. The advisor quotes with a deposit and sends; the customer approves.
   const { quotationId, token } = await advisorSendQuote(jobId, advisorId, "a7");
@@ -312,7 +324,7 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
   m = await mark();
   await customerApproveQuote(token, "a8");
   await told("a8", m, jobId, [{ id: advisorId, label: "the advisor" }]);
-  await nextScreen("a8", advisorId, "/dashboard", [/deposit request|Advance payment/i], "a8-advisor-next");
+  await nextScreen("a8", advisorId, "/home", [/deposit request|Advance payment/i], "a8-advisor-next");
 
   // a9. The advisor sends the deposit request (pay link checked) → accounts' move.
   m = await mark();
@@ -372,12 +384,14 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
   const main = (await sql("select id, number from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval' limit 1", [jobId]))[0];
   check("a11: main LPO waits for approval — R4", !!main?.id);
   await told("a11", m, jobId, [{ role: "owner", label: "the owner" }]);
-  await nextScreen("a11", "owner", "/dashboard", [/LPO waiting for approval|approve/i], "a11-owner-next");
+  await nextScreen("a11", "owner", "/home", [/LPO waiting for approval|approve/i], "a11-owner-next");
   m = await mark();
   {
     const { browser, page } = await browserFor("owner");
     await go(page, `${base}/parts/orders/${main.id}`);
     await page.getByRole("button", { name: "Approve", exact: true }).click();
+    // Since the confirm-and-undo batch (1 November 2026) the Approve asks first (ConfirmSubmit).
+    await page.locator("[data-confirm-yes-money]").click({ timeout: 8000 }).catch(() => null);
     await submitted(page);
     const msg = decodeURIComponent(page.url());
     check("a12: the approval answers in full — R1/R7", /approved ✓ — Parts have been asked to order/.test(msg), msg.slice(-180));
@@ -479,7 +493,7 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
     await browser.close();
   }
   await told("a16", m, jobId, [{ role: "workshop_manager", id: MANAGER_MECH, label: "the manager" }]);
-  await nextScreen("a16", MANAGER_MECH, "/dashboard", [/confirms the work|Job finished/i], "a16-manager-next");
+  await nextScreen("a16", MANAGER_MECH, "/home", [/confirms the work|Job finished/i], "a16-manager-next");
 
   // a17. Manager confirms → QC passes → wash → Ready with the proforma.
   m = await mark();
@@ -555,7 +569,7 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
   const tax = await until(async () => (await sql("select number from public.invoices where job_id = $1 and kind = 'tax_invoice' and is_active", [jobId]))[0], 30, 500);
   check("a21: tax invoice followed by itself — R4", !!tax);
   await told("a21", m, jobId, [{ id: advisorId, label: "the advisor (paid)" }]);
-  await nextScreen("a21", advisorId, "/dashboard", [/tax invoice|Gate out|collection/i], "a21-advisor-next");
+  await nextScreen("a21", advisorId, "/home", [/tax invoice|Gate out|collection/i], "a21-advisor-next");
 
   // a22. Gate-out closes the job.
   m = await mark();
@@ -612,7 +626,7 @@ await section("b", "stock parts + cash", async () => {
   }
   check("b4: proforma prepared at Ready — R4", (await sql("select count(*)::int as n from public.invoices where job_id = $1 and kind = 'proforma' and is_active", [jobId]))[0]?.n >= 1);
   await recordFullPayment(jobId, "b5", { method: "cash", doubleTap: true });
-  await nextScreen("b5", advisorId, "/dashboard", [/tax invoice|Gate out|collection/i], "b5-advisor-next");
+  await nextScreen("b5", advisorId, "/home", [/tax invoice|Gate out|collection/i], "b5-advisor-next");
   await gateOutCollect(jobId, advisorId, "b6");
 });
 
@@ -781,7 +795,9 @@ await section("f", "mixed mechanical + bodyshop line", async () => {
     const r = await api("/api/quote/save", { quotationId, addLine: { service_id: bodySvc.id } }, await cookieHeader(advisorId));
     check("f1: a bodyshop line joins the mechanical quotation", r.status === 200, JSON.stringify(r.json ?? r.status).slice(0, 120));
     // A PPF line is priced per car: the advisor would type the price; the draft line takes it directly.
-    if (r.json?.id) await sql("update public.quotation_lines set unit_price = 2000, line_total = 2000 where id = $1", [r.json.id]);
+    // Above the film cost (2 November 2026, section 1): a PPF line under its film cost now blocks the
+    // advisor's send by design (the below-cost gate), so the sim prices it like a real sale.
+    if (r.json?.id) await sql("update public.quotation_lines set unit_price = 9500, line_total = 9500 where id = $1", [r.json.id]);
   } else {
     check("f1: a bodyshop service exists to mix in (none in the live list: noted, not a failure)", true, "no bodyshop_kind service");
   }
@@ -834,6 +850,14 @@ await section("g", "recovery delivery with the driver's page", async () => {
     await page.locator("[data-location-url]").fill("https://maps.app.goo.gl/simE2E123");
     await page.locator("input[name=keys_ok]").check();
     if (await page.locator("input[name=keychain_ok]").count()) await page.locator("input[name=keychain_ok]").check();
+    // 30 October 2026: the final km and the instrument-cluster photo come before any gate-out stamp.
+    if (await page.locator("[data-mileage-out]").count()) {
+      const giKm = (await sql("select mileage from public.gate_ins where job_id = $1 order by created_at desc limit 1", [jobId]))[0]?.mileage;
+      await page.locator("[data-mileage-out]").fill(String((Number(giKm) || 42010) + 5));
+      const png = CLUSTER_PNG;
+      await page.locator("[data-final-mileage] input[type=file]").first().setInputFiles({ name: "cluster.png", mimeType: "image/png", buffer: png });
+      await until(async () => (await sql("select id from public.job_files where job_id = $1 and kind = 'odometer_out' and removed_at is null", [jobId]))[0], 40, 500);
+    }
     await shot(page, "g2-gateout-delivery-actor");
     await page.getByRole("button", { name: /Stamp: left the workshop/ }).click();
     await submitted(page);
@@ -902,9 +926,10 @@ await section("h", "commission approve then pay", async () => {
   {
     const { browser, page } = await browserFor("accounts", { viewport: { width: 1440, height: 1200 } });
     await go(page, `${base}/commissions`);
-    check("h2: no Mark paid while the invoice is unpaid", (await page.locator(`[data-pay-commission="${q.number}"]`).count()) === 0);
-    const why = ((await page.locator(`[data-commission-row="${q.number}"] [data-pay-blocked-why]`).textContent().catch(() => "")) ?? "");
-    check("h2: the block says why — R5/R7", /invoice|paid/i.test(why), why);
+    check("h2: no Mark paid while the invoice is unpaid", (await page.locator(`[data-pay-tick="${q.id}"]`).count()) === 0);
+    // The why lives on the row itself now (the amber "No tax invoice yet" chip of the rebuilt page).
+    const why = ((await page.locator(`[data-commission-row="${q.number}"]`).textContent().catch(() => "")) ?? "");
+    check("h2: the block says why — R5/R7", /No tax invoice|invoice|paid/i.test(why), why.slice(0, 160));
     await shot(page, "h2-accounts-blocked");
     await browser.close();
   }
@@ -918,10 +943,12 @@ await section("h", "commission approve then pay", async () => {
     if (await row.count()) check("h4: it is amber", (await row.getAttribute("data-urgency")) === "amber", (await row.getAttribute("data-urgency")) ?? "");
     await shot(page, "h4-accounts-waiting");
     await go(page, `${base}/commissions`);
-    await page.locator(`[data-pay-commission="${q.number}"] summary`).click();
-    await page.locator(`[data-pay-commission="${q.number}"] select[name="method"]`).selectOption("transfer");
-    await page.locator(`[data-pay-commission="${q.number}"] input[name="note"]`).fill("Sim TT-1");
-    await page.locator(`[data-pay-commission="${q.number}"] [data-pay-commission-save]`).click();
+    // The rebuilt pay panel (21 October 2026, CPV vouchers): tick the ready row, pick the method, Record.
+    const tick = page.locator(`[data-pay-tick="${q.id}"]`);
+    if (!(await tick.isChecked().catch(() => false))) await tick.check().catch(() => null);
+    await page.locator('[data-pay-method="transfer"]').click();
+    await page.locator('[data-pay-reference]').fill("SIM-TT-1");
+    await page.locator("[data-pay-save]").click();
     await sleep(2500);
     check("h4: moved to Paid — R1/R4", /Paid .*transfer/i.test(((await page.locator("[data-commissions-paid]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ")));
     await shot(page, "h4-paid-actor");
