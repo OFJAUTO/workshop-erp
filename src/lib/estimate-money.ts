@@ -195,6 +195,9 @@ export async function createEstimateProforma(
     .from("invoices")
     .insert({
       number, kind: "proforma", job_id: null, estimate_id: e.id, customer_id: e.customer_id, vehicle_id: e.vehicle_id, token: newToken(), labour_mode: "itemised",
+      // A PARTIAL proforma is a deposit document from birth (like the bodyshop deposit proformas): once the
+      // car arrives, the job's final proforma folds it in and Zoho never sees it as an invoice.
+      ...(input.mode === "partial" ? { deposit_for_quotation_id: e.id } : {}),
       subtotal_aed: totals.gross, discount_aed: totals.discount, taxable_aed: totals.taxable, vat_aed: totals.vat, total_aed: totals.total, agreed_total_aed: null, warranty_credit_aed: 0,
       discount_note: discountNote, bill_to: billTo, valid_until: validUntil,
       issue_reason: input.mode === "complete" ? `Estimate ${e.number} (complete)` : `Estimate ${e.number} (partial advance)`,
@@ -284,7 +287,9 @@ export async function convertEstimateProformaIfPaid(invoiceId: string, by: Actor
   if ((lines ?? []).length) {
     await admin.from("invoice_lines").insert(((lines ?? []) as Record<string, unknown>[]).map((l) => { const c = { ...l }; delete c.id; return { ...c, invoice_id: taxRow.id, created_by: by?.id ?? null, updated_by: by?.id ?? null }; }));
   }
-  await admin.from("payments").update({ invoice_id: taxRow.id, updated_by: by?.id ?? null }).eq("invoice_id", pro.id);
+  // The payments move to the tax invoice; an advance's payments also remember the ADVANCE INVOICE they were
+  // billed on, so the job's final proforma prints "Deposit invoiced (INV-xxxxx)" exactly like job deposits.
+  await admin.from("payments").update({ invoice_id: taxRow.id, updated_by: by?.id ?? null, ...(partial ? { deposit_invoice_number: number, deposit_quotation_id: estimateId } : {}) }).eq("invoice_id", pro.id);
   await admin.from("invoices").update({ converted_to: taxRow.id, updated_by: by?.id ?? null }).eq("id", pro.id);
   if (!partial) await tryEnqueueZoho("invoice", String(taxRow.id), null, by?.id ?? null);
   await admin.from("quotation_events").insert({ quotation_id: estimateId, job_id: null, event_type: "invoice_issued", note: force ? `${number} issued before full payment (${money(bal.balance)} due): ${force.reason}` : `${number} issued: ${pro.number} paid in full${partial ? " (advance)" : ""}`, created_by: by?.id ?? null });
@@ -298,6 +303,36 @@ export async function afterEstimatePayment(invoiceId: string, by: Actor, setting
   if (!(await estimateMoneyReady())) return;
   const { data } = await createAdminClient().from("invoices").select("id, kind, estimate_id, converted_to, status").eq("id", invoiceId).maybeSingle();
   if (data && data.kind === "proforma" && data.estimate_id && !data.converted_to && data.status === "issued") await convertEstimateProformaIfPaid(invoiceId, by, settings);
+}
+
+/**
+ * Part 2 (4 November 2026): THE CAR ARRIVES. Every proforma, payment and tax invoice of the carried
+ * estimates moves onto the job — so "Paid so far" and the invoices are on the job card from the first
+ * minute, the advance tax invoices fold into the final proforma like every deposit invoice, a COMPLETE
+ * pre-paid tax invoice simply IS the job's invoice, and Zoho counts nothing twice (the moved payments
+ * now carry the job, so the final invoice sync applies them as the job's advances).
+ * Idempotent: only documents with no job yet move. Returns the words for the job history.
+ */
+export async function moveEstimateMoneyToJob(estimateIds: string[], jobId: string, by: string | null): Promise<{ moved: number; paid: number; words: string | null }> {
+  if (!estimateIds.length || !(await estimateMoneyReady())) return { moved: 0, paid: 0, words: null };
+  const admin = createAdminClient();
+  const fam = await familyIdsOf(estimateIds);
+  const allIds = Array.from(new Set(Array.from(fam.values()).flatMap((f) => f.ids)));
+  if (!allIds.length) return { moved: 0, paid: 0, words: null };
+  const { data: moved } = await admin
+    .from("invoices")
+    .update({ job_id: jobId, updated_by: by })
+    .in("estimate_id", allIds)
+    .is("job_id", null)
+    .eq("is_active", true)
+    .select("id, number, kind, total_aed, status, converted_to, deposit_for_quotation_id");
+  const docs = ((moved ?? []) as { id: string; number: string; kind: string; total_aed: number | string; status: string; converted_to: string | null; deposit_for_quotation_id: string | null }[]);
+  if (!docs.length) return { moved: 0, paid: 0, words: null };
+  const { data: pays } = await admin.from("payments").update({ job_id: jobId, updated_by: by }).in("invoice_id", docs.map((d) => d.id)).is("job_id", null).eq("is_active", true).select("id, amount_aed, status, method, cheque_status");
+  const paid = Math.round(((pays ?? []) as { amount_aed: number | string; status: string; method: string; cheque_status: string | null }[]).filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared")).reduce((a, p) => a + (Number(p.amount_aed) || 0), 0) * 100) / 100;
+  const live = docs.filter((d) => d.status === "issued" && !d.converted_to);
+  const words = `Estimate money carried over: ${live.map((d) => `${d.number} (${d.kind === "tax_invoice" ? (d.deposit_for_quotation_id ? "advance tax invoice" : "tax invoice") : "proforma"}, ${money(Number(d.total_aed) || 0)})`).join(", ") || docs.map((d) => d.number).join(", ")}${paid > 0 ? ` · ${money(paid)} already paid` : ""}. It counts on this job now.`;
+  return { moved: docs.length, paid, words };
 }
 
 /** The money list's estimate rows: every estimate with an open document or money, the car not here yet. */

@@ -287,6 +287,16 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     const { error: carryError } = await createAdminClient().from("quotations").update({ carried_job_id: job.id, updated_by: staff.id }).in("id", carried.map((e) => e.id));
     const words = carried.map((e) => `${e.number} (${e.id === estimate?.id ? "original" : "additional"}, ${e.status === "approved" ? "accepted" : "not accepted yet"})`).join(", ");
     await supabase.from("job_events").insert({ job_id: job.id, event_type: "estimate_attached", note: carryError ? `Estimates ${words} could not all be marked as carried over: ${carryError.message}` : `Carried over at gate-in: ${words}. Each opens as its own quotation once the inspection is approved.`, created_by: staff.id });
+    // Part 2 (4 November 2026): the estimates' proformas, payments and tax invoices follow the car onto the
+    // job, so Paid so far and Already invoiced stand on the job card from the first minute.
+    try {
+      const { moveEstimateMoneyToJob } = await import("@/lib/estimate-money");
+      const movedMoney = await moveEstimateMoneyToJob(carried.map((e) => e.id), job.id, staff.id);
+      if (movedMoney.words) await supabase.from("job_events").insert({ job_id: job.id, event_type: "payment", note: movedMoney.words, created_by: staff.id });
+    } catch (err) {
+      const { logAppError } = await import("@/lib/app-errors");
+      await logAppError("gate-in: move estimate money", err, { staffId: staff.id, jobId: job.id });
+    }
   }
   if (comebackJob) {
     await supabase.from("job_events").insert({ job_id: job.id, event_type: "comeback", note: `Comeback of ${comebackJob.job_number}, marked at gate-in by ${staff.display_name}. High priority.`, created_by: staff.id });

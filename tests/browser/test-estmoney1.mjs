@@ -6,7 +6,9 @@
 //   node --env-file=.env.test.local tests/browser/test-estmoney1.mjs    (test server on 3102)
 import path from "node:path";
 import { mkdirSync } from "node:fs";
-import { api, base, browserForId, cleanupDb, go, here, makeChecks, pressRecord, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserForId, chooseInspectionFee, cleanupDb, go, here, makeChecks, pressRecord, sleep, sql } from "./pw-lib.mjs";
+
+const pick = (page, name, value) => page.locator(`input[name="${name}"][value="${value}"]`).first().evaluate((el) => el.click());
 
 const mupdf = await import("mupdf");
 const { check, summary } = makeChecks();
@@ -240,6 +242,44 @@ try {
   check("F8: the report is closed by its receipt", !!repDone && !!repDone.payment_id);
   const advBell = await sql("select count(*)::int as n from public.notifications where staff_id = $1 and type = 'payment_report_recorded' and title like $2", [advisor.id, `%${e2.number}%`]);
   check("F9: the advisor hears Recorded ✓ with the estimate named", (advBell[0]?.n ?? 0) >= 1);
+
+  /* ---------- G. THE CAR ARRIVES: every document and payment follows it onto the job ---------- */
+  // The calendar's Prepaid chip first (the car is booked-like: paid money, not here yet).
+  const beforeDocs = await sql("select id from public.invoices where customer_id = $1 and job_id is null and is_active", [cust]);
+  check("G0: before gate-in every document is job-less", beforeDocs.length >= 4, `${beforeDocs.length} docs`);
+  const appt = (await sql("insert into public.appointments (customer_id, vehicle_id, kind, reason, starts_at, duration_minutes, advisor_id, created_by, updated_by) values ($1, $2, 'car_drop', 'Prepaid work as estimated', now() + interval '1 day', 30, $3, $3, $3) returning id", [cust, car, advisor.id]))[0];
+  await go(adv.page, `${base}/calendar/${appt.id}`);
+  const prepaidLine = ((await adv.page.locator("[data-booking-prepaid]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check("G0b: the booking shows Prepaid with the estimates named", /AED 3,650\.00/.test(prepaidLine) && new RegExp(e1.number).test(prepaidLine), prepaidLine.slice(0, 140));
+  await adv.page.screenshot({ path: path.join(dir, "g0-booking-prepaid.png") });
+  await go(adv.page, `${base}/gate-in/new?vehicle=${car}`);
+  for (const [n2, v2] of [["arrived_by", "customer_drove"], ["condition", "runs_drives"], ["fuel_level", "half"], ["cleanliness", "clean"], ["dash_cam", "no"], ["major_damage", "no"], ["keys_count", "1"], ["keys_keychain", "no"], ["old_parts_return", "no"], ["department", "mechanical"]]) await pick(adv.page, n2, v2);
+  const addr = adv.page.locator('textarea[name="location_address"]');
+  if (await addr.count()) await addr.fill("E2e money carry address");
+  await adv.page.locator('input[name="mileage_display"]').pressSequentially("18000");
+  await adv.page.keyboard.press("Tab");
+  await adv.page.locator('input[name="requests"]:visible').first().pressSequentially("As per the prepaid estimates");
+  check("G1: both estimates are ticked to carry over", (await adv.page.locator('input[name="carry_estimate"]:checked').count()) >= 2);
+  await chooseInspectionFee(adv.page, 1000);
+  await sleep(400);
+  await adv.page.getByText("Save and continue to photos and video").click();
+  await adv.page.waitForURL((u) => /\/media/.test(u.toString()), { timeout: 30000 }).catch(() => null);
+  const job = (await sql("select id, job_number from public.jobs where vehicle_id = $1 and is_open", [car]))[0];
+  check("G2: the job opened", !!job, JSON.stringify(job));
+  const movedDocs = await until(async () => { const r = await sql("select kind, number, deposit_for_quotation_id is not null as adv, job_id from public.invoices where customer_id = $1 and is_active", [cust]); return r.length && r.every((d) => d.job_id === job.id) ? r : null; });
+  check("G3: EVERY proforma and tax invoice moved onto the job", !!movedDocs, JSON.stringify((movedDocs ?? []).map((d) => `${d.number}:${d.job_id === job.id}`)));
+  const movedPays = await sql("select count(*)::int as n, coalesce(sum(amount_aed), 0)::float as total from public.payments where customer_id = $1 and job_id = $2 and is_active", [cust, job.id]);
+  check("G4: the payments follow the car (AED 3,650 on the job)", movedPays[0].n === 3 && movedPays[0].total === 3650, JSON.stringify(movedPays[0]));
+  const carryEvent = await sql("select note from public.job_events where job_id = $1 and event_type = 'payment' and note like 'Estimate money carried over%'", [job.id]);
+  check("G5: the job history says the money carried over", carryEvent.length === 1 && /already paid/.test(carryEvent[0].note), (carryEvent[0]?.note ?? "").slice(0, 160));
+  // The job card: Paid so far stands from the first minute.
+  await go(adv.page, `${base}/jobs/${job.id}`);
+  const jobBody = ((await adv.page.textContent("body")) ?? "").replace(/\s+/g, " ");
+  check("G6: the job card shows the money already paid", /3,650\.00|Paid so far/i.test(jobBody));
+  await adv.page.screenshot({ path: path.join(dir, "g1-job-card-carried.png"), fullPage: true });
+  // The estimates are carried: their money rows leave the Invoices list, the estimate card points at the job.
+  await go(acc.page, `${base}/invoices`);
+  check("G7: the car-not-here rows are gone (the job's own rows carry it now)", (await acc.page.locator(`[data-money-row="estimate:${e1.id}"], [data-money-row="estimate:${e2.id}"]`).count()) === 0);
 } finally {
   for (const b of browsers) await b.browser.close().catch(() => {});
   cleanupDb();

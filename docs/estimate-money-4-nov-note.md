@@ -94,11 +94,30 @@ treatment is already the advance rule and would not change).
 - Fixed on the way: the Record payment window's job-less form demanded a SECOND proof file even
   when the advisor's slip was attached — the slip now stands as the proof there too.
 
+## Part 2 — THE CAR ARRIVES: the money follows it (same day)
+
+- **At gate-in**, every proforma, payment and tax invoice of the carried estimates moves onto the
+  job in one step (`moveEstimateMoneyToJob`, idempotent). The job's history says exactly what
+  came: "Estimate money carried over: INV-00022 (tax invoice, AED 2,100.00), INV-00023 (advance
+  tax invoice, AED 1,050.00), PRO-00043 (proforma, AED 800.00) · AED 3,650.00 already paid."
+- **"Paid so far" stands on the job card from the first minute**; the "Car not here yet" rows
+  leave Invoices and payments (the job's own rows carry the money now); the estimate page points
+  at the job.
+- **Nothing is ever counted twice:**
+  - A COMPLETE pre-paid tax invoice IS the job's tax invoice (the proforma step never rebuilds
+    the bill on top of it).
+  - An ADVANCE tax invoice is a deposit document: at Ready the job's final proforma folds it in
+    exactly like today's job deposit invoices — its payments move across, the final invoice
+    prints "Deposit invoiced (INV-xxxxx)", and in Zoho the moved payments (now on the job) are
+    applied to the final invoice as the job's advances.
+  - A PARTIAL proforma is a deposit document from birth, so it folds the same way; a COMPLETE
+    proforma still open at arrival simply becomes the job's proforma.
+- **The calendar shows the money**: a booking for a car with prepaid estimate money reads
+  "Prepaid AED X" on the grid, and the booking page says "AED 3,650.00 on E-00087, E-00088 – the
+  money follows the car onto the job at gate-in."
+
 ## Still to come (the task's remaining parts)
 
-- Part 2: gate-in carries every proforma, payment and tax invoice onto the job ("Paid so far",
-  "Already invoiced", calendar "Prepaid AED X"); the final invoice deducts everything already
-  invoiced.
 - Part 3: revisions (top-up / credit / refund with credit notes), additional estimates' proformas,
   cancel with refund-or-credit and the expiry holds.
 - Part 4: "Order parts now" on an approved estimate with the no-advance owner warning.

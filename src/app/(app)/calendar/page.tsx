@@ -91,7 +91,11 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
 
   const heading = view === "day" ? formatDayHeading(date) : view === "week" ? `Week of ${formatShortDay(weekStart(date))}` : formatMonthHeading(date);
   const href = (v: CalendarView, d: string, w: "me" | "all" = who) => `/calendar?view=${v}&date=${d}&who=${w}`;
-  const ctx = { grace, now };
+  // Money from the estimate (4 November 2026, Part 2): a booked car already paid shows "Prepaid AED X".
+  const { loadEstimateMoneyRows } = await import("@/lib/estimate-money");
+  const prepaid = new Map<string, number>();
+  for (const e of await loadEstimateMoneyRows().catch(() => [])) if (e.vehicleId && e.paid > 0.005) prepaid.set(e.vehicleId, Math.round((prepaid.get(e.vehicleId) ?? 0) * 100 + e.paid * 100) / 100);
+  const ctx = { grace, now, prepaid };
 
   return (
     <>
@@ -231,7 +235,7 @@ function whatsappLink(a: AppointmentFull, settings: Settings) {
   return `https://wa.me/${digits}?text=${encodeURIComponent(whatsappText(a, settings))}`;
 }
 
-type Ctx = { grace: number; now: Date };
+type Ctx = { grace: number; now: Date; /** Money already paid on an estimate, by car (the car not here yet). */ prepaid?: Map<string, number> };
 
 function Fullness({ count, perDay, compact = false }: { count: number; perDay: number; compact?: boolean }) {
   const f = fullness(count, perDay);
@@ -275,6 +279,7 @@ function ApptItem({ a, ctx, compact = false }: { a: AppointmentFull; ctx: Ctx; c
       {missed ? <span className="block text-[11px] font-bold text-red">{missedLabel(a.kind)}</span> : null}
       {a.status === "no_show" ? <span className="block text-[11px] font-semibold text-red">No-show</span> : null}
       {a.status === "cancelled" ? <span className="block text-[11px] font-semibold text-muted">Cancelled</span> : null}
+      {a.vehicle_id && ctx.prepaid?.get(a.vehicle_id) ? <span className="block text-[11px] font-bold text-green" data-appt-prepaid={a.vehicle_id}>Prepaid AED {(ctx.prepaid.get(a.vehicle_id) ?? 0).toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span> : null}
     </Link>
   );
 }

@@ -38,6 +38,10 @@ export default async function AppointmentPage({ params, searchParams }: { params
     advisor: a.advisor?.display_name ?? staff.display_name,
   });
   const gateInHref = a.vehicle_id ? `/gate-in/new?vehicle=${a.vehicle_id}&appointment=${a.id}` : `/gate-in/new-car?appointment=${a.id}`;
+  // Money from the estimate (4 November 2026, Part 2): the booking says what the customer already paid.
+  const { loadEstimateMoneyRows } = await import("@/lib/estimate-money");
+  const prepaidRows = a.vehicle_id ? (await loadEstimateMoneyRows({ customerId: a.customer_id ?? undefined }).catch(() => [])).filter((e) => e.vehicleId === a.vehicle_id && e.paid > 0.005) : [];
+  const prepaidLine = prepaidRows.length ? `AED ${prepaidRows.reduce((s, e) => s + e.paid, 0).toLocaleString("en-GB", { minimumFractionDigits: 2 })} on ${prepaidRows.map((e) => e.number).join(", ")} – the money follows the car onto the job at gate-in` : null;
   const missed = isMissed(a, Number(settings.appointment_missed_after_minutes) || 30);
   const colour = colourFor(a.advisor);
   const statusTone = { booked: "outline", arrived: "green", done: "green", no_show: "red", cancelled: "neutral" } as const;
@@ -100,6 +104,7 @@ export default async function AppointmentPage({ params, searchParams }: { params
                   ]
                 : []),
               { label: "When", value: `${formatDayHeading(date)} at ${dubaiTimeOf(a.starts_at)}${a.kind === "customer_visit" ? `, ${a.duration_minutes} min` : ""}` },
+              ...(prepaidLine ? [{ label: "Prepaid", value: <span className="font-bold text-green" data-booking-prepaid>{prepaidLine}</span> }] : []),
               { label: "Assigned to", value: a.advisor?.display_name ?? "Not assigned yet" },
               ...(a.job ? [{ label: "Job card", value: <Link href={`/jobs/${a.job_id}`} className="font-semibold hover:underline underline-offset-4">{a.job.job_number}</Link> }] : []),
               ...(a.notes ? [{ label: "Notes", value: <span className="whitespace-pre-wrap">{a.notes}</span> }] : []),

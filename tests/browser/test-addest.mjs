@@ -244,7 +244,8 @@ try {
       await page.getByRole("button", { name: "Start quotation" }).first().click();
       await page.waitForURL((u) => /\/quote\//.test(u.toString()), { timeout: 30000 }).catch(() => null);
       const qs = await sql("select q.number, q.status, q.estimate_id, e.number as est, (select string_agg(title, ', ') from public.quotation_lines where quotation_id = q.id and is_active) as titles from public.quotations q join public.quotations e on e.id = q.estimate_id where q.job_id = $1 and q.kind = 'quotation' order by q.created_at", [job.id]);
-      check(`E Start quotation made TWO quotations: ${qs[0]?.number} from ${e1.number} (brakes) and ${qs[1]?.number} from ${e2.number} (PPF)`, qs.length === 2 && qs[0].est === e1.number && /E2e brake service/.test(qs[0].titles ?? "") && qs[1].est === e2.number && /E2e PPF bonnet/.test(qs[1].titles ?? ""), JSON.stringify(qs));
+      // Titles are SAVED in capitals since 1 November (capsText): the match ignores case.
+      check(`E Start quotation made TWO quotations: ${qs[0]?.number} from ${e1.number} (brakes) and ${qs[1]?.number} from ${e2.number} (PPF)`, qs.length === 2 && qs[0].est === e1.number && /E2e brake service/i.test(qs[0].titles ?? "") && qs[1].est === e2.number && /E2e PPF bonnet/i.test(qs[1].titles ?? ""), JSON.stringify(qs));
       await go(page, `${base}/jobs/${job.id}`);
       const ql = page.locator('[data-quotation-list][data-list-kind="quotation"]');
       check("E the job card lists them as ORIGINAL and ADDITIONAL", (await ql.locator('[data-quote-role="original"]').count()) === 1 && (await ql.locator('[data-quote-role="additional"]').count()) === 1);
