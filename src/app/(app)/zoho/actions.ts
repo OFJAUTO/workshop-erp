@@ -53,9 +53,10 @@ async function sender() {
 }
 
 /** Step 1: the preview — how many of each document and their totals, read from the ERP only. */
-export async function zohoSyncPreviewAction(): Promise<{ preview: SyncPreview | null; error: string | null }> {
+export async function zohoSyncPreviewAction(onlyIds: string[] | null = null): Promise<{ preview: SyncPreview | null; error: string | null }> {
   if (!(await sender())) return { preview: null, error: VIEW_ONLY };
-  return { preview: await loadSyncPreview(), error: null };
+  const ids = Array.isArray(onlyIds) ? onlyIds.filter((x) => typeof x === "string" && /^[0-9a-f-]{36}$/i.test(x)).slice(0, 2000) : null;
+  return { preview: await loadSyncPreview(ids), error: null };
 }
 
 /** Step 2: "Yes, send" — the run takes exactly the rows the person saw that still wait. */

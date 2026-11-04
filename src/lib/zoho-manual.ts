@@ -28,6 +28,7 @@ import {
   itemsWord,
   manualCronWords,
   mergeItems,
+  needLineOf,
   reconRunWords,
   reminderDue,
   reminderWords,
@@ -36,6 +37,7 @@ import {
   stuckWords,
   syncModeOf,
   tallyItems,
+  type NeedLine,
   type PendingRow,
   type RunItem,
   type SyncPreviewCore,
@@ -144,6 +146,10 @@ export type SyncPreview = SyncPreviewCore & {
   red: number;
   /** Someone else's run that is still going (one at a time). */
   runningBy: { name: string; startedAt: string } | null;
+  /** A selection (ticked rows, "Sync this"): what was asked for, and the rows that left the queue meanwhile. */
+  selected: { asked: number; missing: number } | null;
+  /** Ticked rows that need another document first: the words, the add button, the fix link (Mathew, 3 November 2026). */
+  needs: NeedLine[];
 };
 
 /** A run of someone else's that is still moving (its window is open and sending). */
@@ -157,17 +163,156 @@ async function freshRunningRun(): Promise<{ id: string; name: string; startedAt:
   return r ? { id: r.id, name: r.started_name ?? "Someone", startedAt: r.started_at } : null;
 }
 
-/** THE preview the window shows before anything is sent. Reads the ERP only — never Zoho. */
-export async function loadSyncPreview(): Promise<SyncPreview> {
-  const [state, pending, minutes, running, { count: red }] = await Promise.all([
+/**
+ * THE preview the window shows before anything is sent. Reads the ERP only — never Zoho. With `onlyIds`
+ * (ticked rows, "Sync this") the preview covers exactly those rows, and `needs` names any ticked row that
+ * hangs on a document outside the selection — with the row to add, or why it cannot go.
+ */
+export async function loadSyncPreview(onlyIds: string[] | null = null): Promise<SyncPreview> {
+  const [state, all, minutes, running, { count: red }] = await Promise.all([
     sendState(),
     loadPendingRows(true),
     undoMinutes(),
     freshRunningRun(),
     createAdminClient().from("zoho_outbox").select("id", { count: "exact", head: true }).eq("status", "failed"),
   ]);
+  const asked = onlyIds ? new Set(onlyIds.filter((x) => typeof x === "string").slice(0, 2000)) : null;
+  const pending = asked ? all.filter((r) => asked.has(r.id)) : all;
   const core = buildPreview(pending, { undoMinutes: minutes, cap: state.real ? null : RUN_CAP_TEST_ROWS });
-  return { ...core, state, red: red ?? 0, runningBy: running ? { name: running.name, startedAt: running.startedAt } : null };
+  const needs = asked ? await selectionNeeds(pending, all, new Set(pending.map((r) => r.id))) : [];
+  return {
+    ...core,
+    state,
+    red: red ?? 0,
+    runningBy: running ? { name: running.name, startedAt: running.startedAt } : null,
+    selected: asked ? { asked: asked.size, missing: asked.size - pending.length } : null,
+    needs,
+  };
+}
+
+/* ------------------------------------------------- what a row hangs on ------------------------------------------------- */
+
+type ParentRef = { kind: ZohoKind; record: string; name: string | null; synced: boolean };
+
+/**
+ * The document each ticked row needs FIRST, found from the ERP's own ids (3 November 2026, Mathew's A2):
+ * a supplier payment its bill, a bill its supplier, a payment its tax invoice, a deposit and an invoice
+ * their customer, a credit note its invoice, a refund its credit note, a supplier credit its bill, a
+ * settlement its payments. One level is enough for the pop-up — the run itself orders and queues deeper.
+ */
+export async function selectionNeeds(children: PendingRow[], allPending: PendingRow[], inSync: Set<string>): Promise<NeedLine[]> {
+  if (!children.length) return [];
+  const admin = createAdminClient();
+  const ids = (kind: ZohoKind) => children.filter((c) => c.kind === kind).map((c) => c.record_id);
+  const read = async <T,>(q: PromiseLike<{ data: T[] | null }>): Promise<T[]> => ((await q).data ?? []) as T[];
+  const want: ZohoKind[] = ["billpayment", "bill", "payment", "deposit", "invoice", "creditnote", "cnrefund", "vendorcredit", "settlement"];
+  if (!children.some((c) => want.includes(c.kind))) return [];
+
+  // The linkage, batched per kind (every list here is the selection's own records: a handful).
+  const [pos, pays, invs, cns, refunds, vcLines, settles] = await Promise.all([
+    ids("billpayment").length || ids("bill").length ? read<{ id: string; zoho_bill_id: string | null; supplier_id: string | null; supplier_name: string | null; number: string }>(admin.from("purchase_orders").select("id, zoho_bill_id, supplier_id, supplier_name, number").in("id", [...ids("billpayment"), ...ids("bill")])) : [],
+    ids("payment").length || ids("deposit").length ? read<{ id: string; invoice_id: string | null; customer_id: string }>(admin.from("payments").select("id, invoice_id, customer_id").in("id", [...ids("payment"), ...ids("deposit")])) : [],
+    ids("invoice").length ? read<{ id: string; customer_id: string; number: string }>(admin.from("invoices").select("id, customer_id, number").in("id", ids("invoice"))) : [],
+    ids("creditnote").length ? read<{ id: string; credit_of: string | null; number: string }>(admin.from("invoices").select("id, credit_of, number").in("id", ids("creditnote"))) : [],
+    ids("cnrefund").length ? read<{ id: string; zoho_creditnote_id: string | null; number: string }>(admin.from("invoices").select("id, zoho_creditnote_id, number").in("id", ids("cnrefund"))) : [],
+    ids("vendorcredit").length ? read<{ part_item_id: string; purchase_order_id: string }>(admin.from("purchase_order_lines").select("part_item_id, purchase_order_id").in("part_item_id", ids("vendorcredit"))) : [],
+    ids("settlement").length ? read<{ id: string; settlement_id: string; receipt_number: string | null; zoho_payment_id: string | null }>(admin.from("payments").select("id, settlement_id, receipt_number, zoho_payment_id").in("settlement_id", ids("settlement"))) : [],
+  ]);
+  const parentInvoiceIds = [...pays.map((p) => p.invoice_id).filter((x): x is string => !!x), ...cns.map((c) => c.credit_of).filter((x): x is string => !!x)];
+  const vcPoIds = vcLines.map((l) => l.purchase_order_id);
+  const [parentInvs, custRows, supRows, vcPos] = await Promise.all([
+    parentInvoiceIds.length ? read<{ id: string; zoho_invoice_id: string | null; number: string }>(admin.from("invoices").select("id, zoho_invoice_id, number").in("id", parentInvoiceIds)) : [],
+    (() => {
+      const cids = [...pays.filter((p) => !p.invoice_id).map((p) => p.customer_id), ...invs.map((i) => i.customer_id)].filter(Boolean);
+      return cids.length ? read<{ id: string; zoho_contact_id: string | null; full_name: string | null; company_name: string | null }>(admin.from("customers").select("id, zoho_contact_id, full_name, company_name").in("id", cids)) : [];
+    })(),
+    (() => {
+      const sids = pos.map((p) => p.supplier_id).filter((x): x is string => !!x);
+      return sids.length ? read<{ id: string; zoho_vendor_id: string | null; name: string }>(admin.from("suppliers").select("id, zoho_vendor_id, name").in("id", sids)) : [];
+    })(),
+    vcPoIds.length ? read<{ id: string; zoho_bill_id: string | null; number: string }>(admin.from("purchase_orders").select("id, zoho_bill_id, number").in("id", vcPoIds)) : [],
+  ]);
+  const poOf = new Map(pos.map((p) => [p.id, p]));
+  const payOf = new Map(pays.map((p) => [p.id, p]));
+  const invOf = new Map(invs.map((i) => [i.id, i]));
+  const parentInvOf = new Map(parentInvs.map((i) => [i.id, i]));
+  const custOf = new Map(custRows.map((c) => [c.id, c]));
+  const supOf = new Map(supRows.map((s) => [s.id, s]));
+  const vcPoOfPart = new Map(vcLines.map((l) => [l.part_item_id, vcPos.find((p) => p.id === l.purchase_order_id) ?? null]));
+
+  const parentsOf = (c: PendingRow): ParentRef[] => {
+    if (c.kind === "billpayment") {
+      const po = poOf.get(c.record_id);
+      return po ? [{ kind: "bill", record: po.id, name: `${po.supplier_name ?? ""} ${po.number}`.trim(), synced: !!po.zoho_bill_id }] : [];
+    }
+    if (c.kind === "bill") {
+      const po = poOf.get(c.record_id);
+      const sup = po?.supplier_id ? supOf.get(po.supplier_id) : null;
+      return sup ? [{ kind: "vendor", record: sup.id, name: sup.name, synced: !!sup.zoho_vendor_id }] : [];
+    }
+    if (c.kind === "payment" || c.kind === "deposit") {
+      const p = payOf.get(c.record_id);
+      if (!p) return [];
+      if (p.invoice_id) {
+        const inv = parentInvOf.get(p.invoice_id);
+        return inv ? [{ kind: "invoice", record: inv.id, name: inv.number, synced: !!inv.zoho_invoice_id }] : [];
+      }
+      const cu = custOf.get(p.customer_id);
+      return cu ? [{ kind: "contact", record: cu.id, name: cu.company_name ?? cu.full_name, synced: !!cu.zoho_contact_id }] : [];
+    }
+    if (c.kind === "invoice") {
+      const inv = invOf.get(c.record_id);
+      const cu = inv ? custOf.get(inv.customer_id) : null;
+      return cu ? [{ kind: "contact", record: cu.id, name: cu.company_name ?? cu.full_name, synced: !!cu.zoho_contact_id }] : [];
+    }
+    if (c.kind === "creditnote") {
+      const cn = cns.find((x) => x.id === c.record_id);
+      const inv = cn?.credit_of ? parentInvOf.get(cn.credit_of) : null;
+      return inv ? [{ kind: "invoice", record: inv.id, name: inv.number, synced: !!inv.zoho_invoice_id }] : [];
+    }
+    if (c.kind === "cnrefund") {
+      const cn = refunds.find((x) => x.id === c.record_id);
+      return cn ? [{ kind: "creditnote", record: cn.id, name: cn.number, synced: !!cn.zoho_creditnote_id }] : [];
+    }
+    if (c.kind === "vendorcredit") {
+      const po = vcPoOfPart.get(c.record_id);
+      return po ? [{ kind: "bill", record: po.id, name: po.number, synced: !!po.zoho_bill_id }] : [];
+    }
+    if (c.kind === "settlement") {
+      return settles.filter((s) => s.settlement_id === c.record_id && !s.zoho_payment_id).map((s) => ({ kind: "payment" as ZohoKind, record: s.id, name: s.receipt_number, synced: false }));
+    }
+    return [];
+  };
+
+  // The failed rows too: a parent in red is WHY the child cannot go.
+  const failedRows = await pageAll<{ id: string; kind: ZohoKind; record_id: string; last_error: string | null }>((a, b) => admin.from("zoho_outbox").select("id, kind, record_id, last_error").eq("status", "failed").order("enqueued_at").range(a, b));
+  const out: NeedLine[] = [];
+  for (const c of children) {
+    for (const parent of parentsOf(c)) {
+      if (parent.synced) continue;
+      const pend = allPending.find((r) => r.kind === parent.kind && r.record_id === parent.record);
+      if (pend && inSync.has(pend.id)) continue; // already ticked: the run sends it first by itself.
+      if (pend) {
+        out.push(needLineOf({ id: c.id, kind: c.kind, name: c.name }, { kind: parent.kind, name: parent.name ?? pend.name, state: "pending", reason: null, id: pend.id }));
+        continue;
+      }
+      const failed = failedRows.find((r) => r.kind === parent.kind && r.record_id === parent.record);
+      if (failed) {
+        out.push(needLineOf({ id: c.id, kind: c.kind, name: c.name }, { kind: parent.kind, name: parent.name, state: "failed", reason: failed.last_error, id: null }));
+        continue;
+      }
+      out.push(needLineOf({ id: c.id, kind: c.kind, name: c.name }, { kind: parent.kind, name: parent.name, state: "absent", reason: null, id: null }));
+    }
+  }
+  return out;
+}
+
+/** The "why is this still waiting" words for the Zoho page's own list (every pending row, no selection). */
+export async function pendingNeedsMap(rows: PendingRow[]): Promise<Map<string, NeedLine>> {
+  const needs = await selectionNeeds(rows, rows, new Set());
+  const map = new Map<string, NeedLine>();
+  for (const n of needs) if (!map.has(n.rowId)) map.set(n.rowId, n);
+  return map;
 }
 
 /* ------------------------------------------------------- the run ------------------------------------------------------- */

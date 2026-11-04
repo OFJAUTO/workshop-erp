@@ -5,11 +5,17 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui";
 import { reloadIfStale } from "@/lib/app-version";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
-import { aed, confirmLabel, itemsWord, kindWord, mergeItems, runWords, tallyItems, type PreviewRow, type RunItem } from "@/lib/zoho-sync-rules";
+import { aed, confirmLabel, confirmQuestion, itemsWord, kindWord, mergeItems, runWords, tallyItems, type PreviewRow, type RunItem } from "@/lib/zoho-sync-rules";
 import type { SyncPreview } from "@/lib/zoho-manual";
 import { zohoSyncChunkAction, zohoSyncFinishAction, zohoSyncPreviewAction, zohoSyncRetryAction, zohoSyncStartAction } from "./actions";
 
 type Phase = "closed" | "loading" | "preview" | "sending" | "results";
+
+/** "Sync this" on a row and "Sync N selected" in the bar open the same window with just those rows. */
+export const ZOHO_SYNC_EVENT = "erp:zoho-sync";
+export function openZohoSync(ids: string[] | null) {
+  window.dispatchEvent(new CustomEvent(ZOHO_SYNC_EVENT, { detail: { ids } }));
+}
 
 const timeOf = (iso: string | null) => (iso ? new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso)) : "");
 
@@ -59,12 +65,18 @@ export function ZohoSyncButton({ waiting }: { waiting: number }) {
     }
   }
 
+  /** The ticked rows this window covers (null = everything waiting). */
+  const [onlyIds, setOnlyIds] = useState<string[] | null>(null);
+  const onlyRef = useRef<string[] | null>(null);
+
   /** Reads the preview from the server (the ERP only; nothing is sent). */
-  const load = async () => {
+  const load = async (ids: string[] | null = onlyRef.current) => {
+    onlyRef.current = ids;
+    setOnlyIds(ids);
     let p: SyncPreview | null = null;
     let err: string | null = null;
     try {
-      const r = await zohoSyncPreviewAction();
+      const r = await zohoSyncPreviewAction(ids);
       p = r.preview;
       err = r.error;
     } catch (e) {
@@ -77,7 +89,7 @@ export function ZohoSyncButton({ waiting }: { waiting: number }) {
     setPhase("preview");
   };
 
-  const open = () => {
+  const open = (ids: string[] | null = null) => {
     isOpen.current = true;
     setPhase("loading");
     setError(null);
@@ -86,8 +98,20 @@ export function ZohoSyncButton({ waiting }: { waiting: number }) {
     setRecon(null);
     setStopAsked(false);
     stopRef.current = false;
-    void load();
+    void load(ids);
   };
+
+  // "Sync this" on a row and "Sync N selected" in the bar: the same window, just those rows.
+  useEffect(() => {
+    const onAsk = (e: Event) => {
+      if (sendingRef.current) return;
+      const ids = (e as CustomEvent<{ ids: string[] | null }>).detail?.ids ?? null;
+      open(Array.isArray(ids) && ids.length ? ids : null);
+    };
+    window.addEventListener(ZOHO_SYNC_EVENT, onAsk);
+    return () => window.removeEventListener(ZOHO_SYNC_EVENT, onAsk);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // The daily reminder and Waiting on you link here with ?sync=1: the address loses it at once (Back or a reload never
   // opens the window again; Next keeps the search params in step, so the next tap of the bell is a new arrival) and the
@@ -109,7 +133,7 @@ export function ZohoSyncButton({ waiting }: { waiting: number }) {
     if (sendingRef.current) return () => window.clearTimeout(tidy);
     isOpen.current = true;
     stopRef.current = false;
-    void load();
+    void load(null);
     return () => window.clearTimeout(tidy);
   }, [wantSync]);
 
@@ -226,7 +250,7 @@ export function ZohoSyncButton({ waiting }: { waiting: number }) {
 
   return (
     <>
-      <Button type="button" size="md" onClick={open} data-zoho-sync-open data-zoho-sync-now>
+      <Button type="button" size="md" onClick={() => open(null)} data-zoho-sync-open data-zoho-sync-now>
         Sync to Zoho{waiting ? ` · ${waiting}` : ""}
       </Button>
       {phase !== "closed" ? (
@@ -266,6 +290,32 @@ export function ZohoSyncButton({ waiting }: { waiting: number }) {
                   </p>
                 ) : null}
 
+                {preview.selected ? (
+                  <p className="text-sm font-semibold" data-zoho-preview-selected={preview.selected.asked}>
+                    {preview.selected.asked === 1 ? "The 1 row you picked" : `The ${preview.selected.asked} rows you picked`}
+                    {preview.selected.missing ? ` (${preview.selected.missing} of them ${preview.selected.missing === 1 ? "is" : "are"} not waiting any more - sent meanwhile, or being sent now)` : ""}.{" "}
+                    <button type="button" className="font-bold underline underline-offset-4" onClick={() => { setPhase("loading"); void load(null); }} data-zoho-preview-everything>Sync everything waiting instead</button>
+                  </p>
+                ) : null}
+                {preview.needs.length ? (
+                  <div className="rounded-control border border-amber-bar bg-amber-soft px-3 py-2 text-sm flex flex-col gap-2" data-zoho-preview-needs={preview.needs.length}>
+                    <p className="font-bold">Needs another document first:</p>
+                    {preview.needs.slice(0, 8).map((n) => (
+                      <div key={`${n.rowId}-${n.words.slice(0, 20)}`} className="flex flex-col gap-1" data-zoho-need={n.rowId}>
+                        <span>{n.words}</span>
+                        <span className="flex flex-wrap items-center gap-2">
+                          {n.addId ? (
+                            <Button type="button" size="md" tone="secondary" onClick={() => { setPhase("loading"); void load([...(onlyIds ?? []), n.addId!]); }} data-zoho-need-add={n.addId}>
+                              Add it to this sync
+                            </Button>
+                          ) : null}
+                          {n.href ? <a className="text-sm font-bold underline min-h-11 inline-flex items-center" href={n.href} data-zoho-need-link>{n.hrefLabel ?? "Open"}</a> : null}
+                        </span>
+                      </div>
+                    ))}
+                    {preview.needs.length > 8 ? <p className="text-xs text-muted">and {preview.needs.length - 8} more</p> : null}
+                  </div>
+                ) : null}
                 {preview.ids.length ? (
                   <>
                     <p className="text-sm font-semibold">
@@ -361,6 +411,11 @@ export function ZohoSyncButton({ waiting }: { waiting: number }) {
                 ) : null}
                 {preview.ids.length ? <p className="text-xs text-muted">About {preview.calls} Zoho calls.</p> : null}
 
+                {preview.ids.length ? (
+                  <p className="text-base font-extrabold" data-zoho-confirm-question>
+                    {confirmQuestion(preview.ids.length, state.bookLabel)}
+                  </p>
+                ) : null}
                 <div className="flex flex-wrap gap-2 pt-1">
                   <Button type="button" tone="secondary" size="lg" onClick={close} data-zoho-sync-cancel>
                     {preview.ids.length ? "Cancel" : "Close"}

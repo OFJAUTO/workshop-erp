@@ -282,7 +282,60 @@ export function buildPreview(pending: PendingRow[], opts: { undoMinutes?: number
 
 /** "Yes, send 12 items to OFJ TEST". */
 export function confirmLabel(n: number, bookLabel: string): string {
-  return `Yes, send ${itemsWord(n)} to ${bookLabel}`;
+  return `Yes, sync and record ${itemsWord(n)}${bookLabel ? ` to ${bookLabel}` : ""}`;
+}
+
+/** THE question above the confirm button (Mathew, 3 November 2026): it always names the Zoho book. */
+export function confirmQuestion(n: number, bookLabel: string): string {
+  const book = bookLabel.startsWith("the REAL book") ? "the REAL book, O F J AUTOMOTIVE WORKS LLC" : bookLabel;
+  return `Do you want to sync and record ${n === 1 ? "this 1 item" : `these ${n} items`} to Zoho (${book})?`;
+}
+
+/** Where a waiting or failed row's problem is FIXED, from its reason (the link beside the words). */
+export function reasonHref(reason: string | null | undefined): { href: string; label: string } | null {
+  if (!reason) return null;
+  if (/TRN/i.test(reason)) return { href: "/parts/suppliers?filter=no_trn", label: "Fix the supplier" };
+  if (/mapping missing/i.test(reason)) return { href: "/settings/zoho/mapping", label: "Open the mapping" };
+  if (/not connected|presses Connect/i.test(reason)) return { href: "/settings/zoho", label: "Open Zoho settings" };
+  if (/cheque/i.test(reason)) return { href: "/invoices?show=awaiting", label: "Open the money list" };
+  return null;
+}
+
+/**
+ * One ticked row that needs another document first (Mathew, 3 November 2026): the pop-up says so in
+ * plain words, offers to add the parent when a press can send it, and explains why it cannot go when
+ * the parent is red. Pure: the server finds the parent, this gives the words.
+ */
+export type NeedLine = {
+  /** The ticked row. */
+  rowId: string;
+  rowKind: ZohoKind;
+  rowName: string | null;
+  /** The parent's own outbox row to add to the sync (null = it cannot simply be added). */
+  addId: string | null;
+  words: string;
+  href: string | null;
+  hrefLabel: string | null;
+};
+export function needLineOf(child: { id: string; kind: ZohoKind; name: string | null }, parent: { kind: ZohoKind; name: string | null; state: "pending" | "failed" | "absent"; reason: string | null; id: string | null }): NeedLine {
+  const childWord = `${kindWord(child.kind)}${child.name ? ` ${child.name}` : ""}`;
+  const parentWord = `${parent.name ? `${parent.name} ` : "its "}${kindWord(parent.kind).toLowerCase()}`;
+  if (parent.state === "failed") {
+    const fix = reasonHref(parent.reason);
+    return {
+      rowId: child.id,
+      rowKind: child.kind,
+      rowName: child.name,
+      addId: null,
+      words: `${childWord} waits for the ${parentWord}, which failed: ${parent.reason ?? "see the red row"}. It cannot go until that is fixed.`,
+      href: fix?.href ?? "/zoho?show=failed",
+      hrefLabel: fix?.label ?? "See the red row",
+    };
+  }
+  if (parent.state === "absent") {
+    return { rowId: child.id, rowKind: child.kind, rowName: child.name, addId: null, words: `${childWord} needs the ${parentWord} first; it is not in the queue, so the sync will queue it by itself and this one goes with the next press.`, href: null, hrefLabel: null };
+  }
+  return { rowId: child.id, rowKind: child.kind, rowName: child.name, addId: parent.id, words: `${childWord} needs the ${parentWord} first.`, href: null, hrefLabel: null };
 }
 
 /* ------------------------------------------------------- the results ------------------------------------------------------- */

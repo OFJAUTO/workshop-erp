@@ -7,11 +7,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { wentLiveOf, zohoOpenUrl, zohoWriteOrg, type OutboxRow } from "@/lib/zoho-sync";
 import { ZOHO_REAL_ORG_ID } from "@/lib/zoho";
 import { outboxDocs } from "@/lib/zoho-docs";
-import { loadRecentRuns, loadRun, waitingCounts } from "@/lib/zoho-manual";
-import { RUN_STALE_MS, SYNC_MODE_WORDS, kindWord, resultWords, retryRefusal, runWords, syncModeOf } from "@/lib/zoho-sync-rules";
+import { loadRecentRuns, loadRun, pendingNeedsMap, waitingCounts } from "@/lib/zoho-manual";
+import { RUN_STALE_MS, SYNC_MODE_WORDS, kindWord, reasonHref, resultWords, retryRefusal, runWords, syncModeOf, type NeedLine, type PendingRow } from "@/lib/zoho-sync-rules";
 import { pageAll } from "@/lib/page-all";
 import { backfillZoho, markZohoDoneByHand, retryZohoRow, tickGoLiveReview } from "./actions";
 import { ZohoSyncButton } from "./ZohoSyncButton";
+import { SyncThisButton, ZohoSelectBar } from "./ZohoSelect";
 import { ZohoSyncModeCard } from "./ZohoSyncModeCard";
 
 export const dynamic = "force-dynamic";
@@ -73,6 +74,13 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
   // The document names, batched per kind (THE lookup shared with the Sync to Zoho window and the reminder).
   const docs = await outboxDocs(rows);
   const [waiting, runs, runView] = await Promise.all([waitingCounts(), loadRecentRuns(5), runParam ? loadRun(runParam) : Promise.resolve(null)]);
+  // Why a waiting row waits (Mathew, 3 November 2026): the document it hangs on, with the fix link when that one is red.
+  const pendingShown: PendingRow[] = rows.filter((r) => r.status === "pending").map((r) => ({ id: r.id, kind: r.kind, record_id: r.record_id, enqueued_at: r.enqueued_at, last_error: r.last_error, claimed_at: null, name: docs.get(`${r.kind}:${r.record_id}`)?.name ?? null, amount: null }));
+  const whyMap = await pendingNeedsMap(pendingShown).catch(() => new Map<string, NeedLine>());
+  const dubaiDayOf = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai" }).format(new Date(iso));
+  const tickDays = Array.from(new Set(pendingShown.map((r) => dubaiDayOf(r.enqueued_at)))).sort();
+  const tickKinds = Array.from(pendingShown.reduce((m, r) => m.set(r.kind, (m.get(r.kind) ?? 0) + 1), new Map<string, number>()).entries()).map(([kind, count]) => ({ kind, count }));
+  const maySync = !staff.viewingAs;
   const mode = syncModeOf(settings.zoho_sync_mode);
   const isOwner = staff.role_id === "owner" && !staff.viewingAs && !staff.actingAs;
   // eslint-disable-next-line react-hooks/purity
@@ -214,6 +222,7 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
 
       <Card className="flex flex-col gap-1" data-zoho-rows>
         <SectionLabel right={String(total)}>Documents</SectionLabel>
+        {maySync && pendingShown.length ? <ZohoSelectBar kinds={tickKinds} days={tickDays} /> : null}
         {capped ? (
           <p className="text-xs text-muted" data-zoho-rows-capped>
             {show === "all" ? `The newest ${LIST_LIMIT} of ${total}, plus every red row.` : `The newest ${LIST_LIMIT} of ${total}.`} Every waiting row is under Waiting and every red row under Failed.
@@ -229,10 +238,12 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
               return (
                 <li key={r.id} id={`z-${r.id}`} className="py-3 flex flex-col gap-1.5 scroll-mt-24" data-zoho-row={r.status}>
                   <div className="flex flex-wrap items-center gap-2">
+                    {maySync && r.status === "pending" ? <input type="checkbox" className="h-5 w-5 accent-ink" aria-label={`Select ${kindWord(r.kind)} ${name}`} data-zoho-tick={r.id} data-kind={r.kind} data-day={dubaiDayOf(r.enqueued_at)} /> : null}
                     <Badge tone="outline">{kindWord(r.kind)}</Badge>
                     <span className="font-bold">{name}</span>
                     <span className="flex-1" />
                     {r.status === "synced" ? <Badge tone="green">Posted ✓</Badge> : r.status === "failed" ? <Badge tone="red">Failed</Badge> : <Badge tone="amber">Waiting</Badge>}
+                    {maySync && r.status === "pending" ? <SyncThisButton id={r.id} /> : null}
                   </div>
                   <p className="text-xs text-muted">
                     Queued {formatDateTime(r.enqueued_at)}
@@ -240,7 +251,18 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
                     {r.attempts > 1 ? ` · ${r.attempts} tries` : ""}
                   </p>
                   {words ? <p className="text-sm font-semibold text-green" data-zoho-result>{words}</p> : null}
-                  {r.last_error && r.status !== "synced" ? <p className="text-sm text-red font-semibold" data-zoho-reason>{r.last_error}</p> : null}
+                  {r.last_error && r.status !== "synced" ? (
+                    <p className="text-sm text-red font-semibold" data-zoho-reason>
+                      {r.last_error}
+                      {(() => { const fix = reasonHref(r.last_error); return fix ? <> <Link href={fix.href} className="underline underline-offset-4" data-zoho-fix-link>→ {fix.label}</Link></> : null; })()}
+                    </p>
+                  ) : null}
+                  {r.status === "pending" && whyMap.get(r.id) ? (
+                    <p className="text-sm text-muted" data-zoho-why>
+                      {whyMap.get(r.id)!.words}
+                      {whyMap.get(r.id)!.href ? <> <Link href={whyMap.get(r.id)!.href!} className="font-bold underline underline-offset-4" data-zoho-fix-link>→ {whyMap.get(r.id)!.hrefLabel ?? "Open"}</Link></> : null}
+                    </p>
+                  ) : null}
                   <div className="flex flex-wrap items-center gap-2">
                     {r.zoho_id && org ? (
                       <a className="text-sm font-bold underline" href={zohoOpenUrl(org, r.kind, r.zoho_id)} target="_blank" rel="noreferrer" data-zoho-open>
