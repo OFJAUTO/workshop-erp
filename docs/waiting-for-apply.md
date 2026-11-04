@@ -11,10 +11,16 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-| # | Migration | What it adds | Backup taken first |
-|---|---|---|---|
-| 1 | `20261204090000_estimate_money.sql` (money from the estimate) | Invoices tied to an estimate (`invoices.estimate_id`, plain uuid), the bill-to block (`invoices.bill_to`, `quotations.bill_to`), `invoices.valid_until`, payment links and payment reports on an estimate (`payment_requests.estimate_id` + job optional, `payment_reports.estimate_id` + job optional), and the proforma WhatsApp template row. Until it is applied, live shows no estimate-proforma buttons (`estimateMoneyReady`); nothing half-works. | `backups/2026-11-04T11-08-18` (111 tables, 249,077 rows) |
-| 2 | `20261204120000_estimate_money2.sql` (Part 3: combined proformas) | `invoices.covers_estimate_ids uuid[]` + its index: one combined proforma billing a base estimate together with its additional estimates. Dormant behind `estimateCombineReady`. | same backup (taken before #1; a fresh one is taken at apply time as always) |
+Nothing is waiting.
+
+## Applied on 4 November 2026, night
+
+The owner replied "apply" (23:25 Dubai). A fresh backup was taken first: `backups/2026-11-04T19-25-36` (111 tables, 249,626 rows). Then both files were run with `scripts/db-sql.mjs` and recorded with `scripts/db-record-migration.mjs`, in order, without an error, and `npm run check:live` ran (33 passed, 0 failed).
+
+| # | Migration | What it did on live |
+|---|---|---|
+| 1 | `20261204090000_estimate_money.sql` (money from the estimate) | Invoices tied to an estimate (`invoices.estimate_id`), the bill-to block (`invoices.bill_to`, `quotations.bill_to`), `invoices.valid_until`, payment links and payment reports on an estimate (job now optional on both, with their place checks — every existing row has its job, so nothing changed), and the proforma WhatsApp template row (INSERT 1). The whole estimate-money feature switched itself on. |
+| 2 | `20261204120000_estimate_money2.sql` (combined proformas) | `invoices.covers_estimate_ids uuid[]` + its index. Combined proformas switched on. |
 
 ## Applied on 3 November 2026, afternoon
 
