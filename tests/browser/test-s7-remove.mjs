@@ -3,8 +3,8 @@
 // LPO and in "Our cost". This proves, through the Parts table and Returns and leftovers, as Parts:
 //   A. ordered, not delivered, on an APPROVED quotation -> Cancelled with the supplier: the row greys "Removed – Cancelled
 //      with the supplier by <name>", no "Ordered" chip, the LPO line is cancelled and the LPO total goes down, Our cost
-//      goes down, the supplier message is ready to copy; the approved quotation's line and total are unchanged, the
-//      advisor is told to revise and the owner is asked to allow the revision.
+//      goes down, the supplier message is ready to copy; the approved quotation's line and total are unchanged, and
+//      (Fix 2.5, 4 November 2026) NOBODY gets a task: the job card shows the quiet "removed after approval" line.
 //   B. delivered -> Return to supplier: waiting for the credit note, listed on Returns and leftovers, the LPO line stays
 //      (delivered) marked "Returned – credit note awaited"; the credit note recorded later completes it (Zoho row queued).
 //   C. delivered -> Keep in stock: the stock item and its count go up at the part's cost; the job's cost of it is 0.
@@ -12,8 +12,8 @@
 //      the same window then saves; the LPO with no line left is cancelled and stays in sight, greyed.
 //   E. the window greys what does not fit: an undelivered part cannot be returned or kept, a delivered one not cancelled.
 // Review fixes (3 November 2026), in the same sections:
-//   A. the job also has an ADDITIONAL quotation approved later: the owner is asked to revise the quotation that charges
-//      the part (never the newer one); the workshop managers' bell opens the work order (they cannot open Parts).
+//   A. the job also has an ADDITIONAL quotation approved later: it is left alone with the one that charges the part
+//      (nothing is asked on either); the workshop managers' bell opens the work order (they cannot open Parts).
 //   B. a proforma made before the ending: its internal cost of the part goes to 0 (the tax invoice it becomes copies 0);
 //      the row's "Credit note awaited" tag is not a tap target - "Record the credit note" is in the ⋯ menu; the credit
 //      note recorded on Returns and leftovers answers in a window on the page, never at the top of the page.
@@ -120,7 +120,8 @@ try {
     check("E: not delivered - Cancelled with the supplier is offered", await allowed("cancelled"));
     check("E: not delivered - Return to supplier is greyed, with the reason", !(await allowed("return")) && /Not delivered yet: nothing to return/.test(await text(dlg.locator("[data-end-why='return']"))));
     check("E: not delivered - Keep in stock is greyed, with the reason", !(await allowed("stock")) && /nothing to put on the shelf/.test(await text(dlg.locator("[data-end-why='stock']"))));
-    check("E: the Save button waits for a reason", await dlg.locator("[data-end-save]").isDisabled());
+    // Fix 2.4 (4 November 2026): one tap is enough - with nothing typed the record says "Not needed".
+    check("E: the Save button is ready with nothing typed (one tap)", !(await dlg.locator("[data-end-save]").isDisabled()));
     await page.screenshot({ path: shot("e1-window-not-delivered.png") });
     await dlg.getByRole("button", { name: "Cancel", exact: true }).click();
   }
@@ -163,25 +164,26 @@ try {
     const q1After = (await sql("select total_aed::float as total, status, revision_requested_at from public.quotations where id = $1", [q1]))[0];
     const lineAfter = (await sql("select line_total::float as total, is_active from public.quotation_lines where id = $1", [lineBefore.id]))[0];
     check(`A: the approved quotation is unchanged (AED ${q1After?.total}, line AED ${lineAfter?.total}, still on it)`, q1After?.status === "approved" && Math.abs((q1After?.total ?? 0) - (q1Before?.total ?? -1)) < 0.01 && lineAfter?.is_active === true && Math.abs(lineAfter.total - lineBefore.total) < 0.01);
-    const told = await until(async () => (await sql("select title, body from public.notifications where job_id = $1 and title like 'Part removed after approval%' order by created_at desc limit 1", [jobId]))[0]);
-    check(`A: the advisor is told to revise ("${told?.title}")`, !!told && /revise the quotation/.test(told.title) && /approved price has not changed/.test(told.body ?? ""));
-    check("A: the owner is asked to allow the revision", !!q1After?.revision_requested_at);
+    // Fix 2.5 (4 November 2026): a parts-desk removal on an APPROVED quotation is QUIET - no owner ask, no
+    // advisor task, no notification; the job card's quotation box shows "removed after approval" instead.
+    const quietEvent = await until(async () => (await sql("select note from public.job_events where job_id = $1 and event_type = 'parts_removed_after_approval' order by created_at desc limit 1", [jobId]))[0]);
+    check(`A: the quiet "removed after approval" line is written ("${quietEvent?.note?.slice(0, 90)}")`, !!quietEvent && /after approval/.test(quietEvent.note) && /still charged on/.test(quietEvent.note));
+    check("A: the owner is NOT asked to allow a revision (the advisor chooses)", !q1After?.revision_requested_at);
+    const reviseBell = (await sql("select title from public.notifications where job_id = $1 and (title like 'Part removed after approval%' or type = 'revision_request')", [jobId]));
+    check("A: no revise task and no owner ask was sent", reviseBell.length === 0, JSON.stringify(reviseBell).slice(0, 120));
     // The job's other quotation (approved later, never charging the pads) is left alone.
     const q2After = (await sql("select revision_requested_at, revision_request_parts from public.quotations where id = $1", [Q2]))[0];
-    check("A: the ADDITIONAL quotation approved later is not the one asked about", !q2After?.revision_requested_at && !q2After?.revision_request_parts);
-    const ownerBell = (await sql("select href from public.notifications where job_id = $1 and type = 'revision_request' order by created_at desc limit 1", [jobId]))[0];
-    check(`A: the owner's bell opens the quotation that charges the pads (${ownerBell?.href ?? "none"})`, !!ownerBell?.href && ownerBell.href.includes(`/quote/${q1}`));
+    check("A: the ADDITIONAL quotation approved later is left alone too", !q2After?.revision_requested_at && !q2After?.revision_request_parts);
     // Workshop managers cannot open the Parts page: their bell opens the car's work order.
     const mgrBells = await until(async () => { const r = await sql("select href from public.notifications where job_id = $1 and title like 'Part removed · %'", [jobId]); return r.length ? r : null; }, 20);
     check(`A: the managers' bell opens the work order (${(mgrBells ?? []).map((b) => b.href).join(", ")})`, !!mgrBells?.length && mgrBells.every((b) => b.href === `/jobs/${jobId}/work`));
-    // His box shows the part leaving the quotation - never "nothing left to change" (the part is off the job, but the
-    // approved quotation still charges it).
+    // The job card's quotation box carries the quiet line.
     const own = await open(owner.id);
-    await go(own.page, `${base}/jobs/${jobId}/quote/${q1}?revise=1`);
+    await go(own.page, `${base}/jobs/${jobId}`);
     await pageReady(own.page);
-    const boxText = await text(own.page.locator("[data-owner-box]"));
-    check(`A: the owner's box lists the pads as taken off ("${boxText.slice(0, 120)}")`, (await own.page.locator("[data-revision-empty]").count()) === 0 && /FRONT BRAKE PADS/i.test(boxText));
-    await own.page.screenshot({ path: shot("a4-owner-revision-box.png") });
+    const quietLine = await text(own.page.locator("[data-parts-removed-line]"));
+    check(`A: the job card shows the quiet line ("${quietLine.slice(0, 90)}")`, /removed by .+ after approval/.test(quietLine));
+    await own.page.screenshot({ path: shot("a4-quiet-line.png") });
   }
 
   /* ---------- B. Return to supplier, then the credit note ---------- */

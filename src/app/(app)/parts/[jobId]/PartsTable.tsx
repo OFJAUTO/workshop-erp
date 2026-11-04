@@ -148,7 +148,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
   const [adding, setAdding] = useState(false);
   // Bulk delete: the ticked rows, the question before it, and the minute of Undo after it.
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [confirmDelete, setConfirmDelete] = useState<null | { count: number; kept: number; keys: TableRow[] | null }>(null);
+  const [confirmDelete, setConfirmDelete] = useState<null | { count: number; kept: number; cancel: TableRow[]; keys: TableRow[] | null }>(null);
   const [undo, setUndo] = useState<null | { batch: string; count: number; kept: number }>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   // "Set for ticked": one availability, supplier or type for every ticked row.
@@ -297,20 +297,33 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
   function toggleAll() {
     setSelected(allTicked ? new Set() : new Set(deletable.map((r) => r.key)));
   }
-  /** "Delete all": the ticked rows, or every unordered row of the job when none is ticked. One question, then it goes. */
+  /** A ticked ordered part with nothing arrived can go in the same sweep: it ends as "Cancelled with the supplier". */
+  const cancellable = (r: TableRow) => !!r.partId && r.locked && !r.removed && !r.ended && !!r.endings && !r.endings.refusal && r.endings.options.some((o) => o.key === "cancelled" && o.allowed);
+  /** "Delete all": the ticked rows, or every deletable row of THIS job when none is ticked. One question naming the job, then it goes. */
   function askDelete() {
     const ticked = deletable.filter((r) => selected.has(r.key));
     const targets = ticked.length ? ticked : deletable;
-    const kept = targets.filter((r) => r.locked).length;
-    const count = targets.length - kept;
+    const cancel = targets.filter(cancellable);
+    const kept = targets.filter((r) => r.locked && !cancel.some((c) => c.key === r.key)).length;
+    const count = targets.length - kept - cancel.length;
     setBulkError(null);
-    setConfirmDelete({ count, kept, keys: ticked.length ? ticked : null });
+    setConfirmDelete({ count, kept, cancel, keys: ticked.length ? ticked : null });
   }
   async function doDelete() {
     const c = confirmDelete;
     if (!c) return;
     setConfirmDelete(null);
     setBulkBusy(true);
+    // Ordered parts with nothing arrived first: each ends as "Cancelled with the supplier" (recorded, not undoable).
+    for (const r of c.cancel) {
+      const out = await endPartFromParts(jobId, r.partId as string, { ending: "cancelled", reason: "Deleted from the Parts table" });
+      if (out.ok) setRows((p) => p.map((x) => (x.key === r.key ? { ...x, removed: { by: "", reason: "Deleted" }, ended: out.words ?? "Cancelled with the supplier", orderLabel: null, endings: null, settledFix: null } : x)));
+      else {
+        setBulkBusy(false);
+        setBulkError(`${r.name.toUpperCase()}: ${out.error ?? "could not be cancelled."}`);
+        return;
+      }
+    }
     const keys = c.keys ? { partIds: c.keys.map((r) => r.partId).filter((x): x is string => !!x), requestIds: c.keys.filter((r) => !r.partId && r.requestId).map((r) => r.requestId as string) } : null;
     const localOnly = (c.keys ?? deletable).filter((r) => !r.partId && !r.requestId);
     const res: { error?: string; deleted?: number; kept?: number; batch?: string | null } = keys && !keys.partIds.length && !keys.requestIds.length ? { deleted: 0, kept: 0, batch: null } : await bulkDeleteParts(jobId, keys);
@@ -328,7 +341,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
       setUndo({ batch: res.batch, count: deleted, kept: res.kept ?? 0 });
       if (undoTimer.current) clearTimeout(undoTimer.current);
       undoTimer.current = setTimeout(() => setUndo(null), 60_000);
-    } else setUndo(deleted || res.kept ? { batch: "", count: deleted, kept: res.kept ?? 0 } : null);
+    } else setUndo(deleted || res.kept || c.cancel.length ? { batch: "", count: deleted, kept: res.kept ?? 0 } : null);
   }
   async function undoDelete() {
     const u = undo;
@@ -422,11 +435,12 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
       {confirmDelete ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onClick={() => setConfirmDelete(null)}>
           <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()} data-delete-confirm>
-            <span className="text-lg font-extrabold">{confirmDelete.count ? `Delete ${confirmDelete.count} part${confirmDelete.count === 1 ? "" : "s"}?` : "Nothing to delete"}</span>
-            {confirmDelete.kept ? <p className="text-sm text-muted">{confirmDelete.kept} ordered part{confirmDelete.kept === 1 ? " is" : "s are"} kept: once ordered, received or fitted a part is never deleted here.</p> : null}
-            {confirmDelete.count ? <p className="text-xs text-muted">The rows disappear at once and come off the quotation. Undo is there for a minute.</p> : null}
+            <span className="text-lg font-extrabold" data-delete-confirm-title>{confirmDelete.count + confirmDelete.cancel.length ? `Delete ${confirmDelete.count + confirmDelete.cancel.length} part${confirmDelete.count + confirmDelete.cancel.length === 1 ? "" : "s"} on ${refLabel}?` : "Nothing to delete"}</span>
+            {confirmDelete.cancel.length ? <p className="text-sm" data-delete-confirm-cancelled>{confirmDelete.cancel.length === 1 ? "1 is on an LPO with nothing arrived" : `${confirmDelete.cancel.length} are on an LPO with nothing arrived`}: ✓ Cancelled with the supplier (recorded on the LPO; not brought back by Undo).</p> : null}
+            {confirmDelete.kept ? <p className="text-sm text-muted">{confirmDelete.kept} part{confirmDelete.kept === 1 ? " is" : "s are"} kept: already delivered or with the technician. End {confirmDelete.kept === 1 ? "it" : "each"} from the line&apos;s ⋯ menu (Return to supplier / Keep in stock).</p> : null}
+            {confirmDelete.count + confirmDelete.cancel.length ? <p className="text-xs text-muted">Only this job&apos;s lines are touched. The rows disappear at once; a line on an approved quotation stays until the advisor revises it. Undo is there for a minute.</p> : null}
             <div className="flex flex-wrap gap-2">
-              {confirmDelete.count ? <Button type="button" size="md" tone="danger" onClick={() => void doDelete()} data-delete-confirm-yes>Delete</Button> : null}
+              {confirmDelete.count + confirmDelete.cancel.length ? <Button type="button" size="md" tone="danger" onClick={() => void doDelete()} data-delete-confirm-yes>Delete</Button> : null}
               <Button type="button" tone="ghost" size="md" onClick={() => setConfirmDelete(null)}>Cancel</Button>
             </div>
           </div>
@@ -991,7 +1005,7 @@ function EndDialog({ name, endings: given, options, onClose, onEnd }: { name: st
     return () => window.removeEventListener("keydown", onKey);
   }, [busy, onClose]);
   const save = async () => {
-    if (!choice || reason.trim().length < 3 || busy) return;
+    if (!choice || busy) return;
     setBusy(true);
     setError(null);
     const r = await onEnd(choice, reason.trim());
@@ -1038,10 +1052,10 @@ function EndDialog({ name, endings: given, options, onClose, onEnd }: { name: st
               ))}
             </div>
             {endings!.partly ? <p className="text-xs font-semibold text-amber" data-end-partly>{endings!.partly}</p> : null}
-            <ReasonChips name="reason" label="Why is it not needed?" options={options} onValue={setReason} placeholder="Tap a reason, or type" textCase="sentence" disabled={busy} />
+            <ReasonChips name="reason" label="Why is it not needed? (optional)" options={options} onValue={setReason} placeholder="Tap a reason, or type – empty saves as “Not needed”" textCase="sentence" disabled={busy} />
             {error ? <p className="rounded-control border border-red-bar bg-white px-3 py-2 text-sm font-semibold text-red" role="alert" data-end-error>{error}</p> : null}
             <div className="flex flex-wrap gap-2">
-              <Button type="button" size="md" tone="danger" disabled={!choice || reason.trim().length < 3 || busy} onClick={() => void save()} data-end-save>{busy ? "Saving…" : "Save the ending"}</Button>
+              <Button type="button" size="md" tone="danger" disabled={!choice || busy} onClick={() => void save()} data-end-save>{busy ? "Saving…" : "Save the ending"}</Button>
               <Button type="button" tone="ghost" size="md" disabled={busy} onClick={onClose}>Cancel</Button>
             </div>
           </>

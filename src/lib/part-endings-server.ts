@@ -1,6 +1,6 @@
 import "server-only";
 import { logAppError, SAVE_FAILED } from "./app-errors";
-import { finishPartsPlanning, refusalsReady } from "./lpo";
+import { finishPartsPlanning, lpoApproverIds, refusalsReady } from "./lpo";
 import { round2 } from "./money";
 import { jobAdvisorIds, notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import { PART_FULL_SELECT, toPartFull, type PartFull } from "./parts-data";
@@ -80,8 +80,8 @@ async function newestQuoteLineOf(jobId: string, partId: string): Promise<{ quota
  * (Parts or the owner, never View as).
  */
 export async function endOrderedPart(jobId: string, partId: string, input: EndInput, actor: EndActor): Promise<EndResult> {
-  const reason = cleanText(input.reason, 300);
-  if (reason.length < 3) return { error: "Say why the part is not needed (a few words)." };
+  // One tap is enough (Fix 2.4, 4 November 2026): with nothing typed the record says "Not needed".
+  const reason = cleanText(input.reason, 300) || "Not needed";
   if (input.ending !== "cancelled" && input.ending !== "return" && input.ending !== "stock") return { error: "Choose an ending: Cancelled with the supplier, Return to supplier, or Keep in stock." };
   const admin = createAdminClient();
   const fail = async (step: string, err: unknown): Promise<EndResult> => {
@@ -326,9 +326,23 @@ export async function endOrderedPart(jobId: string, partId: string, input: EndIn
           quote.note = `It came off ${onQuote.number}, which is still being prepared.`;
           return;
         }
-        // Sent or approved: the customer's price is never changed here, and the change lands on THIS quotation number
-        // (never another quotation of the job). Sent: its next version, for the advisor to send. Approved: the owner is
-        // asked to allow one revision. A tax invoice out: nothing can change; the owner settles it with a credit note.
+        // Fix 2.5 (4 November 2026): on an APPROVED quotation (no tax invoice out) a parts-desk removal is quiet.
+        // Revising is the advisor's choice: no owner ask, no task, no notification - the approved line and the
+        // customer's price stay, and the job card's quotation box shows "removed after approval".
+        if (onQuote.status === "approved") {
+          const { liveInvoicesOf } = await import("./quote-lock");
+          const { invoicesForLock } = await import("./quote-lock-server");
+          const live = liveInvoicesOf(await invoicesForLock(jobId));
+          if (!live.tax) {
+            await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_removed_after_approval", note: `${desc} removed by ${actor.display_name} after approval (${reason}) · still charged on ${onQuote.number} until the advisor revises it`, created_by: actor.id });
+            await admin.from("quotations").update({ parts_price_changed_at: now, updated_by: actor.id }).eq("id", onQuote.quotationId);
+            quote.note = `It is still on ${onQuote.number} (approved, ${aedText(onQuote.lineTotal)} before VAT): the customer's approved price has not changed. Revising the quotation is the advisor's choice - nothing was sent to anyone.`;
+            return;
+          }
+        }
+        // Sent: the customer's price is never changed here, and the change lands on THIS quotation number
+        // (never another quotation of the job) as its next version, for the advisor to send.
+        // A tax invoice out: nothing can change; the owner settles it with a credit note.
         const out = await qv.revisePartOnQuotation(jobId, p.id, onQuote.quotationId, actor.id);
         if (out.kind !== "tax") await admin.from("quotations").update({ parts_price_changed_at: now, updated_by: actor.id }).eq("id", onQuote.quotationId);
         const onWords = `${desc} (${aedText(onQuote.lineTotal)} on ${onQuote.number})`;
@@ -355,6 +369,19 @@ export async function endOrderedPart(jobId: string, partId: string, input: EndIn
         const n = { type: "parts_priced", title: `Part removed · ${job.job_number}`, body: `${desc}: ${label} by ${actor.display_name} (${reason}).${po ? ` ${po.number} is now ${aedText(poAfter?.total ?? po.total_cost_aed)}${poAfter?.cancel ? " (cancelled)" : ""}.` : ""}`, jobId, href: `/jobs/${jobId}/work` };
         await notifyManagers((job as { department: string | null }).department ?? null, n);
       });
+      // Fix 2.3 (4 November 2026): the LPO was still WAITING for approval - the approvers hear that the list
+      // changed, so the owner never decides on a stale list.
+      if (po && po.status === "pending_approval") {
+        await after("approvers", async () => {
+          await notifyStaff(await lpoApproverIds(), {
+            type: "po_approval",
+            title: `${po.number} updated after sending`,
+            body: `${job.job_number} · ${desc} ${label.toLowerCase()} by ${actor.display_name}. ${poAfter?.cancel ? "No line left: the LPO is cancelled." : `The approval page shows the current list (new total ${aedText(poAfter?.total ?? po.total_cost_aed)}).`}`,
+            jobId,
+            href: `/parts/orders/${po.id}`,
+          });
+        });
+      }
     }
     const vin = ((job.vehicle as unknown as { vin: string | null } | null)?.vin) ?? null;
     // Only part of the line came: whatever its ending, the rest is cancelled with the supplier and the supplier is told.

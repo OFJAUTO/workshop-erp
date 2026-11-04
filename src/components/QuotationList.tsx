@@ -16,7 +16,7 @@ const REVISABLE = ["sent", "opened", "expired", "declined", "urgent_requested"];
 const PREPARING = ["draft", "pending_owner"];
 const CHIP: Record<QuoteFamily["role"], string | null> = { original: "ORIGINAL", additional: "ADDITIONAL", single: null };
 
-export function QuotationList({ jobId, families, canQuote, jobOpen, kind = "quotation" }: { jobId?: string; families: QuoteFamily[]; canQuote: boolean; jobOpen: boolean; kind?: "quotation" | "estimate" }) {
+export function QuotationList({ jobId, families, canQuote, jobOpen, kind = "quotation", removedAfterApproval }: { jobId?: string; families: QuoteFamily[]; canQuote: boolean; jobOpen: boolean; kind?: "quotation" | "estimate"; /** Fix 2.5 (4 November 2026): "2 parts removed by Peter after approval" - a quiet line, never a task. */ removedAfterApproval?: string | null }) {
   if (!families.length) return null;
   const estimates = kind === "estimate";
   const money = quoteMoney(families);
@@ -24,6 +24,7 @@ export function QuotationList({ jobId, families, canQuote, jobOpen, kind = "quot
   const openHref = (id: string) => (estimates ? `/estimates/${id}` : `/jobs/${jobId}/quote/${id}`);
   return (
     <div className="flex flex-col gap-2" data-quotation-list={families.length} data-list-kind={kind}>
+      {removedAfterApproval ? <p className="text-xs text-muted" data-parts-removed-line>{removedAfterApproval}</p> : null}
       <ul className="flex flex-col divide-y divide-line rounded-control border border-line bg-white">
         {families.map((f) => {
           const c = f.current;

@@ -28,7 +28,17 @@ export type JobLpos = {
   toOrder: PartFull[];
   /** Approved parts from our own stock (no LPO). */
   fromStock: PartFull[];
+  /** Fix 2 (4 November 2026): the newest refused main LPO that has no replacement yet - shown with the owner's reason and "Send for approval again". */
+  refused: { po: PurchaseOrderRow; lines: PoLineRow[]; reason: string } | null;
+  /** Lines of the pending main LPO that changed AFTER it was sent for approval ("removed: PLUG WASHER"). */
+  mainChanges: string[];
 };
+
+/** The owner's reason out of a refused LPO's notes ("Refused: too dear" → "too dear"). */
+export function refusalReasonOf(notes: string | null): string {
+  const line = String(notes ?? "").split("\n").find((l) => /refused/i.test(l)) ?? "";
+  return line.replace(/^Refused:?\s*/i, "").trim();
+}
 
 /** The approved parts of a job: on an LPO, waiting for one, or from stock. */
 export async function loadJobLpos(jobId: string): Promise<JobLpos> {
@@ -44,11 +54,35 @@ export async function loadJobLpos(jobId: string): Promise<JobLpos> {
   const main = [...pos].reverse().find((p) => p.kind === "main") ?? null;
   const charges = await chargesByPo(pos.map((p) => p.id));
   const suppliers = pos.filter((p) => p.kind === "supplier" && (!main || p.parent_id === main.id || !p.parent_id)).map((po) => ({ po, lines: lines.filter((l) => l.po_id === po.id), charges: charges.get(po.id) ?? [] }));
+  // Fix 2 (4 November 2026): a refused main LPO is not a dead end. The newest one with no replacement is shown
+  // with the owner's reason and "Send for approval again"; a pending main says what changed after it was sent.
+  let refused: JobLpos["refused"] = null;
+  if (!main || main.status !== "pending_approval") {
+    const { data: ref } = await admin.from("purchase_orders").select(PO_SELECT).eq("job_id", jobId).eq("kind", "main").eq("status", "cancelled").eq("is_active", true).is("superseded_by", null).ilike("notes", "%refused%").order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (ref) {
+      const po = toPo(ref as Record<string, unknown>);
+      const { data: refLines } = await admin.from("purchase_order_lines").select(PO_LINE_SELECT).eq("po_id", po.id).order("position");
+      refused = { po, lines: ((refLines ?? []) as Record<string, unknown>[]).map(toPoLine), reason: refusalReasonOf(po.notes) };
+    }
+  }
+  const mainChanges: string[] = [];
+  if (main && main.status === "pending_approval") {
+    const { data: allLines } = await admin.from("purchase_order_lines").select("description, is_active, created_at, updated_at").eq("po_id", main.id).order("position");
+    const sentAt = new Date(main.created_at).getTime();
+    for (const l of allLines ?? []) {
+      const name = String(l.description).toUpperCase();
+      if (l.is_active === false) mainChanges.push(`removed: ${name}`);
+      else if (new Date(l.created_at as string).getTime() > sentAt + 90_000) mainChanges.push(`added: ${name}`);
+      else if (new Date(l.updated_at as string).getTime() > new Date(l.created_at as string).getTime() + 90_000) mainChanges.push(`changed: ${name}`);
+    }
+  }
   return {
     main,
     mainLines: main ? lines.filter((l) => l.po_id === main.id) : [],
     mainCharges: main ? charges.get(main.id) ?? [] : [],
     suppliers,
+    refused,
+    mainChanges,
     // Never a part marked not needed, or one refused on an LPO (its order status went back to none), and never a part
     // from our own shelf (2 November 2026: it is received from the shelf, never ordered - one stuck at To order no
     // longer blocks the job's LPO).
@@ -297,6 +331,11 @@ export const refusalsReady = () => schemaReady("part_items", "refused_at, refuse
 /** "1 part added", "2 parts added". */
 const partsWord = (n: number) => `${n} part${n === 1 ? "" : "s"}`;
 
+/** The owner and the head accountants (exported for the ending path: Fix 2.3, 4 November 2026). */
+export async function lpoApproverIds(): Promise<string[]> {
+  return approverIds();
+}
+
 /** The owner and the head accountants: who approve LPOs. */
 async function approverIds(): Promise<string[]> {
   const { data } = await createAdminClient().from("staff").select("id, role_id, is_head_accountant").eq("is_active", true).in("role_id", ["owner", "accounts"]);
@@ -426,4 +465,122 @@ export async function refusePoLine(poId: string, lineId: string, reason: string,
     await notifyRoles(["parts"], { type: "po_decided", title: `Refused on ${po.number}: ${part}`, body: `${by.display_name}: ${reason}. ${supplier ? `${supplier} is off the LPO. ` : ""}Tap Replace on the line to add a replacement${cancelled ? "" : "; it joins the LPO waiting for approval by itself"}.`, jobId: po.job_id, href: `/parts/${po.job_id}` });
   }
   return { number: po.number, cancelled, part };
+}
+
+/* ------------------------------------------------------------------------------------------------------------------
+ * Fix 2 of 4 November 2026: a refused LPO is never a dead end, and a pending approval always shows the current list.
+ * ---------------------------------------------------------------------------------------------------------------- */
+
+type DiffLine = { description: string; part_number?: string | null; quantity: number; unit_cost: number };
+
+/** What changed between the refused list and the new one, in plain words, for the owner's approval page and bell. */
+export function lpoDiff(oldLines: DiffLine[], newLines: DiffLine[]): { added: string[]; removed: string[]; changed: string[] } {
+  const keyOf = (l: DiffLine) => String(l.description).trim().toUpperCase();
+  const olds = new Map(oldLines.map((l) => [keyOf(l), l]));
+  const news = new Map(newLines.map((l) => [keyOf(l), l]));
+  const added: string[] = [];
+  const removed: string[] = [];
+  const changed: string[] = [];
+  for (const [k, l] of news) {
+    const was = olds.get(k);
+    if (!was) added.push(k);
+    else if (Math.abs(Number(was.quantity) - Number(l.quantity)) > 0.001 || Math.abs(Number(was.unit_cost) - Number(l.unit_cost)) > 0.005) {
+      changed.push(`${k} (was × ${Number(was.quantity)} at AED ${Number(was.unit_cost).toFixed(2)}, now × ${Number(l.quantity)} at AED ${Number(l.unit_cost).toFixed(2)})`);
+    }
+  }
+  for (const k of olds.keys()) if (!news.has(k)) removed.push(k);
+  return { added, removed, changed };
+}
+
+export const diffWords = (d: { added: string[]; removed: string[]; changed: string[] }): string =>
+  [d.added.length ? `added ${d.added.join(", ")}` : "", d.removed.length ? `removed ${d.removed.join(", ")}` : "", d.changed.length ? `changed ${d.changed.join("; ")}` : ""].filter(Boolean).join(" · ") || "same parts, same prices";
+
+/**
+ * "Send for approval again" on a refused main LPO: a NEW version is raised from the CURRENT list (Peter's removals,
+ * replacements and additions applied), numbered after the refused one ("LPO-00041 V2"), and the owner sees what
+ * changed against the refused list, highlighted. The refused LPO is put away (superseded) so it stops showing.
+ */
+export async function resendMainLpo(refusedPoId: string, by: Actor): Promise<{ error?: string; poId?: string; number?: string }> {
+  const admin = createAdminClient();
+  const { data: old } = await admin.from("purchase_orders").select("id, number, job_id, kind, status, notes, superseded_by").eq("id", refusedPoId).maybeSingle();
+  if (!old || old.kind !== "main") return { error: "LPO not found." };
+  if (old.status !== "cancelled" || !/refused/i.test(String(old.notes ?? ""))) return { error: `${old.number} was not refused: nothing to send again.` };
+  if (old.superseded_by) return { error: `${old.number} was already sent again.` };
+  const r = await createMainLpo(old.job_id, by);
+  if (r.error || !r.poId) return { error: r.error ?? "Could not raise the new LPO." };
+  // The new version carries the refused LPO's own number with V2, V3 … so everyone talks about the same order.
+  const base = String(old.number).replace(/ V\d+$/i, "");
+  const { data: priors } = await admin.from("purchase_orders").select("number").eq("job_id", old.job_id).or(`number.eq.${base},number.like.${base} V%`);
+  const version = Math.max(1, ...(priors ?? []).map((p) => (String(p.number) === base ? 1 : Number(/ V(\d+)$/i.exec(String(p.number))?.[1]) || 1))) + 1;
+  const newNumber = `${base} V${version}`;
+  const { error: numErr } = await admin.from("purchase_orders").update({ number: newNumber, updated_by: by.id }).eq("id", r.poId);
+  const finalNumber = numErr ? r.number ?? newNumber : newNumber;
+  await admin.from("purchase_orders").update({ superseded_by: r.poId, updated_by: by.id }).eq("id", refusedPoId);
+  // What changed against the refused list, for the owner.
+  const [{ data: oldLines }, { data: newLines }] = await Promise.all([
+    // The refused list as the owner SAW it: lines cut before the refusal are not "changes" of the new version.
+    admin.from("purchase_order_lines").select("description, quantity, unit_cost").eq("po_id", refusedPoId).eq("is_active", true),
+    admin.from("purchase_order_lines").select("description, quantity, unit_cost").eq("po_id", r.poId).eq("is_active", true),
+  ]);
+  const words = diffWords(lpoDiff((oldLines ?? []) as DiffLine[], (newLines ?? []) as DiffLine[]));
+  const { data: job } = await admin.from("jobs").select("job_number").eq("id", old.job_id).maybeSingle();
+  await admin.from("job_events").insert({ job_id: old.job_id, event_type: "po_resent", note: `${finalNumber} sent for approval again by ${by.display_name} after ${old.number} was refused. Changes: ${words}.`, created_by: by.id });
+  await notifyStaff(await approverIds(), { type: "po_approval", title: `${finalNumber} to approve (sent again after refusal)`, body: `${job?.job_number ?? ""} · replaces the refused ${old.number}. Changes: ${words}. One tap to approve.`, jobId: old.job_id, href: `/parts/orders/${r.poId}` });
+  return { poId: r.poId, number: finalNumber };
+}
+
+/**
+ * A part deleted or removed while it sits on a main LPO still WAITING for approval: its line comes off that LPO at
+ * once, the total moves, and the approvers are told - the owner never approves a list that is no longer true.
+ * Approved and ordered LPOs are never touched here (an ordered part leaves through its ending instead).
+ */
+export async function cutPendingLpoLines(jobId: string, partIds: string[], by: Actor, what: string): Promise<void> {
+  if (!partIds.length) return;
+  const admin = createAdminClient();
+  const { data: parts } = await admin.from("part_items").select("id, description, po_id, po_line_id").in("id", partIds).not("po_id", "is", null);
+  const withPo = (parts ?? []).filter((p) => p.po_line_id);
+  if (!withPo.length) return;
+  const poIds = Array.from(new Set(withPo.map((p) => p.po_id as string)));
+  const { data: pos } = await admin.from("purchase_orders").select("id, number, status, kind").in("id", poIds).eq("status", "pending_approval").eq("kind", "main");
+  const pending = new Map((pos ?? []).map((p) => [p.id as string, p]));
+  const byPo = new Map<string, { number: string; names: string[] }>();
+  for (const p of withPo) {
+    const po = pending.get(p.po_id as string);
+    if (!po) continue;
+    await admin.from("purchase_order_lines").update({ is_active: false, updated_by: by.id }).eq("id", p.po_line_id as string);
+    const got = byPo.get(po.id as string) ?? { number: po.number as string, names: [] };
+    got.names.push(String(p.description).toUpperCase());
+    byPo.set(po.id as string, got);
+  }
+  for (const [poId, got] of byPo) {
+    const t = await retotalPo(poId, by.id);
+    if (!t.lines) {
+      await admin.from("purchase_orders").update({ status: "cancelled", notes: "Every line was deleted before approval", updated_by: by.id }).eq("id", poId);
+      await releaseCharges(poId, by.id);
+    }
+    const { data: job } = await admin.from("jobs").select("job_number").eq("id", jobId).maybeSingle();
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "po_part_removed", note: `${got.number}: ${got.names.join(", ")} ${what} by ${by.display_name} while it waits for approval. ${t.lines ? `New total ${aedText(t.total)}.` : "No line left: the LPO is cancelled."}`, created_by: by.id });
+    await notifyStaff(await approverIds(), { type: "po_approval", title: `${got.number} updated after sending`, body: `${job?.job_number ?? ""} · ${got.names.join(", ")} ${what} by ${by.display_name}. ${t.lines ? `The approval page shows the current list (new total ${aedText(t.total)}).` : "No line left: the LPO is cancelled."}`, jobId, href: `/parts/orders/${poId}` });
+  }
+}
+
+/** Put back (or Undo) of a part whose line was cut from a still-pending main LPO: the line comes back, the total follows. */
+export async function restorePendingLpoLines(jobId: string, partIds: string[], by: Actor): Promise<void> {
+  if (!partIds.length) return;
+  const admin = createAdminClient();
+  const { data: parts } = await admin.from("part_items").select("id, description, po_id, po_line_id").in("id", partIds).not("po_line_id", "is", null);
+  const poIds = Array.from(new Set((parts ?? []).map((p) => p.po_id as string).filter(Boolean)));
+  if (!poIds.length) return;
+  const { data: pos } = await admin.from("purchase_orders").select("id, number").in("id", poIds).eq("status", "pending_approval").eq("kind", "main");
+  const pending = new Map((pos ?? []).map((p) => [p.id as string, p.number as string]));
+  const byPo = new Map<string, string[]>();
+  for (const p of parts ?? []) {
+    if (!pending.has(p.po_id as string)) continue;
+    await admin.from("purchase_order_lines").update({ is_active: true, updated_by: by.id }).eq("id", p.po_line_id as string);
+    byPo.set(p.po_id as string, [...(byPo.get(p.po_id as string) ?? []), String(p.description).toUpperCase()]);
+  }
+  for (const [poId, names] of byPo) {
+    const t = await retotalPo(poId, by.id);
+    await notifyStaff(await approverIds(), { type: "po_approval", title: `${pending.get(poId)} updated: ${names.join(", ")} put back`, body: `New total ${aedText(t.total)}. The approval page shows the current list.`, jobId, href: `/parts/orders/${poId}` });
+  }
 }

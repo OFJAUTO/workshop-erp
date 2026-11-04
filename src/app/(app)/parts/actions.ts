@@ -54,8 +54,9 @@ async function draftQuotation(jobId: string) {
  * The part's line on the quotation (src/lib/quote-versions.ts): the open draft, or the next version when the latest one
  * was already sent or approved, with the advisor told to send it. Parts never think about versions.
  */
-export async function syncLineForPart(jobId: string, partId: string, by: string, opts: { quiet?: boolean } = {}) {
-  await syncPartLine(jobId, partId, by, undefined, { quietRevision: opts.quiet });
+export async function syncLineForPart(jobId: string, partId: string, by: string, opts: { quiet?: boolean; /** Fix 2.5: a parts-desk delete never asks for a revision on an approved quotation. */ partsDelete?: boolean } = {}): Promise<{ keptApproved?: boolean }> {
+  const r = await syncPartLine(jobId, partId, by, undefined, { quietRevision: opts.quiet, partsDelete: opts.partsDelete });
+  return { keptApproved: r.keptApproved };
 }
 
 /*

@@ -423,6 +423,15 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const trackStages = STAGE_ORDER.filter((s) => !skipStages.includes(s as Stage)) as Stage[];
   // Approved work stays approved while an additional quotation waits: the Approval step never jumps back.
   const quoteApproved = quoteFamilies.length ? anyApproved(quoteFamilies) : latestQuote ? latestQuote.status === "approved" : null;
+  // Fix 2.5 (4 November 2026): parts the desk removed AFTER the customer's approval - a quiet line, never a task.
+  const removedAfterApproval = await (async () => {
+    const { data: ev } = await admin.from("job_events").select("created_by").eq("job_id", id).eq("event_type", "parts_removed_after_approval");
+    if (!ev?.length) return null;
+    const ids = Array.from(new Set(ev.map((e) => e.created_by as string | null).filter((x): x is string => !!x)));
+    const { data: who } = ids.length ? await admin.from("staff").select("id, display_name").in("id", ids) : { data: [] };
+    const names = (who ?? []).map((w) => w.display_name as string);
+    return `${ev.length} part${ev.length === 1 ? "" : "s"} removed${names.length ? ` by ${names.join(", ")}` : ""} after approval · still on the approved quotation until an advisor revises it`;
+  })();
   // Batch 29 Oct (2), section 2: the owner and advisors record "the customer declined all work" while nothing is approved;
   // the owner, advisors and accounts see the time spent on the car.
   const mayDeclineAll = (role === "owner" || role === "service_advisor") && !staff.viewingAs && job.is_open && !job.declined_out_at && !quoteApproved && !loose && (!!inspection || quoteFamilies.length > 0);
@@ -792,7 +801,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <Card id="quotation" className={`${tile(quoteBox)}${quoteFamilies.length > 1 ? " col-span-2" : ""}`} data-stage-card="quotation" data-state={quoteBox}>
           <span className={boxTitle(quoteBox)}>{tick(quoteBox)}{quoteFamilies.length > 1 ? `Quotations · ${quoteFamilies.length}` : "Quotation"}</span>
           <span className="text-sm font-semibold">{qState.text}</span>
-          <QuotationList jobId={id} families={quoteFamilies} canQuote={canQuote} jobOpen={job.is_open} />
+          <QuotationList jobId={id} families={quoteFamilies} canQuote={canQuote} jobOpen={job.is_open} removedAfterApproval={removedAfterApproval} />
           {mayDeclineAll ? <div><DeclinedAllButton jobId={id} fee={Number(job.inspection_fee_aed) || 0} isOwner={role === "owner"} oldWording={oldWording} /></div> : null}
           <div className="flex flex-wrap gap-2 mt-auto">
             {!latestQuote && canQuote && (loose || isQuickJob(job) || inspection?.inspection.status === "approved" || role === "owner") ? (

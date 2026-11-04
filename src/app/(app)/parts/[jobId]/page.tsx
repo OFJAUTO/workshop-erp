@@ -6,7 +6,7 @@ import Link from "next/link";
 import { CopyVin } from "@/components/CopyVin";
 import { notFound } from "next/navigation";
 import { LiveRefresh } from "@/components/LiveRefresh";
-import { Badge, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { inspectionDangerous, loadInspection } from "@/lib/inspection-data";
@@ -25,7 +25,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { pricingDone, reopenPricing } from "../actions";
-import { emailSupplierLpo, markSupplierOrdered, receiveTicked, sendLpoForApproval, setPartExpectedDate } from "../lpo-actions";
+import { emailSupplierLpo, markSupplierOrdered, receiveTicked, resendRefusedLpo, sendLpoForApproval, setPartExpectedDate } from "../lpo-actions";
 import { gmailConfigured } from "@/lib/gmail";
 import { SupplierLpoCard, type SupplierLpo } from "../SupplierLpoCard";
 import { PartsSteps } from "@/components/PartsSteps";
@@ -258,14 +258,32 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
       {dep.short ? <div data-deposit-wait><Notice tone="info">Waiting for the deposit: {depositShortText(dep)} Accounts record it; the owner can approve the LPO without it.</Notice></div> : null}
       <PartsSteps steps={steps} hrefs={{ pricing: "#pricing", approval: "#lpo", lpo: "#lpos", received: "#received", handover: `/parts/handover/${jobId}` }} />
 
+      {lpos.refused ? (
+        <Card className="flex flex-col gap-3 border-red-bar" data-refused-lpo>
+          <div className="flex flex-wrap items-center gap-2">
+            <SectionLabel>Refused LPO</SectionLabel>
+            <Badge tone="red">{lpos.refused.po.number} refused</Badge>
+          </div>
+          <p className="text-sm font-semibold" data-refused-reason>{lpos.refused.reason ? `Reason: ${lpos.refused.reason}` : "Refused (no reason was written)."}</p>
+          <p className="text-xs text-muted">Fix the list below (remove, replace or add parts), then send it again: a new version with the CURRENT list goes for approval, and the owner sees what changed against the refused one.</p>
+          {canOrder && job.is_open ? (
+            <form action={resendRefusedLpo.bind(null, jobId, lpos.refused.po.id)}>
+              <Button type="submit" size="lg" data-resend-lpo>Send for approval again</Button>
+            </form>
+          ) : null}
+        </Card>
+      ) : null}
+
       {hasApproved ? (
         <Card id="lpo" className={`flex flex-col gap-3 ${lpos.toOrder.length && !pendingMain && canOrder ? "border-ink" : ""}`} data-lpo-card>
           <div className="flex flex-wrap items-center gap-2">
             <SectionLabel>Approved parts</SectionLabel>
             {pendingMain ? <Badge tone="amber">{pendingMain.number} waiting for approval</Badge> : null}
+            {pendingMain && lpos.mainChanges.length ? <Badge tone="amber" data-lpo-updated-after-sending>Updated after sending</Badge> : null}
             {job.plan_parts_done_at && !pendingMain && !lpos.toOrder.length && !lpos.suppliers.some((s) => s.po.status === "approved") ? <Badge tone="green">{job.plan_parts_ready_date && job.plan_parts_ready_date > today ? `All parts here by ${formatDate(job.plan_parts_ready_date)}` : "Every part is here"}</Badge> : null}
           </div>
           <p className="text-sm" data-lpo-summary>{summaryText}</p>
+          {pendingMain && lpos.mainChanges.length ? <p className="text-xs text-muted" data-lpo-changes>Since it was sent: {lpos.mainChanges.slice(0, 8).join(" · ")}{lpos.mainChanges.length > 8 ? " · …" : ""}. The approval shows the current list.</p> : null}
           {lpos.toOrder.length && !pendingMain ? (
             canOrder ? (
               <SendLpoButton action={sendLpoForApproval.bind(null, jobId)} unfinished={unfinishedNames} />

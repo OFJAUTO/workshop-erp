@@ -5,6 +5,7 @@ import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff, requireStaff } from "@/lib/auth";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
+import { cutPendingLpoLines, restorePendingLpoLines } from "@/lib/lpo";
 import { endingOf, type EndingKey } from "@/lib/part-endings";
 import { endOrderedPart, type EndResult } from "@/lib/part-endings-server";
 import { holdForSend, loadPricingRows } from "@/lib/parts-pricing";
@@ -66,13 +67,24 @@ export async function removeNotNeeded(jobId: string, target: { partId?: string |
   // Held for the send only while one is expected (the car then stays on the parts desk's list until it is pressed).
   let held = false;
   let name = "";
+  // Fix 2.5 (4 November 2026): the part sat on an APPROVED quotation - no task and no notification for anyone;
+  // the job card's quotation box shows the quiet "removed after approval" line instead.
+  let quietApproved = false;
   if (target.partId) {
-    const { data: p } = await admin.from("part_items").select("id, description, order_status").eq("id", target.partId).eq("job_id", jobId).maybeSingle();
+    const { data: p } = await admin.from("part_items").select("id, description, order_status, po_id").eq("id", target.partId).eq("job_id", jobId).maybeSingle();
     if (!p) return { error: "Part not found." };
-    if (p.order_status !== "none") return { error: "This part is already ordered: use \"Remove: not needed (ordered: choose its ending)\" in its menu." };
+    if (!["none", "to_order"].includes(String(p.order_status)) ) return { error: "This part is already ordered: use \"Remove: not needed (ordered: choose its ending)\" in its menu." };
+    // A part already on an APPROVED LPO (split, waiting to be ordered) ends through the ending dialog, never here.
+    if (p.order_status === "to_order" && p.po_id) {
+      const { data: po } = await admin.from("purchase_orders").select("status").eq("id", p.po_id).maybeSingle();
+      if (po && po.status !== "pending_approval") return { error: "This part is on an approved LPO: use \"Remove: not needed (ordered: choose its ending)\" in its menu." };
+    }
     held = await holdForSend(job, staff.id);
     await admin.from("part_items").update({ is_active: false, removed_at: now, removed_by: staff.id, removed_reason: reason, updated_by: staff.id }).eq("id", p.id);
-    await syncLineForPart(jobId, p.id, staff.id, { quiet: held });
+    const sync = await syncLineForPart(jobId, p.id, staff.id, { quiet: held, partsDelete: true });
+    quietApproved = !!sync.keptApproved;
+    // Fix 2.3 (4 November 2026): its line comes off a main LPO still waiting for approval, and the approvers are told.
+    await cutPendingLpoLines(jobId, [p.id], staff, "removed (not needed)");
     name = p.description;
   } else if (target.requestId) {
     const { data: r } = await admin.from("part_requests").select("id, label").eq("id", target.requestId).eq("job_id", jobId).maybeSingle();
@@ -82,11 +94,13 @@ export async function removeNotNeeded(jobId: string, target: { partId?: string |
     name = r.label;
   } else return { error: "Nothing to remove." };
   await admin.from("job_events").insert({ job_id: jobId, event_type: "part_removed", note: `${name} removed by ${staff.display_name}: ${reason}`, created_by: staff.id });
-  const n = { type: "parts_priced", title: `Part removed · ${job.job_number}`, body: `${name}: removed by ${staff.display_name} (${reason}). It is off the list and the quotation; Put back is on the Parts page.`, jobId, href: `/parts/${jobId}` };
-  // Still pricing: the advisor hears it with "Pricing done – send to advisor"; the manager is told now.
-  if (!held) await notifyStaff(await advisorsOf(jobId, job.gated_in_by), { ...n, href: `/jobs/${jobId}` });
-  await notifyManagers(job.department ?? null, n);
-  await flagSent(jobId, staff.id);
+  if (!quietApproved) {
+    const n = { type: "parts_priced", title: `Part removed · ${job.job_number}`, body: `${name}: removed by ${staff.display_name} (${reason}). It is off the list and the quotation; Put back is on the Parts page.`, jobId, href: `/parts/${jobId}` };
+    // Still pricing: the advisor hears it with "Pricing done – send to advisor"; the manager is told now.
+    if (!held) await notifyStaff(await advisorsOf(jobId, job.gated_in_by), { ...n, href: `/jobs/${jobId}` });
+    await notifyManagers(job.department ?? null, n);
+    await flagSent(jobId, staff.id);
+  }
   refresh(jobId);
   return { ok: true };
 }
@@ -107,6 +121,8 @@ export async function putBackPart(jobId: string, target: { partId?: string | nul
     if (endingOf(p)) return { error: "This part was given its ending (cancelled with the supplier, returned or kept in stock): it cannot be put back. Add the part again if it is needed after all." };
     await admin.from("part_items").update({ is_active: true, removed_at: null, removed_by: null, removed_reason: null, updated_by: staff.id }).eq("id", p.id);
     await syncLineForPart(jobId, p.id, staff.id);
+    // Its line comes back onto a main LPO still waiting for approval (Fix 2.3).
+    await restorePendingLpoLines(jobId, [p.id], staff);
     name = p.description;
   } else if (target.requestId) {
     const { data: r } = await admin.from("part_requests").select("id, label").eq("id", target.requestId).eq("job_id", jobId).maybeSingle();

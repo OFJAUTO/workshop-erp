@@ -143,7 +143,9 @@ export default async function InspectionReportPage({ params }: { params: Promise
   const approvedForQc = role === "qc_inspector" && bundle?.inspection.status === "approved";
   // Section 7: the bodyshop managers and team leaders open a report that has bodyshop findings, to complete and check them.
   const bodyshopReader = isBodyshopStaff(staff) && !!bundle && (!!(await createAdminClient().from("inspections").select("bodyshop_opened_at").eq("id", bundle.inspection.id).maybeSingle()).data?.bodyshop_opened_at || job.department === "bodyshop" || job.department === "both");
-  const allowed = role === "owner" || isTech || isManager || approvedForAdvisor || approvedForQc || role === "accounts" || role === "parts" || bodyshopReader;
+  // Fix 2.6 (4 November 2026): the gate-in role reads the report (findings, photos, measurements) to help the
+  // parts desk. The page shows them no action of any kind - every form below is gated to the roles that act.
+  const allowed = role === "owner" || isTech || isManager || approvedForAdvisor || approvedForQc || role === "accounts" || role === "parts" || role === "gate_in" || bodyshopReader;
   if (!allowed) redirect(role === "technician" ? "/my-jobs" : role === "service_advisor" ? `/jobs/${id}?error=${encodeURIComponent("The report opens for you once the workshop manager has approved it.")}` : role === "qc_inspector" ? "/road-tests" : "/home");
 
   if (!bundle) {

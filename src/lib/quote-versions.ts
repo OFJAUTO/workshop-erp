@@ -441,7 +441,7 @@ export async function syncMissingParts(jobId: string, quotationId: string, by: s
  * The part's line on the quotation: made when the part is priced, kept in step afterwards, retired when the part goes.
  * With no quotation given, the change lands on the open draft or on a new version (see quoteTargetFor).
  */
-export async function syncPartLine(jobId: string, partId: string, by: string | null, quotationId?: string, opts: { /** A new version brought up to date: the caller judges below cost itself. */ quietBelow?: boolean; /** Section 10: a new version made by this change is told with the pricing send, not on its own. */ quietRevision?: boolean } = {}): Promise<{ quotationId: string | null; created: boolean; change: "added" | "changed" | "removed" | null }> {
+export async function syncPartLine(jobId: string, partId: string, by: string | null, quotationId?: string, opts: { /** A new version brought up to date: the caller judges below cost itself. */ quietBelow?: boolean; /** Section 10: a new version made by this change is told with the pricing send, not on its own. */ quietRevision?: boolean; /** Fix 2.5 (4 November 2026): the parts desk DELETED the part. On an APPROVED quotation that is the advisor's business to revise when they choose: no owner ask, no new version, no notification - the approved line (and the customer's price) stays, and a quiet line goes on the job card. */ partsDelete?: boolean } = {}): Promise<{ quotationId: string | null; created: boolean; change: "added" | "changed" | "removed" | null; keptApproved?: boolean }> {
   const admin = createAdminClient();
   // A version named outright must still be open: an approved or replaced one refuses (and the attempt is written down).
   if (quotationId) {
@@ -483,6 +483,28 @@ export async function syncPartLine(jobId: string, partId: string, by: string | n
     if (ids.length) {
       const { data: open } = await admin.from("quotations").select("id").in("id", ids).eq("job_id", jobId).eq("kind", "quotation").in("status", ["draft", "pending_owner"]).limit(1).maybeSingle();
       home = (open?.id as string | undefined) ?? null;
+    }
+  }
+  // Fix 2.5 (4 November 2026): the parts desk deleted a part whose line sits on an APPROVED quotation and no
+  // revision draft is open. Revising is the advisor's choice: nothing is asked, nothing is sent, the approved
+  // line and the customer's price stay, and the job card's quotation box shows the quiet "removed after approval" line.
+  if (opts.partsDelete && !quotationId && !home) {
+    const { data: appr } = await admin
+      .from("quotation_lines")
+      .select("id, quotation:quotations!inner(id, number, status)")
+      .eq("part_item_id", partId)
+      .eq("is_active", true)
+      .in("quotation.status", ["approved", "urgent_requested"])
+      .limit(1)
+      .maybeSingle();
+    if (appr) {
+      const q = appr.quotation as unknown as { number: string };
+      const [{ data: p1 }, { data: who1 }] = await Promise.all([
+        admin.from("part_items").select("description").eq("id", partId).maybeSingle(),
+        by ? admin.from("staff").select("display_name").eq("id", by).maybeSingle() : Promise.resolve({ data: null }),
+      ]);
+      await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_removed_after_approval", note: `${String(p1?.description ?? "A part").toUpperCase()} removed by ${who1?.display_name ?? "Parts"} after approval · still charged on ${q.number} until the advisor revises it`, created_by: by });
+      return { quotationId: null, created: false, change: null, keptApproved: true };
     }
   }
   const target = quotationId ? { id: quotationId, created: false } : home ? { id: home, created: false } : await quoteTargetFor(jobId, by, changeWords, { partIds: [partId], redOf, quiet: opts.quietRevision });

@@ -76,7 +76,8 @@ export const PERMISSIONS = {
   gateOut: ["owner", "service_advisor", "accounts"],
   overrideKeys: ["owner", "workshop_manager"],
   approveRelease: ["owner", "accounts"],
-  viewDashboard: ["owner", "workshop_manager", "service_advisor", "accounts", "parts"],
+  // Fix 2.6 (4 November 2026): the gate-in role sees the board READ-ONLY (cars and stages, no customers, no money).
+  viewDashboard: ["owner", "workshop_manager", "service_advisor", "accounts", "parts", "gate_in"],
   viewCalendar: OFFICE_NO_QC,
   bookAppointments: ["owner", "service_advisor"],
   approveInspections: ["owner", "workshop_manager"],

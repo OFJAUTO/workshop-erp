@@ -9,7 +9,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
-import { receivePartInFull, createMainLpo, orderSupplierLpo, setPartExpected } from "@/lib/lpo";
+import { receivePartInFull, createMainLpo, orderSupplierLpo, resendMainLpo, setPartExpected } from "@/lib/lpo";
 import { blankToNull } from "@/lib/format";
 import { gmailConfigured, sendGmail } from "@/lib/gmail";
 import { notifyStaff } from "@/lib/notifications";
@@ -47,6 +47,16 @@ export async function sendLpoForApproval(jobId: string) {
   // The deposit has not arrived: the owner hears that the LPO waits on it (override on the LPO page, or wait).
   if (r.poId) await warnOwnerIfDepositShort(jobId, r.poId, r.number ?? "");
   redirect(`/parts/${jobId}?message=${enc(`${r.number} sent for approval. After the one-tap approval, one LPO per supplier appears here with Copy, PDF and Ordered.`)}#lpo`);
+}
+
+/** Fix 2.2 (4 November 2026): after a refusal, "Send for approval again" raises the new version from the CURRENT list. */
+export async function resendRefusedLpo(jobId: string, refusedPoId: string) {
+  const staff = await requirePermission("managePurchaseOrders");
+  const r = await resendMainLpo(refusedPoId, staff);
+  refresh(jobId, r.poId ?? null);
+  if (r.error) redirect(`/parts/${jobId}?error=${enc(r.error)}#lpo`);
+  if (r.poId) await warnOwnerIfDepositShort(jobId, r.poId, r.number ?? "");
+  redirect(`/parts/${jobId}?message=${enc(`${r.number} sent for approval again with the current list. The owner sees what changed against the refused one.`)}#lpo`);
 }
 
 /** "Ordered" on a supplier LPO: one tap; the arrival dates follow from the availability entered at pricing. */

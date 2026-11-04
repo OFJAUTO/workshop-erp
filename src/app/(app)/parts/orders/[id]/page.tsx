@@ -10,7 +10,7 @@ import { requirePermission } from "@/lib/auth";
 import { endedLinesOf } from "@/lib/part-endings-server";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
-import { loadJobLpos, lpoProblemsFor, refusalsReady } from "@/lib/lpo";
+import { loadJobLpos, lpoDiff, lpoProblemsFor, refusalReasonOf, refusalsReady } from "@/lib/lpo";
 import { lpoProblemAdvice } from "@/lib/part-cost-check";
 import { invoiceHref } from "@/lib/supplier-invoices";
 import { supplierNeedsTrn } from "@/lib/supplier-rules";
@@ -122,6 +122,30 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const endedHere = endedByPo.get(po.id) ?? [];
   const endedOfLine = new Map(endedHere.filter((e) => e.onLpo).map((e) => [e.lineId, e]));
   const cancelledHere = endedHere.filter((e) => !e.onLpo);
+  // Fix 2.2 (4 November 2026): this LPO replaces a refused one - the owner sees what changed, highlighted.
+  const { data: replacedRaw } = isMain && po.status === "pending_approval" ? await admin.from("purchase_orders").select("id, number, notes").eq("superseded_by", po.id).limit(1).maybeSingle() : { data: null };
+  let resendDiff: { number: string; reason: string; added: string[]; removed: string[]; changed: string[] } | null = null;
+  if (replacedRaw) {
+    const { data: oldL } = await admin.from("purchase_order_lines").select("description, quantity, unit_cost").eq("po_id", replacedRaw.id).eq("is_active", true);
+    const d = lpoDiff((oldL ?? []) as { description: string; quantity: number; unit_cost: number }[], lines.map((l) => ({ description: l.description, quantity: l.quantity, unit_cost: l.unit_cost })));
+    resendDiff = { number: replacedRaw.number as string, reason: refusalReasonOf(replacedRaw.notes as string | null), ...d };
+  }
+  // Fix 2.3: lines that changed AFTER the LPO was sent for approval - the owner always decides on the current list.
+  let sentChanges: string[] = [];
+  if (isMain && po.status === "pending_approval") {
+    const { data: allL } = await admin.from("purchase_order_lines").select("description, is_active, created_at, updated_at").eq("po_id", po.id).order("position");
+    const sentAt = new Date(po.created_at).getTime();
+    sentChanges = (allL ?? []).flatMap((l) => {
+      const name = String(l.description).toUpperCase();
+      if (l.is_active === false) return [`removed: ${name}`];
+      if (new Date(l.created_at as string).getTime() > sentAt + 90_000) return [`added: ${name}`];
+      if (new Date(l.updated_at as string).getTime() > new Date(l.created_at as string).getTime() + 90_000) return [`changed: ${name}`];
+      return [];
+    });
+  }
+  // A refused LPO is not a dead end: this page says so, and names the version that replaced it once Parts resend.
+  const refusedHere = po.status === "cancelled" && /refused/i.test(String(po.notes ?? ""));
+  const { data: replacedBy } = refusedHere && po.superseded_by ? await admin.from("purchase_orders").select("id, number").eq("id", po.superseded_by).maybeSingle() : { data: null };
 
   return (
     <>
@@ -277,6 +301,36 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                   </li>
                 ))}
               </ul>
+            </Card>
+          ) : null}
+          {refusedHere ? (
+            <Card className="flex flex-col gap-2 border-red-bar" data-lpo-refused-note>
+              <SectionLabel>Refused</SectionLabel>
+              <p className="text-sm font-semibold">{refusalReasonOf(po.notes) ? `Reason: ${refusalReasonOf(po.notes)}` : "Refused (no reason was written)."}</p>
+              {replacedBy ? (
+                <p className="text-sm">Replaced by <Link href={`/parts/orders/${replacedBy.id}`} className="font-bold underline underline-offset-4" data-lpo-replaced-by>{replacedBy.number as string}</Link>, which carries the current list.</p>
+              ) : (
+                <p className="text-sm text-muted">This is not a dead end: Parts fix the list on the <Link href={`/parts/${po.job_id}#lpo`} className="font-semibold underline underline-offset-4">Parts page</Link> and press &quot;Send for approval again&quot;.</p>
+              )}
+            </Card>
+          ) : null}
+          {resendDiff ? (
+            <Card className="flex flex-col gap-2 border-ink" data-lpo-diff>
+              <SectionLabel>Sent again after a refusal</SectionLabel>
+              <p className="text-sm">Replaces the refused <span className="font-bold">{resendDiff.number}</span>{resendDiff.reason ? ` (your reason: ${resendDiff.reason})` : ""}. What changed:</p>
+              {resendDiff.added.length || resendDiff.removed.length || resendDiff.changed.length ? (
+                <ul className="flex flex-col gap-1 text-sm">
+                  {resendDiff.added.map((a) => <li key={`a-${a}`} className="rounded-control bg-green-soft px-2 py-1 font-semibold" data-lpo-diff-added>+ {a}</li>)}
+                  {resendDiff.removed.map((r) => <li key={`r-${r}`} className="rounded-control bg-chip px-2 py-1 text-muted line-through" data-lpo-diff-removed>− {r}</li>)}
+                  {resendDiff.changed.map((c) => <li key={`c-${c}`} className="rounded-control bg-amber-soft px-2 py-1 font-semibold" data-lpo-diff-changed>~ {c}</li>)}
+                </ul>
+              ) : <p className="text-sm text-muted" data-lpo-diff-same>Same parts at the same prices.</p>}
+            </Card>
+          ) : null}
+          {sentChanges.length && po.status === "pending_approval" ? (
+            <Card className="flex flex-col gap-1 border-amber-bar" data-lpo-updated-note>
+              <SectionLabel>Updated after sending</SectionLabel>
+              <p className="text-sm">{sentChanges.slice(0, 10).join(" · ")}{sentChanges.length > 10 ? " · …" : ""}. The list and total above are the current ones.</p>
             </Card>
           ) : null}
           {po.status === "pending_approval" && canApprove ? (

@@ -24,6 +24,7 @@ import { loadDocAlerts } from "@/lib/doc-reminders-data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ElapsedTimer } from "@/components/ElapsedTimer";
 import { AccountsDashboard } from "./AccountsDashboard";
+import { GateInView } from "./GateInView";
 import { PartsDashboard } from "./PartsDashboard";
 import { AdvisorPanel } from "./AdvisorPanel";
 import { DashboardCars, type DashRow } from "./DashboardCars";
@@ -71,6 +72,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   if (role === "accounts") return <AccountsDashboard staff={staff} settings={settings} />;
   // Parts see parts, not the workshop chips: their dashboard is the parts screen.
   if (role === "parts") return <PartsDashboard staff={staff} />;
+  // Fix 2.6 (4 November 2026): the gate-in role sees the board read-only - cars, stages and the inspection
+  // reports, to help the parts desk. No customer names or phones, no money, no buttons that change anything.
+  if (role === "gate_in") return <GateInView staff={staff} />;
   const workingTime = workingTimeOf(settings);
 
   const supabase = await createClient();
