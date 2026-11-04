@@ -248,6 +248,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
           <>
             <CopyVin vin={v?.vin} />
             <LinkButton href="/parts" tone="secondary" size="lg">Parts desk</LinkButton>
+            <LinkButton href={`/jobs/${jobId}/inspection`} tone="secondary" size="lg" data-view-inspection={jobId}>View inspection</LinkButton>
             {can(role, "viewJobs") ? <LinkButton href={`/jobs/${jobId}`} tone="secondary" size="lg">Job card</LinkButton> : null}
           </>
         }

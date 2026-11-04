@@ -163,22 +163,36 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
     const gone = !j.is_open;
     const car = [j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ");
     return (
-      <Link key={j.id} href={`/parts/${j.id}`} className={`flex flex-wrap items-center gap-3 rounded-card border px-3 py-2 min-h-12 ${gone ? "border-line bg-chip" : allDone ? "border-green bg-green-soft" : "border-line bg-white"}`} data-all-car={j.id} data-all-done={allDone && !gone ? "1" : undefined} data-gone={gone ? "1" : undefined}>
-        <CarThumb size="sm" url={j.vehicle?.photo_path ? (pics.get(j.vehicle.photo_path) ?? null) : null} alt={j.vehicle ? formatPlate(j.vehicle) : j.job_number} />
-        <span className="font-extrabold uppercase">{j.vehicle ? formatPlate(j.vehicle) : "—"}</span>
-        <span className="text-sm uppercase">{car}</span>
-        <span className="text-sm text-muted">{j.job_number}</span>
-        {seesCust && j.customer ? <span className="text-sm text-muted uppercase">{j.customer.company_name ?? j.customer.full_name}</span> : null}
-        <PartsSteps size="dots" steps={steps} />
-        <span className={`ml-auto text-xs font-semibold ${allDone && !gone ? "text-green" : "text-muted"}`}>{gone ? `Gated out${j.gated_out_at ? ` ${formatDate(j.gated_out_at)}` : ""}` : allDone ? "All parts handed over" : (STATUS_LABELS[j.status as JobStatus] ?? j.status)}</span>
-      </Link>
+      <div key={j.id} className={`flex flex-wrap items-center gap-3 rounded-card border px-3 py-2 min-h-12 ${gone ? "border-line bg-chip" : allDone ? "border-green bg-green-soft" : "border-line bg-white"}`} data-all-car={j.id} data-all-done={allDone && !gone ? "1" : undefined} data-gone={gone ? "1" : undefined}>
+        <Link href={`/parts/${j.id}`} className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+          <CarThumb size="sm" url={j.vehicle?.photo_path ? (pics.get(j.vehicle.photo_path) ?? null) : null} alt={j.vehicle ? formatPlate(j.vehicle) : j.job_number} />
+          <span className="font-extrabold uppercase">{j.vehicle ? formatPlate(j.vehicle) : "—"}</span>
+          <span className="text-sm uppercase">{car}</span>
+          <span className="text-sm text-muted">{j.job_number}</span>
+          {seesCust && j.customer ? <span className="text-sm text-muted uppercase">{j.customer.company_name ?? j.customer.full_name}</span> : null}
+          <PartsSteps size="dots" steps={steps} />
+          <span className={`ml-auto text-xs font-semibold ${allDone && !gone ? "text-green" : "text-muted"}`}>{gone ? `Gated out${j.gated_out_at ? ` ${formatDate(j.gated_out_at)}` : ""}` : allDone ? "All parts handed over" : (STATUS_LABELS[j.status as JobStatus] ?? j.status)}</span>
+        </Link>
+        <Link href={`/jobs/${j.id}/inspection`} className="inline-flex min-h-9 items-center text-xs font-semibold underline underline-offset-4" data-view-inspection={j.id}>
+          View inspection
+        </Link>
+      </div>
     );
   };
 
   return (
     <>
       <LiveRefresh tables={["part_requests", "part_items", "jobs"]} />
-      <PageHeader title="Parts" subtitle="To price, to order, deliveries expected, received to issue." actions={<LinkButton href="/parts/no-home" tone="secondary" size="lg" data-returns-tab>Returns and leftovers{noHomeCount ? ` (${noHomeCount})` : ""}</LinkButton>} />
+      <PageHeader
+        title="Parts"
+        subtitle="To price, to order, deliveries expected, received to issue."
+        actions={
+          <>
+            <LinkButton href="/parts/inspections" tone="secondary" size="lg" data-inspection-list-link>Inspection reports</LinkButton>
+            <LinkButton href="/parts/no-home" tone="secondary" size="lg" data-returns-tab>Returns and leftovers{noHomeCount ? ` (${noHomeCount})` : ""}</LinkButton>
+          </>
+        }
+      />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <WaitingPanel staff={staff} />
