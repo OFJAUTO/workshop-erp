@@ -1,9 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { Lightbox } from "./Lightbox";
 import { PhotoButton } from "./PhotoButton";
+
+// The scanner (camera, edge finding, the PDF) loads only when "Scan document" is tapped.
+const LazyScanner = dynamic(() => import("./DocumentScanner").then((m) => m.DocumentScanner), { ssr: false });
 import { reportUploadFailure, shrinkPhoto } from "@/lib/upload-client";
 import { listRecords, onSendEvent, scopeOf, type SendEvent } from "@/lib/send-queue";
 import { pendingWords, useSendQueue, type PendingFile, type SentResult } from "@/lib/use-send-queue";
@@ -312,6 +316,8 @@ type Props = {
   single?: boolean;
   /** Files still on their way from here: the parent's button waits for a file it needs. */
   onPending?: (w: FilesWaiting) => void;
+  /** "Scan document" next to the photo button (4 November 2026): camera → straightened, cleaned, ONE PDF. */
+  scan?: boolean;
 };
 
 /**
@@ -326,10 +332,11 @@ export function JobFileUpload(props: Props) {
   return <Uploader key={`${props.jobId}|${props.kind}|${props.refId ?? ""}|${props.caption ?? ""}`} {...props} />;
 }
 
-function Uploader({ jobId, kind, refId = null, files, accept = "photo", label, disabled = false, onAdded, onRemoved, removable = false, compact = false, caption, form = null, alsoKinds, single = false, onPending }: Props) {
+function Uploader({ jobId, kind, refId = null, files, accept = "photo", label, disabled = false, onAdded, onRemoved, removable = false, compact = false, caption, form = null, alsoKinds, single = false, onPending, scan = true }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [preparing, setPreparing] = useState(0);
   const [open, setOpen] = useState<number | null>(null);
+  const [scanning, setScanning] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const fnRef = useRef(onAdded);
   const filesRef = useRef(files);
@@ -522,8 +529,14 @@ function Uploader({ jobId, kind, refId = null, files, accept = "photo", label, d
               <button type="button" onClick={() => { const el = fileRef.current; if (el) { el.value = ""; el.click(); } }} className={btn}>{text}</button>
             </>
           )}
+          {scan ? (
+            <button type="button" onClick={() => setScanning(true)} className={`${btn} text-xs`} data-scan-document>
+              Scan document
+            </button>
+          ) : null}
         </div>
       ) : null}
+      {scanning ? <LazyScanner onDone={(f) => { setScanning(false); void handleFiles([f]); }} onClose={() => setScanning(false)} /> : null}
       {open !== null && slides[open] ? <Lightbox slides={slides} index={open} onClose={() => setOpen(null)} onMove={setOpen} /> : null}
       {error ? <p className="text-xs font-semibold text-red" data-upload-error>{error}</p> : null}
     </div>

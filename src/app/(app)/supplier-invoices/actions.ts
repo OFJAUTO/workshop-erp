@@ -73,6 +73,7 @@ export async function queryInvoiceAction(key: string, formData: FormData) {
     await admin.from("purchase_orders").update({ supplier_invoice_query: comment, supplier_invoice_query_at: now, supplier_invoice_query_by: staff.id, supplier_invoice_checked_at: null, supplier_invoice_checked_by: null, updated_by: staff.id }).eq("id", s.poId);
     if (s.jobId) await admin.from("job_events").insert({ job_id: s.jobId, event_type: "supplier_invoice_query", note: `Supplier invoice ${row.number ?? ""} (${row.supplier}, ${s.poNumber}) queried by ${staff.display_name}: ${comment}`, created_by: staff.id });
   }
-  await notifyRoles(["parts"], { type: "supplier_invoice_missing", title: `Accounts query · ${invWords(row.number)} · ${row.supplier}`, body: `${staff.display_name}: ${comment}. Correct the invoice on the LPO page (${row.shares.map((s) => s.poNumber).join(", ")}).`, jobId: row.shares[0]?.jobId ?? null, href: `/parts/orders/${row.shares[0]?.poId}` });
-  return to({ message: "Sent back to Parts with your comment ✓" });
+  // 4 November 2026: Parts no longer enter invoices - the query asks them about the PAPER (check with the supplier, tell accounts), and accounts correct the entry.
+  await notifyRoles(["parts"], { type: "supplier_invoice_missing", title: `Accounts query · ${invWords(row.number)} · ${row.supplier}`, body: `${staff.display_name}: ${comment}. Check the paper with the supplier and tell accounts – they correct the entry (${row.shares.map((s) => s.poNumber).join(", ")}).`, jobId: row.shares[0]?.jobId ?? null, href: `/parts/orders/${row.shares[0]?.poId}` });
+  return to({ message: "Sent to Parts with your comment ✓ (they check the paper; you correct the entry here)" });
 }

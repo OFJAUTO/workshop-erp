@@ -517,7 +517,8 @@ async function runHousekeeping(): Promise<Record<string, number>> {
     for (const po of missing ?? []) {
       if (po.invoice_reminder_at && String(po.invoice_reminder_at) > dayAgo) continue;
       const days = po.received_at ? Math.max(0, Math.floor((Date.now() - Date.parse(po.received_at as string)) / 86400000)) : 0;
-      await notifyRoles(["parts"], { type: "supplier_invoice_missing", title: `Invoice missing · ${po.number}`, body: `${po.supplier_name}: no invoice ${days ? `${days} day${days === 1 ? "" : "s"} after the delivery` : "yet"}. Chase it and enter the number and the date.`, jobId: (po.job_id as string | null) ?? null, href: `/parts/orders/${po.id}` });
+      // 4 November 2026: the invoice is accounts' to collect and scan (parts keep the paper at the desk).
+      await notifyRoles(["accounts"], { type: "supplier_invoice_missing", title: `Invoice missing · ${po.number}`, body: `${po.supplier_name}: no invoice ${days ? `${days} day${days === 1 ? "" : "s"} after the delivery` : "yet"}. Collect the supplier's invoice from Parts and scan it.`, jobId: (po.job_id as string | null) ?? null, href: `/supplier-invoices?open=${encodeURIComponent(`follow:${po.id}`)}` });
       await admin.from("purchase_orders").update({ invoice_reminder_at: new Date().toISOString() }).eq("id", po.id);
       told++;
     }

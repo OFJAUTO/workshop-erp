@@ -351,14 +351,15 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {(po.status === "ordered" || po.status === "partly_received") && canManage ? (
             <Card className="flex flex-col gap-2 border-ink">
               <SectionLabel>Receive the delivery</SectionLabel>
-              <ReceiveForm lines={formLines} action={receivePurchaseOrder.bind(null, po.id)} jobId={po.job_id} poId={po.id} askInvoice={po.supplier_invoice_status !== "received"} poTotal={po.total_cost_aed} />
+              <ReceiveForm lines={formLines} action={receivePurchaseOrder.bind(null, po.id)} invoiceOpen={po.supplier_invoice_status !== "received"} />
             </Card>
           ) : null}
-          {!isMain && po.status === "received" && canManage && po.supplier_invoice_status !== "received" ? (
+          {/* Supplier invoices are scanned and entered by the owner and accounts ONLY (4 November 2026). */}
+          {!isMain && po.status === "received" && po.supplier_invoice_status !== "received" ? (
             <Card className={`flex flex-col gap-2 ${po.supplier_invoice_status === "to_follow" ? "!border-amber-bar" : ""}`}>
-              <SectionLabel>Supplier invoice{po.supplier_invoice_status === "to_follow" ? " · missing" : ""}</SectionLabel>
-              {po.supplier_invoice_status === "to_follow" ? <p className="text-sm font-semibold text-amber-bar" data-invoice-missing>Invoice missing: chase {po.supplier_name} and enter the number and the date. Accounts see it on their list, and Parts get one reminder a day.</p> : null}
-              <SupplierInvoiceForm jobId={po.job_id} poId={po.id} lines={formLines} action={supplierInvoice.bind(null, po.id)} poTotal={po.total_cost_aed} />
+              <SectionLabel>Supplier invoice{po.supplier_invoice_status === "to_follow" ? " · with accounts" : ""}</SectionLabel>
+              {po.supplier_invoice_status === "to_follow" ? <p className="text-sm font-semibold text-amber-bar" data-invoice-missing>{canPay ? `Collect the supplier's invoice from Parts, scan it and enter it here (or on the Supplier invoices page).` : `Invoice with accounts: they collect the supplier's paper from the desk and scan it. Keep it ready for them.`}</p> : null}
+              {canPay ? <SupplierInvoiceForm jobId={po.job_id} poId={po.id} lines={formLines} action={supplierInvoice.bind(null, po.id)} poTotal={po.total_cost_aed} /> : null}
             </Card>
           ) : null}
         </div>
@@ -385,7 +386,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {!isMain && po.status !== "pending_approval" && po.status !== "cancelled" && (po.supplier_invoice_status !== "none" || invoiceFiles.length > 0 || po.status === "received") ? (
             <Card className="flex flex-col gap-3 scroll-mt-4" id="paid" data-supplier-pay>
               <SectionLabel>{po.job_id ? <>Invoice files &amp; payment</> : "Payment"}</SectionLabel>
-              {po.job_id ? <InvoiceFiles jobId={po.job_id} poId={po.id} files={invoiceFiles} canEdit={canManage || canPay} /> : <p className="text-xs text-muted" data-stock-order-pay>Stock order (no car): the supplier invoice is the one entered when the order was received.</p>}
+              {po.job_id ? <InvoiceFiles jobId={po.job_id} poId={po.id} files={invoiceFiles} canEdit={canPay} /> : <p className="text-xs text-muted" data-stock-order-pay>Stock order (no car): the supplier invoice is the one entered when the order was received.</p>}
               {po.supplier_paid_at ? (
                 <div className="flex flex-col gap-2">
                 {!staff.viewingAs && (role === "owner" || po.supplier_paid_by === staff.id) ? <UndoButton at={po.supplier_paid_at} minutes={undoMinutes} done="Payment to the supplier recorded" action={undoSupplierPaid.bind(null, po.id)} /> : null}

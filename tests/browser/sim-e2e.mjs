@@ -426,12 +426,26 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
     await go(page, `${base}/parts/${jobId}`);
     await page.locator("[data-mark-received]").click();
     await sleep(500);
-    check("a14: THE supplier-invoice box in the panel — R4 (one component)", (await page.locator("[data-supplier-invoice-box]").count()) === 1);
-    await page.locator("[data-invoice-number]").fill("SIM-INV-1");
-    await page.locator("[data-invoice-date]").fill(today);
+    // 4 November 2026: receiving never asks for the invoice - accounts collect the paper and scan it.
+    check("a14: no invoice box at receiving; the note says accounts take it over", (await page.locator("[data-supplier-invoice-box]").count()) === 0 && (await page.locator("[data-receive-invoice-note]").count()) === 1);
     await shot(page, "a14-receive-actor");
     await page.locator("[data-no-stickers]").click();
     await sleep(2500);
+    // Accounts enter the invoice from the Waiting-for-invoice row (scan & enter), so the money side stays whole.
+    {
+      const [poRow] = await sql("select id from public.purchase_orders where job_id = $1 and kind = 'supplier' order by created_at desc limit 1", [jobId]);
+      if (poRow) {
+        const acc = await browserFor("accounts");
+        await go(acc.page, `${base}/supplier-invoices?open=${encodeURIComponent(`follow:${poRow.id}`)}`);
+        await acc.page.locator("[data-si-enter] [data-invoice-number]").fill("SIM-INV-1");
+        await acc.page.locator("[data-si-enter] [data-invoice-date]").fill(today);
+        await acc.page.locator("[data-si-enter-save]").click();
+        await acc.page.waitForURL(/message=|error=/, { timeout: 25000 });
+        const st = await sql("select supplier_invoice_status from public.purchase_orders where id = $1", [poRow.id]);
+        check("a14b: accounts entered the invoice (scan & enter) — R4", st[0]?.supplier_invoice_status === "received");
+        await acc.browser.close();
+      }
+    }
     // The desk marks them Ready for handover: the technician's tablet then lists them to take with his PIN.
     await go(page, `${base}/parts/handover/${jobId}`);
     const ready = page.locator("[data-mark-ready]");

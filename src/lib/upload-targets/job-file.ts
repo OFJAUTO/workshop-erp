@@ -21,6 +21,9 @@ function kindAllowed(roleId: string | null, kind: string, caption?: unknown): bo
   if (kind === "payment_proof") return roleId === "owner" || roleId === "accounts";
   // The slip an advisor sends to accounts with "Payment received – send to accounts" (2 November 2026).
   if (kind === "payment_report") return roleId === "owner" || roleId === "accounts" || roleId === "service_advisor";
+  // Supplier invoices are scanned and entered by the owner and accounts ONLY (4 November 2026): the parts
+  // desk's angled photos misread amounts, so accounts collect the paper and scan it properly.
+  if (kind === "supplier_invoice") return roleId === "owner" || roleId === "accounts";
   return roleId !== "team_leader" || kind === "bodyshop_photo" || (kind === "work_photo" && String(caption ?? "").startsWith("Film plotter"));
 }
 
@@ -100,8 +103,16 @@ export const jobFileTarget: TargetSpec = {
         id = row.id as string;
         // Zoho Books phase 2: a supplier-invoice scan added AFTER the bill posted attaches on the next sync run.
         if (kind === "supplier_invoice" && refId) {
-          const { data: zpo } = await admin.from("purchase_orders").select("id, zoho_bill_id").eq("id", refId).maybeSingle();
+          const { data: zpo } = await admin.from("purchase_orders").select("id, number, zoho_bill_id, supplier_invoice_path").eq("id", refId).maybeSingle();
           if ((zpo as { zoho_bill_id?: string | null } | null)?.zoho_bill_id) await reopenZoho("bill", refId);
+          // 4 November 2026: a scan added where the LPO already had a file is a replacement/addition - written down.
+          if (zpo) {
+            const { count } = await admin.from("job_files").select("id", { count: "exact", head: true }).eq("kind", "supplier_invoice").eq("ref_id", refId).is("removed_at", null).neq("id", id);
+            if ((count ?? 0) > 0 || (zpo as { supplier_invoice_path?: string | null }).supplier_invoice_path) {
+              const { data: who } = actor.staffId ? await admin.from("staff").select("display_name").eq("id", actor.staffId).maybeSingle() : { data: null };
+              await admin.from("job_events").insert({ job_id: jobId, event_type: "supplier_invoice", note: `${(zpo as { number?: string }).number ?? "LPO"}: another invoice file added (replacing or alongside the earlier one) by ${who?.display_name ?? "accounts"}`, created_by: actor.staffId });
+            }
+          }
         }
         // A QC post-scan PDF that arrived after the inspector moved on: it becomes the open round's post-scan when it has none
         // - only the round it was taken in (never the next round, after a failed check).

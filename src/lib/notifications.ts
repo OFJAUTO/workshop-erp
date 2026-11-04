@@ -20,7 +20,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "fixed_asset", label: "A tools and equipment order counts as a fixed asset (accounts)", locked: true },
   { type: "sticker_prompt", label: "A sticker or label to print (labels at receipt, battery warranty, oil service)", locked: true },
   { type: "supplier_invoice_mismatch", label: "A supplier invoice price differs from the LPO (accounts)", locked: true },
-  { type: "supplier_invoice_missing", label: "A supplier invoice is still missing (Parts, daily)", locked: true },
+  { type: "supplier_invoice_missing", label: "A supplier invoice is still missing (accounts, daily)", locked: true },
   { type: "supplier_invoice_received", label: "A supplier invoice arrived with the parts: check it (accounts)", locked: true },
   { type: "task_overdue", label: "A red task waited over 30 minutes (one bell)", locked: true },
   { type: "quote_revised_by_parts", label: "Parts changed: revised quotation to send" },

@@ -3,46 +3,33 @@
 import { PositionsLine } from "@/components/PositionsLine";
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { SupplierInvoiceBox } from "@/components/SupplierInvoiceBox";
-import { useFormKey, type FilesWaiting } from "@/components/JobFileUpload";
 import { Button } from "@/components/ui";
 
-export type ReceiveRow = { id: string; description: string; positions?: string[] | null; qty: number; supplier: string | null; state: string | null; poId: string | null; /** The approved price each (the LPO's), so the invoice's own price can be typed beside it. */ unitCost?: number | null };
-export type ReceivedRow = { id: string; description: string; positions?: string[] | null; qty: number };
+export type ReceiveRow = { id: string; description: string; positions?: string[] | null; qty: number; supplier: string | null; state: string | null; poId: string | null };
+export type ReceivedRow = { id: string; description: string; positions?: string[] | null; qty: number; /** The LPO's invoice is not entered yet: accounts collect and scan it (4 November 2026). */ invoiceWithAccounts?: boolean };
 type Action = (formData: FormData) => Promise<{ error?: string; ok?: boolean; message?: string }>;
 
 /**
  * Receiving parts from the supplier, all on this page: a tick box per line, Select all, "Mark N received",
- * then one panel with a sticker switch per part (one sticker per unit), THE supplier-invoice box
- * (SupplierInvoiceBox: number + date compulsory or "Invoice to follow", amount cross-checked, photos with X),
- * and "Print stickers" / "No stickers". Received lines stay underneath, collapsed and light green.
+ * then one panel with a sticker switch per part (one sticker per unit) and "Print stickers" / "No stickers".
+ * Since 4 November 2026 receiving never asks for the invoice: the supplier's paper goes to ACCOUNTS, who
+ * collect it from Parts, scan it and enter it (the received lines read "invoice with accounts" until then).
  */
-export function ReceivePanel({ jobId, rows, received, canAct, action, poTotals = {} }: { jobId: string; rows: ReceiveRow[]; received: ReceivedRow[]; canAct: boolean; action: Action; /** LPO totals before VAT by po id, for the invoice-amount cross-check. */ poTotals?: Record<string, number> }) {
+export function ReceivePanel({ jobId, rows, received, canAct, action }: { jobId: string; rows: ReceiveRow[]; received: ReceivedRow[]; canAct: boolean; action: Action }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [unticked, setUnticked] = useState<Set<string>>(new Set());
   const [panel, setPanel] = useState(false);
   const [noSticker, setNoSticker] = useState<Set<string>>(new Set());
-  // A real uuid: a supplier invoice scan sent before the save is tied to it in job_files.ref_id (a uuid column). It
-  // stays the same for this car's receiving across a reload (a scan still waiting on the device stays with it) and is
-  // renewed after each successful save.
-  const formTag = `receive:${jobId}`;
-  const { key: clientKey, renew } = useFormKey(formTag, jobId);
-  const [scanWait, setScanWait] = useState<FilesWaiting>({ count: 0, stopped: 0 });
   const [msg, setMsg] = useState<{ tone: "error" | "success"; text: string } | null>(null);
   const [pending, start] = useTransition();
   const ticked = rows.filter((r) => !unticked.has(r.id));
-  // The amount cross-check works when every ticked part sits on the SAME LPO; a mixed tick skips it.
-  const tickedPoIds = Array.from(new Set(ticked.map((r) => r.poId)));
-  const singlePoId = tickedPoIds.length === 1 && tickedPoIds[0] ? tickedPoIds[0] : null;
-  const poTotal = singlePoId ? (poTotals[singlePoId] ?? null) : null;
   const toggle = (id: string) => setUnticked((u) => { const n = new Set(u); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const submit = (print: boolean) => start(async () => {
     setMsg(null);
     const fd = formRef.current ? new FormData(formRef.current) : new FormData();
     for (const r of ticked) fd.append("part", r.id);
     const stickerIds = ticked.filter((r) => !noSticker.has(r.id)).map((r) => r.id);
-    const usedKey = clientKey;
     const r = await action(fd);
     if (r.error) { setMsg({ tone: "error", text: r.error }); return; }
     if (print && stickerIds.length) window.open(`/parts/labels/${jobId}?parts=${stickerIds.join(",")}&auto=1`, "_blank", "noopener");
@@ -50,11 +37,8 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, poTotals =
     setPanel(false);
     setUnticked(new Set());
     setNoSticker(new Set());
-    renew(usedKey);
     router.refresh();
   });
-  // The save waits while the invoice photo is only on this device: its path and its tie to the LPO need the server's copy.
-  const scanHeld = scanWait.count > 0;
   return (
     <form ref={formRef} onSubmit={(e) => e.preventDefault()} className="flex flex-col gap-3" data-receive-panel>
       {rows.length ? (
@@ -93,11 +77,6 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, poTotals =
                   return (
                     <li key={r.id} className="flex items-center gap-3 min-h-11" data-sticker-row={r.id}>
                       <span className="flex flex-1 flex-col"><span className="font-semibold">{r.description}<span className="font-normal text-muted"> × {r.qty}</span></span><PositionsLine positions={r.positions} /></span>
-                      {r.unitCost !== null && r.unitCost !== undefined ? (
-                        <label className="flex flex-col text-[11px] font-semibold text-muted">On the invoice, each
-                          <input name={`price__part__${r.id}`} defaultValue={String(r.unitCost)} inputMode="decimal" className="h-9 w-24 rounded-control border border-line-strong px-2 text-right text-sm text-ink" aria-label={`Price each on the supplier's invoice for ${r.description}`} data-invoice-price={r.id} />
-                        </label>
-                      ) : null}
                       <button type="button" onClick={() => setNoSticker((u) => { const n = new Set(u); if (n.has(r.id)) n.delete(r.id); else n.add(r.id); return n; })} aria-pressed={sticker} data-sticker-switch className={`inline-flex min-h-9 items-center gap-1.5 rounded-control border px-3 text-xs font-bold ${sticker ? "border-ink bg-ink text-white" : "border-line-strong bg-white text-muted"}`}>
                         {sticker ? `Stickers × ${r.qty}` : "No sticker"}
                       </button>
@@ -105,18 +84,12 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, poTotals =
                   );
                 })}
               </ul>
-              <input type="hidden" name="client_key" value={clientKey ?? ""} />
-              <SupplierInvoiceBox jobId={jobId} poId={singlePoId} poTotal={poTotal} clientKey={clientKey} formTag={formTag} onWaiting={setScanWait} />
+              <p className="text-xs text-muted" data-receive-invoice-note>The supplier&apos;s invoice is NOT entered here: keep the paper at the desk – accounts collect and scan it (they are told the moment you save).</p>
               <div className="flex flex-wrap gap-2">
-                <Button type="button" size="lg" disabled={pending || scanHeld || !clientKey} onClick={() => submit(true)} data-print-stickers>{pending ? "Saving…" : "Print stickers"}</Button>
-                <Button type="button" tone="secondary" size="lg" disabled={pending || scanHeld || !clientKey} onClick={() => submit(false)} data-no-stickers>No stickers</Button>
+                <Button type="button" size="lg" disabled={pending} onClick={() => submit(true)} data-print-stickers>{pending ? "Saving…" : "Print stickers"}</Button>
+                <Button type="button" tone="secondary" size="lg" disabled={pending} onClick={() => submit(false)} data-no-stickers>No stickers</Button>
                 <Button type="button" tone="ghost" size="lg" onClick={() => setPanel(false)}>Back</Button>
               </div>
-              {scanHeld ? (
-                <span className="text-xs font-semibold text-amber-bar" data-scan-sending>
-                  {scanWait.stopped ? "The invoice photo could not be sent – try again or remove it (it can be added on the LPO later)." : "The invoice photo is still sending – the save waits for it (or remove it and add it on the LPO later)."}
-                </span>
-              ) : null}
             </div>
           ) : null}
         </>
@@ -130,7 +103,7 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, poTotals =
               <li key={r.id} className="flex items-center gap-2 rounded-control bg-green-soft px-2 py-2" data-received-line={r.id}>
                 <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green text-xs font-bold text-white">✓</span>
                 <span className="flex flex-col"><span className="font-semibold">{r.description}</span><PositionsLine positions={r.positions} /></span><span className="text-muted">× {r.qty}</span>
-                <span className="ml-auto text-xs font-semibold text-green">Received</span>
+                <span className="ml-auto text-xs font-semibold text-green" data-received-words={r.invoiceWithAccounts ? "invoice-with-accounts" : "received"}>{r.invoiceWithAccounts ? "Received · invoice with accounts" : "Received"}</span>
               </li>
             ))}
           </ul>

@@ -1,6 +1,7 @@
 "use server";
 
 import { depositShortText, depositState } from "@/lib/deposits";
+import { formatPlate } from "@/lib/types";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -171,12 +172,6 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
   const po = toPo(raw as Record<string, unknown>);
   if (!["ordered", "partly_received"].includes(po.status)) redirect(`${back}?error=${encodeURIComponent("This order is not out for delivery.")}`);
   const lines = ((lineRows ?? []) as Record<string, unknown>[]).map(toPoLine);
-  // The invoice rules run BEFORE anything is received: number and date (checked by the one rulebook) or an
-  // explicit "Invoice to follow" — unless the invoice is already on file from an earlier delivery.
-  if (po.supplier_invoice_status !== "received") {
-    const check = checkSupplierInvoice({ toFollow: formData.get("to_follow") === "on", number: blankToNull(formData.get("invoice_number")), date: blankToNull(formData.get("invoice_date")), amount: Number(String(formData.get("invoice_amount") ?? "").replace(/[^\d.]/g, "")) || null, poTotal: Number(po.total_cost_aed) || null, amountConfirmed: formData.get("amount_confirmed") === "on", today: dubaiToday() });
-    if (!check.ok) redirect(`${back}?error=${encodeURIComponent(check.error)}`);
-  }
   let received = 0;
   const now = new Date().toISOString();
   for (const l of lines) {
@@ -201,12 +196,25 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
   const { data: after } = await admin.from("purchase_order_lines").select("quantity, received_qty").eq("po_id", poId).eq("is_active", true);
   const allIn = (after ?? []).every((l) => Number(l.received_qty) + 0.005 >= Number(l.quantity));
   await admin.from("purchase_orders").update({ status: allIn ? "received" : "partly_received", received_at: allIn ? now : null, updated_by: staff.id }).eq("id", poId);
-  // The supplier invoice entered with the delivery (optional; stock orders need no scan).
-  const invoiceNow = formData.get("to_follow") === "on" || blankToNull(formData.get("invoice_number"));
-  const invoiceResult = invoiceNow ? await applySupplierInvoice(po, (((await admin.from("purchase_order_lines").select(PO_LINE_SELECT).eq("po_id", poId).eq("is_active", true)).data ?? []) as Record<string, unknown>[]).map(toPoLine), formData, staff) : null;
+  // 4 November 2026: receiving never enters the invoice. The LPO without one goes on the Waiting-for-invoice
+  // list and ACCOUNTS hear at once - they collect the supplier's paper from Parts, scan it and enter it.
+  let invoiceWords = "";
+  if (po.supplier_invoice_status !== "received") {
+    await admin.from("purchase_orders").update({ supplier_invoice_status: "to_follow", supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", poId).neq("supplier_invoice_status", "received");
+    const { data: jv } = po.job_id ? await admin.from("jobs").select("job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("id", po.job_id).maybeSingle() : { data: null };
+    const plate = jv?.vehicle ? formatPlate(jv.vehicle as unknown as Parameters<typeof formatPlate>[0]) : "";
+    await notifyRoles(["accounts"], {
+      type: "supplier_invoice_missing",
+      title: `Collect the supplier's invoice · ${jv?.job_number ?? po.number}`,
+      body: `Parts received from ${po.supplier_name}${jv?.job_number ? ` for ${jv.job_number}` : ` (${po.number})`}${plate ? ` · ${plate}` : ""} – collect the supplier's invoice from Parts and scan it.`,
+      jobId: po.job_id,
+      href: `/supplier-invoices?open=${encodeURIComponent(`follow:${poId}`)}`,
+    });
+    invoiceWords = " The invoice goes to accounts: keep the supplier's paper at the desk.";
+  }
   if (!po.job_id) {
     refresh(null, poId);
-    redirect(`${back}?message=${encodeURIComponent(`${allIn ? "Received in full: the items are on the shelf." : "Partial delivery recorded: the items are on the shelf."}${invoiceResult?.message ? ` ${invoiceResult.message}` : invoiceResult?.error ? ` Invoice: ${invoiceResult.error}` : ""}`)}`);
+    redirect(`${back}?message=${encodeURIComponent(`${allIn ? "Received in full: the items are on the shelf." : "Partial delivery recorded: the items are on the shelf."}${invoiceWords}`)}`);
   }
   const job = await jobBrief(po.job_id);
   const { data: open } = await admin.from("part_items").select("id").eq("job_id", po.job_id).eq("is_active", true).in("order_status", ["to_order", "ordered", "partly_received"]);
@@ -217,7 +225,7 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
   await notifyStaff(ids, n);
   await notifyManagers(job?.department ?? null, n);
   refresh(po.job_id, poId);
-  const doneMessage = `${allIn ? "Received in full. The stickers printed; issue the parts." : "Partial delivery recorded. The stickers printed."}${invoiceResult?.message ? ` ${invoiceResult.message}` : invoiceResult?.error ? ` Invoice: ${invoiceResult.error}` : allIn ? " Enter the supplier invoice if it came with the delivery." : ""}`;
+  const doneMessage = `${allIn ? "Received in full. The stickers printed; issue the parts." : "Partial delivery recorded. The stickers printed."}${invoiceWords}`;
   // The stickers of the parts just received print at once; Back returns to the LPO with the message.
   redirect(`/parts/labels/${po.job_id}?auto=1&back=${encodeURIComponent(`${back}?message=${encodeURIComponent(doneMessage)}`)}`);
 }
@@ -291,10 +299,36 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
   return { message: mismatches ? `Supplier invoice saved. The price went up above the limit: it waits for the owner's OK (or Query with supplier).` : diffs.length ? `Supplier invoice saved. ${priced.decision.increase > 0 ? "Price up within the limit: accepted, the owner is told." : "Price down: accepted."}` : "Supplier invoice saved." };
 }
 
-/** The supplier invoice entered on its own, after the delivery. */
+/**
+ * The supplier invoice entered from the Supplier invoices page's waiting row (4 November 2026): accounts
+ * scan the paper there, the reader pre-fills the figures, they check and save. Owner + accounts only; an
+ * optional remark (when the paper differs from the LPO) goes on the record.
+ */
+export async function enterInvoiceFromList(poId: string, rowKey: string, formData: FormData) {
+  const staff = await requirePermission("viewPurchaseOrders");
+  const back = (q: string): never => redirect(`/supplier-invoices?open=${encodeURIComponent(rowKey)}&${q}`);
+  if (!["owner", "accounts"].includes(staff.role_id) || staff.viewingAs) return back(`error=${encodeURIComponent("Supplier invoices are entered by accounts (or the owner).")}`);
+  const admin = createAdminClient();
+  const [{ data: raw }, { data: lineRows }] = await Promise.all([admin.from("purchase_orders").select(PO_SELECT).eq("id", poId).maybeSingle(), admin.from("purchase_order_lines").select(PO_LINE_SELECT).eq("po_id", poId).eq("is_active", true)]);
+  if (!raw) return back(`error=${encodeURIComponent("That LPO no longer exists.")}`);
+  const po = toPo(raw as Record<string, unknown>);
+  const r = await applySupplierInvoice(po, ((lineRows ?? []) as Record<string, unknown>[]).map(toPoLine), formData, staff);
+  const remark = blankToNull(formData.get("remark"));
+  if (!r.error && remark) {
+    await admin.from("purchase_orders").update({ notes: [po.notes, `Invoice remark (${staff.display_name}): ${remark.slice(0, 300)}`].filter(Boolean).join("\n"), updated_by: staff.id }).eq("id", poId);
+    if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: invoice remark by ${staff.display_name} – ${remark.slice(0, 300)}`, created_by: staff.id });
+  }
+  refresh(po.job_id, poId);
+  // The row's key changes once the invoice is entered (follow:<id> becomes the invoice's own key): reopen by the number.
+  const openAfter = r.error ? rowKey : `${po.supplier_id ?? po.supplier_name.trim().toLowerCase()}|${String(formData.get("invoice_number") ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "")}`;
+  redirect(`/supplier-invoices?open=${encodeURIComponent(openAfter)}&${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Saved.")}`);
+}
+
+/** The supplier invoice entered on its own, after the delivery. Owner + accounts ONLY (4 November 2026). */
 export async function supplierInvoice(poId: string, formData: FormData) {
-  const staff = await requirePermission("managePurchaseOrders");
+  const staff = await requirePermission("viewPurchaseOrders");
   const back = `/parts/orders/${poId}`;
+  if (!["owner", "accounts"].includes(staff.role_id) || staff.viewingAs) redirect(`${back}?error=${encodeURIComponent("Supplier invoices are entered by accounts (or the owner): keep the paper at the desk, accounts collect and scan it.")}`);
   const admin = createAdminClient();
   const [{ data: raw }, { data: lineRows }] = await Promise.all([admin.from("purchase_orders").select(PO_SELECT).eq("id", poId).maybeSingle(), admin.from("purchase_order_lines").select(PO_LINE_SELECT).eq("po_id", poId).eq("is_active", true)]);
   if (!raw) redirect("/parts/orders");

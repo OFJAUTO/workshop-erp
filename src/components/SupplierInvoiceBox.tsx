@@ -22,6 +22,7 @@ export function SupplierInvoiceBox({
   canFollow = true,
   formTag,
   onWaiting,
+  prefill = null,
 }: {
   jobId: string | null;
   poId: string | null;
@@ -33,12 +34,23 @@ export function SupplierInvoiceBox({
   formTag?: string;
   /** Scans still on their way: the caller's save waits for them. */
   onWaiting?: (w: FilesWaiting) => void;
+  /** "Read the scan" (4 November 2026) pre-fills the fields; a new key applies a new reading. */
+  prefill?: { key: number; number: string; date: string; amount: string } | null;
 }) {
   const [toFollow, setToFollow] = useState(false);
   const [number, setNumber] = useState("");
   const [date, setDate] = useState("");
   const [amount, setAmount] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  // The reader's figures land once per reading (the prev-value pattern); accounts then correct them freely.
+  const [prefillKey, setPrefillKey] = useState(0);
+  if (prefill && prefill.key !== prefillKey) {
+    setPrefillKey(prefill.key);
+    setNumber(prefill.number);
+    setDate(prefill.date);
+    setAmount(prefill.amount);
+    setConfirmed(false);
+  }
   // The scans are tied to the LPO, else to the save's key; the list follows that reference (a new one starts empty).
   const ref = poId ?? clientKey ?? null;
   const [fileState, setFileState] = useState<{ ref: string | null; files: JobFile[] }>({ ref, files: [] });
@@ -109,7 +121,7 @@ export function SupplierInvoiceBox({
           {!check.ok && (number || date || amountOff) ? <span className="text-xs font-semibold text-amber-bar" data-invoice-check-line>{check.error}</span> : null}
         </>
       ) : (
-        <p className="text-xs text-muted">The LPO shows amber &quot;Invoice missing&quot;, accounts see it on their list, and Parts get one reminder a day until the number and date are entered.</p>
+        <p className="text-xs text-muted">The LPO shows amber &quot;Invoice missing&quot; and accounts get one reminder a day until the number and date are entered.</p>
       )}
     </div>
   );

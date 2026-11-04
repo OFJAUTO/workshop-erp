@@ -1,7 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import type { SendTarget } from "@/lib/send-queue";
+
+// The scanner (camera, edge finding, the PDF) loads only when "Scan document" is tapped.
+const LazyScanner = dynamic(() => import("./DocumentScanner").then((m) => m.DocumentScanner), { ssr: false });
 import { pendingWords, useSendQueue, type PendingFile, type SentResult } from "@/lib/use-send-queue";
 import { shrinkPhoto } from "@/lib/upload-client";
 import { newUuid } from "@/lib/uuid";
@@ -148,6 +152,7 @@ export function QueuedProofView({
   waitingHint?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [scanning, setScanning] = useState(false);
   return (
     <span className="inline-flex max-w-full flex-col gap-1.5" data-queued-proof>
       <span className="inline-flex flex-wrap items-center gap-2">
@@ -179,8 +184,12 @@ export function QueuedProofView({
         >
           {proof.busy ? "Preparing…" : label}
         </button>
+        <button type="button" disabled={proof.busy} onClick={() => setScanning(true)} className={buttonClass} data-scan-document>
+          Scan document
+        </button>
         {proof.error ? <span className="text-xs font-semibold text-red" data-queued-error>{proof.error}</span> : null}
       </span>
+      {scanning ? <LazyScanner onDone={(f) => { setScanning(false); void proof.pick(f); }} onClose={() => setScanning(false)} /> : null}
       {proof.pending.map((p) => (
         <QueuedTile
           key={p.id}

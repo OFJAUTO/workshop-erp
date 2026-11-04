@@ -115,6 +115,11 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
     for (const r of rows.filter((x) => x.status === "new")) {
       out.push({ jobId: `si:${r.key}`, plate: r.number ? invWords(r.number) : "Supplier invoice", car: r.supplier, what: `Supplier invoice to check · ${r.shares.map((x) => x.poNumber).join(", ")}${r.duplicateOf ? " · possible duplicate" : ""}`, amount: aed(r.total), actionLabel: "Check", href: `/supplier-invoices?open=${encodeURIComponent(r.key)}`, always: true, urgency: r.duplicateOf ? "red" : "amber", since: r.at ?? undefined, hint: "Open it next to the parts it covers, then Mark checked (the bill goes to Zoho) or Query it with Parts." });
     }
+    // 4 November 2026: parts received with the invoice still to come - ACCOUNTS collect the paper from Parts and scan it.
+    for (const r of rows.filter((x) => x.status === "waiting")) {
+      const share = r.shares[0];
+      out.push({ jobId: `sicollect:${r.key}`, plate: share ? share.poNumber : "LPO", car: r.supplier, what: `Parts received from ${r.supplier}${share?.jobNumber ? ` for ${share.jobNumber}` : ""}${share?.plate ? ` · ${share.plate}` : ""} – collect the supplier's invoice from Parts and scan it`, amount: aed(r.total), actionLabel: "Scan & enter", href: `/supplier-invoices?open=${encodeURIComponent(r.key)}`, always: true, urgency: "amber", since: r.at ?? undefined, hint: "The paper is at the parts desk. Open the row, Scan document (or attach the PDF), Read the scan, check the figures and save - then Mark checked." });
+    }
     // Fix 4 (4 November 2026): a supplier paid without the proof of payment on file - one amber line until it is uploaded.
     for (const r of rows.filter((x) => x.proofMissing)) {
       out.push({ jobId: `siproof:${r.key}`, plate: r.number ? invWords(r.number) : "Supplier payment", car: r.supplier, what: `Paid to supplier – proof of payment missing (${r.shares.filter((s) => s.paidAt && !s.proofPath).map((s) => s.poNumber).join(", ")})`, amount: aed(r.paidAmount || r.total), actionLabel: "Upload proof", href: `/supplier-invoices?open=${encodeURIComponent(r.key)}`, always: true, urgency: "amber", since: r.paidAt ?? undefined, hint: "Open the invoice and upload the bank slip or card slip on the paid LPO's line." });

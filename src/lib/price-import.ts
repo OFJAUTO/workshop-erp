@@ -994,3 +994,87 @@ export function supplierMatches(hint: string | null | undefined, name: string): 
   while (k < fh.length && k < fn.length && fh[k] === fn[k]) k++;
   return k >= 8;
 }
+
+/* ------------------------------------------------------------------------------------------------
+   The invoice facts (4 November 2026): accounts scan the supplier's invoice and the reader pre-fills
+   the number, the date and the money - gross, discount, before VAT, VAT and the net total - from the
+   PDF's own words (a camera scan with no words goes through the OCR reader instead). Pure.
+   ------------------------------------------------------------------------------------------------ */
+
+export type InvoiceFacts = { number: string | null; date: string | null; gross: number | null; discount: number | null; beforeVat: number | null; vat: number | null; net: number | null };
+
+/** A printed date as the ERP's yyyy-mm-dd (day first unless the day slot can only be the month). */
+export function invoiceDateIso(s: string | null | undefined): string | null {
+  const t = String(s ?? "").trim();
+  if (!t) return null;
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(t);
+  const make = (y: number, m: number, d: number) => {
+    if (y < 100) y += 2000;
+    if (m < 1 || m > 12 || d < 1 || d > 31 || y < 2000 || y > 2100) return null;
+    return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  };
+  if (iso) return make(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+  const num = /\b(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\b/.exec(t);
+  if (num) {
+    let d = Number(num[1]);
+    let m = Number(num[2]);
+    // Day first is the paper's habit here; a first number above 12 can only be the day, a second above 12 means month-first.
+    if (m > 12 && d <= 12) [d, m] = [m, d];
+    return make(Number(num[3]), m, d);
+  }
+  const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  const word = /\b(\d{1,2})[ \-]([A-Za-z]{3,9})[ ,\-]+(\d{2,4})\b/.exec(t);
+  if (word) {
+    const m = MONTHS.indexOf(word[2].slice(0, 3).toLowerCase()) + 1;
+    if (m) return make(Number(word[3]), m, Number(word[1]));
+  }
+  return null;
+}
+
+const FACT_AMOUNT = /(?:aed\s*)?(-?[\d,]+(?:\.\d{1,3})?)\s*$/i;
+const NOT_A_NUMBER_TOKEN = /^\d{15}$/; // a TRN, never an invoice number
+
+/** The invoice's own facts out of its words: number, date and the money rows, by their printed labels. */
+export function invoiceFacts(text: string): InvoiceFacts {
+  const lines = String(text ?? "").split(/\r?\n/).map((l) => l.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const facts: InvoiceFacts = { number: null, date: null, gross: null, discount: null, beforeVat: null, vat: null, net: null };
+  for (const line of lines) {
+    // The invoice number: on a line that says so, the first token with a digit in it.
+    if (!facts.number) {
+      const m = /(?:tax invoice|invoice|inv\.?|bill)\s*(?:no\.?|number|num\.?|#|№)?\s*[:#\-]?\s*([A-Za-z0-9][A-Za-z0-9\/\-]{0,24})\b/i.exec(line);
+      const token = m?.[1] ?? null;
+      if (token && /\d/.test(token) && !NOT_A_NUMBER_TOKEN.test(token) && !/^date/i.test(token) && !invoiceDateIso(token)) facts.number = token.toUpperCase();
+    }
+    // The date: a line that names it, else the first date near the top.
+    if (!facts.date && /\bdate\b/i.test(line)) facts.date = invoiceDateIso(line);
+  }
+  if (!facts.date) for (const line of lines.slice(0, 25)) { const d = invoiceDateIso(line); if (d) { facts.date = d; break; } }
+  // The money rows by their labels, last match wins (totals sit at the bottom).
+  const moneyOf = (line: string) => {
+    const m = FACT_AMOUNT.exec(line);
+    return m ? parseNumber(m[1]) : null;
+  };
+  for (const line of lines) {
+    const v = moneyOf(line);
+    if (v === null) continue;
+    const label = line.slice(0, line.length - (FACT_AMOUNT.exec(line)?.[0].length ?? 0)).trim().toLowerCase();
+    if (!label) continue;
+    if (/^(total )?gross( amount| total)?\b/.test(label)) facts.gross = v;
+    else if (/discount/.test(label)) facts.discount = Math.abs(v);
+    else if (/(sub ?total|total before vat|total excl|taxable( amount)?|net amount)\b/.test(label)) facts.beforeVat = v;
+    else if (/^(output )?(vat|tax)( amount)?(\s*\d+(\.\d+)?\s*%)?\s*:?$/.test(label) || /\bvat\s*\d+(\.\d+)?\s*%$/.test(label)) facts.vat = v;
+    else if (/(net total|grand total|total incl|amount due|total due|total payable|net aed)\b/.test(label)) facts.net = v;
+    else if (/^total( aed| \(aed\))?\s*:?$/.test(label)) {
+      // A plain "Total": before VAT when a VAT row follows, else the net.
+      if (facts.beforeVat === null) facts.beforeVat = v;
+      else facts.net = v;
+    }
+  }
+  // The rows must add up where two of the three are known.
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  if (facts.beforeVat !== null && facts.vat !== null && facts.net === null) facts.net = r2(facts.beforeVat + facts.vat);
+  if (facts.net !== null && facts.vat !== null && facts.beforeVat === null) facts.beforeVat = r2(facts.net - facts.vat);
+  if (facts.net !== null && facts.beforeVat !== null && facts.vat === null && facts.net >= facts.beforeVat) facts.vat = r2(facts.net - facts.beforeVat);
+  if (facts.gross !== null && facts.discount !== null && facts.beforeVat === null) facts.beforeVat = r2(facts.gross - facts.discount);
+  return facts;
+}

@@ -44,3 +44,34 @@ export async function ocrTable(data: Uint8Array | Buffer, mediaType: string): Pr
   if (!headings.length || !rows.length) return { error: "No table was found in the picture.", status: 422 };
   return { result: readTable([headings, ...rows, ...totals]), model: MODEL, usage: body.usage ?? null };
 }
+
+const FACTS_PROMPT = `This is a supplier's invoice (car parts, UAE). Read ONLY the header facts and the money rows, exactly as printed.
+Reply with JSON only, no words around it, in this shape:
+{"invoice_number": "2374", "invoice_date": "28/10/2026", "gross": "1,240.00", "discount": "200.00", "before_vat": "1,040.00", "vat": "52.00", "net_total": "1,092.00"}
+Rules: every value the exact text printed (keep commas); a fact that is not on the paper is "" (empty), never a guess; invoice_number is the supplier's own invoice/bill number (never the TRN, never a date, never our LPO number); before_vat is the taxable amount (subtotal / net amount / total before VAT); net_total is the final amount including VAT (grand total / amount due).`;
+
+export type OcrFacts = { invoice_number: string; invoice_date: string; gross: string; discount: string; before_vat: string; vat: string; net_total: string };
+
+/** Reads the invoice's header facts out of a picture (one page of a camera scan) with the Anthropic API. */
+export async function ocrInvoiceFacts(data: Uint8Array | Buffer, mediaType: string): Promise<{ facts?: OcrFacts; error?: string; status?: number }> {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return { error: "Reading scans is not switched on yet (no reading key in the environment): type the figures from the paper.", status: 503 };
+  if (data.byteLength > 8 * 1024 * 1024) return { error: "The scan page is too large to read. Type the figures from the paper.", status: 400 };
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({ model: MODEL, max_tokens: 600, messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: mediaType, data: Buffer.from(data).toString("base64") } }, { type: "text", text: FACTS_PROMPT }] }] }),
+    signal: AbortSignal.timeout(55_000),
+  }).catch(() => null);
+  if (!res) return { error: "The reading service did not answer. Try again, or type the figures.", status: 502 };
+  const body = (await res.json().catch(() => ({}))) as { content?: { type: string; text?: string }[]; error?: { message?: string } };
+  if (!res.ok) return { error: body.error?.message ?? `The reading service refused (${res.status}).`, status: 502 };
+  const text = (body.content ?? []).filter((c) => c.type === "text").map((c) => c.text ?? "").join("\n");
+  try {
+    const parsed = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)) as Record<string, unknown>;
+    const s = (k: string) => String(parsed[k] ?? "").trim();
+    return { facts: { invoice_number: s("invoice_number"), invoice_date: s("invoice_date"), gross: s("gross"), discount: s("discount"), before_vat: s("before_vat"), vat: s("vat"), net_total: s("net_total") } };
+  } catch {
+    return { error: "The scan could not be read. Type the figures from the paper.", status: 422 };
+  }
+}

@@ -114,16 +114,24 @@ await section("2 stock order", async () => {
   await afterSubmit(pp);
   check("2: Parts mark it ordered", (await sql("select status from public.purchase_orders where id = $1", [stockPoId]))[0]?.status === "ordered");
   await go(pp, `${base}/parts/orders/${stockPoId}`);
-  check("2: the delivery form asks for the supplier invoice at the same time (THE one box)", (await pp.locator("[data-receive-form] [data-supplier-invoice-box]").count()) === 1);
-  await pp.locator('input[name="invoice_number"]').fill("SINV-E2E-1");
-  await pp.locator('input[name="invoice_date"]').fill("2026-10-20");
-  await pp.locator("[data-receive-form] details summary").click();
+  // 4 November 2026: receiving never asks for the invoice (accounts collect the paper and scan it).
+  check("2: the delivery form has NO invoice box; the note says accounts take it over", (await pp.locator("[data-receive-form] [data-supplier-invoice-box]").count()) === 0 && (await pp.locator("[data-receive-form] [data-receive-invoice-note]").count()) === 1);
   const lineId = (await sql("select id from public.purchase_order_lines where po_id = $1", [stockPoId]))[0]?.id;
-  await pp.locator(`[data-invoice-price="${lineId}"]`).fill("12");
   await pp.locator("[data-record-delivery]").click();
   await afterSubmit(pp);
   const after = (await sql("select i.quantity::float as quantity, i.unit_cost::float as cost, i.low_notified_at, (select count(*)::int from public.stock_movements m where m.stock_item_id = i.id and m.kind = 'in' and m.po_id = $2) as moves from public.stock_items i where i.id = $1", [itemId, stockPoId]))[0];
   check("2: the delivery lands on the shelf with the cost averaged in", after?.quantity === 12 && after?.cost === 10 && after?.moves === 1, JSON.stringify(after));
+  // Accounts enter the invoice on the LPO (owner + accounts only), the line's invoice price with it.
+  const { browser: a2b, page: a2p } = await browserFor("accounts", { viewport: { width: 1366, height: 1400 } });
+  await go(a2p, `${base}/parts/orders/${stockPoId}`);
+  check("2: a parts login has no invoice form; accounts do", (await pp.locator("[data-save-invoice]").count()) === 0 && (await a2p.locator("[data-save-invoice]").count()) === 1);
+  await a2p.locator('input[name="invoice_number"]').fill("SINV-E2E-1");
+  await a2p.locator('input[name="invoice_date"]').fill("2026-10-20");
+  await a2p.locator("form:has([data-save-invoice]) details summary").click();
+  await a2p.locator(`[data-invoice-price="${lineId}"]`).fill("12");
+  await a2p.locator("[data-save-invoice]").click();
+  await afterSubmit(a2p);
+  await a2b.close();
   const poAfter = (await sql("select status, supplier_invoice_status, supplier_invoice_number, supplier_invoice_checked_at from public.purchase_orders where id = $1", [stockPoId]))[0];
   const line = (await sql("select invoice_unit_cost::float as price, invoice_check from public.purchase_order_lines where id = $1", [lineId]))[0];
   // 1 November 2026: the supplier invoice is the real cost; +AED 24 on a 120 LPO is within the limit (the higher of 5% or

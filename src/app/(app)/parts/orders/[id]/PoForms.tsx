@@ -11,7 +11,7 @@ import { realPartNumber } from "@/lib/parts-rows";
 type Line = { id: string; description: string; part_number: string | null; quantity: number; received_qty: number; unit_cost: number; flag: string | null; invoice_check?: string | null };
 
 /** The per-line invoice prices (a difference over AED 1 is flagged for Accept / Dispute). */
-function LinePrices({ lines, word }: { lines: Line[]; word: string }) {
+export function LinePrices({ lines, word }: { lines: Pick<Line, "id" | "description" | "unit_cost">[]; word: string }) {
   return (
     <details className="text-sm">
       <summary className="cursor-pointer min-h-11 flex items-center font-semibold text-muted">Prices on the invoice, if different from the {word} (more than AED 1 off is flagged)</summary>
@@ -27,8 +27,8 @@ function LinePrices({ lines, word }: { lines: Line[]; word: string }) {
   );
 }
 
-/** Receiving: a quantity per line, partial allowed, wrong or damaged flagged for return; the ONE supplier-invoice box underneath. */
-export function ReceiveForm({ lines, action, jobId = null, poId = null, askInvoice = false, poTotal = null }: { lines: Line[]; action: (formData: FormData) => void; jobId?: string | null; poId?: string | null; /** The supplier invoice is asked for with the delivery. */ askInvoice?: boolean; poTotal?: number | null }) {
+/** Receiving: a quantity per line, partial allowed, wrong or damaged flagged for return. The invoice is NEVER entered here (4 November 2026: accounts collect the paper and scan it). */
+export function ReceiveForm({ lines, action, invoiceOpen = false }: { lines: Line[]; action: (formData: FormData) => void; /** The LPO's invoice is still to come: the note under the form says accounts take it over. */ invoiceOpen?: boolean }) {
   const [flags, setFlags] = useState<Record<string, string>>({});
   return (
     <form action={action} className="flex flex-col gap-3" data-receive-form>
@@ -58,12 +58,7 @@ export function ReceiveForm({ lines, action, jobId = null, poId = null, askInvoi
           );
         })}
       </ul>
-      {askInvoice ? (
-        <>
-          <SupplierInvoiceBox jobId={jobId} poId={poId} poTotal={poTotal} />
-          <LinePrices lines={lines} word="LPO" />
-        </>
-      ) : null}
+      {invoiceOpen ? <p className="text-xs text-muted" data-receive-invoice-note>The supplier&apos;s invoice is NOT entered here: keep the paper at the desk – accounts collect and scan it (they are told the moment you save).</p> : null}
       <div><Button type="submit" size="md" data-record-delivery>Record the delivery</Button></div>
     </form>
   );

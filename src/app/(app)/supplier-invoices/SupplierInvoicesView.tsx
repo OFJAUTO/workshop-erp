@@ -10,7 +10,9 @@ import { MATCH_WORDS, STATUS_WORDS, filterInvoices, invWords, invoiceFilterOf, i
 import { loadSupplierInvoices, siQueryReady } from "@/lib/supplier-invoices";
 import { signJobFiles } from "@/lib/work-data";
 import { changeWords } from "@/lib/price-change";
+import { enterInvoiceFromList } from "@/app/(app)/parts/order-actions";
 import { checkInvoiceAction, queryInvoiceAction } from "./actions";
+import { ScanEnterInvoice } from "./ScanEnterInvoice";
 
 const money = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const STATUS_TONE: Record<InvoiceStatus, "amber" | "red" | "neutral" | "green" | "ink" | "outline"> = { waiting: "amber", queried: "red", new: "ink", checked: "outline", zoho: "outline", paid: "green" };
@@ -137,7 +139,7 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
   const [{ data: files }, { data: pos }, { data: lines }] = await Promise.all([
     admin.from("job_files").select("id, storage_path, content_type, caption").eq("kind", "supplier_invoice").in("ref_id", poIds).is("removed_at", null).order("created_at"),
     admin.from("purchase_orders").select("id, supplier_invoice_path, supplier_paid_at, supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path, supplier_paid_by").in("id", poIds),
-    admin.from("purchase_order_lines").select("po_id, description, quantity, received_qty, unit_cost, invoice_unit_cost, invoice_check").in("po_id", poIds).eq("is_active", true).order("position"),
+    admin.from("purchase_order_lines").select("id, po_id, description, quantity, received_qty, unit_cost, invoice_unit_cost, invoice_check").in("po_id", poIds).eq("is_active", true).order("position"),
   ]);
   type PaidPo = { id: string; supplier_invoice_path: string | null; supplier_paid_at: string | null; supplier_paid_method: string | null; supplier_paid_reference: string | null; supplier_paid_proof_path: string | null; supplier_paid_by: string | null };
   const poRows = (pos ?? []) as PaidPo[];
@@ -223,6 +225,17 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
         </div>
       </div>
       {outcome ? <div data-si-outcome={outcome.tone}><Notice tone={outcome.tone}>{outcome.text}</Notice></div> : null}
+      {/* 4 November 2026: a row still waiting for its invoice - accounts scan the paper and enter it right here. */}
+      {acts && row.status === "waiting" && row.shares.length === 1 ? (
+        <ScanEnterInvoice
+          poId={row.shares[0].poId}
+          rowKey={row.key}
+          jobId={row.shares[0].jobId}
+          poTotal={row.shares[0].lpoTotal}
+          lines={((lines ?? []) as { id: string; po_id: string; description: string; unit_cost: number }[]).filter((l) => l.po_id === row.shares[0].poId).map((l) => ({ id: l.id, description: l.description, unit_cost: Number(l.unit_cost) }))}
+          action={enterInvoiceFromList.bind(null, row.shares[0].poId, row.key)}
+        />
+      ) : null}
       {acts && row.status !== "waiting" ? (
         <div className="flex flex-wrap items-start gap-3 border-t border-line pt-3">
           {row.status === "new" || row.status === "queried" ? (

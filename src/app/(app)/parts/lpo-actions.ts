@@ -1,8 +1,5 @@
 "use server";
 
-import { isUuid } from "@/lib/uuid";
-import { notifyInvoiceReceived } from "@/lib/supplier-invoices";
-import { applyInvoicePrices } from "@/lib/price-change-server";
 import { warnOwnerIfDepositShort } from "@/lib/deposits";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { redirect } from "next/navigation";
@@ -12,12 +9,12 @@ import { formatDate } from "@/lib/format";
 import { receivePartInFull, createMainLpo, orderSupplierLpo, resendMainLpo, setPartExpected } from "@/lib/lpo";
 import { blankToNull } from "@/lib/format";
 import { gmailConfigured, sendGmail } from "@/lib/gmail";
-import { notifyStaff } from "@/lib/notifications";
+import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { loadPurchaseOrder } from "@/lib/parts-data";
 import { renderPoPdf } from "@/lib/pdf/invoice-pdf";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { checkSupplierInvoice, dubaiToday } from "@/lib/supplier-invoice";
+import { formatPlate } from "@/lib/types";
 
 function refresh(jobId: string | null, poId?: string | null) {
   revalidatePath("/parts");
@@ -153,69 +150,38 @@ export async function receiveTicked(jobId: string, formData: FormData): Promise<
   const admin = createAdminClient();
   const { data: poRows } = await admin.from("part_items").select("po_id").in("id", ids).not("po_id", "is", null);
   const poIds = Array.from(new Set((poRows ?? []).map((r) => r.po_id as string)));
-  const toFollow = formData.get("to_follow") === "on";
-  const num = blankToNull(formData.get("invoice_number"));
-  const date = blankToNull(formData.get("invoice_date"));
-  const amount = Number(String(formData.get("invoice_amount") ?? "").replace(/[^\d.]/g, "")) || null;
-  const clientKey = blankToNull(formData.get("client_key"));
-  const scanPath = blankToNull(formData.get("scan_path"));
-  // The invoice rules run first (only when a supplier LPO is involved; stray stock has no invoice to track).
-  if (poIds.length) {
-    // One supplier invoice belongs to ONE supplier: typed across two suppliers it would land, whole, on both
-    // bills (and skip the 5% cross-check). Each supplier's delivery is received with its own invoice.
-    if (!toFollow && (num || date || amount)) {
-      const { data: sups } = await admin.from("purchase_orders").select("supplier_name").in("id", poIds);
-      const names = Array.from(new Set(((sups ?? []) as { supplier_name: string }[]).map((s) => s.supplier_name.trim().toLowerCase())));
-      if (names.length > 1) return { error: `The ticked parts come from ${names.length} different suppliers: receive one supplier's delivery at a time, each with its own invoice (or tick "Invoice to follow" for all of them).` };
-    }
-    const poTotal = poIds.length === 1 ? Number((await admin.from("purchase_orders").select("total_cost_aed").eq("id", poIds[0]).maybeSingle()).data?.total_cost_aed) || null : null;
-    const check = checkSupplierInvoice({ toFollow, number: num, date, amount, poTotal, amountConfirmed: formData.get("amount_confirmed") === "on", today: dubaiToday() });
-    if (!check.ok) return { error: check.error };
-  }
   for (const id of ids) {
     const r = await receivePartInFull(id, { id: staff.id, display_name: staff.display_name });
     if (r.error) return { error: r.error };
   }
+  /*
+   * 4 November 2026: receiving no longer asks for the invoice. The parts desk's angled photos misread amounts,
+   * so the supplier's paper stays with Parts and ACCOUNTS collect, scan and enter it (owner + accounts only).
+   * Every LPO received without its invoice goes on the "Waiting for invoice" list and accounts hear at once.
+   */
   let invoiceWord = "";
-  let invoicePriceWords = "";
   if (poIds.length) {
-    const now = new Date().toISOString();
-    if (toFollow) {
-      // Marked explicitly: the LPO shows amber "Invoice missing", accounts list it, Parts get a daily reminder.
-      for (const poId of poIds) {
-        await admin.from("purchase_orders").update({ supplier_invoice_status: "to_follow", supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", poId).neq("supplier_invoice_status", "received");
+    const { data: pos } = await admin.from("purchase_orders").select("id, number, supplier_name, supplier_invoice_status").in("id", poIds);
+    const open = ((pos ?? []) as { id: string; number: string; supplier_name: string; supplier_invoice_status: string }[]).filter((p) => p.supplier_invoice_status !== "received");
+    if (open.length) {
+      for (const po of open) {
+        await admin.from("purchase_orders").update({ supplier_invoice_status: "to_follow", supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", po.id).neq("supplier_invoice_status", "received");
       }
-      invoiceWord = " Invoice to follow: it sits on the missing list until the number and date are entered.";
-    } else {
-      for (const poId of poIds) {
-        // An invoice already on the LPO is never silently overwritten from the receive panel; the LPO page's own
-        // invoice form is the place to correct one.
-        await admin.from("purchase_orders").update({ supplier_invoice_number: num ? num.slice(0, 80) : null, supplier_invoice_date: date, supplier_invoice_amount: amount, ...(scanPath ? { supplier_invoice_path: scanPath } : {}), supplier_invoice_status: "received", supplier_invoice_at: now, supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", poId).neq("supplier_invoice_status", "received");
-      }
-      // Files uploaded before the save carry the panel's key (a uuid); they re-point to the (first) LPO so the scan shows on its page.
-      if (isUuid(clientKey)) await admin.from("job_files").update({ ref_id: poIds[0] }).eq("job_id", jobId).eq("kind", "supplier_invoice").eq("ref_id", clientKey).is("removed_at", null);
-      // 1 November 2026: the price each on the supplier's invoice (typed beside each part) is the real cost.
-      const { data: pis } = await admin.from("part_items").select("id, po_id, po_line_id").in("id", ids);
-      const byPo = new Map<string, Map<string, number>>();
-      for (const p of (pis ?? []) as { id: string; po_id: string | null; po_line_id: string | null }[]) {
-        const text = String(formData.get(`price__part__${p.id}`) ?? "").trim();
-        if (!text || !p.po_id || !p.po_line_id) continue;
-        const price = Number(text.replace(/[^\d.]/g, ""));
-        if (!Number.isFinite(price) || price < 0) continue;
-        if (!byPo.has(p.po_id)) byPo.set(p.po_id, new Map());
-        byPo.get(p.po_id)!.set(p.po_line_id, price);
-      }
-      for (const [poId, prices] of byPo) {
-        const r = await applyInvoicePrices(poId, prices, staff, await getSettings());
-        if (r.changed.length) invoicePriceWords = r.decision.increase > 0 ? (r.decision.auto ? " Price up within the limit: accepted, the owner is told." : " Price up above the limit: it waits for the owner's OK.") : " Price down: accepted.";
-      }
-      // Accounts are told at once (Supplier invoices tab); the bill goes to Zoho when they mark it Checked.
-      await notifyInvoiceReceived(poIds);
-      invoiceWord = " Supplier invoice saved.";
+      const { data: job } = await admin.from("jobs").select("job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("id", jobId).maybeSingle();
+      const plate = job?.vehicle ? formatPlate(job.vehicle as unknown as Parameters<typeof formatPlate>[0]) : "";
+      const suppliers = Array.from(new Set(open.map((p) => p.supplier_name))).join(", ");
+      await notifyRoles(["accounts"], {
+        type: "supplier_invoice_missing",
+        title: `Collect the supplier's invoice · ${job?.job_number ?? ""}`,
+        body: `Parts received from ${suppliers} for ${job?.job_number ?? ""}${plate ? ` · ${plate}` : ""} – collect the supplier's invoice from Parts and scan it (${open.map((p) => p.number).join(", ")}).`,
+        jobId,
+        href: `/supplier-invoices?open=${encodeURIComponent(`follow:${open[0].id}`)}`,
+      });
+      invoiceWord = " The invoice goes to accounts: they collect the supplier's paper and scan it.";
     }
   }
   revalidatePath(`/parts/${jobId}`);
   revalidatePath("/parts");
   revalidatePath(`/jobs/${jobId}`);
-  return { ok: true, message: `${ids.length} part${ids.length === 1 ? "" : "s"} received.${invoiceWord}${invoicePriceWords}` };
+  return { ok: true, message: `${ids.length} part${ids.length === 1 ? "" : "s"} received.${invoiceWord}` };
 }

@@ -49,18 +49,28 @@ try {
   // Only LPO A's parts on the receiving panel for now.
   await sql("update public.part_items set order_status = 'received', received_qty = coalesce(confirmed_quantity, quantity) where job_id = $1 and po_id is distinct from $2", [jobId, poA.id]);
 
-  /* ---------- A. Received at 260 each: within the limit ---------- */
+  /* ---------- A. Received plain; ACCOUNTS enter the invoice at 260 each (4 November 2026) ---------- */
   const parts = await open(desk.id);
   await go(parts.page, `${base}/parts/${jobId}`);
   await parts.page.locator("[data-mark-received]").click();
-  await parts.page.locator("[data-invoice-number]").fill("INV-2374");
-  await parts.page.locator("[data-invoice-date]").fill(today);
-  await parts.page.locator("[data-invoice-amount]").pressSequentially("1040", { delay: 10 });
-  for (const l of poA.lines) await parts.page.locator(`[data-invoice-price="${l.partId}"]`).fill("260");
-  await parts.page.locator('[data-supplier-invoice-box] input[type="file"]').setInputFiles(png);
-  await until(async () => (await parts.page.locator("[data-supplier-invoice-box] [data-remove-file]").count()) > 0, 40, 400);
-  await parts.page.locator("[data-receive-confirm]").screenshot({ path: shot("a1-receive-with-invoice-price.png") });
+  check("A: receiving never asks for the invoice any more", (await parts.page.locator("[data-supplier-invoice-box]").count()) === 0);
+  await parts.page.locator("[data-receive-confirm]").screenshot({ path: shot("a1-receive-no-invoice.png") });
   await parts.page.locator("[data-no-stickers]").click();
+  await until(async () => (await sql("select supplier_invoice_status from public.purchase_orders where id = $1 and supplier_invoice_status = 'to_follow'", [poA.id]))[0]);
+  const accA = await open(acc.id);
+  await go(accA.page, `${base}/supplier-invoices?open=${encodeURIComponent(`follow:${poA.id}`)}`);
+  await accA.page.locator("[data-si-enter] [data-invoice-number]").fill("INV-2374");
+  await accA.page.locator("[data-si-enter] [data-invoice-date]").fill(today);
+  await accA.page.locator("[data-si-enter] [data-invoice-amount]").pressSequentially("1040", { delay: 10 });
+  await accA.page.locator('[data-si-enter] [data-supplier-invoice-box] input[type="file"]').setInputFiles(png);
+  await until(async () => (await accA.page.locator("[data-si-enter] [data-supplier-invoice-box] [data-remove-file]").count()) > 0, 40, 400);
+  await accA.page.locator("[data-si-enter] details summary").click();
+  for (const l of poA.lines) await accA.page.locator(`[data-si-enter] [data-invoice-price="${l.lineId}"]`).fill("260");
+  await accA.page.locator("[data-si-enter]").screenshot({ path: shot("a1-accounts-enter-with-price.png") });
+  await accA.page.locator("[data-si-enter-save]").click();
+  // Wait for the save's redirect BEFORE closing: a browser closed mid-POST aborts the server action.
+  await accA.page.waitForURL(/message=|error=/, { timeout: 25000 }).catch(() => {});
+  await accA.browser.close();
   const linesA = await until(async () => { const r = await sql("select invoice_unit_cost::float as inv, invoice_check from public.purchase_order_lines where po_id = $1 order by position", [poA.id]); return r.every((x) => x.inv === 260) ? r : null; });
   check("A: the 260 is saved on both LPO lines", !!linesA);
   check("A: within the limit: accepted at once", linesA?.every((x) => x.invoice_check === "accepted"));
@@ -79,14 +89,23 @@ try {
   await own.page.locator("[data-job-supplier-invoices]").scrollIntoViewIfNeeded().catch(() => {});
   await own.page.screenshot({ path: shot("a3-job-card-price-change.png") });
 
-  /* ---------- B. Above the limit: the owner's OK first ---------- */
+  /* ---------- B. Above the limit: the owner's OK first (accounts enter the invoice since 4 November) ---------- */
   const poB = await mkPo("LPO-E2EPC-2", [{ name: "E2E GEARBOX MOUNT", qty: 1, unit: 1000 }]);
   await go(parts.page, `${base}/parts/orders/${poB.id}`);
-  await parts.page.locator('input[name="invoice_number"]').fill("INV-9001");
-  await parts.page.locator('input[name="invoice_date"]').fill(today);
-  await parts.page.locator("[data-receive-form] details summary").click();
-  await parts.page.locator(`[data-invoice-price="${poB.lines[0].lineId}"]`).fill("1200");
   await parts.page.locator("[data-record-delivery]").click();
+  await until(async () => (await sql("select status from public.purchase_orders where id = $1 and status = 'received'", [poB.id]))[0]);
+  const accInv = async (poId, number, lineId, price) => {
+    const a = await open(acc.id);
+    await go(a.page, `${base}/parts/orders/${poId}`);
+    await a.page.locator('input[name="invoice_number"]').fill(number);
+    await a.page.locator('input[name="invoice_date"]').fill(today);
+    await a.page.locator("form:has([data-save-invoice]) details summary").click();
+    await a.page.locator(`[data-invoice-price="${lineId}"]`).fill(String(price));
+    await a.page.locator("[data-save-invoice]").click();
+    await a.page.waitForURL(/message=|error=/, { timeout: 25000 }).catch(() => {});
+    await a.browser.close();
+  };
+  await accInv(poB.id, "INV-9001", poB.lines[0].lineId, 1200);
   const lineB = await until(async () => (await sql("select invoice_unit_cost::float as inv, invoice_check from public.purchase_order_lines where id = $1 and invoice_unit_cost is not null", [poB.lines[0].lineId]))[0]);
   check(`B: +AED 200 on a 1,000 LPO is above the limit (AED 100): it waits for the owner (${lineB?.invoice_check})`, lineB?.inv === 1200 && lineB?.invoice_check === "mismatch");
   const okNote = (await sql("select title from public.notifications where staff_id = $1 and title like 'Your OK needed · LPO-E2EPC-2%' limit 1", [owner.id]))[0];
@@ -109,11 +128,9 @@ try {
   /* ---------- C. A price down: accepted at once ---------- */
   const poC = await mkPo("LPO-E2EPC-3", [{ name: "E2E CABIN FILTER", qty: 1, unit: 300 }]);
   await go(parts.page, `${base}/parts/orders/${poC.id}`);
-  await parts.page.locator('input[name="invoice_number"]').fill("INV-9002");
-  await parts.page.locator('input[name="invoice_date"]').fill(today);
-  await parts.page.locator("[data-receive-form] details summary").click();
-  await parts.page.locator(`[data-invoice-price="${poC.lines[0].lineId}"]`).fill("280");
   await parts.page.locator("[data-record-delivery]").click();
+  await until(async () => (await sql("select status from public.purchase_orders where id = $1 and status = 'received'", [poC.id]))[0]);
+  await accInv(poC.id, "INV-9002", poC.lines[0].lineId, 280);
   const lineC = await until(async () => (await sql("select invoice_unit_cost::float as inv, invoice_check from public.purchase_order_lines where id = $1 and invoice_unit_cost is not null", [poC.lines[0].lineId]))[0]);
   check(`C: a price down is accepted at once (${lineC?.invoice_check})`, lineC?.inv === 280 && lineC?.invoice_check === "accepted");
 
