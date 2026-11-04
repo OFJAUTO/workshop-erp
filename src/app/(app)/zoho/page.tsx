@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Words } from "@/components/Words";
 import { Badge, Button, Card, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -126,7 +127,7 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
           </form>
         ) : null}
         <span className="text-xs text-muted basis-full" data-zoho-mode-line>
-          <span className="font-bold text-ink">{SYNC_MODE_WORDS[mode].title}:</span> {SYNC_MODE_WORDS[mode].line} {mode === "manual" ? `${waiting.total ? `${waiting.total} waiting now.` : "Nothing waiting now."} ${waiting.stuckWords ? `${waiting.stuckWords} ` : ""}` : ""}
+          <span className="font-bold text-ink">{SYNC_MODE_WORDS[mode].title}:</span> <Words text={`${SYNC_MODE_WORDS[mode].line}${mode === "manual" ? ` ${waiting.total ? `${waiting.total} waiting now.` : "Nothing waiting now."}${waiting.stuckWords ? ` ${waiting.stuckWords}` : ""}` : ""}`} />
           {isOwner ? "You change this below." : "Only the owner changes this."}
         </span>
       </Card>
@@ -254,17 +255,17 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
                     {r.synced_at ? ` · posted ${formatDateTime(r.synced_at)}` : ""}
                     {r.attempts > 1 ? ` · ${r.attempts} tries` : ""}
                   </p>
-                  {words ? <p className="text-sm font-semibold text-green" data-zoho-result>{words}</p> : null}
+                  {words ? <p className="text-sm font-semibold text-green" data-zoho-result><Words text={words} /></p> : null}
                   {r.last_error && r.status !== "synced" ? (
                     <p className="text-sm text-red font-semibold" data-zoho-reason>
-                      {r.last_error}
+                      <Words text={r.last_error} />
                       {(() => { const fix = reasonHref(r.last_error, { kind: r.kind, recordId: r.record_id }); return fix ? <> <Link href={fix.href} className="underline underline-offset-4" data-zoho-fix-link>→ {fix.label}</Link></> : null; })()}
                     </p>
                   ) : null}
                   {r.status === "pending" ? (
                     whyMap.get(r.id) ? (
                       <p className="text-sm text-muted" data-zoho-why>
-                        {whyMap.get(r.id)!.words}
+                        <Words text={whyMap.get(r.id)!.words} />
                         {whyMap.get(r.id)!.href ? <> <Link href={whyMap.get(r.id)!.href!} className="font-bold underline underline-offset-4" data-zoho-fix-link>→ {whyMap.get(r.id)!.hrefLabel ?? "Open"}</Link></> : null}
                       </p>
                     ) : (
