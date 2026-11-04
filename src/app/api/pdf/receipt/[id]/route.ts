@@ -52,14 +52,23 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     payment.job_id
       ? admin.from("jobs").select("job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", payment.job_id).maybeSingle()
       : Promise.resolve({ data: null }),
-    payment.job_id ? admin.from("payments").select(PAYMENT_SELECT).eq("job_id", payment.job_id).eq("is_active", true) : Promise.resolve({ data: null }),
+    // Paid-to-date: the job's payments; for a job-less invoice (an estimate's proforma, a pending charge)
+    // the INVOICE's own payments, so the summary never shows the full total as still due (4 November 2026).
+    payment.job_id
+      ? admin.from("payments").select(PAYMENT_SELECT).eq("job_id", payment.job_id).eq("is_active", true)
+      : payment.invoice_id
+        ? admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", payment.invoice_id).eq("is_active", true)
+        : Promise.resolve({ data: null }),
   ]);
   // A payment with no job names the car it was paid for, when it was given one.
   const { data: carOnly } = !payment.job_id && (await paymentsAnytimeReady()) ? await admin.from("payments").select("vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant, vin, model_year, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", id).maybeSingle() : { data: null };
   const v = (((job as { vehicle?: unknown } | null)?.vehicle ?? (carOnly as { vehicle?: unknown } | null)?.vehicle) as VehicleRow | null) ?? null;
+  const snap = (invoice?.invoice as { vehicle_snapshot?: { title?: string | null; plate?: string | null; vin?: string | null } | null } | undefined)?.vehicle_snapshot ?? null;
   const vehicle = v
     ? { title: [v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" ") || null, plate: v.has_plate === false ? "NO PLATE" : formatPlate(v), vin: v.vin ?? null }
-    : null;
+    : snap
+      ? { title: snap.title ?? null, plate: snap.plate ?? "NO PLATE", vin: snap.vin ?? null }
+      : null;
 
   // Paid to date on the job: every recorded payment, deposits included (a pending cheque counts, with its note).
   const recorded = ((payRows ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded");

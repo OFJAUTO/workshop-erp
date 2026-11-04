@@ -110,6 +110,7 @@ const TEXT_KEYS = [
   "supplier_lpo_from_email",
   "supplier_lpo_email_text",
   "whatsapp_estimate_template",
+  "whatsapp_estimate_proforma_template",
   "company_address",
   "company_phone",
   "company_email",

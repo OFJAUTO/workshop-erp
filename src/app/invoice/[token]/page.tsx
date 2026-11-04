@@ -62,7 +62,12 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
   const meta = [
     { label: isProforma ? "Proforma no." : isTax ? "Invoice no." : "Credit note no.", value: invoice.number },
     { label: "Date", value: formatDate(invoice.issued_at) },
-    ...(job ? [{ label: "Reference", value: job.job_number }] : []),
+    ...(job ? [{ label: "Reference", value: job.job_number }] : bundle.estimate ? [{ label: "Reference", value: bundle.estimate.number }] : []),
+    ...(isProforma && bundle.validUntil ? [{ label: "Valid until", value: formatDate(bundle.validUntil) }] : []),
+    // The bill-to block (4 November 2026): who pays, when it differs from the car's owner.
+    ...(bundle.billTo?.company ? [{ label: "Billed to", value: bundle.billTo.company }] : []),
+    ...(bundle.billTo?.trn ? [{ label: "TRN", value: bundle.billTo.trn }] : []),
+    ...(bundle.billTo?.po_number ? [{ label: "Your PO/ref", value: bundle.billTo.po_number }] : []),
   ];
   // Section 11: the job's tint specification on the tint items; tint outside a package gets its own small card.
   const tintSpec = await tintSpecForJob(invoice.job_id);

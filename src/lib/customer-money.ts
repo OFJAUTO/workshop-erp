@@ -1,5 +1,6 @@
 import "server-only";
 import { loadChargeEntries } from "./charges";
+import { loadEstimateMoneyRows } from "./estimate-money";
 import { customerName } from "./customer-view";
 import { INVOICE_SELECT, PAYMENT_SELECT, creditsOnDocs, draftFrom, invoiceBalance, loadDraftInputs, nextDocumentNumber, toInvoice, toPayment, type DraftInputs, type InvoiceRow, type PaymentRow } from "./invoice-data";
 import { round2 } from "./money";
@@ -231,6 +232,11 @@ export async function paymentChoices(input: { customerId?: string | null; vehicl
   for (const e of await loadChargeEntries({ customerId, status: "pending" })) {
     if (!e.proforma_id || e.tax_invoice_id || e.balance <= 0.005) continue;
     targets.push({ key: `inv:${e.proforma_id}`, kind: "invoice", jobId: null, invoiceId: e.proforma_id, vehicleId: e.vehicle_id, title: `Pending charge · ${e.what}`, detail: `Proforma ${e.proformaNumber} · balance ${aed(e.balance)}${e.paid > 0 ? ` · AED ${e.paid.toLocaleString("en-GB", { minimumFractionDigits: 2 })} paid so far` : ""} · the tax invoice follows when it is paid in full`, total: e.total, paid: e.paid, balance: e.balance, invoiceNumber: e.proformaNumber, isProforma: true, gone: false });
+  }
+  // 4 November 2026: an estimate's proforma (the car not here yet) is a place for the money too.
+  for (const e of await loadEstimateMoneyRows({ customerId })) {
+    if (!e.proformaId || e.balance <= 0.005) continue;
+    targets.push({ key: `inv:${e.proformaId}`, kind: "invoice", jobId: null, invoiceId: e.proformaId, vehicleId: e.vehicleId, title: `Estimate ${e.number} · car not here yet`, detail: `Proforma ${e.proformaNumber} · balance ${aed(e.balance)}${e.paid > 0 ? ` · ${aed(e.paid)} paid so far` : ""} · the tax invoice follows the moment it is paid`, total: e.total, paid: e.paid, balance: e.balance, invoiceNumber: e.proformaNumber, isProforma: true, gone: false });
   }
   // That car's jobs first, then the rest as they came (newest first).
   targets.sort((a, b) => Number(b.vehicleId === vehicleId) - Number(a.vehicleId === vehicleId));

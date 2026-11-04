@@ -70,3 +70,11 @@ export const paymentReportsReady = () => schemaReady("payment_reports", "id, sta
  *  window closes, "Last syncs", one run at a time). Migration 20261203180000_zoho_manual_sync. Before it a run still
  *  works and shows its results in the window; only the stored history and the one-run lock wait for the table. */
 export const syncRunsReady = () => schemaReady("zoho_sync_runs", "id, status, heartbeat_at, outbox_ids, items, removed, skipped");
+
+/** Money from the estimate (4 November 2026): a proforma (complete or partial) from an estimate before any job,
+ *  paid -> the tax invoice by itself; the bill-to block on its documents. Migration 20261204090000_estimate_money.
+ *  Before it the estimate page shows no proforma card and nothing reads the new columns. */
+export const estimateMoneyReady = () => schemaReady("invoices", "estimate_id, bill_to, valid_until");
+/** The advisor's payment link and "Payment received - send to accounts" on an estimate (same migration). */
+export const estimatePayLinkReady = () => schemaReady("payment_requests", "estimate_id");
+export const estimateReportReady = () => schemaReady("payment_reports", "estimate_id");

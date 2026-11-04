@@ -11,7 +11,9 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Nothing is waiting.
+| # | Migration | What it adds | Backup taken first |
+|---|---|---|---|
+| 1 | `20261204090000_estimate_money.sql` (money from the estimate) | Invoices tied to an estimate (`invoices.estimate_id`, plain uuid), the bill-to block (`invoices.bill_to`, `quotations.bill_to`), `invoices.valid_until`, payment links and payment reports on an estimate (`payment_requests.estimate_id` + job optional, `payment_reports.estimate_id` + job optional), and the proforma WhatsApp template row. Until it is applied, live shows no estimate-proforma buttons (`estimateMoneyReady`); nothing half-works. | `backups/2026-11-04T11-08-18` (111 tables, 249,077 rows) |
 
 ## Applied on 3 November 2026, afternoon
 

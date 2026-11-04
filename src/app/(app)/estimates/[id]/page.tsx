@@ -32,6 +32,11 @@ import { handbackOf, startersOf, staffNamesOf } from "@/lib/quote-lead";
 import { HandbackBanner } from "@/components/HandbackBanner";
 import { recoveryProviderList } from "@/lib/recovery-providers";
 import { costLimitsOf } from "@/lib/part-cost-check";
+import { estimateMoneyOf } from "@/lib/estimate-money";
+import { billToFromCustomer, type BillTo } from "@/lib/estimate-money-rules";
+import { estimateMoneyReady } from "@/lib/schema-ready";
+import { OPEN_ESTIMATE_STATUSES } from "@/lib/quote-history";
+import { EstimateMoneyCard, type MoneyCardFacts } from "./EstimateMoneyCard";
 
 export const dynamic = "force-dynamic";
 
@@ -72,6 +77,29 @@ export default async function EstimatePage({ params, searchParams }: { params: P
   const attached = attachedRows?.[0] ?? null;
   const addsTo = q.additional_to_id ? (await createAdminClient().from("quotations").select("id, number").eq("id", q.additional_to_id).maybeSingle()).data : null;
   const tone = accepted ? "green" : q.status === "declined" || q.status === "expired" ? "red" : q.status === "draft" ? "outline" : "amber";
+  // Money from the estimate (4 November 2026): dormant until the migration is applied.
+  const emReady = await estimateMoneyReady();
+  const em = emReady && !attached ? await estimateMoneyOf(q.id) : null;
+  const emFacts: MoneyCardFacts | null = em
+    ? {
+        proforma: em.proforma ? { id: em.proforma.id, number: em.proforma.number, total: em.proforma.total_aed, validUntil: (em.proforma as { valid_until?: string | null }).valid_until ?? null, sentAt: (em.proforma as { sent_at?: string | null }).sent_at ?? null, complete: em.proformaComplete } : null,
+        taxes: em.taxInvoices.filter((t) => !t.converted_to).map((t) => ({ id: t.id, number: t.number, total: t.total_aed, advance: !!t.deposit_for_quotation_id, token: t.token })),
+        paid: em.paid,
+        pendingCheque: em.pendingCheque,
+        total: em.total,
+        badgeWords: em.badge.words,
+        badgeTone: em.badge.tone,
+        paidWords: em.paidWords,
+        fullyInvoiced: em.fullyInvoiced,
+      }
+    : null;
+  const emBillTo: BillTo = emReady
+    ? (((await createAdminClient().from("quotations").select("bill_to").eq("id", q.id).maybeSingle()).data?.bill_to as BillTo | null) ?? billToFromCustomer(customer))
+    : billToFromCustomer(customer);
+  const emShow = !!emFacts && (OPEN_ESTIMATE_STATUSES.includes(q.status as (typeof OPEN_ESTIMATE_STATUSES)[number]) || !!emFacts.proforma || emFacts.taxes.length > 0 || emFacts.paid > 0.005);
+  const emCanCreate = mayManage || (!staff.viewingAs && role === "accounts");
+  const emCanRecord = ["owner", "accounts"].includes(role) && !staff.viewingAs;
+  const emRecordReadOnly = ["owner", "accounts"].includes(role) && !!staff.viewingAs;
 
   return (
     <>
@@ -126,6 +154,21 @@ export default async function EstimatePage({ params, searchParams }: { params: P
             </>
           )}
         </Card>
+      ) : null}
+      {emShow && emFacts ? (
+        <EstimateMoneyCard
+          estimateId={q.id}
+          number={q.number}
+          approved={accepted}
+          money={emFacts}
+          billTo={emBillTo}
+          canCreate={emCanCreate}
+          canRecord={emCanRecord}
+          recordReadOnly={emRecordReadOnly}
+          customerId={q.customer_id}
+          vehicleId={q.vehicle_id ?? null}
+          phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
+        />
       ) : null}
       <QuoteEditor
         comp={await compJobChoices(q, null)}

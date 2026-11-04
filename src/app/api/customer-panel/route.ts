@@ -8,6 +8,7 @@ import { jobBalance } from "@/lib/invoice-data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { customerCredit } from "@/lib/customer-money";
+import { loadEstimateMoneyRows } from "@/lib/estimate-money";
 import { can, type RoleId } from "@/lib/roles";
 
 export const dynamic = "force-dynamic";
@@ -93,6 +94,8 @@ export async function GET(request: NextRequest) {
     openBalance: Math.round(openBalance * 100) / 100,
     credit: await customerCredit(String(c.id)),
     pendingCharges: (await pendingChargesFor(String(c.id))).map((p) => ({ id: p.id, words: pendingChargeNote(p) })),
+    // 4 November 2026: money on an estimate before the car arrives ("E-00061 · Paid AED X of Y").
+    estimateMoney: (await loadEstimateMoneyRows({ customerId: String(c.id) })).map((e) => ({ id: e.estimateId, words: `${e.number} · paid AED ${e.paid.toLocaleString("en-GB", { minimumFractionDigits: 2 })} of ${e.total.toLocaleString("en-GB", { minimumFractionDigits: 2 })} · car not here yet` })),
     canPay: can(role as RoleId, "recordPayments") && !staff.viewingAs,
     cars: ((cars ?? []) as unknown as Vehicle[]).filter((v) => v.id !== job?.vehicle_id).map((v) => ({ id: v.id, plate: formatPlate(v), car: carWords(v) })),
     declined: (declined ?? []).map((d) => ({ id: d.id, title: d.title, date: d.declined_at })),

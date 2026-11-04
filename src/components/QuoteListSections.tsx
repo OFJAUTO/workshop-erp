@@ -26,6 +26,8 @@ export type QuoteListRow = {
   leadName: string | null;
   /** "Edited by Omar – check and send" with what changed, while it stands. */
   handback: { words: string; summary: string } | null;
+  /** Money from the estimate (4 November 2026): "Prepaid" / "Part paid · AED X of Y" / "Proforma sent – unpaid". */
+  money?: { badge: string | null; tone: "green" | "amber" | null; words: string | null } | null;
   followUp: boolean;
   versions: { id: string; version: number; status: string; by?: string | null }[];
   versionBase: string;
@@ -101,6 +103,7 @@ export function QuoteListSections({ rows, me, ownerName, noun, acceptedWords }: 
                 {r.customer ? <span className="text-sm text-muted">{r.customer}</span> : null}
                 <Badge tone={r.handback && s.key === "ready" ? "green" : tone(r.status)}>{r.handback && s.key === "ready" ? r.handback.words : QUOTE_STATUS_LABELS[r.status]}</Badge>
                 {r.additionalTo !== null ? <span className="rounded-full border border-ink px-2 py-0.5 text-[10px] font-extrabold tracking-[0.08em]" data-estimate-additional-chip>ADDITIONAL{r.additionalTo ? ` · to ${r.additionalTo}` : ""}</span> : null}
+                {r.money?.badge ? <Badge tone={r.money.tone === "green" ? "green" : "amber"} data-em-list-badge={r.money.badge}>{r.money.badge}</Badge> : null}
                 {r.status === "cancelled" && r.cancelReason ? <span className="text-xs font-semibold text-muted" data-cancel-reason>{r.cancelReason}</span> : null}
                 <span className="ml-auto text-sm font-semibold">{aed(r.total)}</span>
                 <span className="pointer-events-auto flex items-center gap-1">
@@ -113,6 +116,7 @@ export function QuoteListSections({ rows, me, ownerName, noun, acceptedWords }: 
                   {r.sentAt ? `sent ${formatDateTime(r.sentAt)}` : `started ${formatDateTime(r.createdAt)}`}
                   {r.validUntil ? ` · valid until ${formatDate(r.validUntil)}` : ""}
                   {r.leadName ? <span data-started-by> · started by {r.leadName}</span> : null}
+                  {r.money?.words ? <span data-em-list-paid> · {r.money.words}</span> : null}
                 </span>
                 {r.handback && s.key === "ready" && r.handback.summary ? <span className="basis-full text-sm font-semibold" data-handback-summary>{r.handback.summary}</span> : null}
               </div>

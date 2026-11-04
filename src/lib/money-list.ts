@@ -8,7 +8,7 @@
  */
 import type { MoneyInvoice, MoneyState } from "./money-steps";
 
-export type MoneyRowKind = "job" | "credit" | "charge";
+export type MoneyRowKind = "job" | "credit" | "charge" | "estimate";
 
 /** A card or payment-link payment on the row saved without a real auth code (3 November 2026, section 5). */
 export type AuthMissingPayment = { id: string; number: string; method: string; amount: number; receivedAt: string; code: string | null };
@@ -138,8 +138,8 @@ export const AWAITING_GROUPS: { key: AwaitingGroup; label: string }[] = [
 ];
 
 export function awaitingGroupOf(r: MoneyRowData): AwaitingGroup {
-  // A pending charge has its proforma from the start; a car that left owes now; a sent document is due now.
-  if (r.kind === "charge" || r.taxInvoice || r.proforma?.sent_at || !r.isOpen) return "due_now";
+  // A pending charge or an estimate has its proforma from the start; a car that left owes now; a sent document is due now.
+  if (r.kind === "charge" || r.kind === "estimate" || r.taxInvoice || r.proforma?.sent_at || !r.isOpen) return "due_now";
   if (r.proforma || ["ready", "pending_payment", "in_delivery"].includes(r.jobStatus)) return "to_send";
   return r.paid > 0.005 ? "wip_advance" : "wip_nothing";
 }

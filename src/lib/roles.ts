@@ -91,7 +91,9 @@ export const PERMISSIONS = {
   approveQuotes: ["owner"],
   priceParts: ["owner", "parts"],
   confirmParts: ["owner", "technician", "workshop_manager"],
-  viewEstimates: ["owner", "service_advisor"],
+  // Accounts joined 4 November 2026 (money from the estimate): they open an estimate to record its
+  // proforma's payment and to scan-and-enter; managing it stays with the starter and the owner.
+  viewEstimates: ["owner", "service_advisor", "accounts"],
   manageServices: ["owner"],
   // Parts ordering, work, QC, wash, invoices, payments (built 9 October 2026)
   managePurchaseOrders: ["owner", "parts"],

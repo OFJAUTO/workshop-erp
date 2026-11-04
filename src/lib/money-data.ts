@@ -10,6 +10,7 @@ import { authCodeMissing, authMissingFilter } from "./auth-code";
 import { jobMoneyMany, liveDocOf, unallocatedOf, type JobMoneyFacts } from "./customer-money";
 import { customerName } from "./customer-view";
 import { loadChargeEntries } from "./charges";
+import { loadEstimateMoneyRows } from "./estimate-money";
 import { pageAll, pageAllIn } from "./page-all";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
@@ -376,6 +377,52 @@ export async function loadMoneyList(settings: Settings, opts: MoneyListScope = {
     };
     // A search keeps the charges of a customer or car it found, or one that matches itself (its PRO-/INV- number).
     if (opts.scope === "search" && !(found.customerIds.has(e.customer_id) || (!!e.vehicle_id && found.vehicleIds.has(e.vehicle_id)) || rowMatches(row, opts.q))) continue;
+    rows.push(row);
+  }
+
+  // 4 November 2026: an estimate paid (or billed) before the car arrives - "Car not here yet · E-00061".
+  for (const e of await loadEstimateMoneyRows().catch(() => [])) {
+    const todayList = collected.filter((p) => !p.job_id && p.invoice_id && e.docIds.includes(p.invoice_id));
+    const taxToday = taxTodayRows.filter((t) => !t.job_id && e.taxIds.includes(t.id)).map((t) => t.number);
+    const authMissing = e.docIds.flatMap((id) => missingOfInvoice.get(id) ?? []);
+    const keep = opts.scope === "range" ? e.docIds.some((id) => rangeInvoiceIds.has(id)) : opts.scope === "search" ? true : e.balance > 0.005 || todayList.length > 0 || taxToday.length > 0 || authMissing.length > 0 || e.paid > 0.005;
+    if (!keep) continue;
+    const row: MoneyRowData = {
+      kind: "estimate",
+      key: `estimate:${e.estimateId}`,
+      href: `/estimates/${e.estimateId}`,
+      jobId: "",
+      jobNumber: e.number,
+      jobStatus: "",
+      isOpen: true,
+      plate: e.plate ?? "",
+      car: e.car ?? "",
+      customer: e.customer,
+      customerId: e.customerId,
+      pictureUrl: null,
+      proforma: null,
+      taxInvoice: null,
+      docNumber: e.proformaNumber ?? null,
+      total: e.total > 0 ? e.total : null,
+      paid: e.paid,
+      balance: e.total > 0 ? round2(Math.max(0, e.total - e.paid)) : null,
+      pendingCheque: e.pendingCheque,
+      credited: 0,
+      recentPaidOnly: false,
+      advance: 0,
+      paidToday: round2(todayList.reduce((a, p) => a + Number(p.amount_aed), 0)),
+      paidTodayCount: todayList.length,
+      taxToday,
+      state: plainState(e.balance > 0.005 ? `Car not here yet · ${e.number} · ${aedWords(e.balance)} due` : `Car not here yet · ${e.number} · paid`, e.balance > 0.005 ? "amber" : "green"),
+      issuedAt: e.createdAt,
+      lastAt: e.payments.map((p) => p.received_at).sort().at(-1) ?? e.createdAt,
+      paidAt: null,
+      reportedBy: null,
+      ageDays: Math.max(0, Math.floor((now - Date.parse(e.createdAt)) / 86400000)),
+      what: `Car not here yet · ${e.number}`,
+      authMissing,
+    };
+    if (opts.scope === "search" && !(found.customerIds.has(e.customerId) || (!!e.vehicleId && found.vehicleIds.has(e.vehicleId)) || rowMatches(row, opts.q))) continue;
     rows.push(row);
   }
 

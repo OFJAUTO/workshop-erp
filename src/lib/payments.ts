@@ -1,6 +1,7 @@
 import "server-only";
 import { DEFAULT_UNDO_MINUTES, mayUndo } from "./money-undo";
 import { afterPendingChargePayment } from "./charges";
+import { afterEstimatePayment } from "./estimate-money";
 import { SAVE_FAILED, logAppError } from "@/lib/app-errors";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { INVOICE_SELECT, PAYMENT_SELECT, creditsOnDocs, invoiceBalance, toInvoice, toPayment, type PaymentRow } from "./invoice-data";
@@ -116,6 +117,8 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     if (invoice.converted_to) return { error: `${invoice.number} became a tax invoice. Record the payment against the tax invoice.` };
     jobId = invoice.job_id;
     customerId = invoice.customer_id;
+    // The receipt names the car for a job-less invoice too (estimate proformas, pending charges).
+    vehicleId = (invoice.vehicle_id as string | null) ?? null;
     const { data: pays } = await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", invoice.id).eq("is_active", true);
     const rows = ((pays ?? []) as Record<string, unknown>[]).map(toPayment);
     const credit = invoice.kind === "tax_invoice" ? ((await creditsOnDocs([invoice.id])).get(invoice.id) ?? 0) : 0;
@@ -184,6 +187,9 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     if (input.invoiceId) await admin.from("invoices").update({ customer_says_paid_at: null, updated_by: actor.id }).eq("id", input.invoiceId).not("customer_says_paid_at", "is", null);
     if (input.invoiceId && jobId) await settleJob(jobId, input.invoiceId, actor.id, settings);
     if (input.invoiceId && !jobId) await afterPendingChargePayment(input.invoiceId, actor.id ? { id: actor.id, display_name: actor.display_name, role_id: actor.role_id } : null, settings);
+    // An estimate's proforma paid before the car arrives: the tax invoice follows by itself (4 November 2026).
+    // A pending cheque never converts (invoiceBalance counts cleared money only); the cheque-clear action re-checks.
+    if (input.invoiceId && !jobId) await afterEstimatePayment(input.invoiceId, actor.id ? { id: actor.id, display_name: actor.display_name } : null, settings);
     if (!input.invoiceId && jobId) await afterDepositRecorded(jobId, String(created.id), amount, actor, settings);
     // Zoho Books (one-way): the recorded money joins the outbox; a cheque waits until it clears.
     if (method !== "cheque") await tryEnqueueZoho(input.invoiceId ? "payment" : "deposit", String(created.id), jobId ?? null, actor.id);

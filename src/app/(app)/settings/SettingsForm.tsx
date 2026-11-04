@@ -440,6 +440,9 @@ export function SettingsForm({
             <Field label="WhatsApp estimate message" hint="Placeholders: [name], [make model], [plate], [link], [advisor].">
               <Textarea name="whatsapp_estimate_template" defaultValue={v.whatsapp_estimate_template} rows={3} required />
             </Field>
+            <Field label="WhatsApp estimate proforma message" hint="The proforma invoice sent before the car arrives. Placeholders: [name], [estimate], [make model], [plate], [link], [amount].">
+              <Textarea name="whatsapp_estimate_proforma_template" defaultValue={v.whatsapp_estimate_proforma_template} rows={4} required />
+            </Field>
             <details className="rounded-control border border-line p-4">
               <summary className="cursor-pointer text-sm font-bold">Standard labour rate per make (optional)</summary>
               <p className="text-xs text-muted mt-2 mb-3">The advisor can go higher on a quotation, never lower. Only the owner can go below. Leave blank for the general rate.</p>

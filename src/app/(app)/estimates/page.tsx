@@ -9,6 +9,10 @@ import { EstimateMenu } from "./EstimateMenu";
 import { QuoteListSections, type QuoteListRow } from "@/components/QuoteListSections";
 import { HANDBACK_SELECT, handbackReady, startersOf, staffNamesOf } from "@/lib/quote-lead";
 import { handbackStands, handbackWords, type HandbackKind } from "@/lib/quote-handback";
+import { estimateMoneyMany } from "@/lib/estimate-money";
+import { EM_FILTERS } from "@/lib/estimate-money-rules";
+import { estimateMoneyReady } from "@/lib/schema-ready";
+import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
@@ -23,9 +27,9 @@ type Row = { id: string; number: string; version: number; status: QuoteStatus; c
  * Estimates before the car arrives. 1 November 2026 (E-00055): every advisor sees every estimate (their own first),
  * the advisor who STARTED one stays in charge whoever edits it, and the sections follow who it waits on.
  */
-export default async function EstimatesPage({ searchParams }: { searchParams: Promise<{ message?: string }> }) {
+export default async function EstimatesPage({ searchParams }: { searchParams: Promise<{ message?: string; money?: string }> }) {
   const staff = await requirePermission("viewEstimates");
-  const { message } = await searchParams;
+  const { message, money: moneyFilter } = await searchParams;
   const settings = await getSettings();
   const admin = createAdminClient();
   const ready = await handbackReady();
@@ -43,6 +47,14 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
   const numberOf = new Map((baseRows ?? []).map((b) => [b.id as string, b.number as string]));
   const followDays = Number(settings.estimate_followup_days) || 2;
   const mayManage = (lead: string | null) => !staff.viewingAs && (staff.role_id === "owner" || lead === staff.id);
+  // Money from the estimate (4 November 2026): the badge per NUMBER, measured from its newest listed version.
+  const newestOfNumber = new Map<string, string>();
+  for (const r of rows) if (!newestOfNumber.has(r.number)) newestOfNumber.set(r.number, r.id);
+  const emMany = (await estimateMoneyReady()) ? await estimateMoneyMany(Array.from(newestOfNumber.values())) : new Map<string, never>();
+  const moneyOf = (number: string) => {
+    const m = emMany.get(newestOfNumber.get(number) ?? "");
+    return m ? { badge: m.badge.words, tone: m.badge.tone, words: m.paidWords, key: m.badge.key } : null;
+  };
   const list: QuoteListRow[] = rows.map((r) => {
     const lead = starters.get(r.number) ?? r.created_by;
     return {
@@ -68,16 +80,36 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
       versions: versionsOf(r.number),
       versionBase: "/estimates/",
       menu: <EstimateMenu id={r.id} number={r.number} status={r.status} neverSent={!r.sent_at} canManage={mayManage(lead)} />,
+      money: moneyOf(r.number),
     };
   });
+  // The money filters (4 November 2026): Prepaid / Part paid / Proforma sent - unpaid, per estimate number.
+  const keyOfNumber = (n: string) => moneyOf(n)?.key ?? null;
+  const shown = moneyFilter ? list.filter((r) => keyOfNumber(r.number) === moneyFilter) : list;
+  const countOf = (key: string) => new Set(list.filter((r) => keyOfNumber(r.number) === key).map((r) => r.number)).size;
 
   return (
     <>
       <LiveRefresh tables={["quotations"]} />
       <PageHeader title="Estimates" subtitle="Before the car arrives. The customer accepts on a branded page; at gate-in the estimate becomes the quotation." actions={<LinkButton href="/estimates/new" size="lg">New estimate</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
+      {emMany.size > 0 || moneyFilter ? (
+        <div className="flex flex-wrap items-center gap-2" data-em-filters>
+          {EM_FILTERS.map((f) => {
+            const on = moneyFilter === f.key;
+            const n = countOf(f.key);
+            return (
+              <Link key={f.key} href={on ? "/estimates" : `/estimates?money=${f.key}`} className={`inline-flex min-h-11 items-center rounded-control border px-3 text-sm font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-em-filter={f.key} data-em-filter-on={on ? "1" : "0"}>
+                {f.label}{n ? ` · ${n}` : ""}
+              </Link>
+            );
+          })}
+          {moneyFilter ? <Link href="/estimates" className="text-sm font-bold underline underline-offset-4">Show all</Link> : null}
+        </div>
+      ) : null}
       {rows.length === 0 ? <Empty title="No estimates yet" /> : null}
-      <QuoteListSections rows={list} me={staff.id} ownerName={owners?.[0]?.display_name ?? "the owner"} noun="estimate" acceptedWords="Accepted · waiting for the car" />
+      {moneyFilter && shown.length === 0 && rows.length > 0 ? <Empty title="Nothing under this filter" /> : null}
+      <QuoteListSections rows={shown} me={staff.id} ownerName={owners?.[0]?.display_name ?? "the owner"} noun="estimate" acceptedWords="Accepted · waiting for the car" />
     </>
   );
 }

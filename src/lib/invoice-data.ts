@@ -14,7 +14,7 @@ import { getSettings, type Settings } from "./settings";
 import { noChargeJob } from "./comp-data";
 import { createAdminClient } from "./supabase/admin";
 import { loadVisitMileage } from "./visit-mileage";
-import { gateOutMileageReady, partUnitsReady } from "./schema-ready";
+import { estimateMoneyReady, gateOutMileageReady, partUnitsReady } from "./schema-ready";
 import { cleanUnit, type PartUnit } from "./part-units";
 import { customerMileage } from "./mileage";
 import { realPartNumber } from "./parts-rows";
@@ -207,6 +207,11 @@ export type InvoiceBundle = {
   issuedByName: string | null;
   /** 30 October 2026: "48,210 km" at gate-in and at gate-out, for the customer (words only). */
   mileage: { in: string | null; out: string | null } | null;
+  /** Money from the estimate (4 November 2026, read only once the migration is applied): the estimate the
+   *  document was issued from, the bill-to block and the proforma's valid-until day. */
+  estimate?: { id: string; number: string } | null;
+  billTo?: { company?: string | null; address?: string | null; trn?: string | null; attention?: string | null; po_number?: string | null } | null;
+  validUntil?: string | null;
 };
 
 export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
@@ -224,8 +229,24 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
     admin.from("staff").select("id, display_name").in("id", [invoice.prepared_by, invoice.issued_by].filter((x): x is string => !!x)),
   ]);
   const nameOf = new Map((people ?? []).map((p) => [p.id, p.display_name]));
+  // Money from the estimate (4 November 2026): the extra columns exist only once the migration is applied.
+  let estimate: { id: string; number: string } | null = null;
+  let billTo: InvoiceBundle["billTo"] = null;
+  let validUntil: string | null = null;
+  if (await estimateMoneyReady()) {
+    const { data: extra } = await admin.from("invoices").select("estimate_id, bill_to, valid_until").eq("id", id).maybeSingle();
+    billTo = (extra?.bill_to as InvoiceBundle["billTo"]) ?? null;
+    validUntil = (extra?.valid_until as string | null) ?? null;
+    if (extra?.estimate_id) {
+      const { data: est } = await admin.from("quotations").select("id, number").eq("id", extra.estimate_id).maybeSingle();
+      if (est) estimate = { id: String(est.id), number: String(est.number) };
+    }
+  }
   return {
     invoice,
+    estimate,
+    billTo,
+    validUntil,
     lines: await attachInvoiceUnits(((lines ?? []) as Record<string, unknown>[]).map(toInvoiceLine)),
     payments: ((payments ?? []) as Record<string, unknown>[]).map(toPayment),
     customer: (customer as InvoiceBundle["customer"]) ?? null,

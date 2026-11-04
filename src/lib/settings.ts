@@ -328,6 +328,7 @@ const DEFAULTS = {
   whatsapp_quote_revised_template: "Dear [name],\n\nYour quotation for the *[make model]* ([plate]) has been updated:\n[link]\n\nAny questions, just reply here.\n\nOFJ Automotive",
   damage_note_chips: ["Scratches", "Dents", "Stone chips", "Paint peeling", "PPF peeling", "PPF scratched", "Cracked bumper", "Kerbed wheels", "Windscreen chip", "Broken light"] as string[],
   whatsapp_estimate_template: "Dear [name],\n\nOur estimate for the *[make model]* ([plate]) is here:\n[link]\n\nThe final price is confirmed once the car is with us.\n\nOFJ Automotive",
+  whatsapp_estimate_proforma_template: "Dear [name],\n\nOur proforma invoice for estimate *[estimate]* ([make model], [plate]) is here:\n[link]\n\nAmount: AED [amount]. This is not a tax invoice: the tax invoice is issued the moment the payment is received.\n\nBank details are on the proforma. Thank you,\nOFJ Automotive",
   whatsapp_report_template: "Dear [name],\n\nThe inspection of your *[make model]* ([plate]) is complete.\n\nThe report is here:\n[link]\n\nOFJ Automotive",
   inspection_checklist: DEFAULT_CHECKLIST as ChecklistSection[],
   appointment_reminder_hours_before: 1,

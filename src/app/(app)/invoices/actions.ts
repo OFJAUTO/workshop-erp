@@ -14,6 +14,8 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { validateGatewayUrl } from "@/lib/pay-page";
 import { convertProformaIfPaid, ensureProforma } from "@/lib/invoice-flow";
+import { afterEstimatePayment } from "@/lib/estimate-money";
+import { afterPendingChargePayment } from "@/lib/charges";
 import { ensureAutoPayLink, replacePaymentLink } from "@/lib/payment-links";
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS } from "@/lib/money-steps";
 import { getSiteUrl } from "@/lib/site";
@@ -297,6 +299,13 @@ export async function setChequeStatus(paymentId: string, formData: FormData) {
         { handOnly: where === "opening" },
       );
     }
+  }
+  // A cheque clearing on a JOB-LESS proforma (an estimate's, or a pending charge's) may complete it:
+  // the tax invoice follows now, exactly as it would for money recorded straight (4 November 2026).
+  if (!p.job_id && p.invoice_id && status === "cleared") {
+    const settings = await getSettings();
+    await afterPendingChargePayment(p.invoice_id, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id }, settings).catch(() => null);
+    await afterEstimatePayment(p.invoice_id, { id: staff.id, display_name: staff.display_name }, settings).catch(() => null);
   }
   if (p.job_id) {
     await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment", note: `${p.number}: cheque ${p.cheque_number ?? ""} ${status} (${staff.display_name})`, created_by: staff.id });

@@ -56,8 +56,20 @@ function docLineOf(l: InvoiceLineRow, compReason: string | null = null): Section
   };
 }
 
-function customerBox(b: Pick<InvoiceBundle, "customer" | "invoice">) {
+function customerBox(b: Pick<InvoiceBundle, "customer" | "invoice" | "billTo">) {
   const snap = b.invoice.customer_snapshot ?? {};
+  // The bill-to block (4 November 2026): typed on the estimate, it names WHO pays - a company with its
+  // address, TRN, attention person and PO number - and may differ from the car's owner.
+  const bt = b.billTo ?? null;
+  if (bt && (bt.company || bt.trn || bt.attention || bt.po_number || bt.address)) {
+    const name = bt.company || snap.company_name || b.customer?.company_name || snap.full_name || b.customer?.full_name || "Customer";
+    return {
+      title: "Billed to",
+      strong: name,
+      lines: [bt.attention ? `Attn: ${bt.attention}` : null, bt.address || null, [snap.phone ?? b.customer?.phone, snap.email ?? b.customer?.email].filter(Boolean).join(" · ") || null],
+      muted: [bt.trn ? `TRN ${bt.trn}` : null, bt.po_number ? `Your PO/ref: ${bt.po_number}` : null],
+    };
+  }
   const name = snap.company_name ?? b.customer?.company_name ?? snap.full_name ?? b.customer?.full_name ?? "Customer";
   // A company shows once: the contact line only for a real person whose name differs from it.
   const company = snap.company_name ?? b.customer?.company_name ?? null;
@@ -153,7 +165,15 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
     after: paidRows,
     balance: isCredit ? null : bal.balance,
   });
-  const note = isCredit ? "This credit note corrects an earlier tax invoice." : bal.state === "paid" ? `Paid in full${bal.paidAt ? ` on ${formatDate(bal.paidAt)}` : ""}. Thank you.` : invoice.kind === "proforma" ? "Please pay the total to collect the vehicle. The tax invoice follows the payment." : "Thank you for your business.";
+  const note = isCredit
+    ? "This credit note corrects an earlier tax invoice."
+    : bal.state === "paid"
+      ? `Paid in full${bal.paidAt ? ` on ${formatDate(bal.paidAt)}` : ""}. Thank you.`
+      : invoice.kind === "proforma"
+        ? bundle.estimate
+          ? "PROFORMA INVOICE – not a tax invoice. The tax invoice is issued the moment the payment is received."
+          : "Please pay the total to collect the vehicle. The tax invoice follows the payment."
+        : "Thank you for your business.";
   // The boxes of lines; when the totals would start a page alone, the last two lines travel with them (boxesWithTail).
   const boxes: BoxSpec[] = [
     ...(services.length || !pkgRows.length ? [{ key: "services", title: "Labour and services", lines: services, subtotalLabel: "Labour subtotal", showSubtotal: sectionSubtotalShown(sectionCounts, "services") }] : []),
@@ -176,7 +196,8 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
         meta={[
           { label: NUMBER_LABELS[invoice.kind], value: invoice.number },
           { label: "Date", value: formatDate(invoice.issued_at) },
-          job ? { label: "Reference", value: job.job_number } : null,
+          job ? { label: "Reference", value: job.job_number } : bundle.estimate ? { label: "Reference", value: bundle.estimate.number } : null,
+          invoice.kind === "proforma" && bundle.validUntil ? { label: "Valid until", value: formatDate(bundle.validUntil) } : null,
         ]}
       />
       <InfoBoxes boxes={[customerBox(bundle), vehicleBox(bundle)]} />
