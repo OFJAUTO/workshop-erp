@@ -678,6 +678,8 @@ export type SupplierBalance = {
   toFollowCount: number;
   /** Returned parts still waiting for this supplier's credit note (with VAT). */
   creditsDue: number;
+  /** Fix 4 (4 November 2026): invoices paid without a proof of payment on file. */
+  proofMissingCount: number;
   invoices: InvoiceRow[];
 };
 
@@ -690,7 +692,7 @@ export function supplierBalances(invoices: InvoiceRow[], suppliers: PaSupplier[]
     if (isOurStock(r.supplier)) continue;
     const k = keyOf(r.supplierId, r.supplier);
     const s = r.supplierId ? supOf.get(r.supplierId) : null;
-    const cur = out.get(k) ?? { key: k, supplierId: r.supplierId, supplier: r.supplier, trn: r.trn, vatRegistered: r.vatRegistered, needsTrn: supplierNeedsTrn({ name: r.supplier, trn: r.trn, vat_registered: r.vatRegistered }), terms: s?.paymentTerms ?? null, invoiced: 0, invoicedCount: 0, paid: 0, paidCount: 0, unpaid: 0, unpaidCount: 0, oldestUnpaid: null, toFollow: 0, toFollowCount: 0, creditsDue: 0, invoices: [] };
+    const cur = out.get(k) ?? { key: k, supplierId: r.supplierId, supplier: r.supplier, trn: r.trn, vatRegistered: r.vatRegistered, needsTrn: supplierNeedsTrn({ name: r.supplier, trn: r.trn, vat_registered: r.vatRegistered }), terms: s?.paymentTerms ?? null, invoiced: 0, invoicedCount: 0, paid: 0, paidCount: 0, unpaid: 0, unpaidCount: 0, oldestUnpaid: null, toFollow: 0, toFollowCount: 0, creditsDue: 0, proofMissingCount: 0, invoices: [] };
     cur.invoices.push(r);
     if (r.status === "waiting") {
       cur.toFollow = r2(cur.toFollow + r.total);
@@ -703,6 +705,8 @@ export function supplierBalances(invoices: InvoiceRow[], suppliers: PaSupplier[]
         cur.paid = r2(cur.paid + r.paidAmount);
         cur.paidCount++;
       }
+      // Fix 4 (4 November 2026): a payment without its proof on file is flagged on Payments to suppliers too.
+      if (r.proofMissing) cur.proofMissingCount++;
     }
     out.set(k, cur);
   }

@@ -25,6 +25,9 @@ export type SiPo = {
   /** How and with what reference the supplier was paid (Parts accounts > Payments to suppliers). */
   paid_method?: string | null;
   paid_reference?: string | null;
+  /** Fix 4 (4 November 2026): the proof of payment (bank slip, card slip) and who paid, per LPO. */
+  proof_path?: string | null;
+  paid_by?: string | null;
   query?: string | null;
   query_at?: string | null;
 };
@@ -54,7 +57,7 @@ export const MATCH_WORDS: Record<InvoiceMatch, string> = {
  * One LPO's part of a supplier invoice. Payment is recorded LPO by LPO ("Paid to supplier" on each LPO page), so each
  * share carries its own paid stamp: a split invoice can be partly paid.
  */
-export type InvoiceShare = { poId: string; poNumber: string; jobId: string | null; jobNumber: string | null; plate: string; car: string; amount: number; lpoTotal: number; parts: number; paidAt: string | null };
+export type InvoiceShare = { poId: string; poNumber: string; jobId: string | null; jobNumber: string | null; plate: string; car: string; amount: number; lpoTotal: number; parts: number; paidAt: string | null; /** Fix 4 (4 November 2026): the payment's own facts, so the proof box reads per LPO. */ paidMethod: string | null; paidReference: string | null; proofPath: string | null; paidBy: string | null };
 export type InvoiceRow = {
   key: string;
   supplier: string;
@@ -83,6 +86,8 @@ export type InvoiceRow = {
   paidAt: string | null;
   paidMethod: string | null;
   paidReference: string | null;
+  /** Fix 4 (4 November 2026): paid, but a share has no proof of payment on file. */
+  proofMissing: boolean;
   /** When it arrived (the invoice entered, else the parts received). */
   at: string | null;
   query: string | null;
@@ -115,7 +120,7 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
     const shares: InvoiceShare[] = items.map((p) => {
       const j = p.job_id ? jobOf.get(p.job_id) : null;
       const mine = lines.filter((l) => l.po_id === p.id);
-      return { poId: p.id, poNumber: p.number, jobId: p.job_id, jobNumber: j?.job_number ?? null, plate: j?.plate ?? "", car: j?.car ?? "", amount: r2(waiting ? p.total_cost_aed : (p.supplier_invoice_amount ?? p.total_cost_aed)), lpoTotal: p.total_cost_aed, parts: mine.length, paidAt: p.paid_at };
+      return { poId: p.id, poNumber: p.number, jobId: p.job_id, jobNumber: j?.job_number ?? null, plate: j?.plate ?? "", car: j?.car ?? "", amount: r2(waiting ? p.total_cost_aed : (p.supplier_invoice_amount ?? p.total_cost_aed)), lpoTotal: p.total_cost_aed, parts: mine.length, paidAt: p.paid_at, paidMethod: p.paid_method ?? null, paidReference: p.paid_reference ?? null, proofPath: p.proof_path ?? null, paidBy: p.paid_by ?? null };
     });
     const beforeVat = r2(shares.reduce((a, s) => a + s.amount, 0));
     const vat = vatRegistered ? r2((beforeVat * vatPercent) / 100) : 0;
@@ -177,6 +182,8 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
       paidAt: paidPo?.paid_at ?? null,
       paidMethod: paidPo?.paid_method ?? null,
       paidReference: paidPo?.paid_reference ?? null,
+      // Fix 4 (4 November 2026): a payment without its proof is flagged everywhere the invoice shows.
+      proofMissing: shares.some((s) => s.paidAt && !s.proofPath),
       at: items.map((p) => p.supplier_invoice_at ?? p.received_at).filter((x): x is string => !!x).sort().at(-1) ?? null,
       query,
     });
@@ -191,14 +198,14 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
   return rows.sort((x, y) => String(y.at ?? "").localeCompare(String(x.at ?? "")));
 }
 
-export type InvoiceFilter = { supplier?: string; from?: string; to?: string; status?: string; unpaid?: boolean; problems?: boolean; q?: string; job?: string };
+export type InvoiceFilter = { supplier?: string; from?: string; to?: string; status?: string; unpaid?: boolean; problems?: boolean; /** Fix 4: paid without a proof of payment on file. */ noProof?: boolean; q?: string; job?: string };
 
 /**
  * The Supplier invoices filters as they travel in an address: ONE list read by the screen (its filter form and open
  * links), its Excel export, and Parts accounts' "Export this tab" on the same screen, so the file always holds what the
  * screen shows (Unpaid, Match problems and the car included).
  */
-export const SI_FILTER_KEYS = ["supplier", "from", "to", "status", "unpaid", "problems", "q", "job"] as const;
+export const SI_FILTER_KEYS = ["supplier", "from", "to", "status", "unpaid", "problems", "no_proof", "q", "job"] as const;
 export type SiFilterKey = (typeof SI_FILTER_KEYS)[number];
 
 /** The filters to keep in an address, in a fixed order, empty ones left out. */
@@ -209,7 +216,7 @@ export function invoiceFilterParams(sp: Partial<Record<SiFilterKey, string | nul
 /** The filter from an address (the screen's search params, or an export's query). */
 export function invoiceFilterOf(get: (key: SiFilterKey) => string | null | undefined): InvoiceFilter {
   const v = (k: SiFilterKey) => String(get(k) ?? "").trim() || undefined;
-  return { supplier: v("supplier"), from: v("from"), to: v("to"), status: v("status"), unpaid: v("unpaid") === "1", problems: v("problems") === "1", q: v("q"), job: v("job") };
+  return { supplier: v("supplier"), from: v("from"), to: v("to"), status: v("status"), unpaid: v("unpaid") === "1", problems: v("problems") === "1", noProof: v("no_proof") === "1", q: v("q"), job: v("job") };
 }
 
 /** The filters of the tab: supplier, date range, status, unpaid, match problems, a job, and the search box. */
@@ -223,6 +230,7 @@ export function filterInvoices(rows: InvoiceRow[], f: InvoiceFilter, partNames: 
     if (f.status && r.status !== f.status) return false;
     if (f.unpaid && r.paid) return false;
     if (f.problems && !(r.match.some((m) => m !== "matches") || r.duplicateOf)) return false;
+    if (f.noProof && !r.proofMissing) return false;
     if (f.job && !r.shares.some((s) => s.jobId === f.job)) return false;
     if (needle) {
       const hay = [r.number ?? "", r.supplier, ...r.shares.flatMap((s) => [s.poNumber, s.jobNumber ?? "", s.plate, s.car, ...(partNames.get(s.poId) ?? [])])].join(" ").toLowerCase();

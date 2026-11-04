@@ -11,7 +11,7 @@ import type { XlsxSheet } from "./xlsx";
 /** Migration 20261202130000_supplier_invoice_query: accounts' query back to the parts desk. */
 export const siQueryReady = () => schemaReady("purchase_orders", "supplier_invoice_query, supplier_invoice_query_at, supplier_invoice_query_by");
 
-const PO_COLS = "id, number, job_id, supplier_id, supplier_name, status, kind, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_at, supplier_invoice_path, received_at, supplier_invoice_checked_at, zoho_bill_id, supplier_paid_at, supplier_paid_method, supplier_paid_reference";
+const PO_COLS = "id, number, job_id, supplier_id, supplier_name, status, kind, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_at, supplier_invoice_path, received_at, supplier_invoice_checked_at, zoho_bill_id, supplier_paid_at, supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path, supplier_paid_by";
 
 export type SupplierInvoices = { rows: InvoiceRow[]; partNames: Map<string, string[]>; lines: SiLine[] };
 
@@ -73,6 +73,8 @@ async function readSupplierInvoices(opts: { jobId?: string; poIds?: string[] }):
     paid_at: (r.supplier_paid_at as string | null) ?? null,
     paid_method: (r.supplier_paid_method as string | null) ?? null,
     paid_reference: (r.supplier_paid_reference as string | null) ?? null,
+    proof_path: (r.supplier_paid_proof_path as string | null) ?? null,
+    paid_by: (r.supplier_paid_by as string | null) ?? null,
     query: (r.supplier_invoice_query as string | null | undefined) ?? null,
     query_at: (r.supplier_invoice_query_at as string | null | undefined) ?? null,
   }));

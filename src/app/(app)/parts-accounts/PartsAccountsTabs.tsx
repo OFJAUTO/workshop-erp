@@ -155,6 +155,7 @@ export function PaymentsTab({ rows, canPay }: { rows: SupplierBalance[]; canPay:
             <span className="font-extrabold uppercase">{b.supplier}</span>
             {b.trn ? <span className="whitespace-nowrap text-xs text-muted">TRN {b.trn}</span> : null}
             {b.needsTrn ? <Badge tone="red" data-pa-no-trn>{NO_TRN_WORDS}</Badge> : !b.vatRegistered ? <Badge tone="neutral">Not VAT registered</Badge> : null}
+            {b.proofMissingCount ? <Badge tone="red" data-pa-proof-missing>{b.proofMissingCount} paid without proof</Badge> : null}
             {b.terms ? <span className="text-xs text-muted">Terms: {b.terms}</span> : null}
             <span className={`ml-auto whitespace-nowrap text-sm font-extrabold ${b.unpaid > 0 ? "" : "text-green"}`} data-pa-unpaid={b.unpaid.toFixed(2)}>{b.unpaid > 0 ? `Unpaid ${money(b.unpaid)} (${b.unpaidCount})` : "Nothing unpaid ✓"}</span>
           </div>
@@ -178,6 +179,7 @@ export function PaymentsTab({ rows, canPay }: { rows: SupplierBalance[]; canPay:
                   <span className="whitespace-nowrap font-semibold">{money(r.total)}</span>
                   <span className="text-xs text-muted">{r.shares.map((s, i) => <Fragment key={s.poId}>{i ? ", " : ""}<span className="whitespace-nowrap">{s.poNumber}</span></Fragment>)}</span>
                   {r.status === "waiting" ? <Badge tone="amber">Invoice to follow</Badge> : r.paid ? <Badge tone="green">Paid {r.paidAt ? formatDate(r.paidAt) : ""}{r.paidMethod ? ` · ${r.paidMethod}` : ""}{r.paidReference ? ` · ${r.paidReference}` : ""}</Badge> : r.partlyPaid ? <Badge tone="amber" data-pa-partly-paid>Partly paid · {money(r.unpaidAmount)} to pay</Badge> : <Badge tone="ink">Unpaid · {STATUS_WORDS[r.status]}</Badge>}
+                  {r.proofMissing ? <Badge tone="red" data-pa-invoice-proof-missing>Proof missing</Badge> : null}
                   {/* Paid LPO by LPO: one link per LPO still to pay (a split invoice paid on one LPO points at the other). */}
                   {canPay ? <PayLinks r={r} /> : null}
                 </li>

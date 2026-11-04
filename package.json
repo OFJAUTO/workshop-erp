@@ -167,7 +167,8 @@
     "test:s11-zoho-manual": "node --env-file=.env.test.local tests/browser/test-s11-zoho-manual.mjs",
     "test:s12-parts-accounts": "node --env-file=.env.test.local tests/browser/test-s12-parts-accounts.mjs",
     "test:roundoff": "node --env-file=.env.test.local tests/browser/test-roundoff.mjs",
-    "test:zohoselect": "node --env-file=.env.test.local tests/browser/test-zoho-select.mjs"
+    "test:zohoselect": "node --env-file=.env.test.local tests/browser/test-zoho-select.mjs",
+    "test:fix4": "node --env-file=.env.test.local tests/browser/test-fix4.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

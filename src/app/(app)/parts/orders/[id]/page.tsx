@@ -26,6 +26,7 @@ import { formatPlate } from "@/lib/types";
 import { signJobFiles } from "@/lib/work-data";
 import { decidePurchaseOrder, receivePurchaseOrder, supplierInvoice, decideInvoiceCheck, markSupplierPaid, refusePoLineAction, reverseSupplierPaid, undoSupplierPaid } from "../../order-actions";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
+import { SlipTile } from "@/components/PaymentReport";
 import { UndoButton } from "@/components/UndoButton";
 import { DEFAULT_UNDO_MINUTES, undoSecondsLeft } from "@/lib/money-undo";
 import { InvoiceFiles } from "./InvoiceFiles";
@@ -76,6 +77,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const paidFromWords = SUPPLIER_PAY_METHODS.map((m) => `${m.label}: ${zmap.paidFromBy?.[m.key] || zmap.paidFrom || "not mapped yet"}`).join(" · ");
   const paidMethodLabel = SUPPLIER_PAY_METHODS.find((m) => m.key === po.supplier_paid_method)?.label ?? "Bank transfer";
   const proofUrl = po.supplier_paid_proof_path ? (await signJobFiles([po.supplier_paid_proof_path]))[po.supplier_paid_proof_path] : null;
+  const paidByName = po.supplier_paid_by ? ((await admin.from("staff").select("display_name").eq("id", po.supplier_paid_by).maybeSingle()).data?.display_name ?? null) : null;
   const payMissing: string[] = [];
   if (po.supplier_invoice_status !== "received" || !po.supplier_invoice_number) payMissing.push("the invoice number");
   if (!po.supplier_invoice_date) payMissing.push("the invoice date");
@@ -388,12 +390,15 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 <div className="flex flex-col gap-2">
                 {!staff.viewingAs && (role === "owner" || po.supplier_paid_by === staff.id) ? <UndoButton at={po.supplier_paid_at} minutes={undoMinutes} done="Payment to the supplier recorded" action={undoSupplierPaid.bind(null, po.id)} /> : null}
                 <div className="flex flex-wrap items-center gap-2" data-paid-line>
-                  <p className="text-sm font-semibold">Paid to {po.supplier_name} · {paidMethodLabel} · {formatDateTime(po.supplier_paid_at)}{po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}</p>
-                  {proofUrl ? (
-                    <a href={proofUrl} target="_blank" rel="noreferrer" className="text-sm font-bold text-green underline underline-offset-4" data-paid-proof>Proof ✓</a>
+                  <p className="text-sm font-semibold">Paid to {po.supplier_name} · {paidMethodLabel} · {formatDateTime(po.supplier_paid_at)}{po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}{paidByName ? ` · by ${paidByName}` : ""}</p>
+                  {po.supplier_paid_proof_path ? (
+                    <span className="inline-flex items-center gap-2 rounded-control border border-line bg-chip px-2 py-1.5" data-paid-proof>
+                      <SlipTile url={proofUrl} path={po.supplier_paid_proof_path} label={`Proof of payment · ${po.number}`} hook={`lpo-proof-${po.id}`} />
+                      <span className="text-xs font-bold uppercase tracking-[0.06em]">Proof of payment</span>
+                    </span>
                   ) : (
                     <span className="inline-flex items-center gap-2" data-paid-proof-missing>
-                      <Badge tone="amber">Proof missing</Badge>
+                      <Badge tone="red">Proof missing – upload</Badge>
                       {canPay ? <SupplierProofUpload poId={po.id} /> : null}
                     </span>
                   )}

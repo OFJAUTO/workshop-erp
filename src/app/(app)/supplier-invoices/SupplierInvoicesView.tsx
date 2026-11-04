@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { SlipTile } from "@/components/PaymentReport";
 import { ViewerThumb } from "@/components/PhotoViewer";
+import { SupplierProofUpload } from "@/app/(app)/parts/orders/[id]/SupplierProofUpload";
 import { Badge, Button, Card, Input, LinkButton, Notice, SectionLabel, Select } from "@/components/ui";
 import type { CurrentStaff } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -13,7 +15,7 @@ import { checkInvoiceAction, queryInvoiceAction } from "./actions";
 const money = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const STATUS_TONE: Record<InvoiceStatus, "amber" | "red" | "neutral" | "green" | "ink" | "outline"> = { waiting: "amber", queried: "red", new: "ink", checked: "outline", zoho: "outline", paid: "green" };
 
-export type SiSearch = { open?: string; supplier?: string; from?: string; to?: string; status?: string; unpaid?: string; problems?: string; q?: string; job?: string; message?: string; error?: string };
+export type SiSearch = { open?: string; supplier?: string; from?: string; to?: string; status?: string; unpaid?: string; problems?: string; no_proof?: string; q?: string; job?: string; message?: string; error?: string };
 
 /** Where the view lives: its own page (/supplier-invoices, Parts keep it) or the Supplier invoices tab of Parts accounts. */
 export type SiPlace = "supplier-invoices" | "parts-accounts";
@@ -75,6 +77,7 @@ export async function SupplierInvoicesView({ sp, staff, place }: { sp: SiSearch;
           <label className="flex flex-col gap-1 text-xs font-semibold text-muted">To<Input type="date" name="to" defaultValue={sp.to ?? ""} className="w-40" /></label>
           <label className="flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" name="unpaid" value="1" defaultChecked={sp.unpaid === "1"} className="h-5 w-5 accent-ink" />Unpaid</label>
           <label className="flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" name="problems" value="1" defaultChecked={sp.problems === "1"} className="h-5 w-5 accent-ink" />Match problems</label>
+          <label className="flex min-h-11 items-center gap-2 text-sm font-semibold" data-si-no-proof-filter><input type="checkbox" name="no_proof" value="1" defaultChecked={sp.no_proof === "1"} className="h-5 w-5 accent-ink" />Paid without proof</label>
           <Button type="submit" size="md" tone="secondary">Show</Button>
           {kept.length ? <Link href={siHref(place)} className="min-h-11 inline-flex items-center text-sm font-bold underline underline-offset-4">Clear</Link> : null}
         </form>
@@ -82,6 +85,7 @@ export async function SupplierInvoicesView({ sp, staff, place }: { sp: SiSearch;
           <span className="font-extrabold">{rows.length} invoice{rows.length === 1 ? "" : "s"} · AED {money(rows.filter((r) => r.status !== "waiting").reduce((a, r) => a + r.total, 0))} with VAT</span>
           {unpaid.length ? <span className="text-muted">Unpaid:</span> : null}
           {unpaid.slice(0, 8).map((u) => <span key={u.supplierId ?? u.supplier} className="rounded-full border border-line-strong px-2.5 py-0.5 text-xs font-semibold" data-si-unpaid>{u.supplier} · {u.count} · AED {money(u.total)}</span>)}
+          {all.filter((r) => r.proofMissing).length ? <Link href={siHref(place, [...invoiceFilterParams({ no_proof: "1" })])} className="rounded-full border border-red-bar px-2.5 py-0.5 text-xs font-bold text-red" data-si-no-proof-count>Paid without proof · {all.filter((r) => r.proofMissing).length}</Link> : null}
         </div>
       </Card>
 
@@ -112,6 +116,7 @@ function InvoiceCard({ r, href, open }: { r: InvoiceRow; href: string; open: boo
         {r.date ? <span className="text-sm text-muted">{formatDate(r.date)}</span> : null}
         <Badge tone={STATUS_TONE[r.status]}>{STATUS_WORDS[r.status]}</Badge>
         {r.partlyPaid ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-[11px] font-bold text-amber" data-si-partly-paid>Partly paid · AED {money(r.unpaidAmount)} to pay</span> : null}
+        {r.proofMissing ? <span className="rounded-full border border-red-bar bg-white px-2 py-0.5 text-[11px] font-bold text-red" data-si-proof-missing-tag>Proof missing – upload</span> : null}
         <MatchChips r={r} />
         <span className="ml-auto text-sm font-extrabold" data-si-total>AED {money(r.total)}</span>
         <span className="basis-full text-xs text-muted">
@@ -131,15 +136,21 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
   const poIds = row.shares.map((s) => s.poId);
   const [{ data: files }, { data: pos }, { data: lines }] = await Promise.all([
     admin.from("job_files").select("id, storage_path, content_type, caption").eq("kind", "supplier_invoice").in("ref_id", poIds).is("removed_at", null).order("created_at"),
-    admin.from("purchase_orders").select("id, supplier_invoice_path, supplier_paid_at, supplier_paid_method, supplier_paid_reference").in("id", poIds),
+    admin.from("purchase_orders").select("id, supplier_invoice_path, supplier_paid_at, supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path, supplier_paid_by").in("id", poIds),
     admin.from("purchase_order_lines").select("po_id, description, quantity, received_qty, unit_cost, invoice_unit_cost, invoice_check").in("po_id", poIds).eq("is_active", true).order("position"),
   ]);
-  const paths = Array.from(new Set([...((files ?? []) as { storage_path: string }[]).map((f) => f.storage_path), ...((pos ?? []) as { supplier_invoice_path: string | null }[]).map((p) => p.supplier_invoice_path).filter((x): x is string => !!x)]));
+  type PaidPo = { id: string; supplier_invoice_path: string | null; supplier_paid_at: string | null; supplier_paid_method: string | null; supplier_paid_reference: string | null; supplier_paid_proof_path: string | null; supplier_paid_by: string | null };
+  const poRows = (pos ?? []) as PaidPo[];
+  // Fix 4 (4 November 2026): the proof of payment shows next to "Open the invoice (PDF)", signed like the scans.
+  const paths = Array.from(new Set([...((files ?? []) as { storage_path: string }[]).map((f) => f.storage_path), ...poRows.map((p) => p.supplier_invoice_path).filter((x): x is string => !!x), ...poRows.map((p) => p.supplier_paid_proof_path).filter((x): x is string => !!x)]));
   const urls = await signJobFiles(paths);
   const kinds = new Map(((files ?? []) as { storage_path: string; content_type: string | null }[]).map((f) => [f.storage_path, f.content_type ?? ""]));
   const isPdf = (p: string) => /pdf/i.test(kinds.get(p) ?? "") || /\.pdf$/i.test(p);
   // Paid LPO by LPO: each LPO of the invoice with its own payment (a split invoice can be partly paid).
-  const payOf = new Map(((pos ?? []) as { id: string; supplier_paid_at: string | null; supplier_paid_method: string | null; supplier_paid_reference: string | null }[]).map((p) => [p.id, p]));
+  const payOf = new Map(poRows.map((p) => [p.id, p]));
+  const payerIds = Array.from(new Set(poRows.map((p) => p.supplier_paid_by).filter((x): x is string => !!x)));
+  const { data: payers } = payerIds.length ? await admin.from("staff").select("id, display_name").in("id", payerIds) : { data: [] };
+  const payerOf = new Map(((payers ?? []) as { id: string; display_name: string }[]).map((s) => [s.id, s.display_name]));
   const toPay = unpaidShares(row);
   return (
     <Card className="flex flex-col gap-4 !border-ink" id="open" data-si-opened={row.key}>
@@ -184,13 +195,27 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
           ))}
           <p className="text-sm">Before VAT <b>AED {money(row.beforeVat)}</b> · VAT AED {money(row.vat)} · Total <b>AED {money(row.total)}</b>{row.trn ? ` · TRN ${row.trn}` : ""}</p>
           {row.status !== "waiting" && (row.paidAmount > 0 || row.shares.length > 1) ? (
-            <ul className="flex flex-col gap-0.5 text-sm" data-si-paid-lines>
+            <ul className="flex flex-col gap-1.5 text-sm" data-si-paid-lines>
               {row.shares.map((s) => {
                 const p = payOf.get(s.poId);
-                return p?.supplier_paid_at ? (
-                  <li key={s.poId} className="font-semibold text-green" data-si-share-paid={s.poId}>{s.poNumber}: paid to supplier {formatDateTime(p.supplier_paid_at)}{p.supplier_paid_method ? ` · ${p.supplier_paid_method}` : ""}{p.supplier_paid_reference ? ` · ref ${p.supplier_paid_reference}` : ""}</li>
-                ) : (
-                  <li key={s.poId} className="font-semibold" data-si-share-unpaid={s.poId}>{s.poNumber}: not paid yet · AED {money(s.amount)} before VAT</li>
+                if (!p?.supplier_paid_at) return <li key={s.poId} className="font-semibold" data-si-share-unpaid={s.poId}>{s.poNumber}: not paid yet · AED {money(s.amount)} before VAT</li>;
+                const by = p.supplier_paid_by ? payerOf.get(p.supplier_paid_by) : null;
+                return (
+                  <li key={s.poId} className="flex flex-col gap-1" data-si-share-paid={s.poId}>
+                    <span className="font-semibold text-green">{s.poNumber}: paid to supplier {formatDateTime(p.supplier_paid_at)}{p.supplier_paid_method ? ` · ${p.supplier_paid_method}` : ""}{p.supplier_paid_reference ? ` · ref ${p.supplier_paid_reference}` : ""}{by ? ` · by ${by}` : ""}</span>
+                    {/* Fix 4 (4 November 2026): the PROOF OF PAYMENT, right where the invoice is checked. */}
+                    {p.supplier_paid_proof_path ? (
+                      <span className="inline-flex items-center gap-2 self-start rounded-control border border-line bg-chip px-2 py-1.5" data-si-proof={s.poId}>
+                        <SlipTile url={urls[p.supplier_paid_proof_path] ?? null} path={p.supplier_paid_proof_path} label={`Proof of payment · ${s.poNumber}`} hook={`si-proof-${s.poId}`} />
+                        <span className="text-xs font-bold uppercase tracking-[0.06em]">Proof of payment</span>
+                      </span>
+                    ) : (
+                      <span className="flex flex-wrap items-center gap-2" data-si-proof-missing={s.poId}>
+                        <span className="rounded-full border border-red-bar px-2 py-0.5 text-[11px] font-bold text-red">Proof missing – upload</span>
+                        {acts ? <SupplierProofUpload poId={s.poId} /> : null}
+                      </span>
+                    )}
+                  </li>
                 );
               })}
             </ul>
