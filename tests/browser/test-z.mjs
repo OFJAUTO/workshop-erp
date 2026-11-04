@@ -260,11 +260,15 @@ if (want("S4")) {
   const names = page.locator("[data-part-sticker] [data-fit-text]").filter({ hasText: /stabiliser/i });
   check("S4: both stickers carry the FULL name, never '…'", (await names.count()) === 2 && !/…/.test((await names.first().textContent()) ?? "") && new RegExp(longName.slice(0, 30), "i").test((await names.first().textContent()) ?? ""), ((await names.first().textContent()) ?? "").slice(0, 60));
   const fits = await names.evaluateAll((els) => els.map((el) => ({ over: getComputedStyle(el).whiteSpace === "nowrap" && el.scrollWidth > el.clientWidth + 1, wrapped: getComputedStyle(el).whiteSpace === "normal", size: parseFloat(getComputedStyle(el).fontSize), lines: el.querySelector("span")?.getClientRects().length ?? 1 })));
-  check("S4: the long name is shrunk (and wrapped to 2 lines at most), nothing cut off", fits.every((x) => !x.over && (!x.wrapped || x.lines <= 2)), JSON.stringify(fits));
+  // The 50 x 25 layout (5 November 2026): the name bar is the right column, so a VERY long name may
+  // take three lines and shrink towards 1.2 mm (4.5 px) - a close read, never cut off; the job number
+  // stays the big arm's-length line, and a normal name ("FRONT BRAKE PADS SET") sits at 2.6 mm.
+  check("S4: the long name is shrunk (3 lines at most on the narrow bar), nothing cut off", fits.every((x) => !x.over && (!x.wrapped || x.lines <= 3) && x.size >= 4.5), JSON.stringify(fits));
   check("S4: the two different parts read differently on their stickers", /front stabiliser/i.test((await names.first().textContent()) ?? "") && /rear stabiliser/i.test((await names.nth(1).textContent()) ?? ""));
   const jobFits = await page.locator("[data-part-sticker] [data-fit-text]").evaluateAll((els) => els.filter((el) => /^J-\d+$/.test((el.textContent ?? "").trim())).map((el) => ({ over: el.scrollWidth > el.clientWidth + 1, oneLine: getComputedStyle(el).whiteSpace === "nowrap" })));
   check("S4: the job number sits on ONE line, shrunk to fit", jobFits.length >= 2 && jobFits.every((x) => x.oneLine && !x.over), JSON.stringify(jobFits));
-  check("S4: 'Print all (N)' sits at the top and 'Print this one' stays per sticker", /Print all \(2\)/.test((await page.locator(".bar").textContent()) ?? "") && (await page.getByRole("button", { name: "Print this one" }).count()) === 2);
+  // The sticker sheet of 19 October 2026: ticks per sticker and ONE print job ("Print selected (n)").
+  check("S4: the bar prints the ticked stickers in one job", /Print selected \(2\)/.test((await page.locator(".bar").textContent()) ?? "") && (await page.locator("[data-print-selected]").count()) === 1);
   await shot(page, "s4-stickers");
   await browser.close();
 }

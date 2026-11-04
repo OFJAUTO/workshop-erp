@@ -22,8 +22,8 @@ export async function generateMetadata({ params }: { params: Promise<{ jobId: st
 
 /**
  * The part stickers of a job's received parts, one sticker per unit ("1 OF 2"), at the sticker size from Settings
- * (40 × 30 mm by default): the QR on the left, the logo and job number on the right, the part name in capitals on
- * the black strip. Opened the moment a part is ticked received (`?part=<id>&auto=1` prints at once). `?test=1`
+ * (50 × 25 mm landscape by default): the QR on the left, the logo, job number, position and the name bar on the
+ * right. Opened the moment a part is ticked received (`?part=<id>&auto=1` prints at once). `?test=1`
  * prints one sample. Lives outside the app shell so the print is only the stickers.
  */
 export default async function PartLabelsPage({ params, searchParams }: { params: Promise<{ jobId: string }>; searchParams: Promise<{ test?: string; part?: string; parts?: string; auto?: string; back?: string }> }) {
@@ -43,7 +43,7 @@ export default async function PartLabelsPage({ params, searchParams }: { params:
   const labels: Label[] = [];
   if (test === "1") {
     const qr = await qrDataUrl(qrUrl("TESTCODE"), 300);
-    labels.push({ key: "test-1", qr, name: "Front brake pads set (sample)", index: 1, count: 2, date: formatDate(new Date().toISOString()) });
+    labels.push({ key: "test-1", qr, name: "Front brake pads set (sample)", index: 1, count: 2, date: formatDate(new Date().toISOString()), pos: "FRONT LEFT" });
   } else {
     const unitsReady = await partUnitsReady();
     const { data } = await admin.from("part_items").select(PART_FULL_SELECT + ", fitted_at" + (unitsReady ? ", unit" : "")).eq("job_id", jobId).eq("is_active", true).gt("received_qty", 0).order("created_at");

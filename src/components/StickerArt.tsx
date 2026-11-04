@@ -2,8 +2,8 @@
  * The three stickers as plain HTML, black on white, sized in millimetres, for the print pages and the live preview in
  * Settings. No styles from the app: these print bare.
  *
- * Part sticker (40 × 30 mm by default): the QR on the left (about 20 mm), the logo and the job number on the right,
- * and a bold black strip along the bottom with the part name in capitals and "1 OF 2".
+ * Part sticker (50 × 25 mm landscape by default, the owner's layout of 4 November 2026): the QR on the left (about
+ * 21 mm), and on the right the logo, the job number big, the position and the black bar with the name and "1 OF 2".
  * Battery warranty sticker and oil service sticker (50 × 100 mm portrait by default): logo, title, the facts, a black
  * band with the date that matters, the VIN, a QR. The oil sticker's QR opens WhatsApp to book the next service.
  */
@@ -20,27 +20,29 @@ export type ServiceStickerData = { qr: string; servicedOn: string; mileage: stri
 
 const base = (w: number, h: number): React.CSSProperties => ({ width: `${w}mm`, height: `${h}mm`, boxSizing: "border-box", overflow: "hidden", background: "#fff", color: "#000", fontFamily: "Arial, Helvetica, sans-serif", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", padding: "1mm", pageBreakAfter: "always", breakAfter: "page" });
 
+/**
+ * 50 × 25 mm landscape (the owner's layout of 4 November 2026): the QR fills the left (about 21 mm),
+ * and the right column stacks the OFJ logo, the job number BIG, the position (FRONT LEFT) and the
+ * black bar with the part name and "1 OF 2". Scales by height to other sizes; the date is in the ERP
+ * behind the QR, not on the face.
+ */
 export function PartSticker({ w, h, logoUrl, d }: { w: number; h: number; logoUrl: string; d: PartStickerData }) {
-  const u = h / 30;
-  const qr = Math.min(h * 0.68, w * 0.48);
+  const u = h / 25;
+  const pad = 1.2 * u;
+  const qr = Math.min(21 * u, h - 2 * pad, w * 0.5);
   return (
-    <div style={{ ...base(w, h), padding: `${1.5 * u}mm`, gap: `${1 * u}mm` }} data-part-sticker>
-      <div style={{ display: "flex", width: "100%", flex: 1, minHeight: 0, gap: `${2 * u}mm`, alignItems: "center" }}>
+    <div style={{ ...base(w, h), padding: `${pad}mm`, flexDirection: "row", alignItems: "stretch", gap: `${1.4 * u}mm` }} data-part-sticker>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={d.qr} alt="" style={{ width: `${qr}mm`, height: `${qr}mm`, flex: "none", alignSelf: "center" }} data-sticker-qr />
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "space-between", gap: `${0.5 * u}mm` }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={d.qr} alt="" style={{ width: `${qr}mm`, height: `${qr}mm`, flex: "none" }} />
-        <div style={{ flex: 1, minWidth: 0, height: "100%", display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "space-between" }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={logoUrl} alt="" style={{ height: `${6 * u}mm`, maxWidth: "100%", objectFit: "contain" }} />
-          <div style={{ textAlign: "right", width: "100%", minWidth: 0 }}>
-            <FitText text={d.jobNumber} maxMm={4.2 * u} minOneLineMm={2.2 * u} minMm={2.2 * u} allowWrap={false} lineHeight={1} style={{ fontWeight: 800, letterSpacing: "0.3px", textAlign: "right" }} />
-            {d.date ? <div style={{ fontSize: `${2.2 * u}mm`, marginTop: `${0.6 * u}mm` }}>{d.date}</div> : null}
-            {d.pos ? <div style={{ fontSize: `${2.2 * u}mm`, fontWeight: 800, marginTop: `${0.4 * u}mm`, textTransform: "uppercase", lineHeight: 1.1 }} data-sticker-pos>{d.pos}</div> : null}
-          </div>
+        <img src={logoUrl} alt="" style={{ height: `${4 * u}mm`, maxWidth: "100%", objectFit: "contain", flex: "none" }} />
+        <FitText text={d.jobNumber} maxMm={5.8 * u} minOneLineMm={3 * u} minMm={3 * u} allowWrap={false} lineHeight={1} style={{ fontWeight: 800, letterSpacing: "0.3px", textAlign: "right", width: "100%" }} />
+        {d.pos ? <div style={{ fontSize: `${2.7 * u}mm`, fontWeight: 800, textTransform: "uppercase", lineHeight: 1.05, textAlign: "right", width: "100%" }} data-sticker-pos>{d.pos}</div> : null}
+        <div style={{ width: "100%", flex: "none", background: "#000", color: "#fff", padding: `${0.8 * u}mm ${1 * u}mm`, fontWeight: 800, textTransform: "uppercase", display: "flex", justifyContent: "space-between", alignItems: "center", gap: `${1.2 * u}mm`, lineHeight: 1.1, letterSpacing: "0.2px" }}>
+          <span style={{ flex: 1, minWidth: 0 }}><FitText text={d.name} maxMm={2.6 * u} minOneLineMm={2 * u} minMm={1.7 * u} maxLines={3} lineHeight={1.1} style={{ fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.2px" }} /></span>
+          <span style={{ whiteSpace: "nowrap", flex: "none", fontSize: `${1.8 * u}mm` }}>{d.index} OF {d.count}</span>
         </div>
-      </div>
-      <div style={{ width: "100%", flex: "none", background: "#000", color: "#fff", padding: `${1 * u}mm ${1.5 * u}mm`, fontSize: `${2.7 * u}mm`, fontWeight: 800, textTransform: "uppercase", display: "flex", justifyContent: "space-between", gap: `${2 * u}mm`, lineHeight: 1.15, letterSpacing: "0.2px" }}>
-        <span style={{ flex: 1, minWidth: 0, alignSelf: "center" }}><FitText text={d.name} maxMm={2.7 * u} minOneLineMm={2.2 * u} minMm={1.9 * u} lineHeight={1.12} style={{ fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.2px" }} /></span>
-        <span style={{ whiteSpace: "nowrap", flex: "none", alignSelf: "center", fontSize: `${1.9 * u}mm` }}>{d.index} OF {d.count}</span>
       </div>
     </div>
   );

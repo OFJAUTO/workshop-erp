@@ -7,7 +7,7 @@ import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
  * the whole text sits on one line; below the one-line minimum it wraps to two lines, still shrunk to fit. Never
  * an ellipsis. allowWrap={false} keeps it to one line whatever happens (the job number).
  */
-export function FitText({ text, maxMm, minOneLineMm, minMm, lineHeight = 1.1, allowWrap = true, style }: { text: string; maxMm: number; minOneLineMm?: number; minMm?: number; lineHeight?: number; allowWrap?: boolean; style?: CSSProperties }) {
+export function FitText({ text, maxMm, minOneLineMm, minMm, lineHeight = 1.1, allowWrap = true, maxLines = 2, style }: { text: string; maxMm: number; minOneLineMm?: number; minMm?: number; lineHeight?: number; allowWrap?: boolean; /** How many wrapped lines before shrinking further (the 50 × 25 part sticker's narrow name bar allows 3). */ maxLines?: number; style?: CSSProperties }) {
   const ref = useRef<HTMLSpanElement>(null);
   const inner = useRef<HTMLSpanElement>(null);
   const [fitted, setFitted] = useState<{ size: number; wrap: boolean }>({ size: maxMm, wrap: false });
@@ -26,18 +26,18 @@ export function FitText({ text, maxMm, minOneLineMm, minMm, lineHeight = 1.1, al
       s = Math.max(oneMin, s - Math.max(0.08, s * 0.07));
     }
     if (wrap) {
-      // Two lines mean two lines: the real line boxes are counted, shrinking until no more than two remain.
+      // The line cap is real: the actual line boxes are counted, shrinking until no more than maxLines remain.
       const hardFloor = Math.min(oneMin, 0.9);
       el.style.whiteSpace = "normal";
       for (let i = 0; i < 40; i++) {
         el.style.fontSize = `${s}mm`;
-        if (inl.getClientRects().length <= 2) break;
+        if (inl.getClientRects().length <= maxLines) break;
         if (s <= hardFloor + 0.01) break;
         s = Math.max(hardFloor, s - Math.max(0.06, s * 0.06));
       }
     }
     setFitted({ size: s, wrap });
-  }, [text, maxMm, minOneLineMm, minMm, lineHeight, allowWrap]);
+  }, [text, maxMm, minOneLineMm, minMm, lineHeight, allowWrap, maxLines]);
   return (
     <span ref={ref} data-fit-text style={{ display: "block", width: "100%", overflow: "hidden", whiteSpace: fitted.wrap ? "normal" : "nowrap", fontSize: `${fitted.size}mm`, lineHeight, ...style }}>
       <span ref={inner}>{text}</span>

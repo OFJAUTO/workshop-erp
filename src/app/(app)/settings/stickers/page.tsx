@@ -92,7 +92,7 @@ export default async function StickersSettingsPage({ searchParams }: { searchPar
           <Card className="flex flex-col gap-3">
             <SectionLabel>Preview (twice life size)</SectionLabel>
             <div className="flex flex-col gap-4 overflow-x-auto">
-              <div style={{ zoom: scale }} className="border border-dashed border-line-strong self-start"><PartSticker w={ss.partW} h={ss.partH} logoUrl={logo} d={{ qr, jobNumber: "J-00123", name: "Front brake pads set", index: 1, count: 2, date: "16 Oct 2026" }} /></div>
+              <div style={{ zoom: scale }} className="border border-dashed border-line-strong self-start"><PartSticker w={ss.partW} h={ss.partH} logoUrl={logo} d={{ qr, jobNumber: "J-00123", name: "Front brake pads set", index: 1, count: 2, pos: "FRONT LEFT" }} /></div>
               <div style={{ zoom: scale }} className="border border-dashed border-line-strong self-start"><BatterySticker w={ss.batteryW} h={ss.batteryH} logoUrl={logo} d={{ qr, months: ss.warrantyMonths, line: "Main battery · Varta AGM 95Ah", installed: "16 Oct 2026", until: "16 Oct 2027", vin: "WDCYC7CFXHX266190", title: ss.wording.battery, valid: ss.wording.battery_valid }} /></div>
               <div style={{ zoom: scale }} className="border border-dashed border-line-strong self-start"><ServiceSticker w={ss.serviceW} h={ss.serviceH} logoUrl={logo} d={{ qr, plate: "DUBAI A 12345", scanLine: ss.wording.service_scan, servicedOn: "16 Oct 2026", mileage: "42,000 km", nextDate: "16 Oct 2027", nextMileage: "52,000 km", vin: "WDCYC7CFXHX266190", title: ss.wording.service, band: ss.wording.service_band, phone: ss.servicePhone ? ss.phone : null }} /></div>
             </div>

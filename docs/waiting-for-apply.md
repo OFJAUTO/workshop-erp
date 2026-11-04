@@ -14,6 +14,7 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 | # | Migration | What it adds | Backup taken first |
 |---|---|---|---|
 | 1 | `20261204150000_checkin_copy_template.sql` (resend check-in link) | One settings row: the WhatsApp message for a check-in link resent AFTER approval (the read-only copy). Until applied, the built-in wording is used and the Settings box's edits would be dropped — everything else about the resend works already. | `backups/2026-11-04T19-40-57` (111 tables, 249,631 rows) |
+| 2 | `20261205090000_part_sticker_50x25.sql` (part stickers 50 × 25) | Moves the stored part-sticker size from 40 × 30 to the real label size, 50 × 25 mm landscape (two settings values). The sticker's NEW layout is live either way and follows whatever size is stored, so until applied the new design prints at the old 40 × 30 — you could also just type 50 and 25 in Settings > Stickers yourself. | `backups/2026-11-04T21-23-50` (111 tables, 249,688 rows) |
 
 ## Applied on 4 November 2026, night
 
