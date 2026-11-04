@@ -66,6 +66,7 @@
     "test:waiting": "node --env-file=.env.test.local tests/browser/test-waiting.mjs",
     "test:gatein": "node --env-file=.env.test.local tests/browser/test-gatein-page.mjs",
     "test:scanlive": "node --env-file=.env.test.local tests/browser/test-scanlive.mjs",
+    "test:scanstech": "node --env-file=.env.test.local tests/browser/test-scans-tech.mjs",
     "test:reorder": "node --env-file=.env.test.local tests/browser/test-reorder.mjs",
     "test:method": "node --env-file=.env.test.local tests/browser/test-method.mjs",
     "test:commission1": "node --env-file=.env.test.local tests/browser/test-commission1.mjs",

@@ -62,7 +62,7 @@ begin
   delete from public.purchase_orders where number like 'LPO-E2E-%';
   delete from public.recovery_trips where driver_name like 'E2e %' or location_details like 'E2e%';
   delete from public.recovery_drivers where name like 'E2e %';
-  delete from public.inbound_scans where storage_path like 'e2e/%' or from_email like '%@e2e.test';
+  delete from public.inbound_scans where storage_path like 'e2e/%' or from_email like '%@e2e.test' or report_id like 'MAXIAE2E%' or job_id in (select id from public.jobs where id::text like '22222222-0000-4000-8000-00000000e%');
   update public.settings set value = coalesce((select jsonb_agg(x) from jsonb_array_elements_text(value) x where x not ilike 'e2e %'), '[]'::jsonb) where key = 'commission_people';
   delete from public.film_usage where roll_id in (select id from public.film_rolls where name ilike 'e2e %');
   delete from public.film_rolls where name ilike 'e2e %';
@@ -136,7 +136,7 @@ begin
   delete from public.customer_contacts where customer_id = any(cust_ids);
   delete from public.customer_contacts where customer_id = any(cust_ids);
   delete from public.customers where id = any(cust_ids);
-  delete from public.inbound_emails where from_email like 'e2e%' or subject like 'e2e %';
+  delete from public.inbound_emails where from_email like 'e2e%' or subject like 'e2e %' or gmail_message_id like 'e2e-%';
   delete from public.google_mailbox_tokens where mailbox like 'e2e%';
 end $$;
 set session_replication_role = default;

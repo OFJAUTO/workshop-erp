@@ -13,6 +13,7 @@ import { blankToNull, normalisePhone } from "@/lib/format";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS, MANUAL_STATUS_OPTIONS, STATUS_LABELS, STATUS_STAGE, dubaiDate, labelOf, type JobStatus } from "@/lib/jobs";
 import { addTechnician, applyStageSideEffects } from "@/lib/work-flow";
 import { ensureInspection } from "@/lib/inspection-data";
+import { attachMatchedScans } from "@/lib/scan-sync";
 import { loadGateInFlags, loadMedia, mediaChecklist, newToken } from "@/lib/media";
 import { toMiles } from "@/lib/mileage";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
@@ -151,6 +152,8 @@ export async function assignJob(jobId: string, formData: FormData) {
   if (jobRow?.department !== "bodyshop") {
     const settings = await getSettings();
     await ensureInspection(jobId, tech.id, settings.inspection_checklist, Number(settings.inspection_target_minutes) || 90, staff.id);
+    // Fix 1 (4 November 2026): a scan report that arrived before this assignment lands on the new inspection at once.
+    await attachMatchedScans(jobId);
     await applyRoadTestChoice(jobId, jobRow?.job_number ?? "", { id: tech.id, display_name: tech.display_name }, choice, { id: staff.id, display_name: staff.display_name });
   }
   // Bodyshop people land on the bodyshop board in their team's section (one row each, never doubled), mixed cars too.

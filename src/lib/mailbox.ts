@@ -13,7 +13,7 @@ const VIN_RE = /\b[A-HJ-NPR-Z0-9]{17}\b/i;
 
 export type MailAttachmentIn = { name: string; contentType: string; bytes: Buffer };
 export type MailIn = { messageId: string | null; from: string | null; subject: string; text: string; attachments: MailAttachmentIn[] };
-export type MailResult = { stored: number; matched: boolean; jobNumber: string | null; kept: boolean; vin: string | null };
+export type MailResult = { stored: number; matched: boolean; jobNumber: string | null; kept: boolean; vin: string | null; duplicate?: boolean };
 
 const isPdf = (a: MailAttachmentIn) => a.contentType.includes("pdf") || /\.pdf$/i.test(a.name);
 const isImage = (a: MailAttachmentIn) => /^image\/(jpeg|png|webp)/i.test(a.contentType) || /\.(jpe?g|png|webp)$/i.test(a.name);
@@ -28,6 +28,19 @@ const isImage = (a: MailAttachmentIn) => /^image\/(jpeg|png|webp)/i.test(a.conte
 export async function processMail(mail: MailIn, opts: { keepEmailOnNoFiles?: boolean } = {}): Promise<MailResult> {
   const admin = createAdminClient();
   const subject = (mail.subject ?? "").slice(0, 300);
+  // Fix 1 (4 November 2026): Autel sends the SAME report from several addresses (no-reply-eu, noreply-ap,
+  // autelcloudhelp, autelcloudadmin, autelcloudinfo). One report = one record, whoever sent it: the Report ID
+  // is checked BEFORE anything is fetched or stored, and a repeat is filed quietly so it is never looked at again.
+  const reportId = reportIdOf(`${subject}\n${(mail.text ?? "").slice(0, 2000)}`);
+  if (reportId) {
+    const { data: dup } = await admin.from("inbound_scans").select("id, job_id").eq("report_id", reportId).eq("is_active", true).limit(1).maybeSingle();
+    if (dup) {
+      if (mail.messageId) {
+        await admin.from("inbound_emails").insert({ from_email: mail.from, subject: subject || null, text_body: `Duplicate: report ${reportId} was already filed (Autel sends the same report from several addresses). Nothing was imported twice.`, gmail_message_id: mail.messageId, is_active: false });
+      }
+      return { stored: 0, matched: !!dup.job_id, jobNumber: null, kept: false, vin: null, duplicate: true };
+    }
+  }
   let files = mail.attachments.filter((a) => (isPdf(a) || isImage(a)) && a.bytes.length > 0 && a.bytes.length <= 35 * 1024 * 1024);
   // Autel sends a LINK instead of an attachment: fetch the report at once (their links expire).
   // Only autel.com / auteltech.com are ever followed, time-limited and size-capped (src/lib/autel.ts).
@@ -42,7 +55,6 @@ export async function processMail(mail: MailIn, opts: { keepEmailOnNoFiles?: boo
       }
     }
   }
-  const reportId = reportIdOf(`${subject}\n${(mail.text ?? "").slice(0, 2000)}`);
   const carHint = carHintOf(subject);
   if (!files.length) {
     if (opts.keepEmailOnNoFiles !== false) await admin.from("inbound_emails").insert({ from_email: mail.from, subject: subject || null, text_body: (mail.text ?? "").slice(0, 20000) || null, gmail_message_id: mail.messageId });
@@ -68,7 +80,16 @@ export async function processMail(mail: MailIn, opts: { keepEmailOnNoFiles?: boo
     job = (data as unknown as Job | null) ?? null;
   }
   let stored = 0;
+  let repeats = 0;
   for (const f of files) {
+    // No Report ID in the email: the same file for the same car within two weeks is still the same report.
+    if (!reportId && vin) {
+      const { data: twin } = await admin.from("inbound_scans").select("id").eq("vin", vin).eq("file_name", f.name).eq("is_active", true).gte("received_at", new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString()).limit(1);
+      if (twin?.length) {
+        repeats++;
+        continue;
+      }
+    }
     const safeName = f.name.replace(/[^A-Za-z0-9._-]+/g, "_").slice(0, 80) || "scan";
     const path = `${job ? job.id : "unmatched"}/${Date.now()}-${stored}-${safeName}`;
     const contentType = isPdf(f) ? "application/pdf" : f.contentType.toLowerCase() === "text/html" ? "text/html" : f.contentType.toLowerCase().startsWith("image/") ? f.contentType.toLowerCase() : "image/jpeg";
@@ -80,6 +101,12 @@ export async function processMail(mail: MailIn, opts: { keepEmailOnNoFiles?: boo
     if (job && kind === "pre" && isPdf(f)) await attachPrescan(job.id, f.bytes, f.name);
   }
   if (!stored) {
+    if (repeats) {
+      if (mail.messageId) {
+        await admin.from("inbound_emails").insert({ from_email: mail.from, subject: subject || null, text_body: "Duplicate: the same report file was already filed for this car. Nothing was imported twice.", gmail_message_id: mail.messageId, is_active: false });
+      }
+      return { stored: 0, matched: !!job, jobNumber: job?.job_number ?? null, kept: false, vin, duplicate: true };
+    }
     if (opts.keepEmailOnNoFiles === false) return { stored: 0, matched: false, jobNumber: null, kept: false, vin };
     await admin.from("inbound_emails").insert({ from_email: mail.from, subject: subject || null, text_body: `${(mail.text ?? "").slice(0, 19000)}\n\n(${files.length} attachment${files.length === 1 ? "" : "s"} could not be kept)`, gmail_message_id: mail.messageId });
     return { stored: 0, matched: false, jobNumber: null, kept: true, vin };
@@ -99,7 +126,7 @@ export async function processMail(mail: MailIn, opts: { keepEmailOnNoFiles?: boo
   return { stored, matched: false, jobNumber: null, kept: false, vin };
 }
 
-export type MailboxCheck = { ok: boolean; checked: number; stored: number; matched: number; kept: number; skipped: number; error?: string; at: string };
+export type MailboxCheck = { ok: boolean; checked: number; stored: number; matched: number; kept: number; skipped: number; duplicates?: number; error?: string; at: string };
 
 /** The Google sign-in is set up in Vercel (client ID, secret, the mailbox address); the owner still connects it once. */
 export function mailboxConfigured(): boolean {
@@ -129,7 +156,7 @@ export async function checkScansMailbox(): Promise<MailboxCheck> {
       admin.from("inbound_emails").select("gmail_message_id").in("gmail_message_id", ids),
     ]);
     const seen = new Set([...(seenScans ?? []).map((r) => r.gmail_message_id as string), ...(seenMails ?? []).map((r) => r.gmail_message_id as string)]);
-    const result: MailboxCheck = { ok: true, checked: 0, stored: 0, matched: 0, kept: 0, skipped: 0, at };
+    const result: MailboxCheck = { ok: true, checked: 0, stored: 0, matched: 0, kept: 0, skipped: 0, duplicates: 0, at };
     for (const id of ids) {
       if (seen.has(id)) { result.skipped++; continue; }
       const msg: GmailMessage = await getMessage(id);
@@ -143,6 +170,7 @@ export async function checkScansMailbox(): Promise<MailboxCheck> {
       result.stored += r.stored;
       if (r.matched) result.matched++;
       if (r.kept) result.kept++;
+      if (r.duplicate) result.duplicates = (result.duplicates ?? 0) + 1;
     }
     return finish(result);
   } catch (e) {

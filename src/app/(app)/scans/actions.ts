@@ -7,6 +7,7 @@ import { notifyManagers, notifyStaff } from "@/lib/notifications";
 import { SCANS_BUCKET, attachPrescan, scanKindFor } from "@/lib/scans";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { checkScansMailbox, processMail } from "@/lib/mailbox";
+import { attachMatchedScans } from "@/lib/scan-sync";
 import { requireStaff } from "@/lib/auth";
 import { disconnectMailbox } from "@/lib/google-mailbox";
 
@@ -64,9 +65,11 @@ export async function ignoreScan(scanId: string) {
 export async function checkMailboxNow() {
   await requirePermission("approveInspections");
   const r = await checkScansMailbox();
+  const caughtUp = await attachMatchedScans();
   revalidatePath("/scans");
   if (!r.ok) redirect(`/scans?error=${encodeURIComponent(r.error ?? "The mailbox could not be read.")}`);
-  redirect(`/scans?message=${encodeURIComponent(r.checked === 0 ? `Mailbox checked: nothing new${r.skipped ? ` (${r.skipped} already filed)` : ""}.` : `Mailbox checked: ${r.checked} new email${r.checked === 1 ? "" : "s"}, ${r.stored} file${r.stored === 1 ? "" : "s"} kept, ${r.matched} matched to a car.`)}`);
+  const extra = `${r.duplicates ? ` ${r.duplicates} duplicate${r.duplicates === 1 ? "" : "s"} skipped.` : ""}${caughtUp ? ` ${caughtUp} report${caughtUp === 1 ? "" : "s"} placed on the technician's Step 1.` : ""}`;
+  redirect(`/scans?message=${encodeURIComponent((r.checked === 0 ? `Mailbox checked: nothing new${r.skipped ? ` (${r.skipped} already filed)` : ""}.` : `Mailbox checked: ${r.checked} new email${r.checked === 1 ? "" : "s"}, ${r.stored} file${r.stored === 1 ? "" : "s"} kept, ${r.matched} matched to a car.`) + extra)}`);
 }
 
 /** Owner only: the scans mailbox's permission is handed back to Google; Connect signs in again. */

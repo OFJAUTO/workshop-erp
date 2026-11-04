@@ -2,6 +2,7 @@ import { e2eRefused } from "@/lib/e2e-guard";
 import { NextResponse, type NextRequest } from "next/server";
 import { Document, Page, Text, renderToBuffer } from "@react-pdf/renderer";
 import { processMail, type MailAttachmentIn } from "@/lib/mailbox";
+import { attachMatchedScans } from "@/lib/scan-sync";
 import { mailboxConnection, openToken, saveConnection } from "@/lib/google-mailbox";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -16,7 +17,12 @@ export async function POST(request: NextRequest) {
   if (e2eRefused(request)) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }
-  const body = (await request.json().catch(() => ({}))) as { from?: string; subject?: string; text?: string; pdfText?: string; fileName?: string; imageBase64?: string; messageId?: string; connectTest?: { refreshToken: string } };
+  const body = (await request.json().catch(() => ({}))) as { from?: string; subject?: string; text?: string; pdfText?: string; fileName?: string; imageBase64?: string; messageId?: string; connectTest?: { refreshToken: string }; sweep?: boolean };
+  // The cron's catch-up on its own (Fix 1, 4 November 2026): matched scans are placed on their inspections.
+  if (body.sweep) {
+    const caughtUp = await attachMatchedScans();
+    return NextResponse.json({ caughtUp });
+  }
   // A test connection through the same store as the real sign-in. Refused when a real mailbox is connected (the database is shared).
   if (body.connectTest) {
     const current = await mailboxConnection();

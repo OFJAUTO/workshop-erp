@@ -1,6 +1,7 @@
 import { e2eRefused } from "@/lib/e2e-guard";
 import { NextResponse, type NextRequest } from "next/server";
 import { ensureInspection } from "@/lib/inspection-data";
+import { attachMatchedScans } from "@/lib/scan-sync";
 import { newToken } from "@/lib/media";
 import { refreshQuoteTotals } from "@/lib/quote-data";
 import { applyCustomerResponse } from "@/lib/quote-respond";
@@ -201,6 +202,8 @@ export async function POST(request: NextRequest) {
   await admin.from("job_technicians").upsert({ job_id: JOB, staff_id: tech1.id, added_by: manager.id, created_by: manager.id, updated_by: manager.id }, { onConflict: "job_id,staff_id", ignoreDuplicates: true });
   await admin.from("road_tests").upsert({ job_id: JOB, status: "not_started", items: {}, decision: "not_needed", decided_by: manager.id, decided_at: now, created_by: manager.id, updated_by: manager.id }, { onConflict: "job_id" });
   const inspectionId = await ensureInspection(JOB, tech1.id, settings.inspection_checklist, Number(settings.inspection_target_minutes) || 90, manager.id);
+  // Mirrors assignJob (Fix 1, 4 November 2026): a scan that arrived before the assignment lands on the new inspection.
+  await attachMatchedScans(JOB);
   if (stage === "inspection") {
     await admin.from("inspections").update({ status: "in_progress", started_at: now, updated_by: tech1.id }).eq("id", inspectionId);
     await admin.from("jobs").update({ status: "in_inspection" }).eq("id", JOB);

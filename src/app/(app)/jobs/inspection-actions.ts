@@ -6,6 +6,7 @@ import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { ensureInspection, inspectionDangerous, inspectionLocked, loadInspection, reportProblems } from "@/lib/inspection-data";
+import { attachMatchedScans } from "@/lib/scan-sync";
 import { cleanPartsList, mergePartsList } from "@/lib/parts-list";
 import { cleanPartsRows, inspectionLimitsOf, tyreSizeComplete } from "@/lib/inspection";
 import { ensurePartRequests } from "@/lib/quote-data";
@@ -48,6 +49,8 @@ export async function startInspection(jobId: string) {
     if (!job || job.assigned_to !== staff.id) redirect(`/my-jobs/${jobId}?error=${encodeURIComponent("No inspection has been set up for this car yet.")}`);
     const settings = await getSettings();
     await ensureInspection(jobId, staff.id, settings.inspection_checklist, Number(settings.inspection_target_minutes) || 90, staff.id);
+    // Fix 1 (4 November 2026): a scan report that arrived before the inspection existed lands on it now.
+    await attachMatchedScans(jobId);
     bundle = await loadInspection(jobId);
     if (!bundle) redirect(`/my-jobs/${jobId}`);
   }
