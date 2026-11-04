@@ -48,6 +48,15 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
     .eq("token", token)
     .maybeSingle();
   if (!req) return plain(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
+  // Queue of 4 November 2026: a resend EXPIRES the earlier links - an old one says so, with the phone.
+  if ((req as { status?: string }).status === "cancelled") {
+    return plain(
+      <div className="flex flex-col gap-4" data-checkin-expired>
+        <Notice tone="error">This link has expired – ask OFJ for a new one.</Notice>
+        <a href={`tel:${company.phone.replace(/[^\d+]/g, "")}`} className="flex min-h-12 items-center justify-center rounded-lg border-2 border-[#111113] bg-white px-4 text-sm font-extrabold">Call OFJ · {company.phone}</a>
+      </div>,
+    );
+  }
   const card = await loadJobCard(admin, req.job_id, { customerPage: true });
   if (!card || !card.gateIn) return plain(<Notice tone="error">{CHECK_IN.gone}</Notice>);
   const { vehicle, gateIn, requests, media, mediaUrls, job } = card;
@@ -74,7 +83,16 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
   const damage = await loadCarDamage(job.id, { media, urls: mediaUrls });
   const hasDamage = damage.items.length > 0 || damage.loose.length > 0;
   const dirty = gateIn.cleanliness === "dirty" || gateIn.cleanliness === "very_dirty";
-  const approved = !!req.approved_at;
+  // Queue of 4 November 2026: once the JOB is approved, EVERY link of this check-in is read-only — a
+  // fresh link sent after the approval shows the approved snapshot ("Approved by <name> on <date>"),
+  // never the approve button. The approving request's own name and time carry the line.
+  const jobApprovedAt = (job as { first_approval_at?: string | null }).first_approval_at ?? null;
+  const approvedReq = req.approved_at
+    ? { id: req.id, approver_name: req.approver_name, approved_at: req.approved_at }
+    : jobApprovedAt
+      ? (((await admin.from("approval_requests").select("id, approver_name, approved_at").eq("job_id", req.job_id).eq("status", "approved").order("approved_at").limit(1).maybeSingle()).data as { id: string; approver_name: string | null; approved_at: string | null } | null) ?? { id: req.id, approver_name: null, approved_at: jobApprovedAt })
+      : null;
+  const approved = !!approvedReq;
   const car = [vehicle.make?.name, vehicle.model?.name, vehicle.model_year].filter(Boolean).join(" ");
   const customerName = req.sent_to_name ?? card.customer?.full_name ?? "Customer";
   const location = gateIn.location_type === "branch" ? (gateIn.location_name ?? "") : [gateIn.location_name, gateIn.location_address].filter(Boolean).join(", ");
@@ -87,8 +105,10 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
   const feeNoticeAr = noFee ? null : (req.inspection_fee_notice_ar ?? feeNotice(settings.inspection_fee_notice_ar, settings.inspection_fee_aed));
   // 1 November 2026 (B2): charges already incurred before this approval (recovery, fuel, other), with the VAT the agreed way.
   const vatPct = Number((settings as unknown as Record<string, unknown>).vat_percent) || 5;
+  // The agreed charges come from the APPROVING request's snapshot (a fresh post-approval link shows the
+  // same agreed figures, never a later change).
   const incurred = approved
-    ? (((await chargesReady()) ? ((await createAdminClient().from("approval_requests").select("charges_snapshot").eq("id", req.id).maybeSingle()).data?.charges_snapshot ?? []) : []) as { description: string; charge_aed: number; free: boolean }[])
+    ? (((await chargesReady()) ? ((await createAdminClient().from("approval_requests").select("charges_snapshot").eq("id", approvedReq!.id).maybeSingle()).data?.charges_snapshot ?? []) : []) as { description: string; charge_aed: number; free: boolean }[])
     : (await checkInCharges(req.job_id)).map((l) => ({ description: l.description, charge_aed: l.charge_aed, free: l.free }));
   const details: [string, string | null][] = [
     ["Received at", location || null],
@@ -158,7 +178,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
       }
       contact={<ContactButtons phone={company.phone} />}
     >
-      {approved ? <div data-approved-line><Notice tone="success">{approvedLine(req.approver_name, card.customer?.company_name, formatDateTime(req.approved_at))} Thank you.</Notice></div> : null}
+      {approved && approvedReq ? <div data-approved-line><Notice tone="success">{approvedLine(approvedReq.approver_name, card.customer?.company_name, formatDateTime(approvedReq.approved_at))} Thank you.</Notice></div> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <section className="flex flex-col gap-1">
         <h2 className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368] border-b-2 border-[#111113] pb-1.5">Your requests</h2>

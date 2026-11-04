@@ -11,7 +11,9 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Nothing is waiting.
+| # | Migration | What it adds | Backup taken first |
+|---|---|---|---|
+| 1 | `20261204150000_checkin_copy_template.sql` (resend check-in link) | One settings row: the WhatsApp message for a check-in link resent AFTER approval (the read-only copy). Until applied, the built-in wording is used and the Settings box's edits would be dropped — everything else about the resend works already. | `backups/2026-11-04T19-40-57` (111 tables, 249,631 rows) |
 
 ## Applied on 4 November 2026, night
 

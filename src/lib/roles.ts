@@ -68,6 +68,9 @@ export const PERMISSIONS = {
   viewWorkshopList: ["owner", "technician", "workshop_manager", "qc_inspector", "service_advisor", "parts", "accounts"],
   editGateIn: ["owner", "service_advisor", "gate_in"],
   sendApproval: ["owner", "service_advisor"],
+  // Queue of 4 November 2026: the vehicle check-in LINK can be (re)sent by gate-in staff too — before AND
+  // after approval, until the job closes. Only the link: everything else sendApproval guards stays theirs.
+  sendCheckInLink: ["owner", "service_advisor", "gate_in"],
   assignJobs: ["owner", "workshop_manager"],
   moveJobs: ["owner"],
   requestMove: ["owner", "workshop_manager", "service_advisor"],

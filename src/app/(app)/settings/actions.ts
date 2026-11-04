@@ -92,6 +92,7 @@ const TEXT_KEYS = [
   "declaration_text",
   "declaration_text_ar",
   "whatsapp_approval_template",
+  "whatsapp_checkin_copy_template",
   "whatsapp_damage_found_template",
   "inspection_fee_notice",
   "inspection_fee_notice_ar",

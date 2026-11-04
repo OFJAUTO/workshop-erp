@@ -25,8 +25,10 @@ export const maxDuration = 60;
 export async function GET(_request: NextRequest, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params;
   const admin = createAdminClient();
-  const { data: req } = await admin.from("approval_requests").select("id, job_id, approved_at, approver_name, inspection_fee_notice, no_fee").eq("token", token).maybeSingle();
+  const { data: req } = await admin.from("approval_requests").select("id, job_id, approved_at, approver_name, inspection_fee_notice, no_fee, status").eq("token", token).maybeSingle();
   if (!req) return new NextResponse("This link is not valid.", { status: 404 });
+  // 4 November 2026: a resend expired this link - the PDF follows the page.
+  if (req.status === "cancelled") return new NextResponse("This link has expired – ask OFJ for a new one.", { status: 410 });
   const card = await loadJobCard(admin, req.job_id, { customerPage: true });
   if (!card || !card.gateIn) return new NextResponse(CHECK_IN.gone, { status: 404 });
   const { job, vehicle, gateIn, requests, media, mediaUrls } = card;

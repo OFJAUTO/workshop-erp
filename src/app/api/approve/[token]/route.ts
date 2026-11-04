@@ -27,7 +27,12 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
     .eq("token", token)
     .maybeSingle();
   if (!req) return back("This link is not valid.");
+  // Queue of 4 November 2026: a resend expired this link; and once the JOB is approved, every link is
+  // read-only - nothing can be approved twice, whichever link the tap came from.
+  if (req.status === "cancelled") return back("This link has expired – ask OFJ for a new one.");
   if (req.approved_at) return back();
+  const { data: jobCheck } = await admin.from("jobs").select("first_approval_at").eq("id", req.job_id).maybeSingle();
+  if (jobCheck?.first_approval_at) return back();
 
   const now = new Date().toISOString();
   // Section 4.5 (30 October 2026): what the customer confirmed - the damage marked at check-in and its photos - is kept

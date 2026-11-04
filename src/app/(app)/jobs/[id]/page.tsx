@@ -200,7 +200,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const canRequestMove = !can(role, "moveJobs") && can(role, "requestMove") && job.is_open;
   // Gate-in details can be corrected until the car leaves (every change is written in the history).
   const canEditGateIn = can(role, "editGateIn") && job.is_open && job.status !== "in_delivery";
-  const canSend = can(role, "sendApproval") && job.is_open;
+  const canSend = can(role, "sendCheckInLink") && job.is_open;
   // Section 4: the advisor in charge (badge + change control) and whether the viewer follows this car.
   const [{ data: advisorRows }, { data: followRow }] = await Promise.all([
     admin.from("staff").select("id, display_name").in("role_id", ["service_advisor", "owner"]).eq("is_active", true).order("display_name"),
@@ -297,6 +297,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // The WhatsApp messages: car details filled here; the recipient's name and the link are filled in the centre window.
   const fillCar = (t: string) => t.replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", formatPlate(vehicle)).replaceAll("[advisor]", staff.display_name);
   const approvalTemplate = fillCar(settings.whatsapp_approval_template).replaceAll("[name]", greetName);
+  const checkinCopyTemplate = fillCar(settings.whatsapp_checkin_copy_template).replaceAll("[name]", greetName);
   const reportTemplate = fillCar(settings.whatsapp_report_template).replaceAll("[name]", greetName);
   // The messages are short: no bank details (those sit behind "Bank details" on the proforma page and in the PDF).
   const readyTemplate = fillCar(settings.whatsapp_ready_template).replaceAll("[name]", greetName).replaceAll("[bank]", "");
@@ -764,7 +765,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <Card className={tile(approvalBox)} data-stage-card="approval" data-state={approvalBox}>
           <span className={boxTitle(approvalBox)}>{tick(approvalBox)}Job card approval</span>
           {!latestApproval && !job.first_approval_at ? <span className="text-sm font-semibold">{approvalState.text}</span> : null}
-          {seesCustomerDetails ? <ApprovalSendControl fee={!job.first_approval_at && !staff.viewingAs ? { initial: feeInputOf(job), bounds: feeBoundsFor(settings, vehicle?.make?.name), isOwner: role === "owner" } : null} jobId={id} canSend={canSend} complete={check.complete} latest={latestApproval} latestShort={latestApproval?.token ? await shortFor(`${PRODUCTION_SITE_URL}/approve/${latestApproval.token}`) : null} approvedAt={job.first_approval_at} siteUrl={site} messageTemplate={approvalTemplate} customer={customer ? { name: greetName, phone: customer.phone } : null} contacts={approverContacts.map((c) => ({ name: c.name, phone: c.phone }))} hidePhone={!seesCustomerDetails} /> : job.first_approval_at ? <span className="text-sm font-semibold" data-approval-plain>Approved {formatDayTime(job.first_approval_at)}</span> : latestApproval ? <span className="text-sm font-semibold" data-approval-plain>{approvalState.text}</span> : null}
+          {seesCustomerDetails ? <ApprovalSendControl fee={!job.first_approval_at && !staff.viewingAs ? { initial: feeInputOf(job), bounds: feeBoundsFor(settings, vehicle?.make?.name), isOwner: role === "owner" } : null} jobId={id} canSend={canSend} complete={check.complete} latest={latestApproval} latestShort={latestApproval?.token ? await shortFor(`${PRODUCTION_SITE_URL}/approve/${latestApproval.token}`) : null} approvedAt={job.first_approval_at} siteUrl={site} messageTemplate={approvalTemplate} copyTemplate={checkinCopyTemplate} customer={customer ? { name: greetName, phone: customer.phone } : null} contacts={approverContacts.map((c) => ({ name: c.name, phone: c.phone }))} hidePhone={!seesCustomerDetails} /> : job.first_approval_at ? <span className="text-sm font-semibold" data-approval-plain>Approved {formatDayTime(job.first_approval_at)}</span> : latestApproval ? <span className="text-sm font-semibold" data-approval-plain>{approvalState.text}</span> : null}
           {approvedFee ? <ApprovedFeeWording f={approvedFee} /> : null}
           {job.first_approval_at && role === "owner" && !staff.viewingAs && job.is_open ? <OwnerFeeChange action={ownerChangeInspectionFee.bind(null, id)} initial={feeInputOf(job)} bounds={feeBoundsFor(settings, vehicle?.make?.name)} /> : null}
           <LinkButton href={`/jobs/${id}/gate-in`} tone="secondary" size="md" className="mt-auto" data-gate-in-details>

@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { VinCopy } from "@/components/VinCopy";
 import { Badge, Card, DescriptionList, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
-import { requirePermission } from "@/lib/auth";
+import { requireStaff } from "@/lib/auth";
 import { PanelMarker } from "@/components/PanelMarker";
 import { cleanPanelMarks } from "@/lib/car-outline";
 import { saveGateInDamage } from "@/app/(app)/jobs/damage-actions";
@@ -18,6 +18,12 @@ import { getSettings } from "@/lib/settings";
 import { signJobFiles } from "@/lib/work-data";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ApprovalSendControl } from "../SendControls";
+import { feeBoundsFor, feeInputOf } from "@/lib/inspection-fee-server";
+import { greetingNameOf } from "@/lib/messages";
+import { shortFor } from "@/lib/short-links";
+import { getSiteUrl, PRODUCTION_SITE_URL } from "@/lib/site";
+import { formatPlate as plateOfCar } from "@/lib/types";
 import { formatPlate } from "@/lib/types";
 import { mediaChecklist } from "@/lib/media";
 import { MediaGallery } from "../MediaGallery";
@@ -29,9 +35,12 @@ import { CustomerName } from "@/components/CustomerPanel";
  * and time) and the internal PDF. Reached from the Job card approval box at every stage. Staff only.
  */
 export default async function GateInDetailsPage({ params }: { params: Promise<{ id: string }> }) {
-  const staff = await requirePermission("viewJobs");
+  // Queue of 4 November 2026: gate-in staff open THIS page too (to resend the check-in link); the
+  // customer privacy rules of 29 October still hide phones and money from them (seesCustomerDetails).
+  const staff = await requireStaff();
   const { id } = await params;
   const role = staff.role_id as RoleId;
+  if (!can(role, "viewJobs") && !can(role, "sendCheckInLink")) redirect("/");
   const supabase = await createClient();
   const [card, settings] = await Promise.all([loadJobCard(supabase, id), getSettings()]);
   if (!card) notFound();
@@ -58,6 +67,8 @@ export default async function GateInDetailsPage({ params }: { params: Promise<{ 
   const latestApproval = approvals[0] ?? null;
   const approvedApproval = approvals.find((a) => a.approved_at) ?? null;
   const fee = Number(job.inspection_fee_aed ?? settings.inspection_fee_aed) || 0;
+  // The two send messages, the car filled in (the control fills [name] and [link]).
+  const fillCheckinTemplate = (t: string) => t.replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", plateOfCar(vehicle)).replaceAll("[advisor]", staff.display_name);
 
   return (
     <>
@@ -115,6 +126,25 @@ export default async function GateInDetailsPage({ params }: { params: Promise<{ 
           ) : (
             <p className="text-sm text-muted">No approval link yet. It is created from the job card once the photos and videos are complete.</p>
           )}
+          {/* Queue of 4 November 2026: the check-in link can be (re)sent from HERE too - owner, advisors
+              and gate-in staff, before AND after approval (after approval the link opens read-only). */}
+          {can(role, "sendCheckInLink") && job.is_open && !staff.viewingAs ? (
+            <ApprovalSendControl
+              fee={!job.first_approval_at ? { initial: feeInputOf(job), bounds: feeBoundsFor(settings, vehicle?.make?.name), isOwner: role === "owner" } : null}
+              jobId={id}
+              canSend
+              complete={check.complete}
+              latest={latestApproval}
+              latestShort={latestApproval?.token ? await shortFor(`${PRODUCTION_SITE_URL}/approve/${latestApproval.token}`) : null}
+              approvedAt={job.first_approval_at}
+              siteUrl={await getSiteUrl()}
+              messageTemplate={fillCheckinTemplate(String(settings.whatsapp_approval_template ?? ""))}
+              copyTemplate={fillCheckinTemplate(String(settings.whatsapp_checkin_copy_template ?? ""))}
+              customer={customer ? { name: greetingNameOf(customer), phone: customer.phone } : null}
+              contacts={[]}
+              hidePhone={!seesCustomerDetails}
+            />
+          ) : null}
           <p className="text-sm">
             Inspection fee if no work is approved: <span className="font-bold">AED {fee.toLocaleString("en-GB")}</span>
             {job.first_approval_at ? <span className="text-muted"> · locked (the customer approved the job card)</span> : null}

@@ -7,7 +7,6 @@ import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { receivePartInFull, createMainLpo, orderSupplierLpo, resendMainLpo, setPartExpected } from "@/lib/lpo";
-import { blankToNull } from "@/lib/format";
 import { gmailConfigured, sendGmail } from "@/lib/gmail";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { loadPurchaseOrder } from "@/lib/parts-data";

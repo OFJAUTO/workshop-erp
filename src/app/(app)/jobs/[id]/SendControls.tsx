@@ -93,6 +93,7 @@ export function ApprovalSendControl({
   approvedAt,
   siteUrl,
   messageTemplate,
+  copyTemplate = null,
   customer,
   contacts,
   hidePhone = false,
@@ -110,6 +111,8 @@ export function ApprovalSendControl({
   siteUrl: string;
   /** The approval message with [name] and [link] still to fill. */
   messageTemplate: string;
+  /** After approval the resend carries the READ-ONLY copy wording instead of the approval ask (4 November 2026). */
+  copyTemplate?: string | null;
   customer: Recipient | null;
   contacts: Recipient[];
   hidePhone?: boolean;
@@ -121,11 +124,12 @@ export function ApprovalSendControl({
   const [phone, setPhone] = useState(latest?.sent_to_phone ?? options[0]?.phone ?? "");
   const [name, setName] = useState(latest?.sent_to_name ?? customer?.name ?? "");
   const [created, setCreated] = useState<{ id: string; link: string } | null>(latest && !latest.approved_at ? { id: latest.id, link: latestShort ?? `${siteUrl}/approve/${latest.token}` } : null);
+  const [other, setOther] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feeValue, setFeeValue] = useState<FeeInput | null>(fee?.initial ?? null);
   const [pending, start] = useTransition();
   const approved = !!(approvedAt || latest?.approved_at);
-  const message = created ? messageTemplate.replaceAll("[name]", name || "Customer").replaceAll("[link]", created.link) : null;
+  const message = created ? (approved && copyTemplate ? copyTemplate : messageTemplate).replaceAll("[name]", name || "Customer").replaceAll("[link]", created.link) : null;
 
   function startNew() {
     setError(null);
@@ -182,6 +186,11 @@ export function ApprovalSendControl({
   return (
     <div className="flex flex-col gap-1.5">
       {status ? <StatusLine tone={status.tone} text={status.text} onAgain={canSend && !approved ? () => { setStep(created ? "send" : "who"); setOpen(true); } : undefined} /> : null}
+      {canSend && approved ? (
+        <Button type="button" tone="secondary" size="md" className="!whitespace-normal" onClick={startNew} data-resend-checkin>
+          Resend the check-in link (opens read-only)
+        </Button>
+      ) : null}
       {!latest && canSend && !approved ? (
         <>
           <Button type="button" size="md" disabled={!complete || pending} onClick={startNew}>
@@ -197,7 +206,7 @@ export function ApprovalSendControl({
       ) : null}
       {error && !open ? <span className="text-xs font-semibold text-red">{error}</span> : null}
       {open ? (
-        <SendLinkDialog title="Job card approval" message={step === "send" ? message : null} phoneDigits={(created ? phone : "").replace(/[^\d]/g, "")} onSent={sent} onClose={() => setOpen(false)}>
+        <SendLinkDialog title={approved ? "Vehicle check-in link (read-only)" : "Job card approval"} message={step === "send" ? message : null} phoneDigits={(created ? phone : "").replace(/[^\d]/g, "")} onSent={sent} onClose={() => setOpen(false)}>
           {step === "who" ? (
             <div className="flex flex-col gap-3">
               {options.length ? (
@@ -205,20 +214,26 @@ export function ApprovalSendControl({
                   <div className="flex flex-col gap-2">
                     {options.map((o, i) => (
                       <label key={o.phone + i} className="flex items-center gap-3 rounded-control border border-line-strong px-3.5 py-2.5 cursor-pointer has-[:checked]:border-ink has-[:checked]:bg-chip">
-                        <input type="radio" name="recipient" value={o.phone} checked={phone === o.phone} onChange={() => { setPhone(o.phone); setName(o.name); }} className="h-4 w-4 accent-ink" />
+                        <input type="radio" name="recipient" value={o.phone} checked={!other && phone === o.phone} onChange={() => { setOther(false); setPhone(o.phone); setName(o.name); }} className="h-4 w-4 accent-ink" />
                         <span className="flex flex-col">
                           <span className="text-sm font-semibold">{o.name}</span>
                           {!hidePhone ? <span className="text-xs text-muted">{o.phone}</span> : null}
                         </span>
                       </label>
                     ))}
+                    {/* 4 November 2026: the link can go to someone else - a driver, the office, a family member. */}
+                    <label className="flex items-center gap-3 rounded-control border border-line-strong px-3.5 py-2.5 cursor-pointer has-[:checked]:border-ink has-[:checked]:bg-chip">
+                      <input type="radio" name="recipient" value="other" checked={other} onChange={() => { setOther(true); setPhone(""); setName(""); }} className="h-4 w-4 accent-ink" data-send-other />
+                      <span className="text-sm font-semibold">Someone else…</span>
+                    </label>
                   </div>
                 </Field>
-              ) : (
+              ) : null}
+              {!options.length || other ? (
                 <Field label="Phone number">
-                  <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required />
+                  <Input type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} required data-send-other-phone />
                 </Field>
-              )}
+              ) : null}
               <Field label="Name of the person approving" optional>
                 <Input value={name} onChange={(e) => setName(e.target.value)} />
               </Field>

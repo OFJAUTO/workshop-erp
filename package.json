@@ -171,7 +171,8 @@
     "test:fix4": "node --env-file=.env.test.local tests/browser/test-fix4.mjs",
     "test:fix5": "node --env-file=.env.test.local tests/browser/test-fix5.mjs",
     "test:scaninvoice": "node --env-file=.env.test.local tests/browser/test-scan-invoice.mjs",
-    "test:estmoney1": "node --env-file=.env.test.local tests/browser/test-estmoney1.mjs"
+    "test:estmoney1": "node --env-file=.env.test.local tests/browser/test-estmoney1.mjs",
+    "test:resendcheckin": "node --env-file=.env.test.local tests/browser/test-resendcheckin.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

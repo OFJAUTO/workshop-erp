@@ -206,6 +206,9 @@ export function SettingsForm({
             <Field label="WhatsApp approval message" hint="Placeholders: [name], [make model], [plate], [link], [advisor].">
               <Textarea name="whatsapp_approval_template" defaultValue={v.whatsapp_approval_template} rows={4} required />
             </Field>
+            <Field label="WhatsApp: check-in link resent after approval" hint="The read-only copy of the vehicle check-in (no approval asked). Placeholders: [name], [make model], [plate], [link].">
+              <Textarea name="whatsapp_checkin_copy_template" defaultValue={v.whatsapp_checkin_copy_template} rows={4} required />
+            </Field>
             <Field label="WhatsApp: damage found after check-in" hint="Sent when the team records damage found after the car arrived. Placeholders: [name], [make model], [plate], [damage], [link].">
               <Textarea name="whatsapp_damage_found_template" defaultValue={v.whatsapp_damage_found_template || DEFAULT_DAMAGE_FOUND} rows={4} data-damage-found-template />
             </Field>

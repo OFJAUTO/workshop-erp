@@ -387,7 +387,9 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
 
 /** Creates the link. Nothing is "sent" until Open WhatsApp or Copy link is used. */
 export async function sendApproval(jobId: string, _state: FormState, formData: FormData): Promise<FormState> {
-  const staff = await requirePermission("sendApproval");
+  // Queue of 4 November 2026: the check-in link can be (re)sent by gate-in staff too, before AND after
+  // approval, while the job is open. The link itself never changes anything once approved (read-only page).
+  const staff = await requirePermission("sendCheckInLink");
   const values = formValues(formData);
   const name = String(formData.get("sent_to_name") ?? "").trim();
   const phone = normalisePhone(String(formData.get("sent_to_phone") ?? ""));
@@ -397,7 +399,7 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
   const { data: job0 } = await supabase.from("jobs").select("id, status, is_open, job_number, first_approval_at").eq("id", jobId).maybeSingle();
   if (!job0 || !job0.is_open) return { error: "This job is closed.", values };
   const check = mediaChecklist(await loadMedia(jobId), await loadGateInFlags(jobId));
-  if (!check.complete) return { error: "Both videos, the dashboard photo, both keys photos, the four wheel photos with their condition and any required damage photos must be uploaded before the approval link can be created.", values };
+  if (!check.complete && !job0.first_approval_at) return { error: "Both videos, the dashboard photo, both keys photos, the four wheel photos with their condition and any required damage photos must be uploaded before the approval link can be created.", values };
 
   const settings = await getSettings();
   // 30 October 2026: the fee choice is required on the link (Inspection fee with its amount, or No inspection fee with
@@ -416,6 +418,10 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
   if (!terms) return { error: "Add the terms and conditions text in Settings first.", values };
 
   const token = newToken();
+  // A new link EXPIRES the earlier open ones (never an approved one): their pages say "This link has
+  // expired – ask OFJ for a new one", so only the newest link works for the same check-in.
+  const { data: olds } = await createAdminClient().from("approval_requests").update({ status: "cancelled", updated_by: staff.id }).eq("job_id", jobId).eq("kind", "job_card").in("status", ["created", "sent", "opened"]).select("id");
+  if (olds?.length) await logEvent(supabase, jobId, staff.id, { event_type: "approval_created", note: `${olds.length} earlier check-in link${olds.length === 1 ? "" : "s"} expired (a new one is being sent)` });
   const { data: created, error } = await supabase
     .from("approval_requests")
     .insert({
@@ -449,7 +455,7 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
 
 /** Records that the link was actually sent (Open WhatsApp or Copy link). */
 export async function markApprovalSent(jobId: string, requestId: string, method: "whatsapp" | "copy" | "tablet") {
-  const staff = await requirePermission("sendApproval");
+  const staff = await requirePermission("sendCheckInLink");
   const supabase = await createClient();
   const { data: req } = await supabase.from("approval_requests").select("id, status, sent_at, sent_to_name, sent_to_phone").eq("id", requestId).eq("job_id", jobId).maybeSingle();
   if (!req) return;
