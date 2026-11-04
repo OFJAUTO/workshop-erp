@@ -50,7 +50,9 @@ try {
   /* ---------- C. The inspection list ---------- */
   await go(page, `${base}/parts/inspections`);
   const listRow = page.locator(`[data-inspection-row="${jobId}"]`);
-  check("C1: the list shows the car's inspection as Approved", (await listRow.count()) === 1 && (await listRow.getAttribute("data-inspection-status")) === "approved");
+  const [vplate] = await sql("select v.plate_code, v.plate_number from public.vehicles v join public.jobs j on j.vehicle_id = v.id where j.id = $1", [jobId]);
+  const rowText = (await listRow.textContent()) ?? "";
+  check("C1: the list shows the car's inspection as Approved, with the car's plate (the vehicle read works)", (await listRow.count()) === 1 && (await listRow.getAttribute("data-inspection-status")) === "approved" && rowText.includes(vplate.plate_number), rowText.slice(0, 80));
   const listHtml = await page.content();
   check("C2: no customer name on the list", !!custName && !listHtml.toLowerCase().includes(custName.toLowerCase()));
   await page.screenshot({ path: path.join(dir, "c1-inspection-list.png") });

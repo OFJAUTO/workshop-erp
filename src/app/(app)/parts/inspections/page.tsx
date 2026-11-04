@@ -64,7 +64,7 @@ export default async function PartsInspectionsPage({ searchParams }: { searchPar
   const techs = new Map(((techData ?? []) as { id: string; display_name: string }[]).map((t) => [t.id, t.display_name]));
   const vehicleIds = [...new Set([...jobs.values()].map((j) => j.vehicle_id).filter((x): x is string => !!x))];
   const { data: vehData } = vehicleIds.length
-    ? await admin.from("vehicles").select("id, plate_country, plate_emirate, plate_code, plate_number, vin, kind, variant, photo_path, make:makes(name), model:models(name)").in("id", vehicleIds)
+    ? await admin.from("vehicles").select("id, plate_country, plate_emirate, plate_code, plate_number, vin, kind, variant, photo_path, make:vehicle_makes(name), model:vehicle_models(name)").in("id", vehicleIds)
     : { data: [] as unknown[] };
   const vehicles = new Map(((vehData ?? []) as unknown as VehicleLite[]).map((v) => [v.id, v]));
   const pics = await signCarPictures([...vehicles.values()].map((v) => v.photo_path));
