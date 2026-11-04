@@ -244,6 +244,17 @@ export default async function InspectionReportPage({ params }: { params: Promise
                 Road test
               </LinkButton>
             ) : null}
+            {["owner", "service_advisor", "workshop_manager", "parts", "gate_in"].includes(role) ? (
+              <details className="relative" data-print-internal>
+                <summary className="inline-flex min-h-11 cursor-pointer list-none items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold [&::-webkit-details-marker]:hidden">Print (internal) ▾</summary>
+                <div className="absolute right-0 z-20 mt-1 flex w-64 flex-col rounded-card border border-line bg-white p-1 shadow-card">
+                  <a href={`/api/pdf/inspection-internal/${id}?mode=full&photos=1`} target="_blank" rel="noreferrer" className="rounded-control px-3 py-2.5 text-sm font-semibold hover:bg-chip" data-print-internal-link="full-photos">Full list, with photos</a>
+                  <a href={`/api/pdf/inspection-internal/${id}?mode=full`} target="_blank" rel="noreferrer" className="rounded-control px-3 py-2.5 text-sm font-semibold hover:bg-chip" data-print-internal-link="full">Full list, no photos</a>
+                  <a href={`/api/pdf/inspection-internal/${id}?mode=findings&photos=1`} target="_blank" rel="noreferrer" className="rounded-control px-3 py-2.5 text-sm font-semibold hover:bg-chip" data-print-internal-link="findings">Findings only</a>
+                  <a href={`/api/pdf/inspection-internal/${id}?mode=blank`} target="_blank" rel="noreferrer" className="rounded-control px-3 py-2.5 text-sm font-semibold hover:bg-chip" data-print-internal-link="blank">Print blank checklist</a>
+                </div>
+              </details>
+            ) : null}
           </>
         }
       />
