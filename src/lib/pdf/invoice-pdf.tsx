@@ -1,4 +1,5 @@
 import { isPickupShownByPackage, packagesGivePickup } from "../packages";
+import { DECLINED_HEADING, declinedSummary, groupDeclined, splitDeclinedNotes, type DeclinedDocItem } from "../declined-doc";
 import { partLineName } from "../quotes";
 import { realPartNumber } from "../parts-rows";
 import { customerCompWord } from "../complimentary";
@@ -183,10 +184,13 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
 
   const draw = ({ tight, keepLast }: { tight: boolean; keepLast: boolean }) => {
     const { body, lead } = boxesWithTail(boxes, keepLast, tight);
-    const notes = invoice.notes ? (
+    // 5 November 2026 (J-00970): the declined list never rides inside the note - an old note's block
+    // is taken out here, and the list gets its own page-2 section below.
+    const cleanNotes = splitDeclinedNotes(invoice.notes).rest;
+    const notes = cleanNotes ? (
       <View style={styles.note} wrap={false}>
         <Text style={styles.smallTitle}>Note</Text>
-        <Text>{invoice.notes}</Text>
+        <Text>{cleanNotes}</Text>
       </View>
     ) : null;
     return renderToBuffer(
@@ -206,6 +210,11 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
         return docModel ? <PackageSection tight={tight} key={l.id} doc={docModel} price={round2(l.unit_price * l.quantity)} /> : null;
       })}
       {body}
+      {bundle.declined.length ? (
+        <View style={{ marginTop: px(8) }} wrap={false}>
+          <Text style={{ fontSize: px(9.5), fontWeight: 700, color: "#5F6368" }}>{declinedSummary(bundle.declined.length, "page 2")}</Text>
+        </View>
+      ) : null}
       <DocumentTail
         tight={tight}
         rows={rows}
@@ -235,11 +244,39 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
           </>
         }
       />
+      {bundle.declined.length ? <DeclinedPdfSection items={bundle.declined} /> : null}
     </PdfDocument>,
     );
   };
   // One page when it fits; a second page only when needed, never with the totals alone on it (src/lib/pdf-read.ts).
   return renderByPageRules(draw);
+}
+
+/** The declined work on its OWN page (5 November 2026): heading, Replace now → Replace → Advisory,
+ * two columns as rows of two (each row unbreakable, the list flows onto page 3 when long - it can
+ * never sit on top of the totals again). */
+function DeclinedPdfSection({ items }: { items: DeclinedDocItem[] }) {
+  const groups = groupDeclined(items);
+  const n = groups.reduce((t, g) => t + g.items.length, 0);
+  return (
+    <View break>
+      <View style={{ borderBottomWidth: px(2), borderBottomColor: "#111", paddingBottom: 4, marginBottom: 6 }} wrap={false}>
+        <Text style={{ fontSize: px(13), fontWeight: 800, letterSpacing: 0.6 }}>{DECLINED_HEADING} · {n}</Text>
+        <Text style={{ fontSize: px(8.5), color: "#5F6368", marginTop: 2 }}>Found at inspection and not approved this visit. No charge for any of it; we can quote it again any time.</Text>
+      </View>
+      {groups.map((g) => (
+        <View key={g.label} style={{ marginBottom: 7 }}>
+          <Text style={{ fontSize: px(9.5), fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", marginBottom: 2.5 }}>{g.label} · {g.items.length}</Text>
+          {Array.from({ length: Math.ceil(g.items.length / 2) }, (_, r) => (
+            <View key={r} style={{ flexDirection: "row", gap: 12, paddingVertical: 1.2 }} wrap={false}>
+              <View style={{ flex: 1 }}><Text style={{ fontSize: px(9) }}>• {g.items[r * 2]}</Text></View>
+              <View style={{ flex: 1 }}>{g.items[r * 2 + 1] ? <Text style={{ fontSize: px(9) }}>• {g.items[r * 2 + 1]}</Text> : null}</View>
+            </View>
+          ))}
+        </View>
+      ))}
+    </View>
+  );
 }
 
 /** A receipt for one payment, on the same template. */

@@ -15,6 +15,7 @@ import { noChargeJob } from "./comp-data";
 import { createAdminClient } from "./supabase/admin";
 import { loadVisitMileage } from "./visit-mileage";
 import { estimateMoneyReady, gateOutMileageReady, partUnitsReady } from "./schema-ready";
+import { DECLINED_MARKER, cleanDeclined, splitDeclinedNotes, type DeclinedDocItem } from "./declined-doc";
 import { cleanUnit, type PartUnit } from "./part-units";
 import { customerMileage } from "./mileage";
 import { realPartNumber } from "./parts-rows";
@@ -207,6 +208,10 @@ export type InvoiceBundle = {
   issuedByName: string | null;
   /** 30 October 2026: "48,210 km" at gate-in and at gate-out, for the customer (words only). */
   mileage: { in: string | null; out: string | null } | null;
+  /** 5 November 2026 (J-00970): what the customer declined, for the document's own grouped section
+   * (page 2 of the PDF, "listed below" on the page) - from the declined_work rows, else read out of
+   * an old invoice's note. The note itself is shown with the block taken out. */
+  declined: DeclinedDocItem[];
   /** Money from the estimate (4 November 2026, read only once the migration is applied): the estimate the
    *  document was issued from, the bill-to block and the proforma's valid-until day. */
   estimate?: { id: string; number: string } | null;
@@ -242,11 +247,22 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
       if (est) estimate = { id: String(est.id), number: String(est.number) };
     }
   }
+  // The declined-work section (5 November 2026): the structured rows first; an old invoice whose
+  // note carries the whole list falls back to what the note says.
+  let declined: DeclinedDocItem[] = [];
+  const notesHaveList = (invoice.notes ?? "").includes(DECLINED_MARKER);
+  if (invoice.job_id && (notesHaveList || /declined all work/i.test(invoice.issue_reason ?? ""))) {
+    const { data: dw } = await admin.from("declined_work").select("title, severity").eq("job_id", invoice.job_id).eq("is_active", true);
+    declined = cleanDeclined(((dw ?? []) as { title: string; severity: string }[]).map((r) => ({ title: r.title, severity: r.severity as DeclinedDocItem["severity"] })));
+  }
+  if (!declined.length && notesHaveList) declined = cleanDeclined(splitDeclinedNotes(invoice.notes).legacy);
+
   return {
     invoice,
     estimate,
     billTo,
     validUntil,
+    declined,
     lines: await attachInvoiceUnits(((lines ?? []) as Record<string, unknown>[]).map(toInvoiceLine)),
     payments: ((payments ?? []) as Record<string, unknown>[]).map(toPayment),
     customer: (customer as InvoiceBundle["customer"]) ?? null,

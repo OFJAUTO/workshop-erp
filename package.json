@@ -179,7 +179,8 @@
     "backup:offsite": "node --env-file=.env.local scripts/offsite/backup-db.mjs",
     "backup:storage": "node --env-file=.env.local scripts/offsite/backup-storage.mjs",
     "backup:restore-test": "node --env-file=.env.local scripts/offsite/restore-test.mjs",
-    "backup:migrate-local": "node --env-file=.env.local scripts/offsite/migrate-local-backups.mjs"
+    "backup:migrate-local": "node --env-file=.env.local scripts/offsite/migrate-local-backups.mjs",
+    "test:declinedfix": "node --env-file=.env.test.local tests/browser/test-declinedfix.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

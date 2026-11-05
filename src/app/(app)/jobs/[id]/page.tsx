@@ -104,6 +104,8 @@ import { TEAM_LABELS, sideOfPerson, teamOf } from "@/lib/teams";
 import { setJobDepartment, setLineTeam } from "../team-actions";
 import { TeamsCard } from "./TeamsCard";
 import { ChargesCard } from "./ChargesCard";
+import { DeclinedWorkSection } from "@/components/DeclinedWork";
+import { cleanDeclined } from "@/lib/declined-doc";
 import { addJobChargesAction, decideFreeChargeAction, saveQuoteChargeCostAction } from "../charge-actions";
 import { chargesReady, loadJobChargeItems } from "@/lib/charges";
 import { loadSupplierInvoices } from "@/lib/supplier-invoices";
@@ -306,10 +308,13 @@ export default async function JobPage({ params, searchParams }: { params: Promis
 
   const insp = inspection?.inspection ?? null;
   // The five parts steps as dots (the same rule as the parts page).
-  const [{ data: stepRows }, { data: stepJob }] = await Promise.all([
+  const [{ data: stepRows }, { data: stepJob }, { data: declinedRows }] = await Promise.all([
     createAdminClient().from("part_items").select("is_active, order_status, received_qty, quantity, confirmed_quantity, issue_status, availability, supplier, po_id, return_status").eq("job_id", id),
     createAdminClient().from("jobs").select("parts_pricing_done_at, parts_pricing_reopened_at, declined_out_at").eq("id", id).maybeSingle(),
+    createAdminClient().from("declined_work").select("title, severity").eq("job_id", id).eq("is_active", true),
   ]);
+  // 5 November 2026 (J-00970): what the customer declined, as the same grouped section the invoice shows.
+  const declinedItems = cleanDeclined(((declinedRows ?? []) as { title: string; severity: string }[]).map((r) => ({ title: r.title, severity: r.severity as "Replace now" | "Replace" | "Advisory" })));
   const partsStepList = partsSteps({ jobStatus: job.status, pricingDoneAt: (stepJob?.parts_pricing_done_at as string | null) ?? null, pricingReopenedAt: (stepJob?.parts_pricing_reopened_at as string | null) ?? null, parts: (stepRows ?? []).map((r) => stepPartOf(r)) });
   const partsDots = <PartsSteps size="dots" steps={partsStepList} />;
   const inspectionTasks = work && inspection && hasLabourChargesLine(work.lines) ? tasksFromInspection(inspection.items) : [];
@@ -718,6 +723,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </section>
       </div>
 
+      {declinedItems.length ? <DeclinedWorkSection items={declinedItems} title="Recommended work declined by the customer" /> : null}
       {chargesOn && jobCharges && (chargeItemsList.length || mayAddCharges) ? (
         <ChargesCard items={chargeItemsList} costs={jobCharges.costs} costReady={jobCharges.costReady} canAdd={mayAddCharges} canCost={chargesOn && !staff.viewingAs} approved={!!job.first_approval_at} onAdd={addJobChargesAction.bind(null, id)} onDecide={(lineId: string) => decideFreeChargeAction.bind(null, id, lineId)} onSaveCost={(lineId: string) => saveQuoteChargeCostAction.bind(null, id, lineId)} isOwner={role === "owner" && !staff.viewingAs} seesTripPrices={role === "owner" || role === "accounts"} jobId={id} files={chargeFiles} recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]} providers={(settings.recovery_companies ?? []) as string[]} quoteHref={(quotationId: string) => `/jobs/${id}/quote/${quotationId}`} mayOpenQuote={seesQuote} message={chargeMessage ?? null} error={chargeError ?? null} />
       ) : null}

@@ -1,6 +1,6 @@
 "use server";
 
-import { declinedItemsOf, declinedNote, saveDeclinedWork } from "@/lib/declined";
+import { declinedItemsOf, saveDeclinedWork } from "@/lib/declined";
 import { isQuickJob } from "@/lib/inspection-fee";
 import { cleanPartNumber, dateFromDays, isOurStock } from "@/lib/parts-rows";
 import { estimatePartState } from "@/lib/estimate-parts";
@@ -1060,7 +1060,9 @@ export async function declineToGateOut(quotationId: string, formData: FormData) 
   // The declined work is saved for the next visit with its status, and listed on the charge's invoice (29 October 2026).
   const declinedItems = await declinedItemsOf(q.job_id, settings);
   await saveDeclinedWork(q.job_id, declinedItems, staff, settings);
-  if (invoiceId && declinedItems.length) await admin.from("invoices").update({ notes: declinedNote(declinedItems), updated_by: staff.id }).eq("id", invoiceId);
+  // 5 November 2026 (J-00970): the declined list never rides in the note - the documents build their
+  // own grouped section from the declined_work rows; the issue_reason is the flag they look for.
+  if (invoiceId && declinedItems.length) await admin.from("invoices").update({ issue_reason: "Inspection charges: the customer declined all work", updated_by: staff.id }).eq("id", invoiceId);
   await admin.from("job_events").insert({ job_id: q.job_id, event_type: "status_change", from_status: job.status, to_status: "ready", note: `${q.number} declined: the car goes to gate-out (${staff.display_name}).${chargeText || " No charge: the car leaves free."}`, created_by: staff.id });
   await logQuoteEvent(q.id, q.job_id, staff.id, "declined_to_gate_out", `Proceed to gate-out chosen by ${staff.display_name}${chargeText}`);
   const n = { type: "job_declined_out", title: `${job.job_number} declined: make sure the car is put back together and ready for collection`, body: `The customer declined ${q.number}. Open parts requests are cancelled.${chargeText}`, jobId: q.job_id, href: `/jobs/${q.job_id}` };

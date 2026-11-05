@@ -73,7 +73,9 @@ try {
   const inv = (await sql("select id, number, token, notes, total_aed, vat_aed, taxable_aed from public.invoices where job_id = $1 and kind = 'tax_invoice' and is_active order by created_at desc limit 1", [jobId]))[0];
   const lines = await sql("select description, amount_aed, vat_aed, total_aed, coalesce(cost_aed, 0) as cost from public.invoice_lines where invoice_id = $1 and is_active", [inv?.id]);
   check("B the invoice has ONE line INSPECTION CHARGES, AED 750 + VAT 37.50, no typed cost", lines.length === 1 && lines[0].description === "INSPECTION CHARGES" && Number(lines[0].amount_aed) === 750 && Number(lines[0].vat_aed) === 37.5 && Number(lines[0].cost) === 0, JSON.stringify(lines));
-  check("B the invoice note lists the declined work by name and status", /^Recommended work declined by the customer:/.test(inv?.notes ?? "") && /– (Replace|Replace now|Advisory)/.test(inv?.notes ?? ""), inv?.notes);
+  // 5 November 2026 (J-00970): the list is NOT in the note any more - the documents build their own
+  // grouped section from the declined_work rows (forty note lines used to print over the totals).
+  check("B the invoice note does NOT carry the declined list (the section does)", !/Recommended work declined by the customer:/.test(inv?.notes ?? ""), inv?.notes ?? "(empty)");
   const q = (await sql("select status from public.quotations where id = $1", [seed.quotationId]))[0];
   const linesAfter = Number((await sql("select count(*)::int as n from public.quotation_lines where quotation_id = $1 and is_active", [seed.quotationId]))[0].n);
   check("B the quotation is marked declined and keeps every line", q.status === "declined" && linesAfter === linesBefore, `${q.status} · ${linesBefore} → ${linesAfter}`);
@@ -82,14 +84,14 @@ try {
   const jobAfter = (await sql("select status, declined_out_at from public.jobs where id = $1", [jobId]))[0];
   check("B the car is Ready to collect", jobAfter.status === "ready" && !!jobAfter.declined_out_at);
 
-  // The customer's copy: the web page and the PDF carry the note.
+  // The customer's copy: the web page and the PDF carry the declined work as its OWN grouped section.
   const cp = await (await fetch(`${base}/invoice/${inv.token}`)).text();
-  check("B the customer's invoice page shows the declined-work note", /Recommended work declined by the customer/.test(cp));
+  check("B the customer's invoice page shows the declined-work SECTION", /data-declined-section/.test(cp) && /RECOMMENDED WORK DECLINED BY THE CUSTOMER/i.test(cp));
   const pdf = Buffer.from(await (await fetch(`${base}/api/pdf/invoice/${inv.token}`)).arrayBuffer());
   const doc = mupdf.Document.openDocument(pdf, "application/pdf");
   let pdfText = "";
   for (let i = 0; i < doc.countPages(); i++) pdfText += doc.loadPage(i).toStructuredText().asText();
-  check("B the invoice PDF shows INSPECTION CHARGES and the declined-work note", /INSPECTION CHARGES/i.test(pdfText) && /Recommended work declined by the customer/i.test(pdfText));
+  check("B the invoice PDF shows INSPECTION CHARGES and the declined section with its summary line", /INSPECTION CHARGES/i.test(pdfText) && /RECOMMENDED WORK DECLINED BY THE CUSTOMER/i.test(pdfText) && /declined by the customer – listed on page 2/i.test(pdfText));
   fs.writeFileSync(path.join(SHOTS, "B-invoice.pdf"), pdf);
 
   // Profit and the report: the cost is the clocked time, booked as labour.

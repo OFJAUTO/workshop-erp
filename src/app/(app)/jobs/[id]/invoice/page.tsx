@@ -6,7 +6,7 @@ import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { detailsWithoutHours, formatDateTime, formatDayTime, hoursQty } from "@/lib/format";
-import { INVOICE_SELECT, METHOD_LABELS, PAYMENT_SELECT, buildInvoiceDraft, creditsOnDocs, invoiceBalance, nextDocumentNumber, toInvoice, toPayment, type PaymentRow } from "@/lib/invoice-data";
+import { INVOICE_LINE_SELECT, INVOICE_SELECT, METHOD_LABELS, PAYMENT_SELECT, buildInvoiceDraft, creditsOnDocs, invoiceBalance, nextDocumentNumber, toInvoice, toInvoiceLine, toPayment, type PaymentRow } from "@/lib/invoice-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { STATUS_LABELS } from "@/lib/jobs";
 import { PAYMENT_METHOD_LABELS, methodsFor, moneyState, type MoneyInvoice, type MoneyStepKey } from "@/lib/money-steps";
@@ -50,7 +50,7 @@ export const dynamic = "force-dynamic";
 /** Money on screen: two decimals and thousands separators. */
 const m = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-type LiveInvoice = MoneyInvoice & { id: string; total_aed: number; issued_at: string; issue_reason: string | null };
+type LiveInvoice = MoneyInvoice & { id: string; total_aed: number; subtotal_aed: number; discount_aed: number; warranty_credit_aed: number | null; taxable_aed: number; vat_aed: number; issued_at: string; issue_reason: string | null };
 
 /**
  * The money side of one job (rebuilt 21 October 2026, 1.3): a slim step bar (Deposit when asked ·
@@ -82,6 +82,11 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const proforma = (invoices.find((i) => i.kind === "proforma" && i.status === "issued" && !i.converted_to && !i.deposit_for_quotation_id) ?? null) as (LiveInvoice & { customer_says_paid_method: string | null }) | null;
   const live = taxInvoice ?? proforma;
   const { data: livePays } = live ? await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", live.id).eq("is_active", true).order("received_at") : { data: [] };
+  // 5 November 2026 (J-00970): once a document is ISSUED, the Lines box shows ITS OWN lines and
+  // totals - never the quotation draft's (a declined-all car has no approved quotation, and the
+  // draft read "None · 0.00" while the tax invoice said 1,500.00).
+  const { data: liveLineRows } = live ? await admin.from("invoice_lines").select(INVOICE_LINE_SELECT).eq("invoice_id", live.id).eq("is_active", true).order("position") : { data: [] };
+  const liveLines = ((liveLineRows ?? []) as Record<string, unknown>[]).map(toInvoiceLine);
   const payments = ((livePays ?? []) as Record<string, unknown>[]).map(toPayment);
   // 3 November 2026: what credit notes took off the tax invoice is not owed (the same rule as the job card and the list).
   const liveCredit = taxInvoice ? ((await creditsOnDocs([taxInvoice.id])).get(taxInvoice.id) ?? 0) : 0;
@@ -164,8 +169,10 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const readyTemplate = fillCar(settings.whatsapp_ready_template);
   const invoiceTemplate = fillCar(String(settings.whatsapp_invoice_template ?? ""));
   const bankCharges = bankFeesOf(settings);
-  const services = draft.lines.filter((l) => l.section !== "parts");
-  const parts = draft.lines.filter((l) => l.section === "parts");
+  const shownLines = live ? liveLines : draft.lines;
+  const services = shownLines.filter((l) => l.section !== "parts");
+  const parts = shownLines.filter((l) => l.section === "parts");
+  const liveRounding = live ? Math.round((live.taxable_aed - (live.subtotal_aed - live.discount_aed - (live.warranty_credit_aed || 0))) * 100) / 100 : 0;
   const here = `/jobs/${id}/invoice`;
   const unpaid = !!live && (bal?.balance ?? 0) > 0.005;
   const payNowOn = !!payLink && !payLink.paid_at && unpaid;
@@ -464,9 +471,9 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
             {[...depositRows, ...payments].filter((p) => p.status === "recorded").map((p) => <p key={p.id} className="text-sm flex flex-wrap items-center gap-2"><a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="font-bold underline underline-offset-4">Receipt {p.number}</a><span className="text-xs text-muted">AED {m(p.amount_aed)}</span></p>)}
             {!approvedQ?.token && invoices.length === 0 && depositRows.length + payments.length === 0 ? <p className="text-sm text-muted">Nothing yet.</p> : null}
           </Card>
-          <Card className="flex flex-col gap-2">
-            <SectionLabel right={draft.quotationNumbers.length ? `a copy of ${draft.quotationNumbers.join(", ")}` : undefined}>Lines</SectionLabel>
-            <p className="text-xs text-muted">Exactly what the customer approved: the same lines, discount and total. Nothing to choose or type here. A change needs a revised quotation or the owner.</p>
+          <Card className="flex flex-col gap-2" data-lines-source={live ? "invoice" : "draft"}>
+            <SectionLabel right={live ? `${live.number}'s own lines` : draft.quotationNumbers.length ? `a copy of ${draft.quotationNumbers.join(", ")}` : undefined}>Lines</SectionLabel>
+            <p className="text-xs text-muted">{live ? `Exactly what is on ${live.number} - these lines and totals ARE the document's.` : "Exactly what the customer approved: the same lines, discount and total. Nothing to choose or type here. A change needs a revised quotation or the owner."}</p>
             {[{ title: "Services", ls: services }, { title: "Spare parts", ls: parts }].map(({ title, ls }) => (
               <div key={title} className="flex flex-col gap-1">
                 <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{title}</span>
@@ -482,16 +489,28 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                 </ul>
               </div>
             ))}
-            <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm border-t border-line pt-2">
-              <dt className="text-muted">Gross amount</dt><dd className="text-right">AED {m(draft.totals.gross)}</dd>
-              {draft.totals.discount ? <><dt className="font-bold">Discount ({draft.totals.discountPercent}%), as quoted</dt><dd className="text-right font-bold">− AED {m(draft.totals.discount)}</dd></> : null}
-              {draft.totals.warrantyCredit ? <><dt className="font-bold">Warranty repair, no charge</dt><dd className="text-right font-bold">− AED {m(draft.totals.warrantyCredit)}</dd></> : null}
-              {draft.totals.rounding ? <><dt className="text-muted">Rounding, as quoted</dt><dd className="text-right">{draft.totals.rounding < 0 ? "− " : ""}AED {m(Math.abs(draft.totals.rounding))}</dd></> : null}
-              <dt className="text-muted">Taxable amount</dt><dd className="text-right">AED {m(draft.totals.taxable)}</dd>
-              <dt className="text-muted">VAT {draft.vatPercent}%</dt><dd className="text-right">AED {m(draft.totals.vat)}</dd>
-              <dt className="text-lg font-extrabold">Total</dt><dd className="text-right text-lg font-extrabold">AED {m(draft.totals.total)}</dd>
-              {paidSoFar && !live ? <><dt className="text-muted">Paid so far (advances), applied on issue</dt><dd className="text-right">AED {m(paidSoFar)}</dd></> : null}
-            </dl>
+            {live ? (
+              <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm border-t border-line pt-2" data-lines-total={m(live.total_aed)}>
+                <dt className="text-muted">Gross amount</dt><dd className="text-right">AED {m(live.subtotal_aed)}</dd>
+                {live.discount_aed ? <><dt className="font-bold">Discount</dt><dd className="text-right font-bold">− AED {m(live.discount_aed)}</dd></> : null}
+                {live.warranty_credit_aed ? <><dt className="font-bold">Warranty repair, no charge</dt><dd className="text-right font-bold">− AED {m(live.warranty_credit_aed)}</dd></> : null}
+                {liveRounding ? <><dt className="text-muted">Rounding</dt><dd className="text-right">{liveRounding < 0 ? "− " : ""}AED {m(Math.abs(liveRounding))}</dd></> : null}
+                <dt className="text-muted">Taxable amount</dt><dd className="text-right">AED {m(live.taxable_aed)}</dd>
+                <dt className="text-muted">VAT</dt><dd className="text-right">AED {m(live.vat_aed)}</dd>
+                <dt className="text-lg font-extrabold">Total</dt><dd className="text-right text-lg font-extrabold">AED {m(live.total_aed)}</dd>
+              </dl>
+            ) : (
+              <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-1 text-sm border-t border-line pt-2" data-lines-total={m(draft.totals.total)}>
+                <dt className="text-muted">Gross amount</dt><dd className="text-right">AED {m(draft.totals.gross)}</dd>
+                {draft.totals.discount ? <><dt className="font-bold">Discount ({draft.totals.discountPercent}%), as quoted</dt><dd className="text-right font-bold">− AED {m(draft.totals.discount)}</dd></> : null}
+                {draft.totals.warrantyCredit ? <><dt className="font-bold">Warranty repair, no charge</dt><dd className="text-right font-bold">− AED {m(draft.totals.warrantyCredit)}</dd></> : null}
+                {draft.totals.rounding ? <><dt className="text-muted">Rounding, as quoted</dt><dd className="text-right">{draft.totals.rounding < 0 ? "− " : ""}AED {m(Math.abs(draft.totals.rounding))}</dd></> : null}
+                <dt className="text-muted">Taxable amount</dt><dd className="text-right">AED {m(draft.totals.taxable)}</dd>
+                <dt className="text-muted">VAT {draft.vatPercent}%</dt><dd className="text-right">AED {m(draft.totals.vat)}</dd>
+                <dt className="text-lg font-extrabold">Total</dt><dd className="text-right text-lg font-extrabold">AED {m(draft.totals.total)}</dd>
+                {paidSoFar ? <><dt className="text-muted">Paid so far (advances), applied on issue</dt><dd className="text-right">AED {m(paidSoFar)}</dd></> : null}
+              </dl>
+            )}
           </Card>
         </div>
       </div>

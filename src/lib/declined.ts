@@ -26,12 +26,6 @@ export type Severity = (typeof SEVERITY)[number];
 export type DeclinedItem = { title: string; severity: Severity };
 type Actor = { id: string; display_name: string };
 
-/** The customer's invoice note: the declined work by name and status - no prices, no part numbers. */
-export function declinedNote(items: DeclinedItem[]): string | null {
-  if (!items.length) return null;
-  return ["Recommended work declined by the customer:", ...items.map((i) => `• ${i.title} – ${i.severity}`)].join("\n");
-}
-
 /** What the customer declined on this job: the report's findings (worst first), then quoted work no finding covers. */
 export async function declinedItemsOf(jobId: string, settings: Settings): Promise<DeclinedItem[]> {
   const admin = createAdminClient();
@@ -131,7 +125,10 @@ export async function declineAllWork(jobId: string, actor: Actor, settings: Sett
     invoiceId = inv.id;
     invoiceNumber = inv.number;
     total = inv.total;
-    await admin.from("invoices").update({ notes: declinedNote(items), issue_reason: "Inspection charges: the customer declined all work", updated_by: actor.id }).eq("id", inv.id);
+    // 5 November 2026 (J-00970): the declined list is NOT written into the note any more - forty
+    // note lines printed over the PDF's totals. The documents build their own grouped section from
+    // the declined_work rows; the issue_reason is the flag they look for.
+    await admin.from("invoices").update({ issue_reason: "Inspection charges: the customer declined all work", updated_by: actor.id }).eq("id", inv.id);
   }
   if (amount !== fee) {
     await admin.from("job_events").insert({ job_id: jobId, event_type: "inspection_fee_changed", note: `Inspection fee charged AED ${amount.toLocaleString("en-GB")} instead of the AED ${fee.toLocaleString("en-GB")} agreed at gate-in, by ${actor.display_name}${opts.reason ? `: ${opts.reason}` : ""}`, created_by: actor.id });

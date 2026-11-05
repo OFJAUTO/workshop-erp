@@ -19,6 +19,8 @@ import { companyFromSettings } from "@/lib/company";
 import { customerPageMetadata } from "@/lib/customer-pages";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { METHOD_LABELS, invoiceBalance, loadInvoice } from "@/lib/invoice-data";
+import { declinedSummary, splitDeclinedNotes } from "@/lib/declined-doc";
+import { DeclinedWorkSection } from "@/components/DeclinedWork";
 import { currentPaymentLink, paymentLinksOf } from "@/lib/payment-links";
 import { aed } from "@/lib/quotes";
 import { getSettings } from "@/lib/settings";
@@ -151,7 +153,13 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
           </div>
         )}
         {tintOutsidePackage && tintWords ? <TintCard words={tintWords} /> : null}
-        {invoice.notes ? <p className="whitespace-pre-line rounded-lg border border-[#D4D4D8] px-4 py-3 text-sm" data-invoice-note>{invoice.notes}</p> : null}
+        {splitDeclinedNotes(invoice.notes).rest ? <p className="whitespace-pre-line rounded-lg border border-[#D4D4D8] px-4 py-3 text-sm" data-invoice-note>{splitDeclinedNotes(invoice.notes).rest}</p> : null}
+        {bundle.declined.length ? (
+          <>
+            <p className="text-sm font-semibold text-[#5F6368]" data-declined-summary>{declinedSummary(bundle.declined.length, "below")}</p>
+            <DeclinedWorkSection items={bundle.declined} />
+          </>
+        ) : null}
         {workmanship ? <p className="rounded-lg border border-[#D4D4D8] px-4 py-3 text-sm" data-workmanship><span className="font-bold">Workmanship warranty: {workmanship.period}, valid until {formatDate(workmanship.until)}</span></p> : null}
         {wCard && wToken ? <WarrantyCardPanel href={`/warranty/${wToken}`} qr={wQr} certificateNo={wCard.certificateNo} car={[wCard.car, wCard.plate].filter(Boolean).join(" · ")} status={{ kind: customerWarrantyStatus(wCard.status).kind, title: customerWarrantyTitle(wCard.status) }} /> : null}
         {/* Section 9: the package keeps its own section on the proforma and the tax invoice too. */}
