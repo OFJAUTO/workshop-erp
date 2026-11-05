@@ -48,6 +48,7 @@ import { HandbackBanner } from "@/components/HandbackBanner";
 import { recoveryProviderList } from "@/lib/recovery-providers";
 import { requestPartsGone, revisionPreview } from "@/lib/quote-versions";
 import { advisorPricePartsReady, belowCostReady, partUnitsReady } from "@/lib/schema-ready";
+import { loadPartsChanges } from "@/lib/parts-changes-data";
 import { recoveryElsewhere } from "@/lib/charges";
 import { costLimitsOf } from "@/lib/part-cost-check";
 
@@ -58,7 +59,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
   const { id, qid } = await params;
-  const { message, error, send, approve } = await searchParams;
+  const { message, error, send, approve, revise } = await searchParams;
   const { data: declinedRow } = await createAdminClient().from("jobs").select("declined_out_at, is_open, inspection_fee_aed, inspection_fee_choice").eq("id", id).maybeSingle();
   const declinedOut = !!declinedRow?.declined_out_at;
   const jobOpen = declinedRow?.is_open !== false;
@@ -78,6 +79,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const lock = quoteLockOf(q, await invoicesForLock(q.job_id), { isOwner });
   const mayRevise = !staff.viewingAs && (lock.locked ? (lock.reviseBy === "owner_or_allowed" ? isOwner || !!q.revision_allowed_at : lock.reviseBy === "owner" ? isOwner : false) : ["sent", "opened", "expired", "declined", "urgent_requested"].includes(q.status));
   const mayAskRevise = !staff.viewingAs && lock.locked && lock.reviseBy === "owner_or_allowed" && !isOwner && !q.revision_allowed_at;
+  // Parts changed after the customer's approval (5 November 2026, J-00985): the revision request comes prefilled with them.
+  const partsAfter = mayAskRevise ? await loadPartsChanges(id) : null;
   // Someone else holding the editing lock (a heartbeat within the last minute and a half): read only for this person.
   // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
   const lockFresh = !!q.editing_by && q.editing_by !== staff.id && !!q.editing_at && Date.now() - Date.parse(q.editing_at) < 90000;
@@ -342,6 +345,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         onAskRevise={mayAskRevise ? requestRevision.bind(null, q.id) : null}
         revision={{ requestedAt: q.revision_requested_at ?? null, requestedBy: requesterName, reason: q.revision_request_reason ?? null, allowedAt: q.revision_allowed_at ?? null, declinedAt: q.revision_declined_at ?? null, declinedNote: q.revision_decision_note ?? null }}
         reviseReasons={reasonsFor(settings, "revise_after_approval")}
+        reviseDefault={partsAfter?.words ? `Parts changed after approval: ${partsAfter.words.replace(/^Changes since approval: /, "")}` : null}
+        reviseOpen={mayAskRevise && revise === "parts"}
         ownerBox={ownerBox}
         discountBy={discountBy}
         viewerName={staff.display_name}

@@ -164,8 +164,9 @@ export function PricingDoneBar({ progress, mode, sentAt = null, action, onReopen
           {mode === "sent" ? (
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <span className="inline-flex min-h-11 items-center gap-2 rounded-control bg-green-soft px-3 text-sm font-bold text-green" data-pricing-locked>✓ Sent to the advisor{sentAt ? ` · ${formatDateTime(sentAt)}` : ""}</span>
-              {onReopen ? <button type="submit" formAction={onReopen} className="min-h-12 rounded-control border border-line-strong bg-white px-5 text-sm font-bold" data-pricing-edit>Edit</button> : null}
-              <a href={backHref} className="inline-flex min-h-12 items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-pricing-back>Back to the parts desk</a>
+              {/* 5 November 2026: labels that say what they do (the owner's item 6). */}
+              {onReopen ? <button type="submit" formAction={onReopen} className="min-h-12 rounded-control border border-line-strong bg-white px-5 text-sm font-bold" data-pricing-edit>Change prices (reopens pricing)</button> : null}
+              <a href={backHref} className="inline-flex min-h-12 items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-pricing-back>← All cars on the parts desk</a>
             </div>
           ) : (
             <div className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto">

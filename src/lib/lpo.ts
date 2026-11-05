@@ -53,7 +53,9 @@ export async function loadJobLpos(jobId: string): Promise<JobLpos> {
   const lines = ((lineRows ?? []) as Record<string, unknown>[]).map(toPoLine);
   const main = [...pos].reverse().find((p) => p.kind === "main") ?? null;
   const charges = await chargesByPo(pos.map((p) => p.id));
-  const suppliers = pos.filter((p) => p.kind === "supplier" && (!main || p.parent_id === main.id || !p.parent_id)).map((po) => ({ po, lines: lines.filter((l) => l.po_id === po.id), charges: charges.get(po.id) ?? [] }));
+  // Every supplier LPO of the car, whichever main LPO it came from (a later approval continues the first family's
+  // numbers; an older family's LPOs still have parts to receive): never hidden behind the newest main LPO.
+  const suppliers = pos.filter((p) => p.kind === "supplier").map((po) => ({ po, lines: lines.filter((l) => l.po_id === po.id), charges: charges.get(po.id) ?? [] }));
   // Fix 2 (4 November 2026): a refused main LPO is not a dead end. The newest one with no replacement is shown
   // with the owner's reason and "Send for approval again"; a pending main says what changed after it was sent.
   let refused: JobLpos["refused"] = null;
@@ -144,7 +146,7 @@ const lineOf = (p: PartFull, i: number) => ({ part_item_id: p.id, position: i + 
  * "Send LPO for approval": the one main LPO for the job with every approved part still to order, whatever the
  * supplier. It waits for the owner or the head accountant. Parts from our own stock never go on it.
  */
-export async function createMainLpo(jobId: string, by: Actor): Promise<{ error?: string; poId?: string; number?: string }> {
+export async function createMainLpo(jobId: string, by: Actor, opts: { /** "Resend for approval" (5 November 2026): the changes since the customer's approval, told to the approvers. */ note?: string } = {}): Promise<{ error?: string; poId?: string; number?: string }> {
   const admin = createAdminClient();
   const { data: job } = await admin.from("jobs").select("id, job_number, is_open, status").eq("id", jobId).maybeSingle();
   // Part 4 (4 November 2026): a HELD job ("Order parts now" before the car arrives) is booked, not open —
@@ -168,8 +170,8 @@ export async function createMainLpo(jobId: string, by: Actor): Promise<{ error?:
   const grand = round2(total + extra);
   if (extra) await admin.from("purchase_orders").update({ total_cost_aed: grand, updated_by: by.id }).eq("id", po.id);
   await admin.from("jobs").update({ parts_state: "ordering" }).eq("id", jobId).eq("parts_state", "none");
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "po_raised", note: `${po.number} sent for approval by ${by.display_name}: ${lines.length} part${lines.length === 1 ? "" : "s"} from ${supplierNames.join(", ")}${extra ? ` + supplier charges AED ${extra.toLocaleString("en-GB")}` : ""}, AED ${grand.toLocaleString("en-GB")}`, created_by: by.id });
-  const n = { type: "po_approval", title: `LPO to approve · ${po.number}`, body: `${job.job_number} · ${supplierNames.join(", ")} · AED ${grand.toLocaleString("en-GB")} · from ${by.display_name}. One tap to approve.`, jobId, href: `/parts/orders/${po.id}` };
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "po_raised", note: `${po.number} sent for approval by ${by.display_name}: ${lines.length} part${lines.length === 1 ? "" : "s"} from ${supplierNames.join(", ")}${extra ? ` + supplier charges AED ${extra.toLocaleString("en-GB")}` : ""}, AED ${grand.toLocaleString("en-GB")}${opts.note ? ` · ${opts.note}` : ""}`, created_by: by.id });
+  const n = { type: "po_approval", title: opts.note ? `Parts changed after approval · ${po.number} to approve` : `LPO to approve · ${po.number}`, body: `${job.job_number} · ${supplierNames.join(", ")} · AED ${grand.toLocaleString("en-GB")} · from ${by.display_name}.${opts.note ? ` ${opts.note} (old vs new on the LPO).` : ""} One tap to approve.`, jobId, href: `/parts/orders/${po.id}` };
   const { data: heads } = await admin.from("staff").select("id").eq("role_id", "accounts").eq("is_head_accountant", true).eq("is_active", true);
   await notifyRoles(["owner"], n);
   await notifyStaff((heads ?? []).map((h) => h.id), n);
@@ -194,7 +196,13 @@ export async function splitMainLpo(mainId: string, by: Actor): Promise<{ created
     const key = raw && !isOurStock(raw) && !isPlaceholderSupplier(raw) ? raw : "Supplier to confirm";
     groups.set(key, [...(groups.get(key) ?? []), p]);
   }
-  const { data: existing } = await admin.from("purchase_orders").select("sub_number").eq("parent_id", mainId);
+  // One car, one LPO family (5 November 2026, J-00985): a later approval on the same job - parts changed after the
+  // customer's approval, resent - continues the numbers of the job's FIRST approved main LPO (LPO-00045-3), never a
+  // second family. The first approval of a job keeps its own main number as before.
+  const { data: root } = main.job_id ? await admin.from("purchase_orders").select("id, number").eq("job_id", main.job_id).eq("kind", "main").eq("status", "approved").eq("is_active", true).neq("id", mainId).order("created_at").limit(1).maybeSingle() : { data: null };
+  const parentId = (root?.id as string | undefined) ?? mainId;
+  const parentNumber = (root?.number as string | undefined) ?? main.number;
+  const { data: existing } = await admin.from("purchase_orders").select("sub_number").eq("parent_id", parentId);
   let next = Math.max(0, ...(existing ?? []).map((e) => Number(e.sub_number) || 0));
   const created: { id: string; number: string; supplier: string }[] = [];
   for (const [supplierName, items] of groups) {
@@ -208,7 +216,7 @@ export async function splitMainLpo(mainId: string, by: Actor): Promise<{ created
     }
     const lines = items.map(lineOf);
     const total = round2(lines.reduce((a, l) => a + l.quantity * l.unit_cost, 0));
-    const { data: po } = await admin.from("purchase_orders").insert({ job_id: main.job_id, kind: "supplier", parent_id: mainId, sub_number: next, number: `${main.number}-${next}`, supplier_id: supplierId, supplier_name: supplierName, status: "approved", approved_by: main.approved_by, approved_at: main.approved_at, deposit_override_by: main.deposit_override_by, deposit_override_reason: main.deposit_override_reason, total_cost_aed: total, verify_token: randomBytes(18).toString("hex"), created_by: by.id, updated_by: by.id }).select("id, number").single();
+    const { data: po } = await admin.from("purchase_orders").insert({ job_id: main.job_id, kind: "supplier", parent_id: parentId, sub_number: next, number: `${parentNumber}-${next}`, supplier_id: supplierId, supplier_name: supplierName, status: "approved", approved_by: main.approved_by, approved_at: main.approved_at, deposit_override_by: main.deposit_override_by, deposit_override_reason: main.deposit_override_reason, total_cost_aed: total, verify_token: randomBytes(18).toString("hex"), created_by: by.id, updated_by: by.id }).select("id, number").single();
     if (!po) continue;
     const { data: made } = await admin.from("purchase_order_lines").insert(lines.map((l) => ({ ...l, po_id: po.id, created_by: by.id, updated_by: by.id }))).select("id, part_item_id");
     for (const l of made ?? []) await admin.from("part_items").update({ po_id: po.id, po_line_id: l.id, updated_by: by.id }).eq("id", l.part_item_id);

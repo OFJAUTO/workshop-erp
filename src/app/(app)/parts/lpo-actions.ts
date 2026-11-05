@@ -4,11 +4,12 @@ import { warnOwnerIfDepositShort } from "@/lib/deposits";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
-import { requirePermission } from "@/lib/auth";
+import { requirePermission, requireStaff } from "@/lib/auth";
+import { loadPartsChanges } from "@/lib/parts-changes-data";
 import { formatDate } from "@/lib/format";
-import { receivePartInFull, createMainLpo, orderSupplierLpo, resendMainLpo, setPartExpected } from "@/lib/lpo";
+import { receivePartInFull, createMainLpo, lpoProblemWords, lpoProblemsFor, orderSupplierLpo, resendMainLpo, setPartExpected } from "@/lib/lpo";
 import { gmailConfigured, sendGmail } from "@/lib/gmail";
-import { notifyRoles, notifyStaff } from "@/lib/notifications";
+import { notifyJobAdvisors, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { loadPurchaseOrder } from "@/lib/parts-data";
 import { renderPoPdf } from "@/lib/pdf/invoice-pdf";
 import { getSettings } from "@/lib/settings";
@@ -43,6 +44,51 @@ export async function sendLpoForApproval(jobId: string) {
   // The deposit has not arrived: the owner hears that the LPO waits on it (override on the LPO page, or wait).
   if (r.poId) await warnOwnerIfDepositShort(jobId, r.poId, r.number ?? "");
   redirect(`/parts/${jobId}?message=${enc(`${r.number} sent for approval. After the one-tap approval, one LPO per supplier appears here with Copy, PDF and Ordered.`)}#lpo`);
+}
+
+/**
+ * RESEND FOR APPROVAL (5 November 2026, J-00985): parts added after the customer's approval go to whoever approves
+ * LPOs - only the changes - on a main LPO whose page shows old vs new. The new parts become "to order" for it (a
+ * refusal puts them back under To order, as for any LPO); planning reopens; the advisors are told the difference.
+ * The customer's approved quotation is never touched: revising it stays the advisor's choice.
+ */
+export async function resendForApproval(jobId: string) {
+  const staff = await requireStaff();
+  // The answer shows inside the Changes card, next to the button (the standing rule), never at the top of the page.
+  const back = (kind: "error" | "message", words: string): never => redirect(`/parts/${jobId}?${kind === "error" ? "resend_error" : "resent"}=${enc(words)}#changes`);
+  if (staff.viewingAs || !["owner", "parts", "service_advisor"].includes(staff.role_id)) back("error", "The parts desk, the advisor or the owner resends parts for approval.");
+  const changes = await loadPartsChanges(jobId);
+  if (!changes || !changes.needsApproval.length) back("error", "Nothing new to approve: every live part is approved already.");
+  const c = changes!;
+  const unpriced = c.added.filter((a) => !a.priced);
+  if (unpriced.length) back("error", `Price ${unpriced.map((a) => a.description.toUpperCase()).join(", ")} first: a part with no cost cannot go for approval.`);
+  const problems = await lpoProblemsFor(jobId, c.needsApproval);
+  if (problems.size) back("error", lpoProblemWords(problems));
+  const admin = createAdminClient();
+  const { data: job } = await admin.from("jobs").select("job_number, is_open").eq("id", jobId).maybeSingle();
+  if (!job?.is_open) back("error", "This job is closed.");
+  // The new parts go "to order" for this LPO (the approval of the LPO is their approval).
+  const { error: upErr } = await admin.from("part_items").update({ order_status: "to_order", updated_by: staff.id }).in("id", c.needsApproval).eq("order_status", "none");
+  if (upErr) back("error", "Couldn't send - nothing was changed. Try again or tell the owner.");
+  const r = await createMainLpo(jobId, staff, { note: c.words ?? undefined });
+  if (r.error) {
+    // Nothing went for approval: the parts are put back exactly as they were.
+    await admin.from("part_items").update({ order_status: "none", updated_by: staff.id }).in("id", c.needsApproval).eq("order_status", "to_order").is("po_id", null);
+    back("error", r.error);
+  }
+  // Planning reopens: the car is not "every part here" any more.
+  await admin.from("jobs").update({ plan_parts_done_at: null, plan_parts_ready_date: null, updated_by: staff.id }).eq("id", jobId);
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_resent", note: `${staff.display_name} resent the parts for approval on ${r.number}: ${c.words}`, created_by: staff.id });
+  const { data: q } = await admin.from("quotations").select("id, number").eq("job_id", jobId).eq("kind", "quotation").eq("is_active", true).in("status", ["approved", "urgent_requested"]).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  await notifyJobAdvisors(jobId, {
+    type: "parts_changed_after_approval",
+    title: `Parts changed after approval · ${job!.job_number}`,
+    body: `${c.words} (sent for LPO approval by ${staff.display_name}). The customer's approved quotation${q ? ` ${q.number}` : ""} is unchanged - revise it if the price should change.`,
+    href: q ? `/jobs/${jobId}/quote/${q.id}?revise=parts` : `/jobs/${jobId}`,
+  }, { except: staff.id });
+  if (r.poId) await warnOwnerIfDepositShort(jobId, r.poId, r.number ?? "");
+  refresh(jobId, r.poId ?? null);
+  back("message", `Sent for approval on ${r.number}: ${c.words}. The owner or the head accountant approves it; then the new LPO for the supplier appears here.`);
 }
 
 /** Fix 2.2 (4 November 2026): after a refusal, "Send for approval again" raises the new version from the CURRENT list. */

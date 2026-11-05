@@ -6,7 +6,8 @@ import { partsWaitingExtra } from "@/lib/parts-waiting";
 import { PartsSteps } from "@/components/PartsSteps";
 import type { CurrentStaff } from "@/lib/auth";
 import { partAdvisorCols } from "@/lib/parts-data";
-import { partsSteps, stepPartOf, type PartsStepKey } from "@/lib/parts-steps";
+import { PAST_QUOTE, partsSteps, stepPartOf, type PartsStepKey } from "@/lib/parts-steps";
+import { approvedPartIds } from "@/lib/parts-changes-data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { pricingTodoOf } from "@/lib/pricing-done";
@@ -46,6 +47,8 @@ export async function PartsDashboard({ staff }: { staff: CurrentStaff }) {
   const jobs = ((jobRows ?? []) as unknown as JobRow[]);
   const open = new Set(jobs.map((j) => j.id));
   const openParts = parts.filter((p) => open.has(p.job_id));
+  // Parts added after the customer's approval keep a car's steps open (5 November 2026, J-00985).
+  const approvedMap = await approvedPartIds(jobs.map((j) => j.id));
   // Section 10 (3 November 2026): the same to-do rule as the parts desk - a car is on it until Pricing done – send to advisor.
   const todoOf = new Map(jobs.map((j) => [j.id, pricingTodoOf(j, requests.filter((r) => r.job_id === j.id), parts.filter((p) => p.job_id === j.id))] as const));
   const unreceived = (p: (typeof parts)[number]) => Number(p.received_qty) < Number(p.confirmed_quantity ?? p.quantity);
@@ -77,7 +80,7 @@ export async function PartsDashboard({ staff }: { staff: CurrentStaff }) {
         {jobs.length === 0 ? <Empty title="No open car has parts" /> : (
           <ul className="flex flex-col divide-y divide-line">
             {jobs.map((j) => {
-              const steps = partsSteps({ jobStatus: j.status, pricingDoneAt: j.parts_pricing_done_at, pricingReopenedAt: j.parts_pricing_reopened_at, parts: parts.filter((p) => p.job_id === j.id).map((p) => stepPartOf(p)) });
+              const steps = partsSteps({ jobStatus: j.status, pricingDoneAt: j.parts_pricing_done_at, pricingReopenedAt: j.parts_pricing_reopened_at, parts: parts.filter((p) => p.job_id === j.id).map((p) => stepPartOf(p, { pastQuote: PAST_QUOTE.includes(j.status), approvedIds: approvedMap.get(j.id) ?? new Set<string>() })) });
               const current = steps.find((s) => s.state === "current");
               const todo = todoOf.get(j.id) ?? null;
               const action = current ? (current.key === "pricing" && todo === "to_send" ? { label: "Send to advisor", href: (id: string) => `/parts/${id}#pricing` } : STEP_ACTIONS[current.key]) : null;

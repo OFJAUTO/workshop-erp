@@ -1,6 +1,7 @@
 import { VinCopy } from "@/components/VinCopy";
 import { ReceivePanel } from "./ReceivePanel";
-import { partsSteps, stepPartOf } from "@/lib/parts-steps";
+import { PAST_QUOTE, partsSteps, stepPartOf } from "@/lib/parts-steps";
+import { loadPartsChanges } from "@/lib/parts-changes-data";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import Link from "next/link";
 import { CopyVin } from "@/components/CopyVin";
@@ -26,7 +27,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { pricingDone, reopenPricing } from "../actions";
-import { emailSupplierLpo, markSupplierOrdered, receiveTicked, resendRefusedLpo, sendLpoForApproval, setPartExpectedDate } from "../lpo-actions";
+import { emailSupplierLpo, markSupplierOrdered, receiveTicked, resendForApproval, resendRefusedLpo, sendLpoForApproval, setPartExpectedDate } from "../lpo-actions";
 import { gmailConfigured } from "@/lib/gmail";
 import { SupplierLpoCard, type SupplierLpo } from "../SupplierLpoCard";
 import { PartsSteps } from "@/components/PartsSteps";
@@ -52,12 +53,12 @@ export const dynamic = "force-dynamic";
  * then one card per supplier LPO with Copy, PDF and Ordered. Nothing from the inspection report but the parts
  * themselves and the Dangerous flag.
  */
-export default async function PartsJobPage({ params, searchParams }: { params: Promise<{ jobId: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
+export default async function PartsJobPage({ params, searchParams }: { params: Promise<{ jobId: string }>; searchParams: Promise<{ message?: string; error?: string; resent?: string; resend_error?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
   if (!(can(role, "priceParts") || can(role, "editQuotes"))) notFound();
   const { jobId } = await params;
-  const { message, error } = await searchParams;
+  const { message, error, resent, resend_error: resendError } = await searchParams;
   const admin = createAdminClient();
   const settings = await getSettings();
   const unitsReady = await partUnitsReady();
@@ -86,6 +87,10 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const requests = (reqRows ?? []) as unknown as PartRequest[];
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPart);
   const rawById = new Map(((partRows ?? []) as unknown as Record<string, unknown>[]).map((r) => [String(r.id), r]));
+  // Parts changed after the customer's approval (5 November 2026, J-00985): what was added, removed or changed, and
+  // which parts wait for an approval (they hold the step bar open and go out with "Resend for approval").
+  const changes = await loadPartsChanges(jobId);
+  const pastQuote = PAST_QUOTE.includes(String(job.status));
   // Placeholder costs (2 November 2026): each part's cost check, and the stock item behind a shelf part, in words.
   const forCheck = parts.filter((p) => p.is_active !== false).map((p) => ({ ...p, stock_item_id: (rawById.get(p.id)?.stock_item_id as string | null) ?? null, cost_confirmed_aed: (rawById.get(p.id)?.cost_confirmed_aed as number | string | null | undefined) ?? null, final_cost_aed: (rawById.get(p.id)?.final_cost_aed as number | string | null | undefined) ?? null }));
   const costChecks = await costChecksFor(forCheck, forCheck);
@@ -116,7 +121,18 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   // A server page: rendered once per request, today's date (Dubai) is read once.
   const today = dubaiDate();
   // A part refused on an LPO, or marked not needed before it was ordered, is never "To order" (1 November 2026).
-  const orderLabel = (p: PartItem) => (p.order_status === "none" || rawById.get(p.id)?.refused_at || (p.order_status === "to_order" && rawById.get(p.id)?.not_needed_at) ? null : p.order_status === "to_order" ? "To order" : p.order_status === "ordered" ? "Ordered" : p.order_status === "partly_received" ? "Partly received" : "Received");
+  // Each line's own status (5 November 2026): new – needs approval / approved / on LPO-… / received / handed over.
+  const lpoOf = (p: PartItem) => { const id = (rawById.get(p.id)?.po_id as string | null) ?? null; return id ? (poNumber.get(id) ?? null) : null; };
+  const orderLabel = (p: PartItem) => {
+    if (changes?.needsApproval.includes(p.id)) return "New – needs approval";
+    if (p.order_status === "none" || rawById.get(p.id)?.refused_at || (p.order_status === "to_order" && rawById.get(p.id)?.not_needed_at)) return null;
+    const lpo = lpoOf(p);
+    if (String(rawById.get(p.id)?.issue_status ?? "") === "confirmed") return "Handed over";
+    if (p.order_status === "to_order") return lpo ? `On ${lpo} (waiting for approval)` : "Approved – to order";
+    if (p.order_status === "ordered") return lpo ? `On ${lpo} · ordered` : "Ordered";
+    if (p.order_status === "partly_received") return lpo ? `Partly received · ${lpo}` : "Partly received";
+    return "Received";
+  };
   const refusedOf = (p: PartItem) => {
     const raw = rawById.get(p.id);
     return raw?.refused_at ? { by: nameOf.get(String(raw.refused_by ?? "")) ?? "the owner", reason: String(raw.refused_reason ?? ""), supplier: p.supplier ?? null } : null;
@@ -218,14 +234,21 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     lpos.suppliers.length ? `${lpos.suppliers.length} supplier LPO${lpos.suppliers.length === 1 ? "" : "s"}` : "",
   ].filter(Boolean).join(" · ");
   const supplierEmailOf = new Map<string, string | null>(((lpos.suppliers).length ? (await admin.from("suppliers").select("id, email").in("id", (lpos.suppliers).map((s) => s.po.supplier_id).filter((x): x is string => !!x))).data ?? [] : []).map((s) => [s.id as string, (s.email as string | null) ?? null]));
-  const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[]; charges?: { id: string; description: string; amount_aed: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, sent_at: s.po.sent_at ?? null, emailed_at: s.po.emailed_at ?? null, emailed_to: s.po.emailed_to ?? null, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: (rawById.get(l.part_item_id)?.positions as string[] | null | undefined) ?? null, unit: (rawById.get(l.part_item_id)?.unit as string | null | undefined) ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges ?? [], ended: endedByPo.get(s.po.id) ?? [] });
+  const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[]; charges?: { id: string; description: string; amount_aed: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, sent_at: s.po.sent_at ?? null, emailed_at: s.po.emailed_at ?? null, emailed_to: s.po.emailed_to ?? null, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: (rawById.get(l.part_item_id)?.positions as string[] | null | undefined) ?? null, unit: (rawById.get(l.part_item_id)?.unit as string | null | undefined) ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges ?? [], ended: endedByPo.get(s.po.id) ?? [], cancelledElsewhere: s.po.status === "approved" ? cancelledElsewhereFor(s.po.id, s.po.supplier_name) : [] });
+  // The same supplier's lines cancelled on this car's other LPOs: they go out with a new LPO to that supplier (5 November 2026).
+  const cancelledElsewhereFor = (poId: string, supplier: string) => {
+    const same = (name: string) => name.trim().toLowerCase() === supplier.trim().toLowerCase();
+    return [...lpos.suppliers.filter((o) => o.po.id !== poId && same(o.po.supplier_name)).map((o) => ({ number: o.po.number, id: o.po.id })), ...cancelledLpos.filter((c) => c.id !== poId && same(c.supplier_name)).map((c) => ({ number: c.number, id: c.id }))]
+      .map((o) => ({ number: o.number, lines: (endedByPo.get(o.id) ?? []).filter((e) => !e.onLpo) }))
+      .filter((o) => o.lines.length);
+  };
   // Lines still being priced (not removed, refused or unavailable): "Send LPO for approval" names them first.
   const unfinishedNames = rows.filter((r) => !r.removed && !r.refused && !r.unavailable && rowState(r.values, { waitingApproval: r.waitingApproval }) === "not_finished").map((r) => r.name.toUpperCase());
   const car = [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
   // Pricing done locks the rows until Edit; after the customer's approval the ordered rows are locked on their own.
   const pricingLocked = !inPlanning && !!job.parts_pricing_done_at && !job.parts_pricing_reopened_at;
   // The five steps across the top (one rule with the parts desk and the job card), and the parts still to receive.
-  const stepParts = parts.map((p) => stepPartOf({ ...p, received_qty: Number(rawById.get(p.id)?.received_qty) || 0, issue_status: String(rawById.get(p.id)?.issue_status ?? "") || null, po_id: (rawById.get(p.id)?.po_id as string | null) ?? null, return_status: String(rawById.get(p.id)?.return_status ?? "none") }));
+  const stepParts = parts.map((p) => stepPartOf({ ...p, received_qty: Number(rawById.get(p.id)?.received_qty) || 0, issue_status: String(rawById.get(p.id)?.issue_status ?? "") || null, po_id: (rawById.get(p.id)?.po_id as string | null) ?? null, return_status: String(rawById.get(p.id)?.return_status ?? "none"), disposition: (rawById.get(p.id)?.disposition as string | null) ?? null }, { pastQuote, approvedIds: changes?.approvedIds ?? null }));
   const steps = partsSteps({ jobStatus: job.status, pricingDoneAt: job.parts_pricing_done_at, pricingReopenedAt: job.parts_pricing_reopened_at, parts: stepParts.map((sp, i) => ({ ...sp, from_stock: sp.from_stock || lpos.fromStock.some((f) => f.id === parts[i].id) })), mainLpoStatus: lpos.main?.status ?? null, toOrder: lpos.toOrder.length });
   const dep = await depositState(jobId);
   const toReceive = parts.filter((p) => live(p) && ["ordered", "partly_received"].includes(String(p.order_status)));
@@ -258,9 +281,52 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {resendError && !changes?.words ? <Notice tone="error">{resendError}</Notice> : null}
       {!job.is_open ? <Notice tone="info">This job is closed.</Notice> : null}
       {dep.short ? <div data-deposit-wait><Notice tone="info">Waiting for the deposit: {depositShortText(dep)} Accounts record it; the owner can approve the LPO without it.</Notice></div> : null}
-      <PartsSteps steps={steps} hrefs={{ pricing: "#pricing", approval: "#lpo", lpo: "#lpos", received: "#received", handover: `/parts/handover/${jobId}` }} />
+      <PartsSteps steps={steps} hrefs={{ pricing: "#pricing", approval: changes?.needsApproval.length ? "#changes" : "#lpo", lpo: "#lpos", received: "#received", handover: `/parts/handover/${jobId}` }} />
+
+      {/* Parts changed after the customer's approval (5 November 2026, J-00985): what changed, and Resend for approval. */}
+      {changes?.words ? (
+        <Card id="changes" className={`flex flex-col gap-2 scroll-mt-4 ${changes.needsApproval.length ? "!border-amber-bar" : ""}`} data-parts-changes>
+          <SectionLabel>Changes since approval</SectionLabel>
+          <p className="text-sm font-bold" data-parts-changes-words>{changes.words}</p>
+          {resent ? <div data-resend-outcome="success"><Notice tone="success">{resent}</Notice></div> : null}
+          {resendError ? <div data-resend-outcome="error"><Notice tone="error">{resendError}</Notice></div> : null}
+          <ul className="flex flex-col gap-1 text-sm">
+            {changes.added.map((a) => (
+              <li key={a.id} className="flex flex-wrap gap-x-2" data-change-row="added">
+                <span className={`font-bold ${a.needsApproval ? "text-amber" : ""}`}>{a.needsApproval ? "NEW – needs approval" : "NEW"}</span>
+                <span className="font-semibold uppercase">{a.description} × {a.qty}</span>
+                <span className="text-muted">{a.priced ? `AED ${a.total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : "not priced yet"}</span>
+              </li>
+            ))}
+            {changes.changed.map((x) => (
+              <li key={x.id} className="flex flex-wrap gap-x-2" data-change-row="changed">
+                <span className="font-bold">CHANGED</span>
+                <span className="font-semibold uppercase">{x.description}</span>
+                <span className="text-muted">AED {x.oldTotal.toLocaleString("en-GB", { minimumFractionDigits: 2 })} → {x.newTotal.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span>
+              </li>
+            ))}
+            {changes.removed.map((x) => (
+              <li key={x.id} className="flex flex-wrap gap-x-2 text-muted" data-change-row="removed">
+                <span className="font-bold">REMOVED</span>
+                <span className="font-semibold uppercase line-through">{x.description}</span>
+                <span>was AED {x.oldTotal.toLocaleString("en-GB", { minimumFractionDigits: 2 })}{x.reason ? ` · ${x.reason}` : ""}</span>
+              </li>
+            ))}
+          </ul>
+          {changes.needsApproval.length && !(lpos.main && lpos.main.status === "pending_approval") && ["owner", "parts", "service_advisor"].includes(role) && !staff.viewingAs && job.is_open ? (
+            <form action={resendForApproval.bind(null, jobId)} className="flex flex-wrap items-center gap-3">
+              <Button type="submit" size="lg" data-resend-approval>Resend for approval ({changes.needsApproval.length} new part{changes.needsApproval.length === 1 ? "" : "s"})</Button>
+              <span className="text-xs text-muted">Only the changes go to the owner or the head accountant, old vs new. Once approved, the new parts go on a new LPO for the supplier.</span>
+            </form>
+          ) : lpos.main && lpos.main.status === "pending_approval" && changes.needsApproval.length === 0 ? (
+            <p className="text-sm font-semibold text-amber" data-resend-waiting>Sent for approval on {lpos.main.number} – waiting for the owner or the head accountant.</p>
+          ) : null}
+          <p className="text-xs text-muted">The customer&apos;s approved quotation is not changed by this. The advisor decides whether to revise it.</p>
+        </Card>
+      ) : null}
 
       {lpos.refused ? (
         <Card className="flex flex-col gap-3 border-red-bar" data-refused-lpo>

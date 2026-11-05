@@ -75,6 +75,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "estimate_parts_priced", label: "The parts desk priced your estimate's parts", locked: true },
   { type: "quote_target", label: "Parts pricing or quotation past its target", locked: true },
   { type: "po_approval", label: "An LPO needs approval (owner or head accountant)", locked: true },
+  { type: "parts_changed_after_approval", label: "Parts changed after the customer's approval on your car (revise the quotation if the price should change)", locked: true },
   { type: "po_decided", label: "Your LPO was approved or refused", locked: true },
   { type: "parts_arrived", label: "Parts arrived for your car", locked: true },
   { type: "parts_late", label: "A part is past its expected date", locked: true },

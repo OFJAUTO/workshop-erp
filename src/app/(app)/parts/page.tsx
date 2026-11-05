@@ -5,7 +5,8 @@ import { partsWithNoHome } from "@/lib/handover";
 import { creditNotesAwaited } from "@/lib/part-endings-server";
 import { CarThumb } from "@/components/CarThumb";
 import { signCarPictures } from "@/lib/car-pictures";
-import { partsSteps, stepPartOf } from "@/lib/parts-steps";
+import { PAST_QUOTE, partsSteps, stepPartOf } from "@/lib/parts-steps";
+import { approvedPartIds } from "@/lib/parts-changes-data";
 import { CopyVin } from "@/components/CopyVin";
 import Link from "next/link";
 import { LiveRefresh } from "@/components/LiveRefresh";
@@ -60,6 +61,9 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   // Parts without a home, and returns still waiting for the supplier's credit note (3 November 2026): one count on the tab.
   const noHomeCount = (await partsWithNoHome()).length + (await creditNotesAwaited()).length;
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull).map((p) => ({ ...p, advisor_added_label: p.added_by_role === "service_advisor" && !p.part_request_id ? "Added by advisor" : null }));
+  // Parts added after the customer's approval hold a car's dots open (5 November 2026, J-00985): which parts each job's approved quotations carry.
+  const approvedMap = await approvedPartIds(Array.from(new Set(parts.map((p) => p.job_id))));
+  const ctxOf = (jobId: string, status: string) => ({ pastQuote: PAST_QUOTE.includes(status), approvedIds: approvedMap.get(jobId) ?? new Set<string>() });
   const today = todayIso();
   // A car whose only changes wait for the send (a request marked not available, a part removed) has no open request
   // and maybe no active part: it is listed through its own "changes waiting" mark (review of 3 November 2026).
@@ -108,7 +112,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   const dotsOf = (jobId: string) => {
     const j = jobs.get(jobId);
     if (!j) return null;
-    return <PartsSteps size="dots" steps={partsSteps({ jobStatus: j.status, pricingDoneAt: j.parts_pricing_done_at, pricingReopenedAt: j.parts_pricing_reopened_at, parts: parts.filter((p) => p.job_id === jobId).map((p) => stepPartOf(p as unknown as Parameters<typeof stepPartOf>[0])) })} />;
+    return <PartsSteps size="dots" steps={partsSteps({ jobStatus: j.status, pricingDoneAt: j.parts_pricing_done_at, pricingReopenedAt: j.parts_pricing_reopened_at, parts: parts.filter((p) => p.job_id === jobId).map((p) => stepPartOf(p as unknown as Parameters<typeof stepPartOf>[0], ctxOf(jobId, j.status))) })} />;
   };
   const tone = (sinceIso: string) => {
     const min = workingMinutesSince(sinceIso, wt);
@@ -158,7 +162,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   }
   const pics = await signCarPictures([...allCars, ...found].map((j) => j.vehicle?.photo_path));
   const carRow = (j: AllJob) => {
-    const steps = partsSteps({ jobStatus: j.status, pricingDoneAt: j.parts_pricing_done_at, pricingReopenedAt: j.parts_pricing_reopened_at, parts: parts.filter((p) => p.job_id === j.id).map((p) => stepPartOf(p as unknown as Parameters<typeof stepPartOf>[0])) });
+    const steps = partsSteps({ jobStatus: j.status, pricingDoneAt: j.parts_pricing_done_at, pricingReopenedAt: j.parts_pricing_reopened_at, parts: parts.filter((p) => p.job_id === j.id).map((p) => stepPartOf(p as unknown as Parameters<typeof stepPartOf>[0], ctxOf(j.id, j.status))) });
     const allDone = steps.every((s) => s.state === "done");
     const gone = !j.is_open;
     const car = [j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ");

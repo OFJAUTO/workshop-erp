@@ -342,6 +342,8 @@ export function QuoteEditor({
   onAskRevise = null,
   revision = null,
   reviseReasons = [],
+  reviseDefault = null,
+  reviseOpen = false,
   ownerBox = null,
   tintBox = null,
   autoSend = false,
@@ -399,6 +401,10 @@ export function QuoteEditor({
   revision?: { requestedAt: string | null; requestedBy: string | null; reason: string | null; allowedAt: string | null; declinedAt: string | null; declinedNote: string | null } | null;
   /** One-tap reasons for the revision request (Settings). */
   reviseReasons?: string[];
+  /** Parts changed after approval (5 November 2026): the revision request comes prefilled with the changes. */
+  reviseDefault?: string | null;
+  /** Arriving from the advisor's "Parts changed after approval" notice: the request opens by itself. */
+  reviseOpen?: boolean;
   /** The owner's approval box (above the limit) or the revision request, shown under "Before sending". */
   ownerBox?: ReactNode;
   /** Section 5 (30 October 2026): the complimentary box - the earlier jobs to pick from, and whether the owner already decided (a free comeback). Null until the database has it. */
@@ -478,7 +484,7 @@ export function QuoteEditor({
       refresh();
     });
   };
-  const [reviseAsk, setReviseAsk] = useState(false);
+  const [reviseAsk, setReviseAsk] = useState(reviseOpen);
   // The answers already given on the way to "complete" (markup, parts, deposit): carried into the next check.
   const skips = useRef<{ skipMarkup?: boolean; skipParts?: boolean; skipDeposit?: boolean; lowProfitOk?: boolean; skipPositions?: boolean; highMarkupOk?: boolean }>({});
   const [positionsAsk, setPositionsAsk] = useState<string | null>(null);
@@ -1529,7 +1535,7 @@ export function QuoteEditor({
       <form action={onAskRevise} className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
         <span className="text-lg font-extrabold">Ask the owner to allow a revision</span>
         <p className="text-sm text-muted">The customer approved this quotation. Say why it has to change; the owner allows one revision or declines.</p>
-        <ReasonChips name="reason" label="Why?" rows={2} options={reviseReasons} required placeholder="Tap a reason, or type" />
+        <ReasonChips name="reason" label="Why?" rows={2} options={reviseReasons} defaultValue={reviseDefault ?? ""} required placeholder="Tap a reason, or type" />
         <div className="flex flex-wrap gap-2">
           <Button type="submit" size="md" data-ask-revise-send>Ask the owner</Button>
           <Button type="button" tone="ghost" size="md" onClick={() => setReviseAsk(false)}>Cancel</Button>

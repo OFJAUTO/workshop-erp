@@ -12,7 +12,7 @@ import { perUnitMark, qtyWithUnit, unitOf } from "@/lib/part-units";
 export type SupplierLpoLine = { id: string; part_item_id: string; description: string; positions?: string[] | null; part_number: string | null; quantity: number; /** The part's unit (pieces, litres, sets): "× 8 L", the price per litre. */ unit?: string | null; unit_cost: number; expected_date: string | null; received_qty: number };
 /** A line whose part was given its ending (3 November 2026): cancelled (off the LPO), or returned / kept in stock (still on it). */
 export type EndedLpoLine = { lineId: string; description: string; partNumber: string | null; quantity: number; unitCost: number; state: "cancelled" | "return_pending" | "returned" | "stock"; words: string; onLpo: boolean };
-export type SupplierLpo = { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; lines: SupplierLpoLine[]; /** Courier, freight: in the total already. */ charges?: { id: string; description: string; amount_aed: number }[]; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null; ended?: EndedLpoLine[] };
+export type SupplierLpo = { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; lines: SupplierLpoLine[]; /** Courier, freight: in the total already. */ charges?: { id: string; description: string; amount_aed: number }[]; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null; ended?: EndedLpoLine[]; /** The same supplier's lines cancelled on this car's OTHER LPOs (5 November 2026): sent with this LPO so the supplier hears the cancellation and the new order together. */ cancelledElsewhere?: { number: string; lines: EndedLpoLine[] }[] };
 
 /**
  * One supplier's LPO as a card: its number (LPO-00012-1), the parts with part number, name, quantity and our agreed
@@ -44,6 +44,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
         ...po.lines.map((l) => `• ${realPartNumber(l.part_number) ? `${realPartNumber(l.part_number)} · ` : ""}${l.description}${positionsWords(l.positions) ? ` · ${positionsWords(l.positions)}` : ""} × ${qtyWithUnit(l.quantity, unitOf(l.unit))}${l.unit_cost ? ` · AED ${l.unit_cost.toFixed(2)}${perUnitMark(unitOf(l.unit))}` : ""}`),
         ...(po.charges ?? []).map((c) => `• ${c.description} · AED ${c.amount_aed.toFixed(2)}`),
         ...(cancelledLines.length ? ["", "Cancelled:", ...cancelledLines.map((l) => `• ${l.partNumber ? `${l.partNumber} · ` : ""}${l.description} × ${l.quantity}`)] : []),
+        ...(po.cancelledElsewhere ?? []).filter((c) => c.lines.length).flatMap((c) => ["", `Cancelled on ${c.number}:`, ...c.lines.map((l) => `• ${l.partNumber ? `${l.partNumber} · ` : ""}${l.description} × ${l.quantity}`)]),
         "",
         `Total before VAT: AED ${po.total_cost_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`,
       ].filter((x, i, a) => !(x === "" && a[i - 1] === "")).join("\n");

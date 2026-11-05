@@ -4,14 +4,14 @@
 //   PATHS=a,b node --env-file=.env.test.local tests/browser/sim-e2e.mjs   (default: all eight)
 // Paths: a mechanical + supplier parts + deposit + pay-link · b stock parts + cash · c declined → fee →
 // gate-out · d revision after approval · e bodyshop PPF sign-off → handover · f mixed quotation ·
-// g recovery delivery · h commission approve → pay · i enter price myself (estimate + job quotation).
+// g recovery delivery · h commission approve → pay · i enter price myself (estimate + job quotation) · j parts changed after approval → resend for approval.
 import { mkdirSync } from "node:fs";
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -332,7 +332,8 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
     const { browser, page } = await browserForId(advisorId);
     await go(page, `${base}/jobs/${jobId}`);
     await page.locator("[data-send-deposit-request]").click();
-    await sleep(1200);
+    // The button reads "…" while the server makes the payment page: wait for the window itself, never a fixed time.
+    await page.locator("[data-deposit-gateway]").waitFor({ timeout: 30000 }).catch(() => null);
     const payBox = page.locator("[data-deposit-pay-link]");
     if (await payBox.count()) {
       await payBox.fill("https://paypage.sandbox.ngenius-payments.com/?code=sim-dep");
@@ -1111,6 +1112,153 @@ await section("i", "enter price myself (estimate + job quotation)", async () => 
   check("i5: Price is right ✓ is written on the part", !!(await until(async () => (await sql("select 1 as x from public.part_items where id = $1 and price_checked_at is not null", [part.id]))[0])));
   await b2.browser.close();
   await b3.browser.close();
+});
+
+/* ================================================================================================= */
+/* Path j — PARTS CHANGED AFTER APPROVAL (5 November 2026, J-00985): approve → LPO → cancel a part     */
+/* with the supplier → add a new one → the bar opens again → Resend for approval → the approver sees  */
+/* old vs new → a NEW LPO continuing the car's numbers → order → receive → hand over → all green.     */
+/* ================================================================================================= */
+await section("j", "parts changed after approval → resend for approval", async () => {
+  const states = async (page) => Object.fromEntries(await page.locator("[data-parts-steps] [data-step]").evaluateAll((els) => els.map((e) => [e.getAttribute("data-step"), e.getAttribute("data-state")])));
+  const bar = (s) => ["pricing", "approval", "lpo", "received", "handover"].map((k) => `${k}:${s[k] ?? "?"}`).join(" ");
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed.jobId;
+  const partsId = (await sql("select id from public.staff where role_id = 'parts' and is_active order by created_at limit 1"))[0].id;
+  const advisorId = (await sql("select gated_in_by as id from public.jobs where id = $1", [jobId]))[0].id;
+  await sql("update public.part_items set supplier = 'E2E AL TAYER' where job_id = $1 and description = 'front brake pads'", [jobId]);
+  await sql("insert into public.suppliers (name, trn, vat_registered, created_by, updated_by) select n, '100200300400599', true, $1, $1 from (values ('E2E AL TAYER'), ('E2E AL NABOODA')) v(n) where not exists (select 1 from public.suppliers where name ilike v.n)", [partsId]);
+  // The seed's open request (rear brake discs) is not part of this story: it is closed so "Send LPO" sends at once.
+  await sql("update public.part_requests set status = 'unavailable', closed_reason = 'not needed (test)' where job_id = $1 and status = 'open'", [jobId]);
+  // j1. The approved part goes on its LPO, approved and ordered (the family: LPO-X-1).
+  {
+    const { browser, page } = await browserForId(partsId, { viewport: { width: 1500, height: 1300 } });
+    await go(page, `${base}/parts/${jobId}`);
+    await page.locator("[data-send-lpo]").click();
+    // "Send anyway?" when a line is still open (answered: send).
+    await page.locator("[data-lpo-unfinished-send]").click({ timeout: 3000 }).catch(() => null);
+    await page.waitForURL(/message=|error=/, { timeout: 25000 }).catch(() => null);
+    const err = decodeURIComponent(page.url()).split("error=")[1];
+    if (err) console.log("   j1 send LPO said:", err.slice(0, 200));
+    await browser.close();
+  }
+  const main1 = (await sql("select id, number from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval' limit 1", [jobId]))[0];
+  if (!main1) throw new Error("j1: no main LPO was raised (see the line above)");
+  {
+    const { browser, page } = await browserFor("owner");
+    await go(page, `${base}/parts/orders/${main1.id}`);
+    await page.getByRole("button", { name: "Approve", exact: true }).click();
+    await page.locator("[data-confirm-yes-money]").click({ timeout: 8000 }).catch(() => null);
+    await submitted(page);
+    await browser.close();
+  }
+  const lpo1 = (await sql("select id, number from public.purchase_orders where job_id = $1 and kind = 'supplier' order by created_at limit 1", [jobId]))[0];
+  check(`j1: the first supplier LPO is ${main1.number}-1`, lpo1?.number === `${main1.number}-1`, lpo1?.number ?? "");
+  {
+    const { browser, page } = await browserForId(partsId, { viewport: { width: 1500, height: 1300 } });
+    await go(page, `${base}/parts/${jobId}`);
+    if (await page.locator("[data-lpo-ordered]").count()) { const before = page.url(); await page.locator("[data-lpo-ordered]").first().click(); await page.waitForURL((u) => u.toString() !== before, { timeout: 25000 }).catch(() => null); }
+    // j2. Cancel it with the supplier (the J-00985 situation: the approved part is replaced).
+    await go(page, `${base}/parts/${jobId}`);
+    const row = page.locator("[data-row-key]").filter({ has: page.locator("[data-part-name]", { hasText: /front brake pads/i }) }).first();
+    await row.scrollIntoViewIfNeeded().catch(() => null);
+    await row.locator("button[aria-label='More for this part']").click();
+    await page.getByRole("button", { name: /Remove: not needed \(ordered: choose its ending\)/ }).click();
+    const dlg = page.locator("[data-end-dialog]");
+    await dlg.waitFor({ timeout: 10000 });
+    await dlg.locator('[data-end-option="cancelled"]').click();
+    await dlg.locator("input[name='reason']").pressSequentially("Wrong part, supplier cancelled", { delay: 10 });
+    await dlg.locator("[data-end-save]").click();
+    await until(async () => (await dlg.locator("[data-end-done]").count()) > 0, 40, 500);
+    await browser.close();
+  }
+  const pad = (await sql("select disposition, is_active from public.part_items where job_id = $1 and description = 'front brake pads'", [jobId]))[0];
+  check("j2: the approved part is cancelled with the supplier", pad?.disposition === "cancelled" && pad?.is_active === false, JSON.stringify(pad));
+  // j3. Parts add the new part (priced: AL NABOODA, 674.80) - on no approved quotation.
+  const today3 = new Date(Date.now() + 4 * 3600000 + 2 * 86400000).toISOString().slice(0, 10);
+  await sql("insert into public.part_items (job_id, description, part_number, quantity, confirmed_quantity, cost_aed, supplier, availability, delivery_date, confirm_status, part_type, priced_at, priced_by, order_status, created_by, updated_by) values ($1, 'E2E FRONT BRAKE PAD', 'E2E-FBP-1', 1, 1, 674.80, 'E2E AL NABOODA', 'to_order', $3, 'confirmed', 'genuine', now(), $2, 'none', $2, $2)", [jobId, partsId, today3]);
+  {
+    const { browser, page } = await browserForId(partsId, { viewport: { width: 1500, height: 1300 } });
+    await go(page, `${base}/parts/${jobId}`);
+    const s = await states(page);
+    check(`j3: the bar is open again, never all green (${bar(s)})`, s.approval === "current" && s.handover !== "done", bar(s));
+    const words = ((await page.locator("[data-parts-changes-words]").textContent().catch(() => "")) ?? "").trim();
+    check(`j3: "${words}"`, words === "Changes since approval: 1 added, 1 removed, cost + AED 474.80");
+    check("j3: the new line says it needs approval", ((await page.textContent("body")) ?? "").includes("New – needs approval"));
+    check("j3: the removed line shows with its reason", /Wrong part, supplier cancelled/.test(((await page.locator("[data-change-row='removed']").textContent().catch(() => "")) ?? "")));
+    await shot(page, "j3-changes-since-approval");
+    // j4. Resend for approval (the parts desk).
+    await page.locator("[data-resend-approval]").click();
+    await submitted(page);
+    const msg = decodeURIComponent(page.url()).replace(/\+/g, " ");
+    check("j4: Resend answers in place with what went", /Sent for approval on LPO-/.test(msg) && /1 added, 1 removed/.test(msg), msg.slice(-160));
+    check("j4: the answer shows inside the Changes card, next to the button", (await page.locator("[data-parts-changes] [data-resend-outcome='success']").count()) === 1);
+    const s4 = await states(page);
+    check(`j4: approval is the current step, waiting (${bar(s4)})`, s4.approval === "current", bar(s4));
+    await shot(page, "j4-resent");
+    await browser.close();
+  }
+  const main2 = (await sql("select id, number from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval' limit 1", [jobId]))[0];
+  check("j4: a main LPO waits for approval with the new part", !!main2?.id);
+  const ownerNote = await until(async () => (await sql("select title, body from public.notifications where type = 'po_approval' and href = $1 order by created_at desc limit 1", [`/parts/orders/${main2?.id}`]))[0], 20, 500);
+  check(`j4: the approvers are told the changes ("${ownerNote?.title ?? ""}")`, /Parts changed after approval/.test(ownerNote?.title ?? "") && /1 added, 1 removed/.test(ownerNote?.body ?? ""));
+  const advNote = await until(async () => (await sql("select body from public.notifications where staff_id = $1 and type = 'parts_changed_after_approval' and job_id = $2 order by created_at desc limit 1", [advisorId, jobId]))[0], 20, 500);
+  check("j4: the advisor is told, the quotation untouched", /quotation .* is unchanged/.test(advNote?.body ?? ""), advNote?.body ?? "");
+  // j5. The approver sees old vs new and approves → the new LPO continues the car's numbers.
+  {
+    const { browser, page } = await browserFor("owner");
+    await go(page, `${base}/parts/orders/${main2.id}`);
+    const box = page.locator("[data-lpo-after-approval]");
+    check("j5: the approval screen shows old vs new", (await box.locator("[data-lpo-change='added']").count()) === 1 && (await box.locator("[data-lpo-change='removed']").count()) === 1);
+    await shot(page, "j5-approval-old-vs-new");
+    await page.getByRole("button", { name: "Approve", exact: true }).click();
+    await page.locator("[data-confirm-yes-money]").click({ timeout: 8000 }).catch(() => null);
+    await submitted(page);
+    await browser.close();
+  }
+  const lpo2 = (await sql("select id, number, supplier_name from public.purchase_orders where job_id = $1 and kind = 'supplier' and status <> 'cancelled' order by created_at desc limit 1", [jobId]))[0];
+  check(`j5: the new LPO continues the family: ${lpo2?.number} (after ${main1.number}-1)`, lpo2?.number === `${main1.number}-2` && /NABOODA/i.test(lpo2?.supplier_name ?? ""), JSON.stringify(lpo2));
+  // j6. Order, receive, hand over - the bar goes green only at the end.
+  {
+    const { browser, page } = await browserForId(partsId, { viewport: { width: 1500, height: 1300 } });
+    await go(page, `${base}/parts/${jobId}`);
+    await shot(page, "j6-new-lpo");
+    if (await page.locator("[data-lpo-ordered]").count()) { const before = page.url(); await page.locator("[data-lpo-ordered]").first().click(); await page.waitForURL((u) => u.toString() !== before, { timeout: 25000 }).catch(() => null); }
+    await go(page, `${base}/parts/${jobId}`);
+    const s6 = await states(page);
+    check(`j6: ordered - LPO done, not green yet (${bar(s6)})`, s6.lpo === "done" && s6.received !== "done", bar(s6));
+    await page.locator("[data-mark-received]").click();
+    await sleep(500);
+    await page.locator("[data-no-stickers]").click().catch(() => null);
+    await until(async () => (await sql("select 1 as x from public.part_items where job_id = $1 and description = 'E2E FRONT BRAKE PAD' and order_status = 'received'", [jobId]))[0], 30, 500);
+    await go(page, `${base}/parts/${jobId}`);
+    const s7 = await states(page);
+    check(`j7: received - still waiting for the hand-over (${bar(s7)})`, s7.received === "done" && s7.handover !== "done", bar(s7));
+    await go(page, `${base}/parts/handover/${jobId}`);
+    if (await page.locator("[data-mark-ready]").count()) { await page.locator("[data-mark-ready]").click(); await submitted(page); }
+    await browser.close();
+  }
+  const techId = await freeTech(jobId, null);
+  await setPin(techId, "1234");
+  {
+    const { browser, page } = await browserForId(techId, { viewport: { width: 800, height: 1280 }, touch: true });
+    await go(page, `${base}/my-jobs/${jobId}`);
+    for (let i = 0; i < 5 && (await page.locator("[data-part-take][data-ticked='0'] button").count()); i++) { await page.locator("[data-part-take][data-ticked='0'] button").first().click(); await sleep(300); }
+    if (await page.locator("[data-receive-pin]").count()) {
+      await page.locator("[data-receive-pin]").fill("1234");
+      await page.locator("[data-receive-parts]").click();
+    }
+    await until(async () => (await sql("select 1 as x from public.part_items where job_id = $1 and description = 'E2E FRONT BRAKE PAD' and issue_status = 'confirmed'", [jobId]))[0], 30, 500);
+    await browser.close();
+  }
+  {
+    const { browser, page } = await browserForId(partsId, { viewport: { width: 1500, height: 1300 } });
+    await go(page, `${base}/parts/${jobId}`);
+    const s8 = await states(page);
+    check(`j8: handed over - now (and only now) every step is green (${bar(s8)})`, Object.values(s8).every((x) => x === "done"), bar(s8));
+    await shot(page, "j8-all-green");
+    await browser.close();
+  }
 });
 
 const failed = summary();

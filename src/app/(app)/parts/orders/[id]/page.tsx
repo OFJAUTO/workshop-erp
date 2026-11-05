@@ -14,6 +14,7 @@ import { loadJobLpos, lpoDiff, lpoProblemsFor, refusalReasonOf, refusalsReady } 
 import { lpoProblemAdvice } from "@/lib/part-cost-check";
 import { invoiceEditReady, invoiceHref, invoiceVatReady, loadInvoiceEdits } from "@/lib/supplier-invoices";
 import { approvedVsInvoiced } from "@/lib/supplier-invoice-rows";
+import { loadPartsChanges } from "@/lib/parts-changes-data";
 import { InvoiceEditHistory, SupplierInvoiceEditButton } from "@/components/SupplierInvoiceEdit";
 import { supplierNeedsTrn } from "@/lib/supplier-rules";
 import { realPartNumber } from "@/lib/parts-rows";
@@ -164,6 +165,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
       return [];
     });
   }
+  // Parts changed after the customer's approval: shown to the approver on a waiting main LPO, old vs new.
+  const afterApproval = isMain && po.status === "pending_approval" && po.job_id ? await loadPartsChanges(po.job_id) : null;
   // A refused LPO is not a dead end: this page says so, and names the version that replaced it once Parts resend.
   const refusedHere = po.status === "cancelled" && /refused/i.test(String(po.notes ?? ""));
   const { data: replacedBy } = refusedHere && po.superseded_by ? await admin.from("purchase_orders").select("id, number").eq("id", po.superseded_by).maybeSingle() : { data: null };
@@ -346,6 +349,19 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                   {resendDiff.changed.map((c) => <li key={`c-${c}`} className="rounded-control bg-amber-soft px-2 py-1 font-semibold" data-lpo-diff-changed>~ {c}</li>)}
                 </ul>
               ) : <p className="text-sm text-muted" data-lpo-diff-same>Same parts at the same prices.</p>}
+            </Card>
+          ) : null}
+          {/* Parts changed after the customer's approval (5 November 2026, J-00985): what the approver decides on, old vs new. */}
+          {afterApproval?.words ? (
+            <Card className="flex flex-col gap-2 !border-amber-bar" data-lpo-after-approval>
+              <SectionLabel>Changes since the customer&apos;s approval</SectionLabel>
+              <p className="text-sm font-bold" data-lpo-after-approval-words>{afterApproval.words}</p>
+              <ul className="flex flex-col gap-1 text-sm">
+                {afterApproval.added.map((a) => <li key={a.id} className="rounded-control bg-green-soft px-2 py-1 font-semibold" data-lpo-change="added">+ NEW · {a.description.toUpperCase()} × {a.qty} · AED {a.total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</li>)}
+                {afterApproval.changed.map((x) => <li key={x.id} className="rounded-control bg-amber-soft px-2 py-1 font-semibold" data-lpo-change="changed">~ CHANGED · {x.description.toUpperCase()} · old AED {x.oldTotal.toLocaleString("en-GB", { minimumFractionDigits: 2 })} → new AED {x.newTotal.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</li>)}
+                {afterApproval.removed.map((x) => <li key={x.id} className="rounded-control bg-chip px-2 py-1 text-muted" data-lpo-change="removed"><span className="line-through">− {x.description.toUpperCase()}</span> · was AED {x.oldTotal.toLocaleString("en-GB", { minimumFractionDigits: 2 })}{x.reason ? ` · ${x.reason}` : ""}</li>)}
+              </ul>
+              <p className="text-xs text-muted">Old = what the customer approved. The customer&apos;s quotation is not changed by approving this; the advisor decides whether to revise it.</p>
             </Card>
           ) : null}
           {sentChanges.length && po.status === "pending_approval" ? (

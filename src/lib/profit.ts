@@ -13,6 +13,7 @@ import { hasPackageLine, quoteTotals, type QuoteLine } from "./quotes";
 import { chargeLineCosts, type ChargeItem } from "./charge-items";
 import { chargeNet } from "./charge-rules";
 import { loadChargeItemsMany } from "./charges";
+import { loadPartsChangesMany, partsOffInvoice } from "./parts-changes-data";
 import { sideOfDepartment } from "./inspection";
 
 /** The hourly cost rate for a job's department: the department's own figure, else its side's, else the base rate. */
@@ -114,9 +115,22 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
   const { data: cbJobs } = jobIds.length && !filter.noComebacks ? await admin.from("jobs").select("id, comeback_of").in("comeback_of", jobIds).in("comeback_cause", ["workmanship", "faulty_part"]) : { data: [] as { id: string; comeback_of: string }[] };
   const cbProfits = (cbJobs ?? []).length ? await jobProfits(settings, { jobIds: (cbJobs ?? []).map((c) => c.id), noComebacks: true }) : [];
   const byInvoice = (id: string) => ((lines ?? []) as { invoice_id: string; section: string; cost_aed: number | string; amount_aed: number | string; description: string | null; quotation_line_id: string | null; part_item_id: string | null }[]).filter((l) => l.invoice_id === id);
+  // Parts changed after the customer's approval (5 November 2026, J-00985): a live, approved part that no invoice line
+  // carries (added after approval and resent) is a real cost - counted ONCE per job, on the job's invoice with the most
+  // part lines. A removed part costs nothing (its line already reads 0); a replacement counts through its original's line.
+  const invoicedPartIds = new Set(((lines ?? []) as { part_item_id: string | null }[]).map((l) => l.part_item_id).filter((x): x is string => !!x));
+  const offInvoice = await partsOffInvoice(jobIds, invoicedPartIds);
+  const partLinesOf = (id: string) => byInvoice(id).filter((l) => l.section === "parts").length;
+  const carrierOf = new Map<string, string>();
+  for (const { invoice } of invoices) {
+    if (!invoice.job_id) continue;
+    const cur = carrierOf.get(invoice.job_id);
+    if (!cur || partLinesOf(invoice.id) > partLinesOf(cur)) carrierOf.set(invoice.job_id, invoice.id);
+  }
   return invoices.map(({ invoice, job }) => {
     const ls = byInvoice(invoice.id);
-    const partsCost = round2(ls.filter((l) => l.section === "parts").reduce((a, l) => a + Number(l.cost_aed), 0));
+    const extraParts = invoice.job_id && carrierOf.get(invoice.job_id) === invoice.id ? (offInvoice.get(invoice.job_id) ?? 0) : 0;
+    const partsCost = round2(ls.filter((l) => l.section === "parts").reduce((a, l) => a + Number(l.cost_aed), 0) + extraParts);
     // The job's charges (section 8): their quotation lines and the job-card charges on the invoice are counted by THE
     // cost rule below, once - so neither their invoice lines nor their hidden quotation lines are counted again.
     const jc = invoice.job_id ? chargeMap.get(invoice.job_id) ?? null : null;
@@ -305,6 +319,8 @@ export async function approvedNotInvoicedProfit(settings: Settings): Promise<num
   const { data: lineRows } = await admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", open.map((r) => String(r.id))).eq("is_active", true);
   const charges = await chargeTotalsByJob(Array.from(new Set(open.map((r) => r.job.id))));
   const jobCharges = await loadChargeItemsMany(Array.from(new Set(open.map((r) => r.job.id))));
+  // Parts changed after the customer's approval (5 November 2026, J-00985): the cost difference, once per job.
+  const partChanges = await loadPartsChangesMany(Array.from(new Set(open.map((r) => r.job.id))));
   let total = 0;
   // A job with an original and an additional quotation: the suppliers' charges on its parts count once, not per quotation.
   const charged = new Set<string>();
@@ -314,7 +330,7 @@ export async function approvedNotInvoicedProfit(settings: Settings): Promise<num
     const supplierCharges = firstOfJob ? (charges.get(r.job.id) ?? 0) : 0;
     charged.add(r.job.id);
     const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job.department), supplierCharges, ...feeOpts(settings, r.expected_payment_method), packageCosting: await costingOf(settings, r, lines) });
-    total += totals.profit + chargeAdjustment(jobCharges.get(r.job.id)?.items ?? [], lines, firstOfJob);
+    total += totals.profit + chargeAdjustment(jobCharges.get(r.job.id)?.items ?? [], lines, firstOfJob) - (firstOfJob ? (partChanges.get(r.job.id)?.costDelta ?? 0) : 0);
   }
   return round2(total);
 }
@@ -351,12 +367,17 @@ export async function approvedQuoteProfits(settings: Settings, fromIso: string):
   for (const f of (firsts ?? []) as { id: string; job_id: string }[]) if (!firstOf.has(f.job_id)) firstOf.set(f.job_id, f.id);
   // Section 8: a quotation charge's cost typed from the bill replaces its quoted estimate (once, never added to it).
   const jobCharges = await loadChargeItemsMany(jobIds);
+  // Parts changed after the customer's approval (5 November 2026, J-00985): removed parts stop costing, parts added or
+  // re-priced cost what they really cost - the difference, once per job, on its first approved quotation.
+  const partChanges = await loadPartsChangesMany(jobIds);
   return Promise.all(rows.map(async (r) => {
     const lines = ((lineRows ?? []) as Record<string, unknown>[]).filter((l) => l.quotation_id === r.id).map(toLine);
-    const supplierCharges = r.job?.id && firstOf.get(r.job.id) === String(r.id) ? (charges.get(r.job.id) ?? 0) : 0;
+    const first = !!r.job?.id && firstOf.get(r.job.id) === String(r.id);
+    const supplierCharges = first && r.job?.id ? (charges.get(r.job.id) ?? 0) : 0;
     const totals = quoteTotals(lines, toQuote(r), { technicianCostRate: costRateFor(settings, r.job?.department), supplierCharges, ...feeOpts(settings, r.expected_payment_method), packageCosting: await costingOf(settings, r, lines) });
     const adjust = chargeAdjustment(r.job?.id ? jobCharges.get(r.job.id)?.items ?? [] : [], lines, false);
-    return { id: String(r.id), jobId: r.job?.id ?? null, respondedAt: String(r.responded_at), sentBy: (r.sent_by as string | null) ?? null, profit: round2(totals.profit + adjust), net: totals.net };
+    const partsDelta = first && r.job?.id ? (partChanges.get(r.job.id)?.costDelta ?? 0) : 0;
+    return { id: String(r.id), jobId: r.job?.id ?? null, respondedAt: String(r.responded_at), sentBy: (r.sent_by as string | null) ?? null, profit: round2(totals.profit + adjust - partsDelta), net: totals.net };
   }));
 }
 

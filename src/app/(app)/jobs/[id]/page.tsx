@@ -31,7 +31,8 @@ import { STAGE_BOX_CARD, STAGE_BOX_TITLE, stageStates, type StageBoxState } from
 import { washStateNow } from "@/lib/wash-state";
 import { PartsSteps } from "@/components/PartsSteps";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
-import { partsSteps, stepPartOf, noPartsNeeded } from "@/lib/parts-steps";
+import { PAST_QUOTE, partsSteps, stepPartOf, noPartsNeeded } from "@/lib/parts-steps";
+import { loadPartsChanges } from "@/lib/parts-changes-data";
 import { redirect } from "next/navigation";
 import { Collapsible } from "@/components/Collapsible";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
@@ -308,14 +309,17 @@ export default async function JobPage({ params, searchParams }: { params: Promis
 
   const insp = inspection?.inspection ?? null;
   // The five parts steps as dots (the same rule as the parts page).
-  const [{ data: stepRows }, { data: stepJob }, { data: declinedRows }] = await Promise.all([
-    createAdminClient().from("part_items").select("is_active, order_status, received_qty, quantity, confirmed_quantity, issue_status, availability, supplier, po_id, return_status").eq("job_id", id),
+  const [{ data: stepRows }, { data: stepJob }, { data: declinedRows }, partsChanges] = await Promise.all([
+    createAdminClient().from("part_items").select("id, is_active, order_status, received_qty, quantity, confirmed_quantity, issue_status, availability, supplier, po_id, return_status, cost_aed, removed_at, disposition").eq("job_id", id),
     createAdminClient().from("jobs").select("parts_pricing_done_at, parts_pricing_reopened_at, declined_out_at").eq("id", id).maybeSingle(),
     createAdminClient().from("declined_work").select("title, severity").eq("job_id", id).eq("is_active", true),
+    // 5 November 2026 (J-00985): parts changed after the customer's approval hold the dots open and show the change line.
+    loadPartsChanges(id),
   ]);
   // 5 November 2026 (J-00970): what the customer declined, as the same grouped section the invoice shows.
   const declinedItems = cleanDeclined(((declinedRows ?? []) as { title: string; severity: string }[]).map((r) => ({ title: r.title, severity: r.severity as "Replace now" | "Replace" | "Advisory" })));
-  const partsStepList = partsSteps({ jobStatus: job.status, pricingDoneAt: (stepJob?.parts_pricing_done_at as string | null) ?? null, pricingReopenedAt: (stepJob?.parts_pricing_reopened_at as string | null) ?? null, parts: (stepRows ?? []).map((r) => stepPartOf(r)) });
+  const stepCtx = { pastQuote: PAST_QUOTE.includes(String(job.status)), approvedIds: partsChanges?.approvedIds ?? null };
+  const partsStepList = partsSteps({ jobStatus: job.status, pricingDoneAt: (stepJob?.parts_pricing_done_at as string | null) ?? null, pricingReopenedAt: (stepJob?.parts_pricing_reopened_at as string | null) ?? null, parts: (stepRows ?? []).map((r) => stepPartOf(r, stepCtx)) });
   const partsDots = <PartsSteps size="dots" steps={partsStepList} />;
   const inspectionTasks = work && inspection && hasLabourChargesLine(work.lines) ? tasksFromInspection(inspection.items) : [];
   // The money side in five steps (one rule with the invoice page and the accounts screens).
@@ -854,6 +858,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         ) : null}
         <Card className={tile(partsBox)} data-stage-card="parts" data-state={partsBox}>
           <span className="flex items-center gap-2"><span className={boxTitle(partsBox)}>{tick(partsBox)}Parts</span>{partsDots}</span>
+          {partsChanges?.words ? <Link href={`/parts/${id}#changes`} className={`text-xs font-bold underline underline-offset-4 ${partsChanges.needsApproval.length ? "text-amber" : ""}`} data-job-parts-changes>{partsChanges.words}{partsChanges.needsApproval.length ? " – Resend for approval" : ""}</Link> : null}
           <span className="text-sm font-semibold">
             {partItems.length === 0 ? (noPartsNeeded(partsStepList) && !quoteSummary.openRequests ? <span className="text-green" data-no-parts>No parts needed ✓</span> : quoteSummary.openRequests ? `${quoteSummary.openRequests} request${quoteSummary.openRequests === 1 ? "" : "s"} to price` : "Not started") : `${partItems.length} part${partItems.length === 1 ? "" : "s"}`}
           </span>
