@@ -34,7 +34,25 @@ export function supplierNeedsTrn(s: Pick<SupplierLike, "name" | "trn" | "vat_reg
 }
 
 /** The words next to such a supplier, on the list, the LPO and Parts accounts. */
-export const NO_TRN_WORDS = "VAT registered but no TRN: its bills cannot go to Zoho";
+export const NO_TRN_WORDS = "VAT registered but no TRN: no VAT counted and its bills cannot go to Zoho";
+
+/** "Our stock" by name: our own shelf, never a supplier we pay, never VAT. */
+export const isOurStockSupplier = (name: string | null | undefined) => isOurStockName(name);
+
+/**
+ * THE supplier VAT rule (5 November 2026, Mathew): VAT is counted only for a supplier that is VAT registered AND whose
+ * 15-digit TRN we hold - no TRN, no VAT (a supplier without a TRN cannot charge it, and we could not reclaim it).
+ * Never for "Our stock". An entered invoice's own VAT always wins over this estimate (supplier-money.ts).
+ */
+export function supplierChargesVat(s: Pick<SupplierLike, "name" | "trn" | "vat_registered"> | null | undefined): boolean {
+  if (!s) return false;
+  if (isOurStockName(s.name)) return false;
+  if (s.vat_registered === false) return false;
+  return digitsOf(s.trn).length === 15;
+}
+
+/** The words where a supplier amount carries no VAT. */
+export const NO_VAT_WORDS = "No VAT – supplier not VAT-registered";
 
 /**
  * A UAE phone number as dialled inside the country, without its leading 0: the international "00" or "+", the 971 and

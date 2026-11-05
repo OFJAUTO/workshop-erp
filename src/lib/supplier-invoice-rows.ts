@@ -3,7 +3,10 @@
  * (purchase_orders carry the invoice number, date, amount and the scan). One invoice entered on several LPOs of the
  * same supplier (one per car) is ONE row split across them; an LPO received with the invoice "to follow" is a row of
  * its own waiting for it. Status, match and duplicate warnings are worked out here. Pure: no database.
+ * The VAT is THE supplier VAT rule (5 November 2026): supplier-money.ts / supplierChargesVat.
  */
+import { supplierMoney } from "./supplier-money";
+import { supplierChargesVat } from "./supplier-rules";
 
 export type SiPo = {
   id: string;
@@ -66,6 +69,8 @@ export type InvoiceRow = {
   supplierId: string | null;
   trn: string | null;
   vatRegistered: boolean;
+  /** THE supplier VAT rule (5 November 2026): VAT counted on this invoice (registered with a TRN, or the invoice's own typed VAT). */
+  vatCharged: boolean;
   number: string | null;
   date: string | null;
   beforeVat: number;
@@ -130,6 +135,9 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
     const first = items[0];
     const sup = (first.supplier_id ? supOf.get(first.supplier_id) : null) ?? supByName.get(first.supplier_name.trim().toLowerCase()) ?? null;
     const vatRegistered = sup?.vat_registered !== false;
+    // THE supplier VAT rule (5 November 2026, Mathew): VAT only from a supplier registered with a TRN (never Our stock),
+    // 5% of the amount rounded half up; the entered invoice's own typed VAT always wins.
+    const chargesVat = supplierChargesVat(sup ? { ...sup, name: first.supplier_name || sup.name } : { name: first.supplier_name, trn: null, vat_registered: null });
     const waiting = items.every((p) => p.supplier_invoice_status === "to_follow");
     const shares: InvoiceShare[] = items.map((p) => {
       const j = p.job_id ? jobOf.get(p.job_id) : null;
@@ -137,7 +145,7 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
       const amount = r2(waiting ? p.total_cost_aed : (p.supplier_invoice_amount ?? p.total_cost_aed));
       // The LPO's own typed VAT wins (supplier invoice edit, 5 November 2026); an unentered invoice has none yet.
       const typedVat = waiting ? null : (p.supplier_invoice_vat_aed ?? null);
-      const vat = vatRegistered ? r2(typedVat ?? (amount * vatPercent) / 100) : 0;
+      const vat = supplierMoney(amount, { chargesVat, typedVat, vatPercent }).vat;
       return { poId: p.id, poNumber: p.number, jobId: p.job_id, jobNumber: j?.job_number ?? null, plate: j?.plate ?? "", car: j?.car ?? "", amount, vat, withVat: r2(amount + vat), lpoTotal: p.total_cost_aed, parts: mine.length, paidAt: p.paid_at, paidMethod: p.paid_method ?? null, paidReference: p.paid_reference ?? null, proofPath: p.proof_path ?? null, paidBy: p.paid_by ?? null };
     });
     const beforeVat = r2(shares.reduce((a, s) => a + s.amount, 0));
@@ -183,6 +191,7 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
       supplierId: first.supplier_id,
       trn: sup?.trn ?? null,
       vatRegistered,
+      vatCharged: chargesVat || vat > 0.004,
       number: waiting ? null : first.supplier_invoice_number,
       date: waiting ? null : first.supplier_invoice_date,
       beforeVat,
@@ -258,7 +267,7 @@ export function filterInvoices(rows: InvoiceRow[], f: InvoiceFilter, partNames: 
   });
 }
 
-export type UnpaidSupplier = { supplier: string; supplierId: string | null; count: number; total: number; /** The oldest unpaid invoice date (or arrival day). */ oldest: string | null };
+export type UnpaidSupplier = { supplier: string; supplierId: string | null; count: number; total: number; /** The same balance before VAT and its VAT (THE rule, 5 November 2026). */ net: number; vat: number; vatCharged: boolean; /** The oldest unpaid invoice date (or arrival day). */ oldest: string | null };
 
 /** The LPOs of an invoice still to pay (each one is paid on its own LPO page). */
 export const unpaidShares = (r: InvoiceRow): InvoiceShare[] => (r.status === "waiting" ? [] : r.shares.filter((s) => !s.paidAt));
@@ -274,9 +283,13 @@ export function unpaidBySupplier(rows: InvoiceRow[]): UnpaidSupplier[] {
   for (const r of rows) {
     if (r.status === "waiting" || r.unpaidAmount <= 0.005) continue;
     const k = r.supplierId ?? `name:${r.supplier.trim().toLowerCase()}`;
-    const cur = m.get(k) ?? { supplier: r.supplier, supplierId: r.supplierId, count: 0, total: 0, oldest: null };
+    const cur = m.get(k) ?? { supplier: r.supplier, supplierId: r.supplierId, count: 0, total: 0, net: 0, vat: 0, vatCharged: false, oldest: null };
     cur.count++;
     cur.total = r2(cur.total + r.unpaidAmount);
+    const open = r.shares.filter((s) => !s.paidAt);
+    cur.net = r2(cur.net + open.reduce((a, s) => a + s.amount, 0));
+    cur.vat = r2(cur.vat + open.reduce((a, s) => a + s.vat, 0));
+    cur.vatCharged = cur.vatCharged || r.vatCharged;
     const day = r.date ?? (r.at ? r.at.slice(0, 10) : null);
     if (day && (!cur.oldest || day < cur.oldest)) cur.oldest = day;
     m.set(k, cur);

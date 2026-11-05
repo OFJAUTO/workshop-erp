@@ -17,7 +17,8 @@ import { settledCostProblem } from "./part-cost-check";
 import { isOurStock, realPartNumber } from "./parts-rows";
 import { changeWords, lineChange, profitChangeWords } from "./price-change";
 import { MATCH_WORDS, STATUS_WORDS, invWords, unpaidBySupplier, type InvoiceRow } from "./supplier-invoice-rows";
-import { supplierNeedsTrn } from "./supplier-rules";
+import { supplierChargesVat, supplierNeedsTrn } from "./supplier-rules";
+import { supplierMoney } from "./supplier-money";
 
 /* ------------------------------------------------------------------------------------------------------------------
  * What the server hands in.
@@ -93,6 +94,8 @@ export type PaPo = {
   status: string;
   /** Before VAT, supplier charges (courier, freight) included. */
   total: number;
+  /** A cancelled LPO's ORIGINAL amount before VAT (every line it ever had): shown struck through, never counted. */
+  originalTotal?: number | null;
   approvedBy: string | null;
   approvedAt: string | null;
   orderedAt: string | null;
@@ -569,6 +572,9 @@ export type LpoRow = {
   amount: number;
   vat: number;
   total: number;
+  /** THE supplier VAT rule (5 November 2026): VAT counted (registered with a TRN), and a cancelled LPO (struck through, never counted). */
+  vatCharged: boolean;
+  cancelled: boolean;
   approvedBy: string | null;
   approvedAt: string | null;
   orderedAt: string | null;
@@ -608,7 +614,10 @@ export function lpoRows(base: PartsBase): LpoRow[] {
     .map((p) => {
       const job = p.jobId ? (jobOf.get(p.jobId) ?? null) : null;
       const sup = (p.supplierId ? supOf.get(p.supplierId) : null) ?? supByName.get(lower(p.supplierName)) ?? null;
-      const vat = sup?.vatRegistered === false || isOurStock(p.supplierName) ? 0 : r2((p.total * base.limits.vatPercent) / 100);
+      // THE supplier amount (supplier-money.ts): VAT only from a supplier registered with a TRN (never Our stock), 5% of
+      // the LPO total rounded half up; a cancelled LPO at its original amount.
+      const cancelled = p.status === "cancelled";
+      const money = supplierMoney(cancelled && (p.originalTotal ?? 0) > 0 ? (p.originalTotal as number) : p.total, { chargesVat: supplierChargesVat({ name: p.supplierName, trn: sup?.trn ?? null, vat_registered: sup ? sup.vatRegistered : null }), vatPercent: base.limits.vatPercent });
       const mine = linesOf.get(p.id) ?? [];
       const step = lpoStep(p);
       const missing = (p.status === "received" || p.status === "partly_received") && p.invoiceStatus !== "received" && !isOurStock(p.supplierName);
@@ -625,9 +634,11 @@ export function lpoRows(base: PartsBase): LpoRow[] {
         jobNumber: job?.jobNumber ?? "",
         plate: job?.plate ?? "",
         car: job?.car ?? "",
-        amount: r2(p.total),
-        vat,
-        total: r2(p.total + vat),
+        amount: money.net,
+        vat: money.vat,
+        total: money.gross,
+        vatCharged: money.vatCharged,
+        cancelled,
         approvedBy: p.approvedBy,
         approvedAt: p.approvedAt,
         orderedAt: p.orderedAt,
@@ -844,7 +855,7 @@ export function returnRows(base: PartsBase): ReturnRow[] {
     const { name: supplierName, id: supplierId } = partSupplierOf(p, po, supByName);
     const sup = (supplierId ? supOf.get(supplierId) : null) ?? supByName.get(lower(supplierName)) ?? null;
     const credit = expectedCredit(p, lineOfPart.get(p.id) ?? null);
-    const vat = sup?.vatRegistered === false ? 0 : r2((credit * base.limits.vatPercent) / 100);
+    const vat = supplierMoney(credit, { chargesVat: supplierChargesVat({ name: supplierName, trn: sup?.trn ?? null, vat_registered: sup ? sup.vatRegistered : null }), vatPercent: base.limits.vatPercent }).vat;
     const cn = creditNoteOf(p);
     const since = returned ? p.dispositionAt : (p.notNeededAt ?? p.createdAt);
     const waitingDays = state === "credit_on_file" ? null : daysSince(since, base.now);

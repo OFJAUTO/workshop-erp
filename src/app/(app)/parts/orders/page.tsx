@@ -8,6 +8,8 @@ import { PO_SELECT, PO_STATUS_LABELS, toPo, type PurchaseOrderRow } from "@/lib/
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
+import { SupplierAmount } from "@/components/SupplierAmount";
+import { lpoAmounts } from "@/lib/supplier-vat";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +53,8 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
     all.length ? admin.from("purchase_order_lines").select("po_id, description, part_number, expected_date, quantity, received_qty, invoice_check").in("po_id", all.map((p) => p.id)).eq("is_active", true) : Promise.resolve({ data: [] }),
   ]);
   const jobOf = new Map(((jobs ?? []) as unknown as JobInfo[]).map((j) => [j.id, j]));
+  // Supplier amounts with VAT (5 November 2026, Mathew): THE amounts (lib/supplier-vat.ts lpoAmounts) for every row.
+  const amounts = await lpoAmounts(all.filter((p) => p.kind !== "main" || p.status === "pending_approval" || p.status === "cancelled"));
   const linesOf = (id: string) => ((lines ?? []) as LineInfo[]).filter((l) => l.po_id === id);
   const today = todayIso();
   const redDays = Number(settings.supplier_invoice_pending_red_days) || 7;
@@ -70,8 +74,8 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
     const hay = [po.number, po.supplier_name, c?.plate, c?.car, c?.job, c?.vin, c?.customer, ...linesOf(po.id).flatMap((l) => [l.description, l.part_number ?? ""])].join(" ").toLowerCase();
     return hay.includes(needle);
   };
-  const inTab = (po: PurchaseOrderRow) => {
-    switch (tab) {
+  const inTab = (po: PurchaseOrderRow, key: string = tab) => {
+    switch (key) {
       case "pending": return po.status === "pending_approval";
       case "to_send": return po.status === "approved";
       case "ordered": return po.status === "ordered" || po.status === "partly_received";
@@ -83,8 +87,8 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
     }
   };
   const searched = visible.filter(matches).filter((po) => !supplier || po.supplier_id === supplier);
-  const counts = Object.fromEntries(TABS.map((t) => [t.key, searched.filter((po) => (t.key ? inTab({ ...po } as PurchaseOrderRow) : true)).length]));
-  const shown = searched.filter(inTab);
+  const counts = Object.fromEntries(TABS.map((t) => [t.key, searched.filter((po) => inTab(po, t.key)).length]));
+  const shown = searched.filter((po) => inTab(po));
   const suppliers = Array.from(new Map(visible.filter((p) => p.supplier_id).map((p) => [p.supplier_id as string, p.supplier_name])).entries());
   const keep = (next: Record<string, string>) => {
     const p = new URLSearchParams();
@@ -167,7 +171,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
                     {p.supplier_invoice_status === "to_follow" ? <Badge tone={invoiceAge >= redDays ? "red" : "amber"}>Invoice missing · {invoiceAge} day{invoiceAge === 1 ? "" : "s"}</Badge> : null}
                     {mismatch ? <Badge tone="red">{mismatch} price{mismatch === 1 ? "" : "s"} to check</Badge> : null}
                     {p.emailed_at ? <Badge tone="green">Emailed</Badge> : p.sent_at ? <Badge tone="green">Sent</Badge> : null}
-                    <span className="ml-auto text-sm font-semibold">AED {p.total_cost_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span>
+                    <span className="ml-auto" data-lpo-row-amount>{amounts.get(p.id) ? <SupplierAmount money={amounts.get(p.id)!} cancelled={amounts.get(p.id)!.cancelled} size="sm" /> : null}</span>
                     <span className="text-xs text-muted">{p.status === "received" && p.received_at ? `received ${ago(p.received_at)}` : p.ordered_at ? `ordered ${ago(p.ordered_at)}${expected && p.status !== "received" ? `, expected ${formatDate(expected)}` : ""}` : `raised ${formatDateTime(p.created_at)}`}</span>
                   </Card>
                 </Link>

@@ -1,3 +1,5 @@
+import { SupplierAmount } from "@/components/SupplierAmount";
+import { moneyFrom } from "@/lib/supplier-money";
 import Link from "next/link";
 import { Fragment } from "react";
 import { Badge, Card } from "@/components/ui";
@@ -101,7 +103,7 @@ export function LposTab({ rows, redDays }: { rows: LpoRow[]; redDays: number }) 
               <span className="font-semibold uppercase">{r.supplier}</span>
               <Badge tone={lpoTone(r)} data-pa-status={r.step}>{r.step === "received" && r.invoiceMissingDays !== null ? `${LPO_STEP_WORDS.received} · ${r.invoiceMissingDays} day${r.invoiceMissingDays === 1 ? "" : "s"}` : r.stepWords}</Badge>
               {r.lateLines ? <Badge tone="red">{r.lateLines} line{r.lateLines === 1 ? "" : "s"} late</Badge> : null}
-              <span className="ml-auto text-sm font-extrabold" data-pa-amount={r.amount.toFixed(2)}><span className="whitespace-nowrap">{money(r.amount)}</span> <span className="whitespace-nowrap text-xs font-semibold text-muted">before VAT · {money(r.total)} with VAT</span></span>
+              <span className="ml-auto" data-pa-amount={r.amount.toFixed(2)}><SupplierAmount money={moneyFrom(r.amount, r.vat, r.vatCharged)} cancelled={r.cancelled} size="sm" /></span>
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
               {r.jobId ? <Link href={`/jobs/${r.jobId}`} className={`${LINK} whitespace-nowrap`}>{[r.jobNumber, r.plate].filter(Boolean).join(" · ")}</Link> : <span className="text-muted">For the shelf</span>}

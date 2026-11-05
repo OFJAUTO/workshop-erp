@@ -29,6 +29,7 @@ export function SupplierInvoiceEditButton({
   lines,
   paid,
   label = "Edit invoice",
+  chargesVat = true,
 }: {
   action: (formData: FormData) => void | Promise<void>;
   /** Where the answer lands (the page this button sits on). */
@@ -45,6 +46,8 @@ export function SupplierInvoiceEditButton({
   lines: EditInvoiceLine[];
   paid: boolean;
   label?: string;
+  /** THE supplier VAT rule (5 November 2026): false = the supplier is not VAT registered (no TRN): no VAT expected. */
+  chargesVat?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [num, setNum] = useState(number);
@@ -54,8 +57,8 @@ export function SupplierInvoiceEditButton({
   const [confirmed, setConfirmed] = useState(false);
 
   const amountNum = Number(amt.replace(/[^\d.]/g, "")) || 0;
-  const vatNum = vatText.trim() === "" ? r2(amountNum * 0.05) : Number(vatText.replace(/[^\d.]/g, "")) || 0;
-  const fivePct = r2(amountNum * 0.05);
+  const fivePct = chargesVat ? r2(amountNum * 0.05) : 0;
+  const vatNum = vatText.trim() === "" ? fivePct : Number(vatText.replace(/[^\d.]/g, "")) || 0;
   // Suppliers round VAT per line: allow a fil per line before warning (and the warning never blocks).
   const vatTolerance = Math.max(0.01, 0.01 * Math.max(1, lines.length));
   const vatOff = amountNum > 0 && Math.abs(vatNum - fivePct) > vatTolerance + 0.0001;
@@ -115,7 +118,7 @@ export function SupplierInvoiceEditButton({
       </div>
       {vatOff ? (
         <p className="rounded-control border border-amber-bar bg-amber-soft px-3 py-2 text-sm font-semibold" data-vat-warning>
-          VAT typed is not 5% of the amount (5% = AED {money(fivePct)}). Suppliers round per line – you can still save.
+          {chargesVat ? <>VAT typed is not 5% of the amount (5% = AED {money(fivePct)}). Suppliers round per line – you can still save.</> : <>This supplier is not VAT-registered (no TRN on file): VAT is not counted for it. If the invoice really shows VAT, add the supplier&apos;s TRN on Parts &gt; Suppliers first.</>}
         </p>
       ) : null}
       <p className="text-sm font-bold" data-edit-total>Total with VAT: AED {money(total)}</p>

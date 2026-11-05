@@ -13,6 +13,7 @@ import { type SupplierOption } from "@/lib/parts-rows";
 import { loadCatalogue } from "@/lib/parts-catalogue";
 import { lastQuantitiesFor } from "@/lib/part-memory";
 import { PartsTable, type TableRow } from "../../[jobId]/PartsTable";
+import { vatChargingSupplierNames } from "@/lib/supplier-vat";
 import { estimatePricingDone } from "../../estimate-actions";
 
 export const dynamic = "force-dynamic";
@@ -104,6 +105,7 @@ export default async function EstimatePartsDesk({ params }: { params: Promise<{ 
         ) : (
           <PartsTable
             jobId=""
+            vatSupplierNames={await vatChargingSupplierNames()}
             estimate={{ id: q.id, number: q.number, preparing: desk.preparing }}
             rows={rows}
             suppliers={suppliers}

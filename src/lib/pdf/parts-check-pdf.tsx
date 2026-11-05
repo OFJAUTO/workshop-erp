@@ -1,3 +1,5 @@
+import { addSupplierMoney, supplierMoney } from "@/lib/supplier-money";
+import { NO_VAT_WORDS } from "@/lib/supplier-rules";
 import "server-only";
 /* eslint-disable jsx-a11y/alt-text -- react-pdf images are not HTML images */
 import { Document, Image, Page, Text, View, renderToBuffer } from "@react-pdf/renderer";
@@ -26,6 +28,8 @@ export type CheckRow = {
   availability: string;
 };
 export type PartsCheckData = {
+  /** Supplier amounts with VAT (5 November 2026): the suppliers that charge VAT by THE rule (registered with a TRN). */
+  vatSupplierNames: string[];
   jobNumber: string;
   plate: string;
   car: string;
@@ -74,7 +78,10 @@ export async function renderPartsCheckPdf(d: PartsCheckData): Promise<Buffer> {
     const s = r.supplier || "No supplier yet";
     bySupplier.set(s, (bySupplier.get(s) ?? 0) + line);
   }
-  const vat = Math.round(total * 5) / 100;
+  // THE supplier amount (supplier-money.ts): VAT per supplier by THE rule, the same figures as the Parts page's bar.
+  const vatNames = new Set(d.vatSupplierNames.map((n) => n.trim().toLowerCase()));
+  const amount = addSupplierMoney([...bySupplier.entries()].map(([s, v]) => supplierMoney(v, { chargesVat: vatNames.has(s.trim().toLowerCase()) })));
+  const vat = amount.vat;
   const doc = (
     <Document title={`Parts price check ${d.jobNumber}`}>
       <Page size="A4" orientation="landscape" style={[styles.page, { paddingTop: px(28), paddingBottom: px(56), paddingHorizontal: px(38) }]}>
@@ -120,15 +127,19 @@ export async function renderPartsCheckPdf(d: PartsCheckData): Promise<Buffer> {
               </View>
             ))}
             <View style={{ flexDirection: "row", justifyContent: "space-between", borderTopWidth: 0.75, borderTopColor: INK, paddingTop: px(4), marginTop: px(3) }}>
-              <Text style={{ fontSize: px(10.5) }}>Total our cost</Text>
+              <Text style={{ fontSize: px(10.5) }}>Total our cost before VAT</Text>
               <Text style={{ fontSize: px(10.5) }}>AED {money(total)}</Text>
             </View>
+            {amount.vatCharged ? (
+              <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ fontSize: px(10.5) }}>VAT 5%</Text>
+                <Text style={{ fontSize: px(10.5) }}>AED {money(vat)}</Text>
+              </View>
+            ) : (
+              <Text style={{ fontSize: px(9.5), color: GREY }}>{NO_VAT_WORDS}</Text>
+            )}
             <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-              <Text style={{ fontSize: px(10.5) }}>VAT 5%</Text>
-              <Text style={{ fontSize: px(10.5) }}>AED {money(vat)}</Text>
-            </View>
-            <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
-              <Text style={{ fontSize: px(12), fontWeight: 800 }}>GRAND TOTAL</Text>
+              <Text style={{ fontSize: px(12), fontWeight: 800 }}>{amount.vatCharged ? "GRAND TOTAL INCL. VAT" : "GRAND TOTAL"}</Text>
               <Text style={{ fontSize: px(12), fontWeight: 800 }}>AED {money(total + vat)}</Text>
             </View>
           </View>

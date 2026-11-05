@@ -8,11 +8,13 @@ import { SharePdfButton } from "@/components/SharePdfButton";
 import { Button } from "@/components/ui";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { perUnitMark, qtyWithUnit, unitOf } from "@/lib/part-units";
+import { SupplierAmount } from "@/components/SupplierAmount";
+import { supplierMoney, supplierMoneyText } from "@/lib/supplier-money";
 
 export type SupplierLpoLine = { id: string; part_item_id: string; description: string; positions?: string[] | null; part_number: string | null; quantity: number; /** The part's unit (pieces, litres, sets): "× 8 L", the price per litre. */ unit?: string | null; unit_cost: number; expected_date: string | null; received_qty: number };
 /** A line whose part was given its ending (3 November 2026): cancelled (off the LPO), or returned / kept in stock (still on it). */
 export type EndedLpoLine = { lineId: string; description: string; partNumber: string | null; quantity: number; unitCost: number; state: "cancelled" | "return_pending" | "returned" | "stock"; words: string; onLpo: boolean };
-export type SupplierLpo = { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; lines: SupplierLpoLine[]; /** Courier, freight: in the total already. */ charges?: { id: string; description: string; amount_aed: number }[]; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null; ended?: EndedLpoLine[]; /** The same supplier's lines cancelled on this car's OTHER LPOs (5 November 2026): sent with this LPO so the supplier hears the cancellation and the new order together. */ cancelledElsewhere?: { number: string; lines: EndedLpoLine[] }[] };
+export type SupplierLpo = { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; lines: SupplierLpoLine[]; /** Courier, freight: in the total already. */ charges?: { id: string; description: string; amount_aed: number }[]; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null; ended?: EndedLpoLine[]; /** The same supplier's lines cancelled on this car's OTHER LPOs (5 November 2026): sent with this LPO so the supplier hears the cancellation and the new order together. */ cancelledElsewhere?: { number: string; lines: EndedLpoLine[] }[]; /** Supplier amounts with VAT (5 November 2026): whether this supplier charges VAT (supplierChargesVat, looked up by the page). */ chargesVat: boolean };
 
 /**
  * One supplier's LPO as a card: its number (LPO-00012-1), the parts with part number, name, quantity and our agreed
@@ -35,6 +37,10 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
   const returns = (po.ended ?? []).filter((e) => e.onLpo && (e.state === "return_pending" || e.state === "returned"));
   const returnsAed = returns.reduce((a, e) => a + e.quantity * e.unitCost, 0);
   const money = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // THE supplier amount (lib/supplier-money.ts): with VAT only when the supplier charges it; a cancelled LPO at its
+  // original amount (every line it had), struck through and never counted.
+  const originalNet = po.lines.reduce((a, l) => a + l.quantity * l.unit_cost, 0) + cancelledLines.reduce((a, l) => a + l.quantity * l.unitCost, 0) + (po.charges ?? []).reduce((a, c) => a + c.amount_aed, 0);
+  const amount = supplierMoney(cancelledPo ? originalNet : po.total_cost_aed, { chargesVat: po.chargesVat });
   const text = cancelledPo
     ? [`${po.number} · OFJ Automotive`, vin ? `VIN: ${vin}` : "", "", "Please cancel:", ...cancelledLines.map((l) => `• ${l.partNumber ? `${l.partNumber} · ` : ""}${l.description} × ${l.quantity}`)].filter((x, i, a) => !(x === "" && a[i - 1] === "")).join("\n")
     : [
@@ -46,7 +52,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
         ...(cancelledLines.length ? ["", "Cancelled:", ...cancelledLines.map((l) => `• ${l.partNumber ? `${l.partNumber} · ` : ""}${l.description} × ${l.quantity}`)] : []),
         ...(po.cancelledElsewhere ?? []).filter((c) => c.lines.length).flatMap((c) => ["", `Cancelled on ${c.number}:`, ...c.lines.map((l) => `• ${l.partNumber ? `${l.partNumber} · ` : ""}${l.description} × ${l.quantity}`)]),
         "",
-        `Total before VAT: AED ${po.total_cost_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`,
+        `Total: ${supplierMoneyText(amount)}`,
       ].filter((x, i, a) => !(x === "" && a[i - 1] === "")).join("\n");
   const latest = po.lines.map((l) => l.expected_date).filter((d): d is string => !!d).sort().at(-1) ?? null;
   const sentLine = po.emailed_at ? `Sent to supplier by email ${formatDateTime(po.emailed_at)}${po.emailed_to ? ` (${po.emailed_to})` : ""}` : po.sent_at ? `Sent to supplier ${formatDateTime(po.sent_at)}` : null;
@@ -106,7 +112,10 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
         ))}
       </ul>
       <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-        <span className="text-sm font-semibold" data-lpo-total>AED {po.total_cost_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })} before VAT{cancelledLines.length ? ` · ${cancelledLines.length} line${cancelledLines.length === 1 ? "" : "s"} cancelled` : ""}</span>
+        <span className="inline-flex flex-wrap items-center gap-2" data-lpo-total>
+          <SupplierAmount money={amount} cancelled={cancelledPo} size="sm" align="start" />
+          {cancelledLines.length && !cancelledPo ? <span className="text-xs font-semibold text-muted">{cancelledLines.length} line{cancelledLines.length === 1 ? "" : "s"} cancelled</span> : null}
+        </span>
         {returnsAed > 0 ? <span className="text-xs font-semibold text-amber" data-lpo-returns>Returns −AED {money(returnsAed)} (supplier credit) · net AED {money(Math.max(0, po.total_cost_aed - returnsAed))}</span> : null}
         {ordered && latest ? <span className="text-xs text-muted">· all here by {formatDate(latest)}</span> : null}
         <div className="ml-auto flex flex-wrap items-center gap-2">

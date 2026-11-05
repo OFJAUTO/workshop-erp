@@ -1,3 +1,4 @@
+import { vatChargingSupplierNames } from "@/lib/supplier-vat";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -60,6 +61,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ jo
     };
   });
   const pdf = await renderPartsCheckPdf({
+    vatSupplierNames: await vatChargingSupplierNames(),
     jobNumber: job.job_number as string,
     plate: v ? formatPlate(v) : (job.job_number as string),
     car: [v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" "),

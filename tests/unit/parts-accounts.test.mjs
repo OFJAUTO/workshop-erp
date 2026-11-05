@@ -253,7 +253,8 @@ const tm = partsAccountsTotals(tileMix, [], []);
 const boughtList = filterLines(tileMix, { quick: "bought" }, []);
 check(`the Parts bought box opens exactly its lines (${tm.boughtCount} = ${boughtList.length}, AED ${tm.bought})`, PA_QUICK.lines[0].key === "bought" && tm.boughtCount === boughtList.length && tm.bought === Math.round(boughtList.reduce((a, l) => a + l.cost, 0) * 100) / 100 && tm.boughtCount === 2);
 check("the Charged box opens exactly its lines", tm.chargedCount === filterLines(tileMix, { quick: "invoiced" }, []).length && tileMix.filter(isChargedLine).length === tm.chargedCount && tileMix.filter(isBoughtLine).length === tm.boughtCount);
-check("totals: owed to suppliers with VAT, invoices to follow apart", t.owed === 1260 && t.owedCount === 2 && t.toFollow === 315 && t.toFollowCount === 1);
+// 5 November 2026 (Mathew): VAT only from a supplier registered WITH a TRN - INV-9's supplier has none, so no VAT on it.
+check("totals: owed to suppliers with VAT (none from the supplier with no TRN), invoices to follow apart", t.owed === 1250 && t.owedCount === 2 && t.toFollow === 315 && t.toFollowCount === 1, `owed ${t.owed}`);
 check("totals: problems and red ones", t.problems === mixed.length && t.problemsRed === mixed.filter((p) => p.severity === "red").length);
 
 /* ---------- the suppliers list ---------- */

@@ -207,6 +207,10 @@ export const loadPartsBase = cache(async (): Promise<PartsBase> => {
     proformas: docsByJob.get(j.id)?.proforma ?? [],
   }));
 
+  // A cancelled LPO's original amount (5 November 2026): every line it ever had, the inactive ones too.
+  const cancelledPoIds = poRows.filter((p) => p.status === "cancelled").map((p) => String(p.id));
+  const originalOf = new Map<string, number>();
+  for (const l of cancelledPoIds.length ? await pageAllIn<Row>(cancelledPoIds, (ids, a, b) => admin.from("purchase_order_lines").select("id, po_id, quantity, unit_cost").in("po_id", ids).order("id").range(a, b) as unknown as Page<Row>) : []) originalOf.set(String(l.po_id), (originalOf.get(String(l.po_id)) ?? 0) + (Number(l.quantity) || 0) * (Number(l.unit_cost) || 0));
   const pos: PaPo[] = poRows.map((p) => ({
     id: String(p.id),
     number: String(p.number),
@@ -217,6 +221,7 @@ export const loadPartsBase = cache(async (): Promise<PartsBase> => {
     supplierName: String(p.supplier_name ?? ""),
     status: String(p.status),
     total: Number(p.total_cost_aed) || 0,
+    originalTotal: p.status === "cancelled" ? (originalOf.get(String(p.id)) ?? null) : null,
     approvedBy: p.approved_by ? (names.get(String(p.approved_by)) ?? null) : null,
     approvedAt: str(p.approved_at),
     orderedAt: str(p.ordered_at),

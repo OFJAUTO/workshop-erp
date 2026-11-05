@@ -4,14 +4,14 @@
 //   PATHS=a,b node --env-file=.env.test.local tests/browser/sim-e2e.mjs   (default: all eight)
 // Paths: a mechanical + supplier parts + deposit + pay-link · b stock parts + cash · c declined → fee →
 // gate-out · d revision after approval · e bodyshop PPF sign-off → handover · f mixed quotation ·
-// g recovery delivery · h commission approve → pay · i enter price myself (estimate + job quotation) · j parts changed after approval → resend for approval · k revise at the top + hours missing.
-import { mkdirSync } from "node:fs";
+// g recovery delivery · h commission approve → pay · i enter price myself (estimate + job quotation) · j parts changed after approval → resend for approval · k revise at the top + hours missing · l supplier amounts with VAT.
+import fs, { mkdirSync } from "node:fs";
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -1399,6 +1399,166 @@ await section("k", "revise at the top + hours missing (estimate + job quotation)
     await page.screenshot({ path: `${shots}/k8-job-quote-v1-1440.png` });
     await browser.close();
   }
+});
+
+/* ================================================================================================= */
+/* Path l — SUPPLIER AMOUNTS WITH VAT (5 November 2026, Mathew): one supplier VAT registered with a    */
+/* TRN (963.00 → AED 1,011.15 incl. VAT), one with no TRN (no VAT), through the approval screen, the   */
+/* LPO list, the LPO pages, the cards and the supplier PDFs; each LPO tab counts its own; a cancelled */
+/* LPO at its original amount struck through, never counted; at 1440×900 and 800×1280.                 */
+/* ================================================================================================= */
+await section("l", "supplier amounts with VAT + LPO tab counts + cancelled LPOs", async () => {
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed.jobId;
+  const partsId = (await sql("select id from public.staff where role_id = 'parts' and is_active order by created_at limit 1"))[0].id;
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  await sql("insert into public.suppliers (name, trn, vat_registered, created_by, updated_by) select 'E2E VAT SUPPLIER', '100200300400598', true, $1, $1 where not exists (select 1 from public.suppliers where name ilike 'E2E VAT SUPPLIER')", [partsId]);
+  await sql("insert into public.suppliers (name, trn, vat_registered, created_by, updated_by) select 'E2E NO TRN SUPPLIER', null, true, $1, $1 where not exists (select 1 from public.suppliers where name ilike 'E2E NO TRN SUPPLIER')", [partsId]);
+  const noTrn = (await sql("select id::text as id from public.suppliers where name ilike 'E2E NO TRN SUPPLIER'"))[0];
+  await sql("update public.part_requests set status = 'unavailable', closed_reason = 'not needed (test)' where job_id = $1 and status = 'open'", [jobId]);
+  await sql("update public.part_items set supplier = 'E2E VAT SUPPLIER', cost_aed = 963, quantity = 1, confirmed_quantity = 1 where job_id = $1 and description = 'front brake pads'", [jobId]);
+  const day = new Date(Date.now() + 4 * 3600000 + 2 * 86400000).toISOString().slice(0, 10);
+  await sql("insert into public.part_items (job_id, description, part_number, quantity, confirmed_quantity, cost_aed, supplier, availability, delivery_date, confirm_status, part_type, priced_at, priced_by, order_status, created_by, updated_by) values ($1, 'E2E WIPER BLADE SET', 'E2E-WB-1', 1, 1, 100, 'E2E NO TRN SUPPLIER', 'to_order', $2, 'confirmed', 'genuine', now(), $3, 'to_order', $3, $3)", [jobId, day, partsId]);
+  const amountOf = async (loc) => (await loc.count()) ? { gross: await loc.first().getAttribute("data-gross"), net: await loc.first().getAttribute("data-net"), vat: await loc.first().getAttribute("data-vat"), charged: await loc.first().getAttribute("data-vat-charged"), cancelled: await loc.first().getAttribute("data-cancelled"), text: ((await loc.first().textContent()) ?? "").replace(/\s+/g, " ") } : null;
+
+  // l1. Parts send the LPO; the approval screen shows each supplier with its own VAT and the grand total once.
+  {
+    const { browser, page } = await browserForId(partsId, { viewport: { width: 1500, height: 1300 } });
+    await go(page, `${base}/parts/${jobId}`);
+    const cost = ((await page.locator("[data-cost-grand]").textContent()) ?? "").trim();
+    check(`l1: the Parts page's Our cost counts VAT only for the VAT supplier: 963 + 48.15 + 100 = AED 1,111.15 incl. VAT ("${cost}")`, cost === "AED 1,111.15 incl. VAT");
+    await page.locator("[data-send-lpo]").click();
+    await page.locator("[data-lpo-unfinished-send]").click({ timeout: 3000 }).catch(() => null);
+    await page.waitForURL(/message=|error=/, { timeout: 25000 }).catch(() => null);
+    await browser.close();
+  }
+  const main = (await sql("select id, number from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval' limit 1", [jobId]))[0];
+  if (!main) throw new Error("l1: no main LPO was raised");
+  for (const [w, h] of [[1440, 900], [800, 1280]]) {
+    const { browser, page } = await browserFor("owner", { viewport: { width: w, height: h }, ...(w < 1000 ? { hasTouch: true } : {}) });
+    await go(page, `${base}/parts/orders/${main.id}`);
+    const vatGroup = await amountOf(page.locator("[data-lpo-group='E2E VAT SUPPLIER' i] [data-supplier-amount]"));
+    const noGroup = await amountOf(page.locator("[data-lpo-group='E2E NO TRN SUPPLIER' i] [data-supplier-amount]"));
+    const grand = await amountOf(page.locator("[data-lpo-grand-total] [data-supplier-amount]"));
+    if (w === 1440) {
+      check(`l1: the approval screen: E2E VAT SUPPLIER "AED 1,011.15 incl. VAT · 963.00 + VAT 48.15" (${vatGroup?.text})`, vatGroup?.gross === "1011.15" && /AED 1,011\.15 incl\. VAT/.test(vatGroup?.text ?? "") && /963\.00 \+ VAT 48\.15/.test(vatGroup?.text ?? ""));
+      check(`l1: the approval screen: the no-TRN supplier "AED 100.00 · No VAT – supplier not VAT-registered" (${noGroup?.text})`, noGroup?.charged === "0" && noGroup?.gross === "100.00" && /No VAT – supplier not VAT-registered/.test(noGroup?.text ?? ""));
+      check(`l1: the grand total once: AED 1,111.15 incl. VAT (1,063.00 + VAT 48.15) (${grand?.text})`, grand?.gross === "1111.15" && grand?.net === "1063.00" && grand?.vat === "48.15" && !/before VAT/.test(((await page.locator("[data-main-lpo]").textContent()) ?? "")));
+    }
+    await page.screenshot({ path: `${shots}/l1-approval-${w}.png`, fullPage: true });
+    if (w === 1440) {
+      await page.getByRole("button", { name: "Approve", exact: true }).click();
+      const q = ((await page.locator("[data-confirm-text]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+      check(`l1: the Approve question names the amount with VAT ("${q.slice(0, 160)}")`, /AED 1,111\.15 incl\. VAT \(1,063\.00 \+ VAT 48\.15\)/.test(q));
+      await page.locator("[data-confirm-yes-money]").click({ timeout: 8000 }).catch(() => null);
+      await submitted(page);
+    }
+    await browser.close();
+  }
+  const sups = await sql("select id, number, supplier_name from public.purchase_orders where job_id = $1 and kind = 'supplier' order by number", [jobId]);
+  const vatPo = sups.find((p) => /VAT SUPPLIER/i.test(p.supplier_name) && !/NO TRN/i.test(p.supplier_name));
+  const noPo = sups.find((p) => /NO TRN/i.test(p.supplier_name));
+  check(`l2: approval made one supplier LPO each (${sups.map((p) => `${p.number} ${p.supplier_name}`).join(", ")})`, !!vatPo && !!noPo);
+
+  // l2. The LPO list: each row through THE display.
+  {
+    const { browser, page } = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+    await go(page, `${base}/parts/orders?q=${encodeURIComponent(main.number)}`);
+    const a = await amountOf(page.locator(`[data-lpo-row='${vatPo.number}'] [data-supplier-amount]`));
+    const b = await amountOf(page.locator(`[data-lpo-row='${noPo.number}'] [data-supplier-amount]`));
+    check(`l2: the LPO list: ${vatPo.number} "AED 1,011.15 incl. VAT" with "963.00 + VAT 48.15" (${a?.text})`, a?.gross === "1011.15" && /963\.00 \+ VAT 48\.15/.test(a?.text ?? ""));
+    check(`l2: the LPO list: ${noPo.number} "AED 100.00" with "No VAT – supplier not VAT-registered" (${b?.text})`, b?.charged === "0" && /AED 100\.00/.test(b?.text ?? "") && /No VAT – supplier not VAT-registered/.test(b?.text ?? ""));
+    await page.screenshot({ path: `${shots}/l2-lpo-list-1440.png`, fullPage: true });
+    // l3. Each tab counts its OWN LPOs (the counts used the tab on screen for every tab).
+    const tabs = await page.locator("[data-lpo-tab]").evaluateAll((els) => els.map((e) => [e.getAttribute("data-lpo-tab"), Number((e.textContent ?? "").split("·").pop().trim())]));
+    const wrong = [];
+    for (const [key, n] of tabs) {
+      await go(page, `${base}/parts/orders?q=${encodeURIComponent(main.number)}${key ? `&tab=${key}` : ""}`);
+      const rows = await page.locator("[data-lpo-row]").count();
+      if (rows !== n) wrong.push(`${key || "all"}: tab says ${n}, list shows ${rows}`);
+    }
+    check(`l3: every LPO tab's count is its own list (${tabs.map(([k, n]) => `${k || "all"} ${n}`).join(", ")})`, wrong.length === 0 && tabs.length === 8, wrong.join("; "));
+    await go(page, `${base}/parts/orders?q=${encodeURIComponent(main.number)}&tab=ordered`);
+    const onOrdered = await page.locator("[data-lpo-tab]").evaluateAll((els) => els.map((e) => (e.textContent ?? "").trim()).join(" | "));
+    check(`l3: on another tab the counts stay the same (${onOrdered})`, onOrdered.includes("Approved, to send · 2") && onOrdered.includes("Ordered · 0"));
+    await page.screenshot({ path: `${shots}/l3-lpo-tabs-1440.png` });
+    // The Supplier invoices tab of Parts accounts: its count is its own list too.
+    await go(page, `${base}/parts-accounts?tab=invoices`);
+    const siTab = Number(((await page.locator("[data-pa-tabs] a[href*='tab=invoices']").textContent()) ?? "").split("·").pop().trim());
+    const siRows = await page.locator("[data-si-row]").count();
+    check(`l3: the Supplier invoices tab counts its own invoices (tab ${siTab}, list ${siRows})`, siTab === siRows, `${siTab} vs ${siRows}`);
+    await browser.close();
+  }
+  // l4. The supplier LPO pages (1440 and 800) and the supplier copy PDFs.
+  for (const [w, h] of [[1440, 900], [800, 1280]]) {
+    const { browser, page } = await browserFor("owner", { viewport: { width: w, height: h }, ...(w < 1000 ? { hasTouch: true } : {}) });
+    for (const po of [vatPo, noPo]) {
+      await go(page, `${base}/parts/orders/${po.id}`);
+      const t = await amountOf(page.locator("[data-lpo-lines-total] [data-supplier-amount]"));
+      if (w === 1440) {
+        check(`l4: ${po.number}'s Lines box total once: ${po === vatPo ? "AED 1,011.15 incl. VAT" : "AED 100.00, no VAT"} (${t?.text})`, po === vatPo ? t?.gross === "1011.15" && /963\.00 \+ VAT 48\.15/.test(t?.text ?? "") : t?.charged === "0" && t?.gross === "100.00");
+        const card = await amountOf(page.locator("[data-supplier-lpo] [data-lpo-total] [data-supplier-amount]"));
+        check(`l4: ${po.number}'s Send-it card shows the same figures (${card?.text})`, card?.gross === t?.gross && card?.vat === t?.vat);
+      }
+      await page.screenshot({ path: `${shots}/l4-${po === vatPo ? "vat" : "novat"}-lpo-${w}.png`, fullPage: true });
+    }
+    await browser.close();
+  }
+  {
+    const mupdf = await import("mupdf");
+    const cookie = await cookieHeader("owner");
+    for (const po of [vatPo, noPo]) {
+      const res = await fetch(`${base}/api/pdf/po/${po.id}`, { headers: { cookie } });
+      const buf = Buffer.from(await res.arrayBuffer());
+      const doc = mupdf.Document.openDocument(buf, "application/pdf");
+      const pdfText = doc.loadPage(0).toStructuredText().asText().replace(/\s+/g, " ");
+      if (po === vatPo) check(`l5: the supplier copy PDF: Total before VAT 963.00 · VAT 5% 48.15 · Total incl. VAT 1,011.15, no line-by-line VAT, no repeated subtotal (${pdfText.slice(0, 120)}…)`, /Total before VAT AED 963\.00/.test(pdfText) && /VAT 5% AED 48\.15/.test(pdfText) && /Total incl\. VAT AED 1,011\.15/.test(pdfText) && !/Order subtotal/.test(pdfText));
+      else check(`l5: the no-TRN supplier's PDF: Total AED 100.00, "No VAT – supplier not VAT-registered", no VAT row`, /Total AED 100\.00/.test(pdfText) && /No VAT – supplier not VAT-registered/.test(pdfText) && !/VAT 5%/.test(pdfText));
+      fs.writeFileSync(`${shots}/l5-${po === vatPo ? "vat" : "novat"}-supplier-copy.png`, doc.loadPage(0).toPixmap(mupdf.Matrix.scale(1.4, 1.4), mupdf.ColorSpace.DeviceRGB, false, true).asPNG());
+    }
+  }
+  // l6. Cancelled LPOs: the no-TRN supplier's part cancelled with the supplier (its LPO left with no line, total 0 - the
+  // LPO-00042 shape) and a refused LPO that kept its total (the LPO-00041 shape): both at their ORIGINAL amount, struck
+  // through with "Cancelled", never counted.
+  await sql("update public.part_items set order_status = 'ordered' where job_id = $1 and description = 'E2E WIPER BLADE SET'", [jobId]);
+  await sql("update public.purchase_orders set status = 'cancelled', total_cost_aed = 0, notes = 'No line left: this LPO is cancelled.' where id = $1", [noPo.id]);
+  await sql("update public.purchase_order_lines set is_active = false where po_id = $1", [noPo.id]);
+  const refused = (await sql("insert into public.purchase_orders (number, job_id, supplier_id, supplier_name, kind, status, total_cost_aed, notes, created_by, updated_by) values ('E2E-LPO-L-REFUSED', $1, $2, 'E2E NO TRN SUPPLIER', 'main', 'cancelled', 4.48, 'Refused', $3, $3) returning id", [jobId, noTrn.id, ownerId]))[0];
+  if (refused?.id) await sql("insert into public.purchase_order_lines (po_id, position, description, quantity, unit_cost, created_by, updated_by) values ($1, 1, 'PLUG WASHER', 1, 4.48, $2, $2)", [refused.id, ownerId]);
+  {
+    const { browser, page } = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+    await go(page, `${base}/parts/orders?tab=cancelled&q=${encodeURIComponent(main.number)}`);
+    const c42 = await amountOf(page.locator(`[data-lpo-row='${noPo.number}'] [data-supplier-amount]`));
+    check(`l6: a cancelled LPO re-totalled to 0 shows its ORIGINAL AED 100.00 struck through, "Cancelled" (${c42?.text})`, c42?.cancelled === "1" && c42?.gross === "100.00" && /Cancelled/.test(c42?.text ?? ""));
+    await page.screenshot({ path: `${shots}/l6-cancelled-lpos-1440.png`, fullPage: true });
+    await go(page, `${base}/parts/orders?tab=cancelled&q=E2E-LPO-L-REFUSED`);
+    const c41 = await amountOf(page.locator("[data-lpo-row='E2E-LPO-L-REFUSED'] [data-supplier-amount]"));
+    check(`l6: a refused LPO that kept its 4.48 shows the same way: original, struck through, "Cancelled" (${c41?.text})`, c41?.cancelled === "1" && c41?.net === "4.48" && /Cancelled/.test(c41?.text ?? ""));
+    await go(page, `${base}/parts/orders/${noPo.id}`);
+    const pageTotal = await amountOf(page.locator("[data-lpo-lines-total] [data-supplier-amount]"));
+    check(`l6: its LPO page: "Total (cancelled, not counted)" with the original struck through (${pageTotal?.text})`, pageTotal?.cancelled === "1" && pageTotal?.gross === "100.00" && /cancelled, not counted/.test(((await page.locator("[data-lpo-lines-total]").textContent()) ?? "")));
+    await page.screenshot({ path: `${shots}/l6-cancelled-lpo-page-1440.png`, fullPage: true });
+    // Never counted: the supplier's balance and Parts accounts' totals hold nothing from it.
+    await go(page, `${base}/parts-accounts?tab=lpos&q=${encodeURIComponent(noPo.number)}`);
+    const pa = await amountOf(page.locator(`[data-pa-lpo='${noPo.number}'] [data-supplier-amount]`));
+    check(`l6: Parts accounts lists it struck through at its original amount (${pa?.text})`, pa?.cancelled === "1" && pa?.gross === "100.00");
+    await go(page, `${base}/parts/suppliers?q=${encodeURIComponent("E2E NO TRN SUPPLIER")}`);
+    check("l6: the cancelled LPO adds nothing to the supplier's unpaid balance", (await page.locator(`[data-supplier-row='${noTrn.id}'] [data-supplier-unpaid]`).count()) === 0);
+    // l7. The suppliers with no TRN: listed, red, no VAT counted for them.
+    await go(page, `${base}/parts/suppliers?filter=no_trn&q=${encodeURIComponent("E2E NO TRN")}`);
+    check("l7: the no-TRN filter lists the supplier with the red badge (no VAT counted, its bills cannot go to Zoho)", (await page.locator(`[data-supplier-row='${noTrn.id}'] [data-no-trn]`).count()) === 1 && /no VAT counted/i.test(((await page.locator(`[data-supplier-row='${noTrn.id}'] [data-no-trn]`).textContent()) ?? "")));
+    await page.screenshot({ path: `${shots}/l7-no-trn-suppliers-1440.png`, fullPage: true });
+    await browser.close();
+  }
+  {
+    const { browser, page } = await browserFor("owner", { viewport: { width: 800, height: 1280 }, hasTouch: true });
+    await go(page, `${base}/parts/orders?q=${encodeURIComponent(main.number)}`);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    check(`l8: the LPO list at 800 px never slides sideways (${overflow}px)`, overflow <= 1);
+    await page.screenshot({ path: `${shots}/l8-lpo-list-800.png`, fullPage: true });
+    await browser.close();
+  }
+  await sql("update public.purchase_orders set is_active = false where number = 'E2E-LPO-L-REFUSED'");
 });
 
 const failed = summary();

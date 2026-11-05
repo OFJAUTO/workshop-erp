@@ -1,3 +1,4 @@
+import { addSupplierMoney, supplierMoney, supplierMoneyText } from "@/lib/supplier-money";
 import { VinCopy } from "@/components/VinCopy";
 import { ReceivePanel } from "./ReceivePanel";
 import { PAST_QUOTE, partsSteps, stepPartOf } from "@/lib/parts-steps";
@@ -40,6 +41,7 @@ import { isSettledStatus, settledCostProblem } from "@/lib/part-cost-check";
 import { costConfirmReady, partUnitsReady } from "@/lib/schema-ready";
 import { endingOf, endingsFor, endingWords, type EndingPart } from "@/lib/part-endings";
 import { cancelledSupplierLpos, endedLinesOf } from "@/lib/part-endings-server";
+import { supplierVatLookup, vatChargingSupplierNames } from "@/lib/supplier-vat";
 import { askerOfRequest, requestUnitOf, whoOfRole, type QtyWho } from "@/lib/part-units";
 import { lastQuantitiesFor } from "@/lib/part-memory";
 import { PLANNING_STATUSES } from "@/lib/pricing-done";
@@ -226,15 +228,17 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const hasApproved = approvedParts.length > 0 || lpos.suppliers.length > 0 || !!lpos.main;
   const pendingMain = lpos.main && lpos.main.status === "pending_approval" ? lpos.main : null;
   const supplierNames = Array.from(new Set(lpos.toOrder.map((p) => (p.supplier ?? "").trim()).filter(Boolean)));
-  const toOrderTotal = lpos.toOrder.reduce((a, p) => a + (p.cost_aed ?? 0) * (Number(p.confirmed_quantity ?? p.quantity) || 1), 0);
+  // Supplier amounts with VAT (5 November 2026): THE rule, per supplier (the summary, the cards and the bar below).
+  const vatOf = await supplierVatLookup();
+  const toOrderMoney = addSupplierMoney(supplierNames.length ? supplierNames.map((name) => supplierMoney(lpos.toOrder.filter((p) => (p.supplier ?? "").trim() === name).reduce((a, p) => a + (p.cost_aed ?? 0) * (Number(p.confirmed_quantity ?? p.quantity) || 1), 0), { chargesVat: vatOf(null, name) })) : [supplierMoney(lpos.toOrder.reduce((a, p) => a + (p.cost_aed ?? 0) * (Number(p.confirmed_quantity ?? p.quantity) || 1), 0), { chargesVat: false })]);
   const summaryText = [
     `${approvedParts.length} part${approvedParts.length === 1 ? "" : "s"} approved`,
-    lpos.toOrder.length ? `${lpos.toOrder.length} to order${supplierNames.length ? ` from ${supplierNames.length === 1 ? supplierNames[0] : `${supplierNames.length} suppliers (${supplierNames.join(", ")})`}` : ""}, AED ${toOrderTotal.toLocaleString("en-GB", { minimumFractionDigits: 2 })} before VAT` : "",
+    lpos.toOrder.length ? `${lpos.toOrder.length} to order${supplierNames.length ? ` from ${supplierNames.length === 1 ? supplierNames[0] : `${supplierNames.length} suppliers (${supplierNames.join(", ")})`}` : ""}, ${supplierMoneyText(toOrderMoney)}` : "",
     lpos.fromStock.length ? `${lpos.fromStock.length} from our stock` : "",
     lpos.suppliers.length ? `${lpos.suppliers.length} supplier LPO${lpos.suppliers.length === 1 ? "" : "s"}` : "",
   ].filter(Boolean).join(" · ");
   const supplierEmailOf = new Map<string, string | null>(((lpos.suppliers).length ? (await admin.from("suppliers").select("id, email").in("id", (lpos.suppliers).map((s) => s.po.supplier_id).filter((x): x is string => !!x))).data ?? [] : []).map((s) => [s.id as string, (s.email as string | null) ?? null]));
-  const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[]; charges?: { id: string; description: string; amount_aed: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, sent_at: s.po.sent_at ?? null, emailed_at: s.po.emailed_at ?? null, emailed_to: s.po.emailed_to ?? null, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: (rawById.get(l.part_item_id)?.positions as string[] | null | undefined) ?? null, unit: (rawById.get(l.part_item_id)?.unit as string | null | undefined) ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges ?? [], ended: endedByPo.get(s.po.id) ?? [], cancelledElsewhere: s.po.status === "approved" ? cancelledElsewhereFor(s.po.id, s.po.supplier_name) : [] });
+  const toView = (s: { po: { id: string; number: string; supplier_name: string; status: string; ordered_at: string | null; verify_token: string | null; total_cost_aed: number; supplier_id?: string | null; sent_at?: string | null; emailed_at?: string | null; emailed_to?: string | null }; lines: { id: string; part_item_id: string; description: string; part_number: string | null; quantity: number; unit_cost: number; expected_date: string | null; received_qty: number }[]; charges?: { id: string; description: string; amount_aed: number }[] }): SupplierLpo => ({ id: s.po.id, number: s.po.number, sent_at: s.po.sent_at ?? null, emailed_at: s.po.emailed_at ?? null, emailed_to: s.po.emailed_to ?? null, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: (rawById.get(l.part_item_id)?.positions as string[] | null | undefined) ?? null, unit: (rawById.get(l.part_item_id)?.unit as string | null | undefined) ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges ?? [], ended: endedByPo.get(s.po.id) ?? [], chargesVat: vatOf(s.po.supplier_id ?? null, s.po.supplier_name), cancelledElsewhere: s.po.status === "approved" ? cancelledElsewhereFor(s.po.id, s.po.supplier_name) : [] });
   // The same supplier's lines cancelled on this car's other LPOs: they go out with a new LPO to that supplier (5 November 2026).
   const cancelledElsewhereFor = (poId: string, supplier: string) => {
     const same = (name: string) => name.trim().toLowerCase() === supplier.trim().toLowerCase();
@@ -350,7 +354,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
             <SectionLabel>Approved parts</SectionLabel>
             {pendingMain ? <Badge tone="amber">{pendingMain.number} waiting for approval</Badge> : null}
             {pendingMain && lpos.mainChanges.length ? <Badge tone="amber" data-lpo-updated-after-sending>Updated after sending</Badge> : null}
-            {job.plan_parts_done_at && !pendingMain && !lpos.toOrder.length && !lpos.suppliers.some((s) => s.po.status === "approved") ? <Badge tone="green">{job.plan_parts_ready_date && job.plan_parts_ready_date > today ? `All parts here by ${formatDate(job.plan_parts_ready_date)}` : "Every part is here"}</Badge> : null}
+            {job.plan_parts_done_at && !pendingMain && !lpos.toOrder.length && !changes?.needsApproval.length && !lpos.suppliers.some((s) => s.po.status === "approved") ? <Badge tone="green">{job.plan_parts_ready_date && job.plan_parts_ready_date > today ? `All parts here by ${formatDate(job.plan_parts_ready_date)}` : "Every part is here"}</Badge> : null}
           </div>
           <p className="text-sm" data-lpo-summary>{summaryText}</p>
           {pendingMain && lpos.mainChanges.length ? <p className="text-xs text-muted" data-lpo-changes>Since it was sent: {lpos.mainChanges.slice(0, 8).join(" · ")}{lpos.mainChanges.length > 8 ? " · …" : ""}. The approval shows the current list.</p> : null}
@@ -380,7 +384,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
         <section className="flex flex-col gap-3" data-cancelled-lpos>
           <SectionLabel right={`${cancelledLpos.length}`}>Cancelled LPOs</SectionLabel>
           {cancelledLpos.map((c) => (
-            <SupplierLpoCard key={c.id} po={{ id: c.id, number: c.number, supplier_name: c.supplier_name, status: c.status, ordered_at: c.ordered_at, verify_token: c.verify_token, total_cost_aed: c.total_cost_aed, lines: [], charges: [], ended: endedByPo.get(c.id) ?? [] }} vin={v?.vin ?? null} canManage={false} onOrdered={markSupplierOrdered.bind(null, c.id)} onSetDate={setPartExpectedDate} jobId={jobId} />
+            <SupplierLpoCard key={c.id} po={{ id: c.id, number: c.number, chargesVat: vatOf(null, c.supplier_name), supplier_name: c.supplier_name, status: c.status, ordered_at: c.ordered_at, verify_token: c.verify_token, total_cost_aed: c.total_cost_aed, lines: [], charges: [], ended: endedByPo.get(c.id) ?? [] }} vin={v?.vin ?? null} canManage={false} onOrdered={markSupplierOrdered.bind(null, c.id)} onSetDate={setPartExpectedDate} jobId={jobId} />
           ))}
         </section>
       ) : null}
@@ -400,7 +404,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
       ) : null}
 
       <Card id="pricing" className="flex flex-col gap-2 overflow-visible">
-        <PartsTable tyreBrands={Array.from(new Set([...((settings.tyre_brands ?? []) as string[]), ...Object.keys((settings.tyre_brand_custom ?? {}) as Record<string, number>)]))} tyreModels={(settings.tyre_models ?? {}) as Record<string, string[]>} tyreSizes={{ front: v?.tyre_size_front ?? "", rear: v?.tyre_size_rear ?? "" }} jobId={jobId} rows={rows} suppliers={suppliers} types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]} canPrice={canPrice} unitsReady={unitsReady} refLabel={job.job_number} car={[v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" ")} vin={v?.vin ?? null} openingLine={String(settings.supplier_quote_opening_line || "Please quote price and availability:")} catalogue={catalogue} lastImport={lastImport} pricingDoneAt={job.parts_pricing_done_at} onPricingDone={pricingDone.bind(null, jobId)} showBar={canPrice && !inPlanning} showCost={["owner", "service_advisor", "parts"].includes(role)} removeReasons={reasonsFor(settings, "remove_part")} pricingLocked={pricingLocked} onReopen={reopenPricing.bind(null, jobId)} reopenedAt={job.parts_pricing_reopened_at} extraCosts={["owner", "service_advisor", "parts"].includes(role) ? chargeRows.map((c) => ({ supplier: c.supplier, amount: c.amount })) : []} />
+        <PartsTable vatSupplierNames={await vatChargingSupplierNames()} tyreBrands={Array.from(new Set([...((settings.tyre_brands ?? []) as string[]), ...Object.keys((settings.tyre_brand_custom ?? {}) as Record<string, number>)]))} tyreModels={(settings.tyre_models ?? {}) as Record<string, string[]>} tyreSizes={{ front: v?.tyre_size_front ?? "", rear: v?.tyre_size_rear ?? "" }} jobId={jobId} rows={rows} suppliers={suppliers} types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]} canPrice={canPrice} unitsReady={unitsReady} refLabel={job.job_number} car={[v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" ")} vin={v?.vin ?? null} openingLine={String(settings.supplier_quote_opening_line || "Please quote price and availability:")} catalogue={catalogue} lastImport={lastImport} pricingDoneAt={job.parts_pricing_done_at} onPricingDone={pricingDone.bind(null, jobId)} showBar={canPrice && !inPlanning} showCost={["owner", "service_advisor", "parts"].includes(role)} removeReasons={reasonsFor(settings, "remove_part")} pricingLocked={pricingLocked} onReopen={reopenPricing.bind(null, jobId)} reopenedAt={job.parts_pricing_reopened_at} extraCosts={["owner", "service_advisor", "parts"].includes(role) ? chargeRows.map((c) => ({ supplier: c.supplier, amount: c.amount })) : []} />
         {["owner", "service_advisor", "parts", "accounts"].includes(role) ? <SupplierChargesStrip jobId={jobId} charges={chargeRows} canEdit={canPrice} /> : null}
       </Card>
       {canPrice && !inPlanning ? <div className="h-28" /> : null}

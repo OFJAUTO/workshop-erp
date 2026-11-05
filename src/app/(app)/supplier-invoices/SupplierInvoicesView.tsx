@@ -1,3 +1,5 @@
+import { SupplierAmount } from "@/components/SupplierAmount";
+import { rowMoney } from "@/lib/supplier-money";
 import Link from "next/link";
 import { SlipTile } from "@/components/PaymentReport";
 import { ViewerThumb } from "@/components/PhotoViewer";
@@ -122,10 +124,9 @@ function InvoiceCard({ r, href, open }: { r: InvoiceRow; href: string; open: boo
         {r.partlyPaid ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-[11px] font-bold text-amber" data-si-partly-paid>Partly paid · AED {money(r.unpaidAmount)} to pay</span> : null}
         {r.proofMissing ? <span className="rounded-full border border-red-bar bg-white px-2 py-0.5 text-[11px] font-bold text-red" data-si-proof-missing-tag>Proof missing – upload</span> : null}
         <MatchChips r={r} />
-        <span className="ml-auto text-sm font-extrabold" data-si-total>AED {money(r.total)}</span>
+        <span className="ml-auto" data-si-total><SupplierAmount money={rowMoney(r)} size="sm" /></span>
         <span className="basis-full text-xs text-muted">
           {r.trn ? `TRN ${r.trn} · ` : r.vatRegistered ? "No TRN on file · " : "Not VAT registered · "}
-          before VAT {money(r.beforeVat)} · VAT {money(r.vat)} ·{" "}
           {r.shares.map((s, i) => <span key={s.poId} className="whitespace-nowrap">{s.poNumber}{i < r.shares.length - 1 ? ", " : ""}</span>)} ·{" "}
           {r.shares.some((s) => s.jobNumber || s.plate) ? r.shares.filter((s) => s.jobNumber || s.plate).map((s, i, all) => <span key={`car-${s.poId}`} className="whitespace-nowrap">{[s.jobNumber, s.plate].filter(Boolean).join(" ")}{i < all.length - 1 ? ", " : ""}</span>) : "stock order"} · {r.parts} part{r.parts === 1 ? "" : "s"}
         </span>
@@ -203,7 +204,7 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
               </ul>
             </div>
           ))}
-          <p className="text-sm">Before VAT <b>AED {money(row.beforeVat)}</b> · VAT AED {money(row.vat)} · Total <b>AED {money(row.total)}</b>{row.trn ? ` · TRN ${row.trn}` : ""}</p>
+          <div className="flex flex-wrap items-center gap-3 text-sm" data-si-open-amount><span className="font-bold">Invoice total</span><SupplierAmount money={rowMoney(row)} align="start" />{row.trn ? <span className="text-muted">TRN {row.trn}</span> : null}</div>
           {vsApproved ? <p className="text-sm font-bold" data-si-vs-approved>{vsApproved}</p> : null}
           {row.status !== "waiting" && (row.paidAmount > 0 || row.shares.length > 1) ? (
             <ul className="flex flex-col gap-1.5 text-sm" data-si-paid-lines>
@@ -267,7 +268,7 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
             ? row.shares.map((s) => {
                 const p = payOf.get(s.poId);
                 const amt = p?.supplier_invoice_amount ?? null;
-                const vatEff = p?.supplier_invoice_vat_aed ?? (amt ? Math.round(amt * 5) / 100 : null);
+                const vatEff = p?.supplier_invoice_vat_aed ?? (amt ? s.vat : null);
                 return (
                   <SupplierInvoiceEditButton
                     key={`edit-${s.poId}`}
@@ -282,6 +283,7 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
                     lines={((lines ?? []) as { id: string; po_id: string; description: string; quantity: number; unit_cost: number; invoice_unit_cost: number | null }[]).filter((l) => l.po_id === s.poId).map((l) => ({ id: l.id, description: l.description, quantity: Number(l.quantity) || 0, price: Number(l.invoice_unit_cost ?? l.unit_cost) || 0 }))}
                     paid={!!p?.supplier_paid_at}
                     label={row.shares.length > 1 ? `Edit invoice · ${s.poNumber}` : "Edit invoice"}
+                    chargesVat={row.vatCharged}
                   />
                 );
               })

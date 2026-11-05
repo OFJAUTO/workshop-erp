@@ -4,7 +4,7 @@ import { Button, Card, Input, LinkButton, Notice, PageHeader, Select } from "@/c
 import { requirePermission } from "@/lib/auth";
 import { loadPartsBase, partsAccountsView } from "@/lib/parts-accounts";
 import { PA_QUICK, PA_STATUS, PA_TABS, aedWords, asPaTab, filterBalances, filterLines, filterLpos, filterProblems, filterReturns, type PaFilter, type PaTab, type PaTotals } from "@/lib/parts-accounts-rules";
-import { invoiceFilterParams } from "@/lib/supplier-invoice-rows";
+import { filterInvoices, invoiceFilterOf, invoiceFilterParams } from "@/lib/supplier-invoice-rows";
 import { SupplierInvoicesView, type SiSearch } from "../supplier-invoices/SupplierInvoicesView";
 import { LinesTab, LposTab, PaymentsTab, ProblemsTab, ReturnsTab } from "./PartsAccountsTabs";
 
@@ -59,7 +59,11 @@ export default async function PartsAccountsPage({ searchParams }: { searchParams
   const base = await loadPartsBase();
   const { totals, shared } = partsAccountsView(base, f);
   const sup = base.suppliers;
-  const counts: Record<PaTab, number> = { lines: shared.lines.length, lpos: shared.lpos.length, invoices: shared.invoices.length, payments: shared.balances.length, returns: shared.returns.length, problems: shared.problems.length };
+  // Each tab counts its OWN list (5 November 2026): the Supplier invoices tab counts exactly what it shows - its own
+  // filters while it is open, else the search, supplier and dates its link carries.
+  const linkSp: Record<string, string | undefined> = { q: f.q, supplier: f.supplier, from: f.from, to: f.to };
+  const invoiceTabCount = filterInvoices(base.invoices, invoiceFilterOf((k) => (tab === "invoices" ? sp[k] : linkSp[k])), base.invoicePartNames).length;
+  const counts: Record<PaTab, number> = { lines: shared.lines.length, lpos: shared.lpos.length, invoices: invoiceTabCount, payments: shared.balances.length, returns: shared.returns.length, problems: shared.problems.length };
   const quick = PA_QUICK[tab];
   const statuses = PA_STATUS[tab];
   // The supplier list of the filter: every supplier the page has rows for (and the one chosen), by name.

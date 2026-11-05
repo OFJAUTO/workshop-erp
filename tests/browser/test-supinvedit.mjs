@@ -78,7 +78,7 @@ try {
   check("B: the history row keeps the remark and old → new per field", /final invoice/i.test(hist?.remark ?? "") && JSON.stringify(hist?.changes ?? []).includes('"old":"12,228.30"') && JSON.stringify(hist?.changes ?? []).includes('"new":"11,684.82"') && hist?.paid_difference_aed === null);
   check("B: the part costs follow (job cost down by 543.48: 12,228.30 → 11,684.82)", String(await partCost()) === "11684.82");
   await go(page, `${base}/parts/orders/${po.id}`);
-  check("B: the Record box reads the typed VAT (… + VAT 584.24 = 12269.06)", ((await page.locator("body").textContent()) ?? "").includes("+ VAT 584.24 = 12269.06"));
+  check("B: the Record box reads the typed VAT (AED 12,269.06 incl. VAT (11,684.82 + VAT 584.24))", ((await page.locator("body").textContent()) ?? "").includes("AED 12,269.06 incl. VAT (11,684.82 + VAT 584.24)"));
   check(`B: "Approved 12,228.30 → Invoiced 11,684.82 (−543.48)" on the LPO page`, (await text(page.locator("[data-invoice-vs-approved]"))).includes("(−543.48)"));
   const histLine = await text(page.locator("[data-invoice-edit-history]"));
   check(`B: the edit history shows who, the remark and old → new (${histLine.slice(0, 120)})`, histLine.includes("Before VAT: 12,228.30 → 11,684.82") && /final invoice/i.test(histLine));
@@ -88,8 +88,8 @@ try {
   await go(page, `${base}/supplier-invoices?open=${encodeURIComponent(`${sup.id}|SI26001`)}`);
   const opened = page.locator("[data-si-opened]");
   await opened.waitFor({ timeout: 15000 });
-  const totals = await text(opened.locator("p").filter({ hasText: "Before VAT" }));
-  check(`C: the row totals use the typed VAT (${totals.slice(0, 90)})`, totals.includes("11,684.82") && totals.includes("VAT AED 584.24") && totals.includes("12,269.06"));
+  const totals = await text(opened.locator("[data-si-open-amount]"));
+  check(`C: the row totals use the typed VAT (${totals.slice(0, 90)})`, totals.includes("AED 12,269.06 incl. VAT") && totals.includes("11,684.82 + VAT 584.24"));
   check("C: Approved → Invoiced on the invoice row", (await text(opened.locator("[data-si-vs-approved]"))).includes("(−543.48)"));
   check("C: the Edit button and the history are on the invoice too", (await opened.locator("[data-si-edit]").count()) === 1 && (await text(opened.locator("[data-invoice-edit-history]"))).includes("11,684.82"));
   await page.screenshot({ path: shot("c1-invoice-row.png"), fullPage: true });

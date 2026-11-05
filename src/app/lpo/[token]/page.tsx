@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Logo } from "@/components/Logo";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { supplierMoney, supplierMoneyWords } from "@/lib/supplier-money";
+import { supplierChargesVat } from "@/lib/supplier-rules";
 
 export const dynamic = "force-dynamic";
 
@@ -14,9 +16,11 @@ export const metadata: Metadata = { title: "OFJ Automotive, LPO verification", r
 export default async function LpoVerificationPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const admin = createAdminClient();
-  const { data: po } = await admin.from("purchase_orders").select("id, number, supplier_name, status, total_cost_aed, approved_at, created_at, superseded_by").eq("verify_token", token).eq("is_active", true).maybeSingle();
+  const { data: po } = await admin.from("purchase_orders").select("id, number, supplier_id, supplier_name, status, total_cost_aed, approved_at, created_at, superseded_by").eq("verify_token", token).eq("is_active", true).maybeSingle();
   const { data: next } = po?.superseded_by ? await admin.from("purchase_orders").select("number").eq("id", po.superseded_by).maybeSingle() : { data: null };
-  const total = po ? Math.round(Number(po.total_cost_aed) * 1.05 * 100) / 100 : 0;
+  // Supplier amounts with VAT (5 November 2026): THE rule - VAT only from a supplier registered with a TRN.
+  const { data: sup } = po?.supplier_id ? await admin.from("suppliers").select("name, trn, vat_registered").eq("id", po.supplier_id).maybeSingle() : { data: null };
+  const money = po ? supplierMoneyWords(supplierMoney(Number(po.total_cost_aed) || 0, { chargesVat: supplierChargesVat(sup ? { ...sup, name: po.supplier_name } : { name: po.supplier_name, trn: null, vat_registered: null }) })) : null;
   const state = !po ? null : po.superseded_by ? { label: `Superseded by ${next?.number ?? "a newer LPO"}`, tone: "amber" } : po.status === "cancelled" ? { label: "Cancelled", tone: "red" } : po.status === "pending_approval" ? { label: "Not yet approved", tone: "amber" } : { label: "Valid", tone: "green" };
   const toneClass = state?.tone === "green" ? "border-green bg-green-soft text-green" : state?.tone === "red" ? "border-red-bar bg-red-soft text-red" : "border-amber-bar bg-amber-soft text-amber";
   return (
@@ -33,7 +37,7 @@ export default async function LpoVerificationPage({ params }: { params: Promise<
               <dl className="grid grid-cols-[6rem_1fr] gap-y-1 text-sm">
                 <dt className="text-muted">Supplier</dt><dd className="font-semibold">{po.supplier_name}</dd>
                 <dt className="text-muted">Date</dt><dd>{formatDate(po.approved_at ?? po.created_at)}</dd>
-                <dt className="text-muted">Total</dt><dd className="font-semibold">AED {total.toLocaleString("en-GB", { minimumFractionDigits: 2 })} <span className="font-normal text-muted">including VAT</span></dd>
+                <dt className="text-muted">Total</dt><dd className="flex flex-col"><span className="font-semibold" data-lpo-public-total>{money?.main}</span><span className="text-xs text-muted">{money?.sub}</span></dd>
               </dl>
               <div className={`rounded-control border-2 px-4 py-3 text-center text-lg font-extrabold ${toneClass}`}>{state.label}</div>
               <p className="text-xs text-muted">Checked {formatDateTime(new Date().toISOString())}. Issued electronically by the OFJ Automotive system; no signature or stamp needed.</p>

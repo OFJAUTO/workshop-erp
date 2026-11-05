@@ -1,5 +1,7 @@
 "use server";
 
+import { supplierMoney } from "@/lib/supplier-money";
+import { supplierChargesVat } from "@/lib/supplier-rules";
 import { depositShortText, depositState } from "@/lib/deposits";
 import { formatPlate } from "@/lib/types";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
@@ -392,7 +394,9 @@ export async function editSupplierInvoice(poId: string, formData: FormData) {
 
   // The OLD values, for the history and the paid difference.
   const oldVat = (extra as { supplier_invoice_vat_aed?: number | null } | null)?.supplier_invoice_vat_aed ?? null;
-  const vatOf = (amount: number | null, vat: number | null) => (vat !== null ? vat : Math.round((Number(amount) || 0) * 5) / 100);
+  const { data: supRow } = po.supplier_id ? await admin.from("suppliers").select("name, trn, vat_registered").eq("id", po.supplier_id).maybeSingle() : { data: null };
+  const chargesVat = supplierChargesVat(supRow ? { ...supRow, name: po.supplier_name } : { name: po.supplier_name, trn: null, vat_registered: null });
+  const vatOf = (amount: number | null, vat: number | null) => supplierMoney(Number(amount) || 0, { chargesVat, typedVat: vat }).vat;
   const old = {
     number: po.supplier_invoice_number ?? "",
     date: String(po.supplier_invoice_date ?? "").slice(0, 10),

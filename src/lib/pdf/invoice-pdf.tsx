@@ -1,3 +1,5 @@
+import { SUPPLIER_VAT_PERCENT, supplierMoney } from "@/lib/supplier-money";
+import { NO_VAT_WORDS, supplierChargesVat } from "@/lib/supplier-rules";
 import { isPickupShownByPackage, packagesGivePickup } from "../packages";
 import { DECLINED_HEADING, declinedSummary, groupDeclined, splitDeclinedNotes, type DeclinedDocItem } from "../declined-doc";
 import { partLineName } from "../quotes";
@@ -427,31 +429,28 @@ export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise
   const { po, lines, job, supplier } = bundle;
   const currency = currencyOf(settings);
   const company = companyOf(settings);
-  const vatPercent = 5;
+  // Supplier amounts with VAT (5 November 2026, Mathew): THE rule - VAT only from a supplier registered with a TRN,
+  // 5% of the order total rounded half up, printed once in the totals box.
+  const chargesVat = supplierChargesVat(supplier ? { ...supplier, name: po.supplier_name || supplier.name } : { name: po.supplier_name, trn: null, vat_registered: null });
   const verifyUrl = po.verify_token ? `${PRODUCTION_SITE_URL}/lpo/${po.verify_token}` : null;
   const [logo, qr] = await Promise.all([loadLogo(), verifyUrl ? qrPng(verifyUrl) : Promise.resolve(null)]);
   const rows: PoDocRow[] = lines.map((l) => {
     const list = l.list_price !== null && l.list_price !== undefined ? l.list_price : l.unit_cost;
     const disc = l.discount_percent !== null && l.discount_percent !== undefined ? l.discount_percent : list > 0 ? round2((1 - l.unit_cost / list) * 100) : 0;
     const net = round2(l.quantity * l.unit_cost);
-    const vat = round2(net * (vatPercent / 100));
     const part = l.part_item_id ? (bundle.parts ?? []).find((p) => p.id === l.part_item_id) : null;
     const positions = part?.positions ?? null;
     // Section 9: the supplier reads "8 L" (litres) or "2 sets"; the price beside it is per unit.
-    return { partNumber: realPartNumber(l.part_number), name: l.description, sub: positionsWords(positions) || null, qty: qtyText(l.quantity, null, part?.unit ?? null), list, disc: Math.max(0, disc), net, vat, total: round2(net + vat) };
+    return { partNumber: realPartNumber(l.part_number), name: l.description, sub: positionsWords(positions) || null, qty: qtyText(l.quantity, null, part?.unit ?? null), list, disc: Math.max(0, disc), net };
   });
   // The supplier's own charges on this order (courier, freight): one row each, after the parts.
-  for (const c of bundle.charges ?? []) {
-    const vatC = round2(c.amount_aed * (vatPercent / 100));
-    rows.push({ partNumber: null, name: c.description, qty: "1", list: c.amount_aed, disc: 0, net: c.amount_aed, vat: vatC, total: round2(c.amount_aed + vatC) });
-  }
-  const gross = round2(rows.reduce((a, r) => a + r.net, 0));
-  const vat = round2(gross * (vatPercent / 100));
-  const total = round2(gross + vat);
+  for (const c of bundle.charges ?? []) rows.push({ partNumber: null, name: c.description, qty: "1", list: c.amount_aed, disc: 0, net: c.amount_aed });
+  const amount = supplierMoney(rows.reduce((a, r) => a + r.net, 0), { chargesVat });
+  const total = amount.gross;
   const vin = job?.vehicle?.vin ?? null;
   const approvedAt = po.approved_at ?? po.created_at;
   const doc = (
-    <PdfDocument title={`LPO ${po.number}`} company={company} logo={logo} footerLines={["Please quote the LPO number on your delivery note and invoice. Prices before VAT as agreed."]}>
+    <PdfDocument title={`LPO ${po.number}`} company={company} logo={logo} footerLines={[chargesVat ? "Please quote the LPO number on your delivery note and invoice. Prices before VAT as agreed." : `Please quote the LPO number on your delivery note and invoice. Prices as agreed. ${NO_VAT_WORDS}.`]}>
       <TitleRow title="LOCAL PURCHASE ORDER" meta={[{ label: "LPO no.", value: po.number }, { label: "Date", value: formatDate(approvedAt) }]} />
       <InfoBoxes
         boxes={[
@@ -459,10 +458,11 @@ export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise
           { title: "Vehicle", strong: vin ? `VIN ${vin}` : "VIN to follow" },
         ]}
       />
-      <PoLinesTable rows={rows} vatPercent={vatPercent} />
+      <PoLinesTable rows={rows} />
       <View style={{ flexDirection: "row", justifyContent: "flex-end" }}>
-        <TotalsBlock currency={currency} rows={[{ label: "Net amount", value: gross }, { label: `VAT ${vatPercent}%`, value: vat }]} total={{ label: "Total", value: total }} />
+        <TotalsBlock currency={currency} rows={chargesVat ? [{ label: currency === "aed" ? "Total before VAT AED" : "Total before VAT", value: amount.net }, { label: `VAT ${SUPPLIER_VAT_PERCENT}%${currency === "aed" ? " AED" : ""}`, value: amount.vat }] : []} total={{ label: chargesVat ? "Total incl. VAT" : "Total", value: total }} />
       </View>
+      {chargesVat ? null : <Text style={[styles.small, { textAlign: "right", marginTop: px(4) }]}>{NO_VAT_WORDS}</Text>}
       <View style={{ marginTop: px(12) }} wrap={false}>
         <Text style={styles.smallTitle}>Amount in words</Text>
         <Text style={styles.words}>{amountInWords(total)}</Text>

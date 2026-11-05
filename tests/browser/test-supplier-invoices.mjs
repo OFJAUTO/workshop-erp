@@ -98,7 +98,7 @@ try {
   const row = page.locator(`[data-si-row="${sup.id}|INV4512"]`);
   const rowText = await text(row);
   check(`B: one row for INV-4512 over two cars (${rowText.slice(0, 140)})`, (await row.count()) === 1 && rowText.includes("LPO-E2ESI-1") && rowText.includes("LPO-E2ESI-2"));
-  check("B: TRN, before VAT 920.00, VAT 46.00 and total 966.00", rowText.includes("TRN 100200300400500") && rowText.includes("before VAT 920.00") && rowText.includes("VAT 46.00") && rowText.includes("AED 966.00"));
+  check("B: TRN, and the amount once: AED 966.00 incl. VAT (920.00 + VAT 46.00)", rowText.includes("TRN 100200300400500") && rowText.includes("AED 966.00 incl. VAT") && rowText.includes("920.00 + VAT 46.00") && !rowText.includes("before VAT 920.00"));
   check("B: its match says the price changed (the second car's line)", (await row.locator("[data-si-match='price_changed']").count()) === 1);
   check("B: status New", (await row.getAttribute("data-si-state")) === "new");
   const waiting = page.locator("[data-si-row][data-si-state='waiting']");

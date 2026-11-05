@@ -40,6 +40,10 @@ import { DecideForm, ReceiveForm, SupplierInvoiceForm } from "./PoForms";
 import { LpoSendControl } from "./LpoSendControl";
 import { getSiteUrl } from "@/lib/site";
 
+import { SupplierAmount } from "@/components/SupplierAmount";
+import { addSupplierMoney, originalNetOf, supplierMoney, supplierMoneyText } from "@/lib/supplier-money";
+import { supplierChargesVat } from "@/lib/supplier-rules";
+
 export const dynamic = "force-dynamic";
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -123,11 +127,23 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
     return Array.from(m.entries()).map(([supplier, ls]) => ({ supplier, lines: ls, charges: chargesOf(supplier), subtotal: ls.reduce((a, l) => a + l.quantity * l.unit_cost, 0) + chargesOf(supplier).reduce((a, c) => a + c.amount_aed, 0) }));
   })();
   const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
-  // B3: what "Paid to supplier" pays ("AED 1,092.00 (1,040.00 + VAT 52.00)") and the undo window.
+  // Supplier amounts with VAT (5 November 2026, Mathew): THE one calculation (lib/supplier-money.ts). VAT only for a
+  // supplier that is VAT registered with a TRN (never Our stock), 5% of the LPO total rounded half up; the entered
+  // invoice's own VAT replaces the estimate; a cancelled LPO shows its original amount struck through.
+  const { data: groupSups } = isMain ? await admin.from("suppliers").select("name, trn, vat_registered") : { data: [] as { name: string; trn: string | null; vat_registered: boolean | null }[] };
+  const vatOfSupplierName = (name: string) => supplierChargesVat(((groupSups ?? []) as { name: string; trn: string | null; vat_registered: boolean | null }[]).find((x) => x.name.trim().toLowerCase() === name.trim().toLowerCase()) ?? { name, trn: null, vat_registered: null });
+  const chargesVat = isMain ? vatOfSupplierName(po.supplier_name) : supplierChargesVat({ name: po.supplier_name, trn: bundle.supplier?.trn ?? null, vat_registered: bundle.supplier?.vat_registered ?? null });
+  const { data: everyLine } = po.status === "cancelled" ? await admin.from("purchase_order_lines").select("quantity, unit_cost").eq("po_id", po.id) : { data: [] as { quantity: number; unit_cost: number }[] };
+  const cancelled = po.status === "cancelled";
+  const originalNet = cancelled ? originalNetOf((everyLine ?? []) as { quantity: number; unit_cost: number }[]) : 0;
+  const ownMoney = supplierMoney(cancelled && originalNet > 0 ? originalNet : Number(po.total_cost_aed) || 0, { chargesVat });
+  // B3: what "Paid to supplier" pays ("AED 1,092.00 incl. VAT (1,040.00 + VAT 52.00)") and the undo window.
   const payNet = Number(po.supplier_invoice_amount ?? po.total_cost_aed) || 0;
-  // The invoice's own typed VAT wins (supplier invoice edit, 5 November 2026); empty = 5% as before.
-  const payVat = invoiceVat ?? Math.round(payNet * 5) / 100;
-  const payWords = `${money(payNet + payVat)} (${payNet.toLocaleString("en-GB", { minimumFractionDigits: 2 })} + VAT ${payVat.toLocaleString("en-GB", { minimumFractionDigits: 2 })})`;
+  const payMoney = supplierMoney(payNet, { chargesVat, typedVat: invoiceVat });
+  const payVat = payMoney.vat;
+  const payWords = supplierMoneyText(payMoney);
+  const groupMoney = (g: { supplier: string; subtotal: number }) => supplierMoney(g.subtotal, { chargesVat: vatOfSupplierName(g.supplier) });
+  const grandMoney = cancelled ? ownMoney : addSupplierMoney(groups.map(groupMoney));
   const undoMinutes = Number((settings as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES;
   // 1 November 2026 (LPO-00038): one line can be refused on its own; refused lines stay listed, greyed, with the reason.
   const refusalsOn = await refusalsReady();
@@ -214,14 +230,14 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             <section className="flex flex-col gap-3" data-supplier-lpos>
               <SectionLabel right={`${children.length}`}>Supplier LPOs</SectionLabel>
               {children.map((s) => (
-                <SupplierLpoCard key={s.po.id} po={{ id: s.po.id, number: s.po.number, supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, sent_at: s.po.sent_at, emailed_at: s.po.emailed_at, emailed_to: s.po.emailed_to, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: bundle.parts.find((x) => x.id === l.part_item_id)?.positions ?? null, unit: unitOfPart.get(l.part_item_id ?? "") ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges, ended: endedByPo.get(s.po.id) ?? [] }} vin={v?.vin ?? null} canManage={canManage} onOrdered={markSupplierOrdered.bind(null, s.po.id)} onSetDate={setPartExpectedDate} supplierEmail={supplierEmailOf.get(s.po.supplier_id ?? "") ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, s.po.id)} jobId={po.job_id} />
+                <SupplierLpoCard key={s.po.id} po={{ id: s.po.id, number: s.po.number, chargesVat: vatOfSupplierName(s.po.supplier_name), supplier_name: s.po.supplier_name, status: s.po.status, ordered_at: s.po.ordered_at, verify_token: s.po.verify_token, sent_at: s.po.sent_at, emailed_at: s.po.emailed_at, emailed_to: s.po.emailed_to, total_cost_aed: s.po.total_cost_aed, lines: s.lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: bundle.parts.find((x) => x.id === l.part_item_id)?.positions ?? null, unit: unitOfPart.get(l.part_item_id ?? "") ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: s.charges, ended: endedByPo.get(s.po.id) ?? [] }} vin={v?.vin ?? null} canManage={canManage} onOrdered={markSupplierOrdered.bind(null, s.po.id)} onSetDate={setPartExpectedDate} supplierEmail={supplierEmailOf.get(s.po.supplier_id ?? "") ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, s.po.id)} jobId={po.job_id} />
               ))}
             </section>
           ) : null}
 
           {isMain && !children.length ? (
             <Card className="flex flex-col gap-3" data-main-lpo>
-              <SectionLabel right={`${money(po.total_cost_aed)} before VAT`}>Parts by supplier</SectionLabel>
+              <SectionLabel right={`${groups.length} supplier${groups.length === 1 ? "" : "s"}`}>Parts by supplier</SectionLabel>
               {groups.map((g) => (
                 <div key={g.supplier} className="flex flex-col gap-1" data-lpo-group={g.supplier}>
                   <span className="text-sm font-extrabold">{g.supplier}</span>
@@ -253,10 +269,10 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                       </li>
                     ))}
                   </ul>
-                  <div className="flex items-center justify-between rounded-control bg-chip px-3 py-1.5 text-sm"><span className="text-muted">Subtotal · {g.supplier}</span><span className="font-bold" data-lpo-subtotal>{money(g.subtotal)}</span></div>
+                  <div className="flex items-center justify-between gap-2 rounded-control bg-chip px-3 py-1.5 text-sm"><span className="text-muted">Subtotal · {g.supplier}</span><span data-lpo-subtotal><SupplierAmount money={groupMoney(g)} cancelled={cancelled} size="sm" /></span></div>
                 </div>
               ))}
-              <div className="flex items-center justify-between border-t border-line pt-2 text-base"><span className="font-bold">Grand total before VAT</span><span className="font-extrabold" data-lpo-grand-total>{money(po.total_cost_aed)}</span></div>
+              <div className="flex items-center justify-between gap-2 border-t border-line pt-2 text-base"><span className="font-bold">{cancelled ? "Grand total (cancelled, not counted)" : "Grand total"}</span><span data-lpo-grand-total><SupplierAmount money={grandMoney} cancelled={cancelled} /></span></div>
               {canRefuseLine ? <p className="text-xs text-muted">One wrong line? Refuse just that line with its reason: Parts are told to replace it, and the replacement joins this LPO by itself.</p> : null}
               {po.notes ? <p className="text-sm whitespace-pre-wrap text-muted">{po.notes}</p> : null}
             </Card>
@@ -264,7 +280,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
 
           {!isMain ? (
             <Card className="flex flex-col gap-2">
-              <SectionLabel right={`${money(po.total_cost_aed)} before VAT`}>Lines</SectionLabel>
+              <SectionLabel right={`${lines.length} line${lines.length === 1 ? "" : "s"}`}>Lines</SectionLabel>
               <ul className="divide-y divide-line text-sm">
                 {lines.map((l) => {
                   const part = parts.find((p) => p.id === l.part_item_id);
@@ -308,6 +324,10 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                   </li>
                 ))}
               </ul>
+              <div className="flex items-center justify-between gap-2 border-t border-line pt-2" data-lpo-lines-total>
+                <span className="font-bold">{cancelled ? "Total (cancelled, not counted)" : "Total"}</span>
+                <SupplierAmount money={ownMoney} cancelled={cancelled} />
+              </div>
               {po.notes ? <p className="text-sm whitespace-pre-wrap text-muted">{po.notes}</p> : null}
             </Card>
           ) : null}
@@ -373,14 +393,14 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {po.status === "pending_approval" && canApprove ? (
             <Card className="flex flex-col gap-2 border-ink">
               <SectionLabel>Approve this LPO</SectionLabel>
-              <DecideForm action={decidePurchaseOrder.bind(null, po.id)} problems={problemList.map((p) => p.words)} problemAdvice={problemAdvice} depositShort={depositShort} isOwner={role === "owner"} reasons={reasonsFor(settings, "deposit_override")} summary={[po.number, po.supplier_name, `${money(po.total_cost_aed)} before VAT`, `${lines.length} line${lines.length === 1 ? "" : "s"}`]} />
+              <DecideForm action={decidePurchaseOrder.bind(null, po.id)} problems={problemList.map((p) => p.words)} problemAdvice={problemAdvice} depositShort={depositShort} isOwner={role === "owner"} reasons={reasonsFor(settings, "deposit_override")} summary={[po.number, po.supplier_name, supplierMoneyText(isMain ? grandMoney : ownMoney), `${lines.length} line${lines.length === 1 ? "" : "s"}`]} />
             </Card>
           ) : null}
           {!isMain && po.status === "approved" ? (
             <Card className="flex flex-col gap-2 border-ink">
               <SectionLabel>Send it, then Ordered</SectionLabel>
               <p className="text-sm text-muted">Copy the text or send the PDF to {po.supplier_name}, then press Ordered: the arrival dates follow from the availability entered at pricing, and any date can be changed with a tap.</p>
-              <SupplierLpoCard po={{ id: po.id, number: po.number, supplier_name: po.supplier_name, status: po.status, ordered_at: po.ordered_at, verify_token: po.verify_token, sent_at: po.sent_at, emailed_at: po.emailed_at, emailed_to: po.emailed_to, total_cost_aed: po.total_cost_aed, lines: lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: bundle.parts.find((x) => x.id === l.part_item_id)?.positions ?? null, unit: unitOfPart.get(l.part_item_id ?? "") ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: bundle.charges, ended: endedHere }} vin={v?.vin ?? null} canManage={canManage} onOrdered={markSupplierOrdered.bind(null, po.id)} onSetDate={setPartExpectedDate} supplierEmail={bundle.supplier?.email ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, po.id)} jobId={po.job_id} />
+              <SupplierLpoCard po={{ id: po.id, number: po.number, chargesVat, supplier_name: po.supplier_name, status: po.status, ordered_at: po.ordered_at, verify_token: po.verify_token, sent_at: po.sent_at, emailed_at: po.emailed_at, emailed_to: po.emailed_to, total_cost_aed: po.total_cost_aed, lines: lines.map((l) => ({ id: l.id, part_item_id: l.part_item_id, description: l.description, positions: bundle.parts.find((x) => x.id === l.part_item_id)?.positions ?? null, unit: unitOfPart.get(l.part_item_id ?? "") ?? null, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, expected_date: l.expected_date, received_qty: l.received_qty })), charges: bundle.charges, ended: endedHere }} vin={v?.vin ?? null} canManage={canManage} onOrdered={markSupplierOrdered.bind(null, po.id)} onSetDate={setPartExpectedDate} supplierEmail={bundle.supplier?.email ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, po.id)} jobId={po.job_id} />
             </Card>
           ) : null}
           {(po.status === "ordered" || po.status === "partly_received") && canManage ? (
@@ -410,7 +430,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 { label: "Ordered", value: po.ordered_at ? `${formatDateTime(po.ordered_at)} by ${po.ordered_by ? (names.get(po.ordered_by) ?? "") : ""}` : null },
                 { label: "Sent to supplier", value: po.sent_at ? `${formatDateTime(po.sent_at)} by ${po.sent_by ? (names.get(po.sent_by) ?? "") : ""}${po.sent_method ? ` (${po.sent_method})` : ""}` : null },
                 { label: "Received", value: po.received_at ? formatDateTime(po.received_at) : null },
-                { label: "Supplier invoice", value: po.supplier_invoice_status === "received" ? `${po.supplier_invoice_number}${po.supplier_invoice_date ? ` dated ${formatDate(po.supplier_invoice_date)}` : ""}${po.supplier_invoice_amount ? ` · AED ${po.supplier_invoice_amount.toFixed(2)} + VAT ${payVat.toFixed(2)} = ${(Math.round((po.supplier_invoice_amount + payVat) * 100) / 100).toFixed(2)}` : ""} · entered ${formatDateTime(po.supplier_invoice_at)}` : po.supplier_invoice_status === "to_follow" ? "Missing (to follow)" : null },
+                { label: "Supplier invoice", value: po.supplier_invoice_status === "received" ? `${po.supplier_invoice_number}${po.supplier_invoice_date ? ` dated ${formatDate(po.supplier_invoice_date)}` : ""}${po.supplier_invoice_amount ? ` · ${payWords}` : ""} · entered ${formatDateTime(po.supplier_invoice_at)}` : po.supplier_invoice_status === "to_follow" ? "Missing (to follow)" : null },
                 { label: "Paid to supplier", value: po.supplier_paid_at ? `${formatDateTime(po.supplier_paid_at)} by ${po.supplier_paid_by ? (names.get(po.supplier_paid_by) ?? "") : ""}${po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}` : null },
                 ...(po.parent_id ? [{ label: "Main LPO", value: <Link href={`/parts/orders/${po.parent_id}`} className="underline underline-offset-4 font-semibold">{po.number.replace(/-\d+$/, "")}</Link> }] : []),
                 ...(scanUrl ? [{ label: "Scan", value: <a href={scanUrl} target="_blank" rel="noreferrer" className="underline underline-offset-4 font-semibold">Open the supplier invoice</a> }] : []),
@@ -430,6 +450,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 lpoTotal={Number(po.total_cost_aed) || 0}
                 lines={lines.map((l) => ({ id: l.id, description: l.description, quantity: Number(l.quantity) || 0, price: Number(l.invoice_unit_cost ?? l.unit_cost) || 0 }))}
                 paid={!!po.supplier_paid_at}
+                chargesVat={chargesVat}
               />
             ) : null}
             <InvoiceEditHistory entries={invoiceEdits} />

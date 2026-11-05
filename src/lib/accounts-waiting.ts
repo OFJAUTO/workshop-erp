@@ -1,3 +1,5 @@
+import { lpoAmounts } from "./supplier-vat";
+import { supplierMoneyText } from "./supplier-money";
 import "server-only";
 import { loadSupplierInvoices } from "./supplier-invoices";
 import { invWords } from "./supplier-invoice-rows";
@@ -214,16 +216,19 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
 export async function lpoApprovalsWaiting(): Promise<ExtraWaiting[]> {
   const admin = createAdminClient();
   // The job number is read on its own: an unhinted purchase_orders → jobs embed is ambiguous and fails silently.
-  const { data: lpos } = await admin.from("purchase_orders").select("id, number, supplier_name, total_cost_aed, kind, created_at, job_id").eq("status", "pending_approval").eq("is_active", true).order("created_at");
+  const { data: lpos } = await admin.from("purchase_orders").select("id, number, supplier_id, supplier_name, total_cost_aed, kind, created_at, job_id").eq("status", "pending_approval").eq("is_active", true).order("created_at");
   const jobIds = Array.from(new Set((lpos ?? []).map((p) => p.job_id as string | null).filter((x): x is string => !!x)));
   const { data: jobs } = jobIds.length ? await admin.from("jobs").select("id, job_number").in("id", jobIds) : { data: [] };
   const numberOf = new Map((jobs ?? []).map((j) => [j.id as string, j.job_number as string]));
-  return ((lpos ?? []) as { id: string; number: string; supplier_name: string; total_cost_aed: number | string; kind: string; created_at: string; job_id: string | null }[]).map((po) => ({
+  // Supplier amounts with VAT (5 November 2026): the amount being approved, exactly as the approval screen shows it.
+  const rows = (lpos ?? []) as { id: string; number: string; supplier_id?: string | null; supplier_name: string; total_cost_aed: number | string; kind: string; created_at: string; job_id: string | null }[];
+  const amounts = await lpoAmounts(rows.map((p) => ({ id: p.id, kind: p.kind, status: "pending_approval", supplier_id: p.supplier_id ?? null, supplier_name: p.supplier_name, total_cost_aed: Number(p.total_cost_aed) || 0 })));
+  return rows.map((po) => ({
     jobId: `lpo:${po.id}`,
     plate: po.number,
     car: [po.job_id ? numberOf.get(po.job_id) : null, po.supplier_name].filter(Boolean).join(" · "),
     what: "LPO waiting for approval",
-    amount: aed(Number(po.total_cost_aed) || 0),
+    amount: amounts.get(po.id) ? supplierMoneyText(amounts.get(po.id)!) : aed(Number(po.total_cost_aed) || 0),
     actionLabel: "Approve",
     href: `/parts/orders/${po.id}`,
     always: true,

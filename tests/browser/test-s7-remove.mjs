@@ -145,8 +145,8 @@ try {
     check(`A: the row greys "Removed – Cancelled with the supplier by ${partsUser.display_name}" ("${ended}")`, ended.startsWith(`Removed – Cancelled with the supplier by ${partsUser.display_name}`) && /Not required for this job/.test(ended));
     check("A: no Ordered chip and no Put back on the row", !/Ordered/.test(await text(row.locator("[data-status-line]"))) && !(await row.getByRole("button", { name: /Put back/ }).count()));
     check("A: the line total shows a dash", (await text(row.locator("[data-line-total]"))) === "—");
-    const costAfter = await until(async () => { const c = await ourCost(page); return Math.abs(costBefore - c - 210) < 0.02 ? c : null; }, 20) ?? (await ourCost(page));
-    check(`A: Our cost goes down by the pads with VAT (AED ${costBefore} → ${costAfter})`, Math.abs(costBefore - costAfter - 210) < 0.02);
+    const costAfter = await until(async () => { const c = await ourCost(page); return Math.abs(costBefore - c - 200) < 0.02 ? c : null; }, 20) ?? (await ourCost(page));
+    check(`A: Our cost goes down by the pads, no VAT: the supplier is not VAT registered (AED ${costBefore} → ${costAfter})`, Math.abs(costBefore - costAfter - 200) < 0.02);
     const part = (await sql("select order_status, is_active, final_cost_aed::float as final, removed_at, disposition, disposition_at, return_status from public.part_items where id = $1", [pa.id]))[0];
     check(`A: the part is off the job (order ${part?.order_status}, active ${part?.is_active}, cost ${part?.final})`, part?.order_status === "none" && part?.is_active === false && part?.final === 0 && !!part?.removed_at && !!part?.disposition_at && (part?.disposition === "cancelled" || part?.disposition === null));
     const line = (await sql("select is_active from public.purchase_order_lines where id = $1", [LA]))[0];
@@ -156,7 +156,9 @@ try {
     await pageReady(page);
     const card = page.locator("[data-supplier-lpo='LPO-E2E-S7-1']");
     check("A: the LPO card shows the line cancelled, greyed", /Cancelled – not delivered/.test(await text(card.locator("[data-lpo-line-cancelled]"))));
-    check("A: the LPO card total reads AED 150.00 · 1 line cancelled", /AED 150\.00 before VAT · 1 line cancelled/.test(await text(card.locator("[data-lpo-total]"))));
+    // 5 November 2026 (Mathew): THE supplier money display - the supplier is not VAT registered, so no VAT.
+    const cardTotal = await text(card.locator("[data-lpo-total]"));
+    check(`A: the LPO card total reads AED 150.00, no VAT (not VAT registered), 1 line cancelled ("${cardTotal}")`, /AED 150\.00/.test(cardTotal) && /No VAT – supplier not VAT-registered/.test(cardTotal) && /1 line cancelled/.test(cardTotal) && !/incl\. VAT/.test(cardTotal));
     check("A: the part is not waiting to be received", !/front brake pads/i.test(await text(page.locator("[data-received-card]"))));
     await card.scrollIntoViewIfNeeded().catch(() => {});
     await page.screenshot({ path: shot("a3-lpo-card-after-cancel.png") });

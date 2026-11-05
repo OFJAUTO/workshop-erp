@@ -374,17 +374,18 @@ export function LinesTable({ title, lines, currency, vatPercent = 5, subtotalLab
   );
 }
 
-export type PoDocRow = { partNumber: string | null; name: string; /** The positions on their own small line (ALL 4, FRONT PAIR…). */ sub?: string | null; qty: string; list: number; disc: number; net: number; vat: number; total: number };
+export type PoDocRow = { partNumber: string | null; name: string; /** The positions on their own small line (ALL 4, FRONT PAIR…). */ sub?: string | null; qty: string; list: number; disc: number; net: number };
 
-/** The supplier copy's lines: part number and name in full, list price, discount, net, VAT and total. Long part numbers wrap inside the row. */
-export function PoLinesTable({ rows, vatPercent = 5 }: { rows: PoDocRow[]; vatPercent?: number }) {
+/**
+ * The supplier copy's lines: part number and name in full, list price, discount and the line's amount before VAT.
+ * Supplier amounts with VAT (5 November 2026): the VAT is THE rule's, on the order TOTAL, in the totals box under the
+ * table - each figure printed once. Long part numbers wrap inside the row.
+ */
+export function PoLinesTable({ rows }: { rows: PoDocRow[] }) {
   const cPn = { width: px(128), paddingRight: px(8), fontSize: px(10.5) };
-  const cList = { width: px(64), textAlign: "right" as const };
-  const cDisc = { width: px(46), textAlign: "right" as const };
-  const cNet = { width: px(72), textAlign: "right" as const };
-  const cVat = { width: px(60), textAlign: "right" as const };
-  const cTot = { width: px(76), textAlign: "right" as const };
-  const sum = (k: "net" | "vat" | "total") => rows.reduce((a, r) => a + r[k], 0);
+  const cList = { width: px(72), textAlign: "right" as const };
+  const cDisc = { width: px(52), textAlign: "right" as const };
+  const cNet = { width: px(84), textAlign: "right" as const, paddingRight: px(8) };
   return (
     <View style={{ marginBottom: px(18) }}>
       <View style={styles.th} fixed>
@@ -394,9 +395,7 @@ export function PoLinesTable({ rows, vatPercent = 5 }: { rows: PoDocRow[]; vatPe
         <Text style={styles.cQty}>Qty</Text>
         <Text style={cList}>List</Text>
         <Text style={cDisc}>Disc %</Text>
-        <Text style={cNet}>Net</Text>
-        <Text style={cVat}>VAT {vatPercent}%</Text>
-        <Text style={cTot}>Total</Text>
+        <Text style={cNet}>Amount</Text>
       </View>
       {rows.map((r, i) => (
         <View key={i} style={styles.tr} wrap={r.name.length + (r.sub?.length ?? 0) > 600}>
@@ -409,22 +408,9 @@ export function PoLinesTable({ rows, vatPercent = 5 }: { rows: PoDocRow[]; vatPe
           <Text style={styles.cQty}>{r.qty}</Text>
           <Text style={cList}>{moneyDigits(r.list)}</Text>
           <Text style={cDisc}>{r.disc ? `${Math.round(r.disc * 100) / 100}%` : ""}</Text>
-          <Text style={cNet}>{moneyDigits(r.net)}</Text>
-          <Text style={cVat}>{moneyDigits(r.vat)}</Text>
-          <Text style={[cTot, { fontWeight: 600 }]}>{moneyDigits(r.total)}</Text>
+          <Text style={[cNet, { fontWeight: 600 }]}>{moneyDigits(r.net)}</Text>
         </View>
       ))}
-      <View style={styles.subtotal} wrap={false}>
-        <Text style={[styles.cNo, { paddingLeft: px(8), color: INK }]}>{""}</Text>
-        <Text style={cPn}>{""}</Text>
-        <Text style={styles.cDesc}>Order subtotal</Text>
-        <Text style={styles.cQty}>{""}</Text>
-        <Text style={cList}>{""}</Text>
-        <Text style={cDisc}>{""}</Text>
-        <Text style={cNet}>{moneyDigits(sum("net"))}</Text>
-        <Text style={cVat}>{moneyDigits(sum("vat"))}</Text>
-        <Text style={[cTot, { paddingRight: px(8) }]}>{moneyDigits(sum("total"))}</Text>
-      </View>
     </View>
   );
 }

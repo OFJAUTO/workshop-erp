@@ -366,7 +366,8 @@ try {
   check("J: VAT registered but no TRN lists the supplier with the red badge", (await page.locator(`[data-supplier-row='${NOTRN.id}'] [data-no-trn]`).count()) === 1 && (await page.locator(`[data-supplier-row='${HUB.id}']`).count()) === 0);
   await go(page, `${base}/parts/suppliers?filter=unpaid`);
   const chip = page.locator(`[data-supplier-row='${HUB.id}'] [data-supplier-unpaid]`);
-  check(`J: Unpaid balance lists the supplier with "Unpaid AED x (n)" ("${await text(chip)}")`, (await chip.count()) === 1 && /^Unpaid AED 1,501\.50 \(3\)$/.test(await text(chip)) && (await chip.getAttribute("href"))?.includes("/parts-accounts?tab=payments"));
+  // 5 November 2026 (Mathew): the balance through THE supplier money display - "AED 1,501.50 incl. VAT" + "1,430.00 + VAT 71.50".
+  check(`J: Unpaid balance lists the supplier with "Unpaid (n)" and the amount incl. VAT ("${await text(chip)}")`, (await chip.count()) === 1 && /Unpaid \(3\)/.test(await text(chip)) && /AED 1,501\.50 incl\. VAT/.test(await text(chip)) && /1,430\.00 \+ VAT 71\.50/.test(await text(chip)) && (await chip.getAttribute("href"))?.includes("/parts-accounts?tab=payments"));
   check("J: the quick filter counts", /Unpaid balance · \d+/.test(await text(page.locator("[data-supplier-filter='unpaid']"))));
   await page.screenshot({ path: shot("j1-suppliers-unpaid.png"), fullPage: true });
   await go(page, `${base}/parts/orders/${D.id}#paid`);

@@ -6,15 +6,15 @@ import { supplierContactReady } from "@/lib/schema-ready";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { unpaidBySupplier } from "@/lib/supplier-invoice-rows";
 import { loadSupplierInvoices } from "@/lib/supplier-invoices";
-import { NO_TRN_WORDS, SUPPLIER_FILTER_WORDS, asSupplierFilter, supplierNeedsTrn, supplierSearchHit, type SupplierFilter } from "@/lib/supplier-rules";
+import { NO_TRN_WORDS, NO_VAT_WORDS, SUPPLIER_FILTER_WORDS, asSupplierFilter, supplierChargesVat, supplierNeedsTrn, supplierSearchHit, type SupplierFilter } from "@/lib/supplier-rules";
+import { SupplierAmount } from "@/components/SupplierAmount";
+import { moneyFrom } from "@/lib/supplier-money";
 import { addSupplier, applySupplierDiscount, setSupplierActive, updateSupplier } from "./actions";
 import { getSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
 type Supplier = { id: string; name: string; trn: string | null; vat_registered: boolean; phone: string | null; email: string | null; address: string | null; payment_terms: string | null; notes: string | null; is_active: boolean; default_discount_percent: number | null; discount_by_type: Record<string, number> | null; contact_name?: string | null };
-
-const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function SupplierFields({ s, types, canDiscount, contactOn }: { s?: Supplier; types: string[]; canDiscount: boolean; contactOn: boolean }) {
   const byType = (s?.discount_by_type ?? {}) as Record<string, number>;
@@ -132,7 +132,7 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
                 <summary className="list-none cursor-pointer min-h-11 flex flex-wrap items-center gap-3">
                   <span className="font-extrabold">{s.name}</span>
                   {!s.is_active ? <Badge tone="neutral">Inactive</Badge> : null}
-                  {supplierNeedsTrn(s) ? <span data-no-trn><Badge tone="red">{NO_TRN_WORDS}</Badge></span> : null}
+                  {supplierNeedsTrn(s) ? <span data-no-trn><Badge tone="red">{NO_TRN_WORDS}</Badge></span> : !supplierChargesVat(s) ? <span data-no-vat><Badge tone="neutral">{NO_VAT_WORDS}</Badge></span> : null}
                   <span className="text-sm text-muted">{[s.trn ? `TRN ${s.trn}` : null, s.contact_name, s.phone, s.payment_terms, s.default_discount_percent ? `${s.default_discount_percent}% discount` : null].filter(Boolean).join(" · ") || "No details yet"}</span>
                   <span className="ml-auto text-xs font-bold text-muted underline underline-offset-4">Edit</span>
                 </summary>
@@ -146,8 +146,9 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
                 </form>
               </details>
               {unpaid ? (
-                <Link href={unpaidHref(s.id)} className="inline-flex min-h-11 w-fit items-center rounded-full border border-line-strong px-3 text-xs font-bold" data-supplier-unpaid={unpaid.total.toFixed(2)}>
-                  Unpaid {money(unpaid.total)} ({unpaid.count})
+                <Link href={unpaidHref(s.id)} className="inline-flex min-h-11 w-fit flex-wrap items-center gap-2 rounded-card border border-line-strong px-3 py-1 text-xs font-bold" data-supplier-unpaid={unpaid.total.toFixed(2)}>
+                  <span>Unpaid ({unpaid.count})</span>
+                  <SupplierAmount money={moneyFrom(unpaid.net, unpaid.vat, unpaid.vatCharged)} size="sm" align="start" />
                 </Link>
               ) : null}
             </Card>
