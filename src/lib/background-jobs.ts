@@ -10,7 +10,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * notification poll every signed-in screen makes, so it is noticed even when both jobs have stopped.
  */
 
-export type JobKey = "mailbox" | "housekeeping" | "zoho";
+export type JobKey = "mailbox" | "housekeeping" | "zoho" | "offsite_backup" | "offsite_storage" | "offsite_restore";
 export type BackgroundJob = {
   key: JobKey;
   label: string;
@@ -65,12 +65,18 @@ export async function checkLateJobs(force = false): Promise<string[]> {
   const told: string[] = [];
   const admin = createAdminClient();
   for (const j of await loadBackgroundJobs()) {
-    if (!jobLate(j) || j.late_notified_at) continue;
+    // An off-site backup job that RECORDED a failure rings the owner at once (5 November 2026), not
+    // only when its next run is late; a later good run clears the episode (recordJobRun nulls the flag).
+    const failedOffsite = j.key.startsWith("offsite") && j.last_ok === false;
+    if ((!jobLate(j) && !failedOffsite) || j.late_notified_at) continue;
     // Claimed in one update, so two servers checking at the same moment tell the owner once.
     const { data } = await admin.from("background_jobs").update({ late_notified_at: new Date().toISOString() }).eq("key", j.key).is("late_notified_at", null).select("key").maybeSingle();
     if (!data) continue;
-    const title = lateWords(j);
-    await notifyRoles(["owner"], { type: "background_job_late", title, body: `It runs ${j.schedule_label}. Check Vercel > the project > Settings > Cron Jobs, and the job's logs.`, href: "/settings#background-jobs" });
+    const title = failedOffsite && !jobLate(j) ? `${j.label} FAILED: ${j.last_result ?? "no detail"}`.slice(0, 180) : lateWords(j);
+    const body = j.key.startsWith("offsite")
+      ? `It runs ${j.schedule_label}, in GitHub's cloud. Check GitHub > the repository > Actions for the run's log.`
+      : `It runs ${j.schedule_label}. Check Vercel > the project > Settings > Cron Jobs, and the job's logs.`;
+    await notifyRoles(["owner"], { type: "background_job_late", title, body, href: "/settings#background-jobs" });
     told.push(title);
   }
   return told;

@@ -54,3 +54,8 @@ AGENTS.md
 tests/browser/shots/
 tests/tmp/
 public/version.json
+
+# Off-site backup workflows install their one dependency in place on the runner
+scripts/offsite/node_modules/
+scripts/offsite/package.json
+scripts/offsite/package-lock.json

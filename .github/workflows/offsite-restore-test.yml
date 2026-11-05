@@ -1,0 +1,33 @@
+# THE MONTHLY RESTORE TEST (5 November 2026): the newest off-site copy restored into the TEST
+# project's scratch schema and checked row by row, from GitHub's cloud. The 1st of each month at
+# 06:00 Dubai, and by hand.
+name: Off-site restore test (monthly)
+on:
+  schedule:
+    - cron: "0 2 1 * *" # 1st, 02:00 UTC = 06:00 Dubai
+  workflow_dispatch: {}
+concurrency:
+  group: offsite-restore
+  cancel-in-progress: false
+jobs:
+  restore-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the one dependency
+        working-directory: scripts/offsite
+        run: npm init -y > /dev/null && npm install --no-audit --no-fund pg@8
+      - name: Restore the newest copy into the test project and check it
+        working-directory: scripts/offsite
+        env:
+          LIVE_DB_URL: ${{ secrets.LIVE_DB_URL }}
+          TEST_DB_URL: ${{ secrets.TEST_DB_URL }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+        run: node restore-test.mjs

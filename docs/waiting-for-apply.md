@@ -11,7 +11,9 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Nothing — the list is empty.
+| # | Migration | What it adds | Backup taken first |
+|---|---|---|---|
+| 1 | `20261205120000_offsite_backup_jobs.sql` (off-site backups) | Three rows in the background-jobs watch list (nightly off-site backup, weekly storage copy, monthly restore test), so Settings > Background jobs shows every run and the owner's bell rings when one is late or fails. The backups themselves run either way — this only switches the WATCHING on. | `backups/2026-11-05T05-15-52` (111 tables, 250,256 rows) |
 
 ## Applied on 5 November 2026, morning
 

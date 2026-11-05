@@ -1,0 +1,31 @@
+# THE NIGHTLY OFF-SITE DATABASE BACKUP (5 November 2026). Runs in GitHub's cloud - never from the
+# PC - every night at 04:30 Dubai time, and by hand from the Actions tab (Run workflow).
+name: Off-site database backup (nightly)
+on:
+  schedule:
+    - cron: "30 0 * * *" # 00:30 UTC = 04:30 Dubai
+  workflow_dispatch: {}
+concurrency:
+  group: offsite-backup
+  cancel-in-progress: false
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the one dependency
+        working-directory: scripts/offsite
+        run: npm init -y > /dev/null && npm install --no-audit --no-fund pg@8
+      - name: Dump, encrypt, upload, prune
+        working-directory: scripts/offsite
+        env:
+          LIVE_DB_URL: ${{ secrets.LIVE_DB_URL }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+        run: node backup-db.mjs

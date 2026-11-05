@@ -1,0 +1,33 @@
+# THE WEEKLY OFF-SITE STORAGE COPY (5 November 2026): photos, videos and PDFs, incremental and
+# encrypted, from GitHub's cloud - never from the PC. Sundays at 05:30 Dubai, and by hand.
+name: Off-site storage copy (weekly)
+on:
+  schedule:
+    - cron: "30 1 * * 0" # Sunday 01:30 UTC = 05:30 Dubai
+  workflow_dispatch: {}
+concurrency:
+  group: offsite-storage
+  cancel-in-progress: false
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install the one dependency
+        working-directory: scripts/offsite
+        run: npm init -y > /dev/null && npm install --no-audit --no-fund pg@8
+      - name: Copy new and changed files, encrypted
+        working-directory: scripts/offsite
+        env:
+          LIVE_DB_URL: ${{ secrets.LIVE_DB_URL }}
+          LIVE_SUPABASE_URL: ${{ secrets.LIVE_SUPABASE_URL }}
+          LIVE_SERVICE_ROLE_KEY: ${{ secrets.LIVE_SERVICE_ROLE_KEY }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+          B2_KEY_ID: ${{ secrets.B2_KEY_ID }}
+          B2_APP_KEY: ${{ secrets.B2_APP_KEY }}
+          B2_BUCKET: ${{ secrets.B2_BUCKET }}
+        run: node backup-storage.mjs
