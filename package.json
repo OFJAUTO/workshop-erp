@@ -152,6 +152,7 @@
     "test:c12": "node --env-file=.env.test.local tests/browser/test-c12.mjs",
     "test:teams": "node --env-file=.env.test.local tests/browser/test-teams.mjs",
     "test:supinvoices": "node --env-file=.env.test.local tests/browser/test-supplier-invoices.mjs",
+    "test:supinvedit": "node --env-file=.env.test.local tests/browser/test-supinvedit.mjs",
     "test:charges": "node --env-file=.env.test.local tests/browser/test-charges.mjs",
     "test:pricechanges": "node --env-file=.env.test.local tests/browser/test-price-changes.mjs",
     "test:s1-price": "node --env-file=.env.test.local tests/browser/test-s1-price.mjs",

@@ -12,7 +12,9 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
 import { loadJobLpos, lpoDiff, lpoProblemsFor, refusalReasonOf, refusalsReady } from "@/lib/lpo";
 import { lpoProblemAdvice } from "@/lib/part-cost-check";
-import { invoiceHref } from "@/lib/supplier-invoices";
+import { invoiceEditReady, invoiceHref, invoiceVatReady, loadInvoiceEdits } from "@/lib/supplier-invoices";
+import { approvedVsInvoiced } from "@/lib/supplier-invoice-rows";
+import { InvoiceEditHistory, SupplierInvoiceEditButton } from "@/components/SupplierInvoiceEdit";
 import { supplierNeedsTrn } from "@/lib/supplier-rules";
 import { realPartNumber } from "@/lib/parts-rows";
 import { changeWords } from "@/lib/price-change";
@@ -24,7 +26,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { signJobFiles } from "@/lib/work-data";
-import { decidePurchaseOrder, receivePurchaseOrder, supplierInvoice, decideInvoiceCheck, markSupplierPaid, refusePoLineAction, reverseSupplierPaid, undoSupplierPaid } from "../../order-actions";
+import { decidePurchaseOrder, receivePurchaseOrder, supplierInvoice, editSupplierInvoice, decideInvoiceCheck, markSupplierPaid, refusePoLineAction, reverseSupplierPaid, undoSupplierPaid } from "../../order-actions";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { SlipTile } from "@/components/PaymentReport";
 import { UndoButton } from "@/components/UndoButton";
@@ -77,6 +79,12 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const canApprove = can(role, "approvePurchaseOrders") && (role === "owner" || staff.is_head_accountant) && !staff.viewingAs;
   const canManage = can(role, "managePurchaseOrders") && !staff.viewingAs;
   const canPay = (role === "owner" || role === "accounts") && !staff.viewingAs;
+  // Supplier invoice edit (5 November 2026, the Gargash case): the typed VAT, the Edit button and the who/when record.
+  const invoiceEntered = !isMain && po.supplier_invoice_status === "received" && !!po.supplier_invoice_number;
+  const editOn = invoiceEntered && canPay ? await invoiceEditReady() : false;
+  const invoiceVat = invoiceEntered && (await invoiceVatReady()) ? (((await admin.from("purchase_orders").select("supplier_invoice_vat_aed").eq("id", po.id).maybeSingle()).data as { supplier_invoice_vat_aed?: number | null } | null)?.supplier_invoice_vat_aed ?? null) : null;
+  const invoiceEdits = !isMain ? await loadInvoiceEdits([po.id]) : [];
+  const vsApproved = invoiceEntered ? approvedVsInvoiced(Number(po.total_cost_aed) || 0, po.supplier_invoice_amount) : null;
   const scanUrl = po.supplier_invoice_path ? (await signJobFiles([po.supplier_invoice_path]))[po.supplier_invoice_path] : null;
   // Every file of the supplier invoice (several pages photographed one by one are fine), removed ones left out.
   const { data: invFileRows } = !isMain && po.job_id ? await admin.from("job_files").select("id, storage_path, content_type, caption").eq("job_id", po.job_id).eq("kind", "supplier_invoice").eq("ref_id", po.id).is("removed_at", null).order("created_at") : { data: [] };
@@ -116,7 +124,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
   // B3: what "Paid to supplier" pays ("AED 1,092.00 (1,040.00 + VAT 52.00)") and the undo window.
   const payNet = Number(po.supplier_invoice_amount ?? po.total_cost_aed) || 0;
-  const payVat = Math.round(payNet * 5) / 100;
+  // The invoice's own typed VAT wins (supplier invoice edit, 5 November 2026); empty = 5% as before.
+  const payVat = invoiceVat ?? Math.round(payNet * 5) / 100;
   const payWords = `${money(payNet + payVat)} (${payNet.toLocaleString("en-GB", { minimumFractionDigits: 2 })} + VAT ${payVat.toLocaleString("en-GB", { minimumFractionDigits: 2 })})`;
   const undoMinutes = Number((settings as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES;
   // 1 November 2026 (LPO-00038): one line can be refused on its own; refused lines stay listed, greyed, with the reason.
@@ -385,12 +394,29 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 { label: "Ordered", value: po.ordered_at ? `${formatDateTime(po.ordered_at)} by ${po.ordered_by ? (names.get(po.ordered_by) ?? "") : ""}` : null },
                 { label: "Sent to supplier", value: po.sent_at ? `${formatDateTime(po.sent_at)} by ${po.sent_by ? (names.get(po.sent_by) ?? "") : ""}${po.sent_method ? ` (${po.sent_method})` : ""}` : null },
                 { label: "Received", value: po.received_at ? formatDateTime(po.received_at) : null },
-                { label: "Supplier invoice", value: po.supplier_invoice_status === "received" ? `${po.supplier_invoice_number}${po.supplier_invoice_date ? ` dated ${formatDate(po.supplier_invoice_date)}` : ""}${po.supplier_invoice_amount ? ` · AED ${po.supplier_invoice_amount.toFixed(2)}` : ""} · entered ${formatDateTime(po.supplier_invoice_at)}` : po.supplier_invoice_status === "to_follow" ? "Missing (to follow)" : null },
+                { label: "Supplier invoice", value: po.supplier_invoice_status === "received" ? `${po.supplier_invoice_number}${po.supplier_invoice_date ? ` dated ${formatDate(po.supplier_invoice_date)}` : ""}${po.supplier_invoice_amount ? ` · AED ${po.supplier_invoice_amount.toFixed(2)} + VAT ${payVat.toFixed(2)} = ${(Math.round((po.supplier_invoice_amount + payVat) * 100) / 100).toFixed(2)}` : ""} · entered ${formatDateTime(po.supplier_invoice_at)}` : po.supplier_invoice_status === "to_follow" ? "Missing (to follow)" : null },
                 { label: "Paid to supplier", value: po.supplier_paid_at ? `${formatDateTime(po.supplier_paid_at)} by ${po.supplier_paid_by ? (names.get(po.supplier_paid_by) ?? "") : ""}${po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}` : null },
                 ...(po.parent_id ? [{ label: "Main LPO", value: <Link href={`/parts/orders/${po.parent_id}`} className="underline underline-offset-4 font-semibold">{po.number.replace(/-\d+$/, "")}</Link> }] : []),
                 ...(scanUrl ? [{ label: "Scan", value: <a href={scanUrl} target="_blank" rel="noreferrer" className="underline underline-offset-4 font-semibold">Open the supplier invoice</a> }] : []),
               ]}
             />
+            {vsApproved ? <p className="text-sm font-bold" data-invoice-vs-approved>{vsApproved}</p> : null}
+            {/* The owner and accounts edit an entered invoice with a compulsory remark (5 November 2026); others never see the button and the server refuses them too. */}
+            {editOn ? (
+              <SupplierInvoiceEditButton
+                action={editSupplierInvoice.bind(null, po.id)}
+                back={`/parts/orders/${po.id}`}
+                poNumber={po.number}
+                number={po.supplier_invoice_number ?? ""}
+                date={String(po.supplier_invoice_date ?? "").slice(0, 10)}
+                amount={po.supplier_invoice_amount}
+                vat={po.supplier_invoice_amount ? payVat : invoiceVat}
+                lpoTotal={Number(po.total_cost_aed) || 0}
+                lines={lines.map((l) => ({ id: l.id, description: l.description, quantity: Number(l.quantity) || 0, price: Number(l.invoice_unit_cost ?? l.unit_cost) || 0 }))}
+                paid={!!po.supplier_paid_at}
+              />
+            ) : null}
+            <InvoiceEditHistory entries={invoiceEdits} />
           </Card>
           {/* The payment box of every supplier LPO, a stock order (no car) included: "Pay on the LPO" lands here. */}
           {!isMain && po.status !== "pending_approval" && po.status !== "cancelled" && (po.supplier_invoice_status !== "none" || invoiceFiles.length > 0 || po.status === "received") ? (

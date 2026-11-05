@@ -21,7 +21,8 @@ import { checkSupplierInvoice, dubaiToday } from "@/lib/supplier-invoice";
 import { SUPPLIER_PAY_METHODS, flagZohoAttention, reopenZoho, tryEnqueueZoho, zohoPostedSomewhere } from "@/lib/zoho-sync";
 import { JOB_FILES_BUCKET, ensureWorkLines } from "@/lib/work-data";
 import { checkPickable } from "@/lib/staff-picker";
-import { notifyInvoiceReceived, siQueryReady } from "@/lib/supplier-invoices";
+import { invoiceEditReady, notifyInvoiceReceived, siQueryReady } from "@/lib/supplier-invoices";
+import { logAppError } from "@/lib/app-errors";
 import { applyInvoicePrices } from "@/lib/price-change-server";
 import { DEFAULT_UNDO_MINUTES, mayUndo } from "@/lib/money-undo";
 import { objectExists } from "@/lib/upload-targets/common";
@@ -251,7 +252,7 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
  * later, but the LPO cannot be marked paid without it. A line whose invoice price differs from the order by more
  * than AED 1 is flagged for Accept new price or Dispute; the job's cost follows the invoice price meanwhile.
  */
-async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], formData: FormData, staff: { id: string; display_name: string; role_id?: string }): Promise<{ error?: string; message?: string }> {
+async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], formData: FormData, staff: { id: string; display_name: string; role_id?: string }, opts: { edit?: boolean } = {}): Promise<{ error?: string; message?: string }> {
   const admin = createAdminClient();
   // Checked by accounts: the parts desk no longer changes it (accounts query it back first). 1 November 2026.
   const { data: chk } = await admin.from("purchase_orders").select("supplier_invoice_checked_at").eq("id", po.id).maybeSingle();
@@ -285,7 +286,14 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
   const priced = await applyInvoicePrices(po.id, prices, staff, await getSettings());
   const diffs = priced.changed;
   const mismatches = priced.decision.increase > 0 && !priced.decision.auto ? diffs.length : 0;
-  await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_date: invoiceDate, supplier_invoice_path: path ?? po.supplier_invoice_path, supplier_invoice_amount: Number.isFinite(amount) && amount > 0 ? amount : null, supplier_invoice_at: now, supplier_invoice_by: staff.id, ...((await siQueryReady()) ? { supplier_invoice_query: null, supplier_invoice_query_at: null, supplier_invoice_query_by: null } : {}), updated_by: staff.id }).eq("id", po.id);
+  // Edit mode (5 November 2026): the invoice's own VAT (suppliers round differently; empty = 5%),
+  // and the edit sends the invoice back to UNCHECKED so accounts look again.
+  const vatText = String(formData.get("invoice_vat") ?? "").trim();
+  const vatValue = vatText === "" ? null : Number(vatText.replace(/[^\d.]/g, ""));
+  const editCols = opts.edit
+    ? { supplier_invoice_vat_aed: vatValue !== null && Number.isFinite(vatValue) && vatValue >= 0 ? vatValue : null, supplier_invoice_checked_at: null }
+    : {};
+  await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_date: invoiceDate, supplier_invoice_path: path ?? po.supplier_invoice_path, supplier_invoice_amount: Number.isFinite(amount) && amount > 0 ? amount : null, supplier_invoice_at: now, supplier_invoice_by: staff.id, ...editCols, ...((await siQueryReady()) ? { supplier_invoice_query: null, supplier_invoice_query_at: null, supplier_invoice_query_by: null } : {}), updated_by: staff.id }).eq("id", po.id);
   if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: supplier invoice ${number} entered by ${staff.display_name}${diffs.length ? `. Price differences, job cost corrected: ${diffs.join("; ")}` : ""}`, created_by: staff.id });
   // Zoho Books phase 2: the entered invoice becomes the supplier's bill. An invoice CHANGED after the bill
   // already posted cannot be re-posted (never twice): the row turns red for the accountant instead.
@@ -306,9 +314,10 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
         : `The supplier invoice on ${po.number} was changed after its bill reached Zoho (now ${number}, ${invoiceDate}): fix the bill in Zoho by hand, then press "Done by hand".`,
       { handOnly: where === "opening" },
     );
-  } else if (where !== "opening" && wasChecked) {
+  } else if (where !== "opening" && wasChecked && !opts.edit) {
     // Corrected after accounts checked it (and before its bill posted): the corrected bill goes. Otherwise the bill
-    // waits for accounts' Checked in the Supplier invoices tab.
+    // waits for accounts' Checked in the Supplier invoices tab. An EDIT always resets to unchecked instead,
+    // so the bill waits for the fresh check.
     await tryEnqueueZoho("bill", po.id, po.job_id, staff.id);
   }
   await notifyInvoiceReceived([po.id]);
@@ -352,6 +361,83 @@ export async function supplierInvoice(poId: string, formData: FormData) {
   const r = await applySupplierInvoice(po, ((lineRows ?? []) as Record<string, unknown>[]).map(toPoLine), formData, staff);
   refresh(po.job_id, poId);
   redirect(`${back}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Saved.")}`);
+}
+
+/**
+ * EDIT an entered supplier invoice (5 November 2026, the Gargash case LPO-00037-2): the owner and
+ * accounts change the number, date, before-VAT amount, VAT and the per-line costs - with a COMPULSORY
+ * remark. Who, when and old → new are kept in supplier_invoice_edits (shown on the LPO and the
+ * invoice row); the invoice goes back to UNCHECKED so accounts look again (that re-check queues the
+ * Zoho bill; one already in Zoho turns red "fix by hand" through the existing rule). A paid LPO keeps
+ * its payment untouched - the difference is recorded and shown as owed to or by the supplier.
+ */
+export async function editSupplierInvoice(poId: string, formData: FormData) {
+  const staff = await requirePermission("viewPurchaseOrders");
+  const back = String(formData.get("back") ?? `/parts/orders/${poId}`);
+  const say = (kind: "error" | "message", words: string) => redirect(`${back}${back.includes("?") ? "&" : "?"}${kind}=${encodeURIComponent(words)}`);
+  if (!["owner", "accounts"].includes(staff.role_id) || staff.viewingAs) say("error", "Only the owner and accounts can edit a supplier invoice.");
+  if (!(await invoiceEditReady())) say("error", "Editing waits for the owner's \"apply\" (one database change on the list).");
+  const remark = String(formData.get("edit_remark") ?? "").trim();
+  if (remark.length < 5) say("error", "Say WHY in the remark (at least a few words) - every edit is recorded.");
+  const admin = createAdminClient();
+  const [{ data: raw }, { data: lineRows }, { data: extra }] = await Promise.all([
+    admin.from("purchase_orders").select(PO_SELECT).eq("id", poId).maybeSingle(),
+    admin.from("purchase_order_lines").select(PO_LINE_SELECT).eq("po_id", poId).eq("is_active", true),
+    admin.from("purchase_orders").select("supplier_invoice_vat_aed, supplier_invoice_checked_at").eq("id", poId).maybeSingle(),
+  ]);
+  if (!raw) redirect("/parts/orders");
+  const po = toPo(raw as Record<string, unknown>);
+  if (po.supplier_invoice_status !== "received" || !po.supplier_invoice_number) say("error", "There is no entered invoice to edit yet - enter it first.");
+  const lines = ((lineRows ?? []) as Record<string, unknown>[]).map(toPoLine);
+
+  // The OLD values, for the history and the paid difference.
+  const oldVat = (extra as { supplier_invoice_vat_aed?: number | null } | null)?.supplier_invoice_vat_aed ?? null;
+  const vatOf = (amount: number | null, vat: number | null) => (vat !== null ? vat : Math.round((Number(amount) || 0) * 5) / 100);
+  const old = {
+    number: po.supplier_invoice_number ?? "",
+    date: String(po.supplier_invoice_date ?? "").slice(0, 10),
+    amount: Number(po.supplier_invoice_amount) || 0,
+    vat: vatOf(po.supplier_invoice_amount, oldVat),
+    linePrices: new Map(lines.map((l) => [l.id, Number(l.invoice_unit_cost ?? l.unit_cost) || 0])),
+  };
+
+  const r = await applySupplierInvoice(po, lines, formData, staff, { edit: true });
+  if (r.error) say("error", r.error);
+
+  // What changed, in plain strings ready to print.
+  const { data: afterRaw } = await admin.from("purchase_orders").select("supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_vat_aed, supplier_paid_at").eq("id", poId).maybeSingle();
+  const after = afterRaw as { supplier_invoice_number: string | null; supplier_invoice_date: string | null; supplier_invoice_amount: number | null; supplier_invoice_vat_aed: number | null; supplier_paid_at: string | null } | null;
+  const newAmount = Number(after?.supplier_invoice_amount) || 0;
+  const newVat = vatOf(after?.supplier_invoice_amount ?? null, after?.supplier_invoice_vat_aed ?? null);
+  const money = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const changes: { field: string; old: string; new: string }[] = [];
+  if ((after?.supplier_invoice_number ?? "") !== old.number) changes.push({ field: "Invoice number", old: old.number, new: after?.supplier_invoice_number ?? "" });
+  if (String(after?.supplier_invoice_date ?? "").slice(0, 10) !== old.date) changes.push({ field: "Invoice date", old: old.date, new: String(after?.supplier_invoice_date ?? "").slice(0, 10) });
+  if (Math.abs(newAmount - old.amount) > 0.005) changes.push({ field: "Before VAT", old: money(old.amount), new: money(newAmount) });
+  if (Math.abs(newVat - old.vat) > 0.005) changes.push({ field: "VAT", old: money(old.vat), new: money(newVat) });
+  const { data: afterLines } = await admin.from("purchase_order_lines").select("id, description, unit_cost, invoice_unit_cost").eq("po_id", poId).eq("is_active", true);
+  for (const l of (afterLines ?? []) as { id: string; description: string; unit_cost: number | null; invoice_unit_cost: number | null }[]) {
+    const was = old.linePrices.get(l.id) ?? 0;
+    const is = Number(l.invoice_unit_cost ?? l.unit_cost) || 0;
+    if (Math.abs(is - was) > 0.005) changes.push({ field: String(l.description).slice(0, 60), old: money(was), new: money(is) });
+  }
+  // A paid LPO: the payment stands; the difference is owed to or by the supplier.
+  const oldTotal = Math.round((old.amount + old.vat) * 100) / 100;
+  const newTotal = Math.round((newAmount + newVat) * 100) / 100;
+  const paidDiff = after?.supplier_paid_at && Math.abs(newTotal - oldTotal) > 0.005 ? Math.round((newTotal - oldTotal) * 100) / 100 : null;
+
+  if (changes.length) {
+    const { error: histErr } = await admin.from("supplier_invoice_edits").insert({ po_id: poId, remark, changes, paid_difference_aed: paidDiff, created_by: staff.id, updated_by: staff.id });
+    if (histErr) {
+      // The edit itself saved; only the who/when record failed. Never claim nothing was recorded (SAVE_FAILED would).
+      await logAppError("supplier-invoice-edit.history", histErr.message, { detail: { poId } });
+      say("error", "The invoice was changed, but recording who edited it failed - tell the owner (it is in the error log).");
+    }
+    if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: invoice edited by ${staff.display_name} - ${remark}. ${changes.map((c) => `${c.field} ${c.old} → ${c.new}`).join("; ")}`, created_by: staff.id });
+  }
+  refresh(po.job_id, poId);
+  const diffWords = paidDiff ? ` Already paid: the supplier ${paidDiff < 0 ? `owes us AED ${money(Math.abs(paidDiff))}` : `is owed AED ${money(paidDiff)} more`} - the recorded payment is untouched.` : "";
+  say("message", changes.length ? `Invoice edited and sent back to UNCHECKED for accounts (${changes.length} change${changes.length === 1 ? "" : "s"} recorded).${diffWords}` : "Nothing changed - the invoice is as it was.");
 }
 
 /** Accept new price (the invoice price stands) or Dispute (the owner and Parts chase the supplier) on a flagged line. */

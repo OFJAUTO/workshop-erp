@@ -6,8 +6,10 @@ import { Badge, Button, Card, Input, LinkButton, Notice, SectionLabel, Select } 
 import type { CurrentStaff } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { MATCH_WORDS, STATUS_WORDS, filterInvoices, invWords, invoiceFilterOf, invoiceFilterParams, unpaidBySupplier, unpaidShares, type InvoiceRow, type InvoiceStatus } from "@/lib/supplier-invoice-rows";
-import { loadSupplierInvoices, siQueryReady } from "@/lib/supplier-invoices";
+import { MATCH_WORDS, STATUS_WORDS, approvedVsInvoiced, filterInvoices, invWords, invoiceFilterOf, invoiceFilterParams, unpaidBySupplier, unpaidShares, type InvoiceRow, type InvoiceStatus } from "@/lib/supplier-invoice-rows";
+import { invoiceEditReady, invoiceVatReady, loadInvoiceEdits, loadSupplierInvoices, siQueryReady } from "@/lib/supplier-invoices";
+import { InvoiceEditHistory, SupplierInvoiceEditButton } from "@/components/SupplierInvoiceEdit";
+import { editSupplierInvoice } from "@/app/(app)/parts/order-actions";
 import { signJobFiles } from "@/lib/work-data";
 import { changeWords } from "@/lib/price-change";
 import { enterInvoiceFromList } from "@/app/(app)/parts/order-actions";
@@ -136,13 +138,15 @@ function InvoiceCard({ r, href, open }: { r: InvoiceRow; href: string; open: boo
 async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: InvoiceRow; acts: boolean; queryOn: boolean; place: SiPlace; outcome: { tone: "success" | "error"; text: string } | null }) {
   const admin = createAdminClient();
   const poIds = row.shares.map((s) => s.poId);
+  const vatOn = await invoiceVatReady();
   const [{ data: files }, { data: pos }, { data: lines }] = await Promise.all([
     admin.from("job_files").select("id, storage_path, content_type, caption").eq("kind", "supplier_invoice").in("ref_id", poIds).is("removed_at", null).order("created_at"),
-    admin.from("purchase_orders").select("id, supplier_invoice_path, supplier_paid_at, supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path, supplier_paid_by").in("id", poIds),
+    admin.from("purchase_orders").select("id, supplier_invoice_path, supplier_invoice_amount, supplier_paid_at, supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path, supplier_paid_by" + (vatOn ? ", supplier_invoice_vat_aed" : "")).in("id", poIds),
     admin.from("purchase_order_lines").select("id, po_id, description, quantity, received_qty, unit_cost, invoice_unit_cost, invoice_check").in("po_id", poIds).eq("is_active", true).order("position"),
   ]);
-  type PaidPo = { id: string; supplier_invoice_path: string | null; supplier_paid_at: string | null; supplier_paid_method: string | null; supplier_paid_reference: string | null; supplier_paid_proof_path: string | null; supplier_paid_by: string | null };
-  const poRows = (pos ?? []) as PaidPo[];
+  type PaidPo = { id: string; supplier_invoice_path: string | null; supplier_invoice_amount: number | null; supplier_paid_at: string | null; supplier_paid_method: string | null; supplier_paid_reference: string | null; supplier_paid_proof_path: string | null; supplier_paid_by: string | null; supplier_invoice_vat_aed?: number | null };
+  // The select string is built (the vat column is ready-gated), so the result loses its type: cast it.
+  const poRows = (pos ?? []) as unknown as PaidPo[];
   // Fix 4 (4 November 2026): the proof of payment shows next to "Open the invoice (PDF)", signed like the scans.
   const paths = Array.from(new Set([...((files ?? []) as { storage_path: string }[]).map((f) => f.storage_path), ...poRows.map((p) => p.supplier_invoice_path).filter((x): x is string => !!x), ...poRows.map((p) => p.supplier_paid_proof_path).filter((x): x is string => !!x)]));
   const urls = await signJobFiles(paths);
@@ -154,6 +158,10 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
   const { data: payers } = payerIds.length ? await admin.from("staff").select("id, display_name").in("id", payerIds) : { data: [] };
   const payerOf = new Map(((payers ?? []) as { id: string; display_name: string }[]).map((s) => [s.id, s.display_name]));
   const toPay = unpaidShares(row);
+  // Supplier invoice edit (5 November 2026): the Edit button (owner + accounts), "Approved → Invoiced" and the record of edits.
+  const editOn = acts && row.status !== "waiting" ? await invoiceEditReady() : false;
+  const edits = await loadInvoiceEdits(poIds);
+  const vsApproved = row.status === "waiting" ? null : approvedVsInvoiced(Math.round(row.shares.reduce((a, s) => a + s.lpoTotal, 0) * 100) / 100, row.beforeVat);
   return (
     <Card className="flex flex-col gap-4 !border-ink" id="open" data-si-opened={row.key}>
       <div className="flex flex-wrap items-center gap-2">
@@ -196,6 +204,7 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
             </div>
           ))}
           <p className="text-sm">Before VAT <b>AED {money(row.beforeVat)}</b> · VAT AED {money(row.vat)} · Total <b>AED {money(row.total)}</b>{row.trn ? ` · TRN ${row.trn}` : ""}</p>
+          {vsApproved ? <p className="text-sm font-bold" data-si-vs-approved>{vsApproved}</p> : null}
           {row.status !== "waiting" && (row.paidAmount > 0 || row.shares.length > 1) ? (
             <ul className="flex flex-col gap-1.5 text-sm" data-si-paid-lines>
               {row.shares.map((s) => {
@@ -224,6 +233,7 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
           ) : null}
         </div>
       </div>
+      <InvoiceEditHistory entries={edits} />
       {outcome ? <div data-si-outcome={outcome.tone}><Notice tone={outcome.tone}>{outcome.text}</Notice></div> : null}
       {/* 4 November 2026: a row still waiting for its invoice - accounts scan the paper and enter it right here. */}
       {acts && row.status === "waiting" && row.shares.length === 1 ? (
@@ -252,6 +262,30 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
             </form>
           ) : null}
           {!queryOn ? <span className="text-xs text-muted">Query switches on with the database update (waiting for apply).</span> : null}
+          {/* Supplier invoice edit (5 November 2026): owner + accounts, compulsory remark; one button per LPO of a split invoice. */}
+          {editOn
+            ? row.shares.map((s) => {
+                const p = payOf.get(s.poId);
+                const amt = p?.supplier_invoice_amount ?? null;
+                const vatEff = p?.supplier_invoice_vat_aed ?? (amt ? Math.round(amt * 5) / 100 : null);
+                return (
+                  <SupplierInvoiceEditButton
+                    key={`edit-${s.poId}`}
+                    action={editSupplierInvoice.bind(null, s.poId)}
+                    back={siHref(place, [["open", row.key]])}
+                    poNumber={s.poNumber}
+                    number={row.number ?? ""}
+                    date={String(row.date ?? "").slice(0, 10)}
+                    amount={amt}
+                    vat={vatEff}
+                    lpoTotal={s.lpoTotal}
+                    lines={((lines ?? []) as { id: string; po_id: string; description: string; quantity: number; unit_cost: number; invoice_unit_cost: number | null }[]).filter((l) => l.po_id === s.poId).map((l) => ({ id: l.id, description: l.description, quantity: Number(l.quantity) || 0, price: Number(l.invoice_unit_cost ?? l.unit_cost) || 0 }))}
+                    paid={!!p?.supplier_paid_at}
+                    label={row.shares.length > 1 ? `Edit invoice · ${s.poNumber}` : "Edit invoice"}
+                  />
+                );
+              })
+            : null}
           {/* Paid on each LPO's own page: one button per LPO still to pay, never one already paid. */}
           {toPay.map((s) => <LinkButton key={s.poId} href={`/parts/orders/${s.poId}#paid`} tone="ghost" size="lg" data-si-pay={s.poId}>{toPay.length > 1 || row.shares.length > 1 ? `Pay ${s.poNumber} (on the LPO)` : "Paid to supplier (on the LPO)"}</LinkButton>)}
         </div>

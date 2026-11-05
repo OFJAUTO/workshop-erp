@@ -1,6 +1,6 @@
 // The Supplier invoices tab's rows (1 November 2026): one row per invoice over its LPOs, status, match, duplicates.
 //   node --import ./tests/unit/register.mjs tests/unit/supplier-invoice-rows.test.mjs        (npm run test:unit)
-const { groupInvoices, filterInvoices, unpaidBySupplier, invoiceNoticeTitle, invWords } = await import("../../src/lib/supplier-invoice-rows.ts");
+const { groupInvoices, filterInvoices, unpaidBySupplier, invoiceNoticeTitle, invWords, approvedVsInvoiced } = await import("../../src/lib/supplier-invoice-rows.ts");
 
 let failed = 0;
 const check = (name, ok, detail = "") => { if (!ok) failed++; console.log(`${ok ? "OK  " : "FAIL"} ${name}${detail ? ` · ${detail}` : ""}`); };
@@ -43,5 +43,19 @@ check("unpaid per supplier counts only the rest", unpaidBySupplier([part])[0]?.t
 check("a fully paid invoice has nothing to pay", rows.find((r) => r.number === "INV-77")?.unpaidAmount === 0);
 check("the notice title", invoiceNoticeTitle("Spare Hub", "4512", 1040) === "Supplier invoice · SPARE HUB · INV 4512 · AED 1,040.00 + VAT");
 check("INV never twice", invWords("INV-4512") === "INV-4512" && invWords("4512") === "INV 4512");
+// Supplier invoice edit (5 November 2026): the invoice's own typed VAT wins over the computed 5% (the Gargash case).
+const sup = [{ id: "s1", name: "GARGASH", trn: "100200300400500", vat_registered: true }];
+const g = groupInvoices([po("g1", "j1", "SI-2026-88", 11684.82, { total_cost_aed: 12228.3, supplier_invoice_vat_aed: 584.24 })], [], jobs, sup)[0];
+check("typed VAT 584.24 wins: total 12,269.06", g.vat === 584.24 && g.total === 12269.06 && g.beforeVat === 11684.82);
+check("unpaid uses the typed VAT (the supplier balance figure)", g.unpaidAmount === 12269.06 && unpaidBySupplier([g])[0]?.total === 12269.06);
+const g2 = groupInvoices([po("g2", "j1", "SI-99", 1000, { supplier_invoice_vat_aed: 50.02, paid_at: "x" }), po("g3", "j2", "SI-99", 500)], [], jobs, sup)[0];
+check("a split invoice's paid share carries its own typed VAT (1,050.02 paid, 525 to pay)", g2.paidAmount === 1050.02 && g2.unpaidAmount === 525);
+const g4 = groupInvoices([po("g4", "j1", "SI-55", 800, { supplier_invoice_vat_aed: 40 })], [], jobs, [{ id: "s1", name: "GARGASH", trn: null, vat_registered: false }])[0];
+check("a non-VAT supplier stays at 0 even with a typed VAT", g4.vat === 0 && g4.total === 800);
+check("no typed VAT = 5% as before", groupInvoices([po("g5", "j1", "SI-56", 1000)], [], jobs, sup)[0].vat === 50);
+// "Approved 12,228.30 → Invoiced 11,684.82 (−543.48)" — the LPO's approved total next to the invoice's figure.
+check("approved vs invoiced words", approvedVsInvoiced(12228.3, 11684.82) === "Approved 12,228.30 → Invoiced 11,684.82 (−543.48)");
+check("an increase reads +", approvedVsInvoiced(250, 260) === "Approved 250.00 → Invoiced 260.00 (+10.00)");
+check("agreeing figures say nothing", approvedVsInvoiced(1000, 1000) === null && approvedVsInvoiced(1000, null) === null && approvedVsInvoiced(0, 500) === null);
 console.log(failed ? `FAILED (${failed})` : "All passed");
 process.exit(failed ? 1 : 0);

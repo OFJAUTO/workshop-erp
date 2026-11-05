@@ -14,6 +14,7 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 | # | Migration | What it adds | Backup taken first |
 |---|---|---|---|
 | 1 | `20261205120000_offsite_backup_jobs.sql` (off-site backups) | Three rows in the background-jobs watch list (nightly off-site backup, weekly storage copy, monthly restore test), so Settings > Background jobs shows every run and the owner's bell rings when one is late or fails. The backups themselves run either way — this only switches the WATCHING on. | `backups/2026-11-05T05-15-52` (111 tables, 250,256 rows) |
+| 2 | `20261205150000_supplier_invoice_edit.sql` (supplier invoice edit) | The invoice's own VAT on the LPO (`purchase_orders.supplier_invoice_vat_aed`; empty = 5% as today) and the server-only `supplier_invoice_edits` table (who, when, the remark and every old → new of an edit). Until it is applied, the "Edit invoice" button stays hidden and VAT reads as 5%; nothing existing changes. Needed for the Gargash case LPO-00037-2 (Mathew edits it with the new button once this is applied). | `backups/2026-11-05T06-25-24` (111 tables, 250,788 rows) |
 
 ## Applied on 5 November 2026, morning
 

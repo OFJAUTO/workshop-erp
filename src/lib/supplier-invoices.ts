@@ -1,5 +1,6 @@
 import "server-only";
 import { logAppError } from "./app-errors";
+import { formatDateTime } from "./format";
 import { notifyRoles } from "./notifications";
 import { pageAll, pageAllIn } from "./page-all";
 import { schemaReady } from "./schema-ready";
@@ -10,6 +11,9 @@ import type { XlsxSheet } from "./xlsx";
 
 /** Migration 20261202130000_supplier_invoice_query: accounts' query back to the parts desk. */
 export const siQueryReady = () => schemaReady("purchase_orders", "supplier_invoice_query, supplier_invoice_query_at, supplier_invoice_query_by");
+/** Supplier invoice edit (5 November 2026): the VAT override and the edit history. Migration 20261205150000_supplier_invoice_edit. */
+export const invoiceEditReady = () => schemaReady("supplier_invoice_edits", "id, po_id, remark, changes");
+export const invoiceVatReady = () => schemaReady("purchase_orders", "supplier_invoice_vat_aed");
 
 const PO_COLS = "id, number, job_id, supplier_id, supplier_name, status, kind, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_at, supplier_invoice_path, received_at, supplier_invoice_checked_at, zoho_bill_id, supplier_paid_at, supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path, supplier_paid_by";
 
@@ -35,7 +39,7 @@ export async function loadSupplierInvoices(opts: { jobId?: string; poIds?: strin
 
 async function readSupplierInvoices(opts: { jobId?: string; poIds?: string[] }): Promise<SupplierInvoices> {
   const admin = createAdminClient();
-  const queryCols = (await siQueryReady()) ? ", supplier_invoice_query, supplier_invoice_query_at" : "";
+  const queryCols = ((await siQueryReady()) ? ", supplier_invoice_query, supplier_invoice_query_at" : "") + ((await invoiceVatReady()) ? ", supplier_invoice_vat_aed" : "");
   // Every row, page by page (PostgREST answers 1,000 rows at most; the old .limit(1500) stopped silently at 1,000).
   const page = (from: number, to: number) => {
     let q = admin.from("purchase_orders").select(PO_COLS + queryCols).eq("is_active", true).neq("kind", "main").in("supplier_invoice_status", ["received", "to_follow"]).order("created_at", { ascending: false }).order("id").range(from, to);
@@ -66,6 +70,7 @@ async function readSupplierInvoices(opts: { jobId?: string; poIds?: string[] }):
     supplier_invoice_number: (r.supplier_invoice_number as string | null) ?? null,
     supplier_invoice_date: (r.supplier_invoice_date as string | null) ?? null,
     supplier_invoice_amount: r.supplier_invoice_amount === null || r.supplier_invoice_amount === undefined ? null : Number(r.supplier_invoice_amount),
+    supplier_invoice_vat_aed: r.supplier_invoice_vat_aed === null || r.supplier_invoice_vat_aed === undefined ? null : Number(r.supplier_invoice_vat_aed),
     supplier_invoice_at: (r.supplier_invoice_at as string | null) ?? null,
     received_at: (r.received_at as string | null) ?? null,
     checked_at: (r.supplier_invoice_checked_at as string | null) ?? null,
@@ -160,6 +165,32 @@ export async function notifyInvoiceReceived(poIds: string[]): Promise<void> {
   } catch (e) {
     await logAppError("supplier-invoices.notify", e, { detail: { poIds } });
   }
+}
+
+export type InvoiceEdit = { id: string; poId: string; at: string; by: string; remark: string; changes: { field: string; old: string; new: string }[]; paidDiff: number | null };
+
+/**
+ * The edit history of these LPOs' invoices, newest first, with who and when preformatted (supplier invoice edit,
+ * 5 November 2026). Shown on the LPO page's Record box and under the opened invoice in Supplier invoices; empty
+ * until the owner's "apply" creates the table.
+ */
+export async function loadInvoiceEdits(poIds: string[]): Promise<InvoiceEdit[]> {
+  if (!poIds.length || !(await invoiceEditReady())) return [];
+  const admin = createAdminClient();
+  const { data } = await admin.from("supplier_invoice_edits").select("id, po_id, remark, changes, paid_difference_aed, created_at, created_by").in("po_id", poIds).eq("is_active", true).order("created_at", { ascending: false }).limit(50);
+  const rows = (data ?? []) as { id: string; po_id: string; remark: string; changes: unknown; paid_difference_aed: number | null; created_at: string; created_by: string | null }[];
+  const byIds = Array.from(new Set(rows.map((r) => r.created_by).filter((x): x is string => !!x)));
+  const { data: staff } = byIds.length ? await admin.from("staff").select("id, display_name").in("id", byIds) : { data: [] };
+  const names = new Map(((staff ?? []) as { id: string; display_name: string }[]).map((s) => [s.id, s.display_name]));
+  return rows.map((r) => ({
+    id: r.id,
+    poId: r.po_id,
+    at: formatDateTime(r.created_at),
+    by: r.created_by ? (names.get(r.created_by) ?? "") : "",
+    remark: r.remark,
+    changes: Array.isArray(r.changes) ? (r.changes as { field: string; old: string; new: string }[]) : [],
+    paidDiff: r.paid_difference_aed === null || r.paid_difference_aed === undefined ? null : Number(r.paid_difference_aed),
+  }));
 }
 
 /** The tile count (accounts' dashboard): invoices to check, waiting for the invoice, queried, or with a price that differs and is not decided. Strict: its caller falls back to its own count. */

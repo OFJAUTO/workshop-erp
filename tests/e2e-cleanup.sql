@@ -52,12 +52,14 @@ begin
   delete from public.inspection_findings where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.inspection_media where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.inspection_change_requests where inspection_id in (select id from public.inspections where job_id = any(job_ids));
+  delete from public.supplier_invoice_edits where po_id in (select id from public.purchase_orders where job_id = any(job_ids));
   delete from public.purchase_order_lines where po_id in (select id from public.purchase_orders where job_id = any(job_ids));
   delete from public.price_import_lines where import_id in (select id from public.price_imports where job_id = any(job_ids));
   delete from public.supplier_charges where job_id = any(job_ids);
   for t in select table_name from information_schema.columns where table_schema = 'public' and column_name = 'job_id' and table_name in (select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE') and table_name <> 'jobs' loop
     execute format('delete from public.%I where job_id = any($1)', t) using job_ids;
   end loop;
+  delete from public.supplier_invoice_edits where po_id in (select id from public.purchase_orders where number like 'LPO-E2E-%');
   delete from public.purchase_order_lines where po_id in (select id from public.purchase_orders where number like 'LPO-E2E-%');
   delete from public.purchase_orders where number like 'LPO-E2E-%';
   delete from public.recovery_trips where driver_name like 'E2e %' or location_details like 'E2e%';
@@ -118,6 +120,7 @@ begin
   delete from public.inspection_findings where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.inspection_media where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.inspection_change_requests where inspection_id in (select id from public.inspections where job_id = any(job_ids));
+  delete from public.supplier_invoice_edits where po_id in (select id from public.purchase_orders where job_id = any(job_ids));
   delete from public.purchase_order_lines where po_id in (select id from public.purchase_orders where job_id = any(job_ids));
   delete from public.price_import_lines where import_id in (select id from public.price_imports where job_id = any(job_ids));
   delete from public.supplier_charges where job_id = any(job_ids);
@@ -185,6 +188,7 @@ set session_replication_role = default;
 -- Stock orders, stock items and the notifications the Part C tests make.
 set session_replication_role = replica;
 delete from public.stock_movements where stock_item_id in (select id from public.stock_items where name ilike 'e2e %') or po_id in (select id from public.purchase_orders where supplier_name ilike 'e2e %');
+delete from public.supplier_invoice_edits where po_id in (select id from public.purchase_orders where supplier_name ilike 'e2e %');
 delete from public.purchase_order_lines where po_id in (select id from public.purchase_orders where supplier_name ilike 'e2e %');
 delete from public.notifications where href like '/parts/orders/%' and href in (select '/parts/orders/' || id::text from public.purchase_orders where supplier_name ilike 'e2e %');
 delete from public.purchase_orders where supplier_name ilike 'e2e %';

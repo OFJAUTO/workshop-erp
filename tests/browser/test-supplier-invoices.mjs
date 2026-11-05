@@ -51,24 +51,32 @@ try {
   await sql("update public.purchase_order_lines set received_qty = 1 where po_id = $1", [poC.id]);
   const poD = await mkPo(jobId, "LPO-E2ESI-4", 520, "E2E BRAKE HOSE", 2, 260);
 
-  /* ---------- A. Parts receive with the invoice and its photo: accounts are told ---------- */
+  /* ---------- A. Parts receive (no invoice asked since 4 November 2026); accounts collect, scan and enter it ---------- */
   const parts = await open(desk.id, 1500, 1400);
   await go(parts.page, `${base}/parts/${jobId}`);
   for (const id of [poC.partId, poD.partId]) await parts.page.locator(`[data-receive-row="${id}"] button`).click().catch(() => {});
   // Only the wishbone links stay ticked.
   const ticked = await parts.page.locator("[data-receive-row] button[aria-pressed='true']").count();
   if (ticked > 1) for (const id of [poC.partId, poD.partId]) if ((await parts.page.locator(`[data-receive-row="${id}"] button[aria-pressed='true']`).count())) await parts.page.locator(`[data-receive-row="${id}"] button`).click();
+  await parts.page.screenshot({ path: shot("a0-parts-receive-no-invoice-box.png") });
   await parts.page.locator("[data-mark-received]").click();
-  await sleep(400);
-  await parts.page.locator("[data-invoice-number]").fill("INV-4512");
-  await parts.page.locator("[data-invoice-date]").fill(today);
-  await parts.page.locator("[data-invoice-amount]").pressSequentially("520", { delay: 15 });
-  await parts.page.locator('[data-supplier-invoice-box] input[type="file"]').setInputFiles(png);
-  await until(async () => (await parts.page.locator("[data-supplier-invoice-box] [data-remove-file]").count()) > 0, 40, 400);
-  await parts.page.screenshot({ path: shot("a1-parts-receive-with-invoice.png") });
-  await parts.page.locator("[data-no-stickers]").click();
+  await parts.page.locator("[data-no-stickers]").click().catch(() => {});
+  const follow = await until(async () => (await sql("select id from public.purchase_orders where id = $1 and supplier_invoice_status = 'to_follow'", [poA.id]))[0]);
+  check("A: receiving never asks for the invoice – the LPO waits for accounts (to follow)", !!follow);
+  const collect = await until(async () => (await sql("select body from public.notifications where staff_id = $1 and body like '%collect the supplier%' and body like '%E2E SPARE HUB%' order by created_at desc limit 1", [acc.id]))[0]);
+  check("A: accounts are told at once to collect the paper from Parts", /collect the supplier's invoice from Parts and scan it/.test(collect?.body ?? ""));
+  // Accounts enter it on the waiting row (the one shared box, prefilled scans welcome).
+  const accA = await open(acc.id, 1500, 1400);
+  await go(accA.page, `${base}/supplier-invoices?open=${encodeURIComponent(`follow:${poA.id}`)}`);
+  await accA.page.locator("[data-si-enter] [data-invoice-number]").fill("INV-4512");
+  await accA.page.locator("[data-si-enter] [data-invoice-date]").fill(today);
+  await accA.page.locator("[data-si-enter] [data-invoice-amount]").pressSequentially("520", { delay: 15 });
+  await accA.page.locator('[data-si-enter] [data-supplier-invoice-box] input[type="file"]').setInputFiles(png);
+  await until(async () => (await accA.page.locator("[data-si-enter] [data-remove-file]").count()) > 0, 40, 400);
+  await accA.page.screenshot({ path: shot("a1-accounts-enter-invoice.png") });
+  await accA.page.locator("[data-si-enter-save]").click();
   const recA = await until(async () => (await sql("select supplier_invoice_number from public.purchase_orders where id = $1 and supplier_invoice_status = 'received'", [poA.id]))[0]);
-  check("A: the parts and the invoice are saved on the LPO", recA?.supplier_invoice_number === "INV-4512");
+  check("A: the invoice entered by accounts is saved on the LPO", recA?.supplier_invoice_number === "INV-4512");
   // THIS invoice's notice (3 November 2026: older notices of other tests' invoices sit on the shared TEST database, so
   // "the newest one" could be read before this one was written).
   const note = await until(async () => (await sql("select title, body, href from public.notifications where staff_id = $1 and type = 'supplier_invoice_received' and body like '%LPO-E2ESI-1%' order by created_at desc limit 1", [acc.id]))[0]);

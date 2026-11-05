@@ -1270,10 +1270,11 @@ export type BillErpFigures = {
  */
 export async function billErpFigures(po: PoRow): Promise<BillErpFigures> {
   const admin = createAdminClient();
+  const vatCol = (await schemaReady("purchase_orders", "supplier_invoice_vat_aed")) ? ", supplier_invoice_vat_aed" : "";
   const [{ data: lineRows }, { data: chargeRows }, { data: poStatusRow }, { data: supRow }] = await Promise.all([
     admin.from("purchase_order_lines").select("description, quantity, received_qty, unit_cost, invoice_unit_cost, invoice_check").eq("po_id", po.id),
     admin.from("supplier_charges").select("description, amount_aed").eq("po_id", po.id).eq("is_active", true).is("removed_at", null),
-    admin.from("purchase_orders").select("status").eq("id", po.id).maybeSingle(),
+    admin.from("purchase_orders").select("status" + vatCol).eq("id", po.id).maybeSingle(),
     po.supplier_id ? admin.from("suppliers").select("vat_registered").eq("id", po.supplier_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const fullyReceived = ((poStatusRow as { status?: string } | null)?.status ?? "") !== "partly_received";
@@ -1294,7 +1295,10 @@ export async function billErpFigures(po: PoRow): Promise<BillErpFigures> {
   const partsRate = round2(expectedNet - chargesSum);
   // A posted bill keeps the standing it was posted with; before that, the supplier's switch decides.
   const taxed = po.zoho_bill_taxed ?? (supRow as { vat_registered?: boolean } | null)?.vat_registered !== false;
-  const gross = taxed ? round2(expectedNet + round2(expectedNet * 0.05)) : expectedNet;
+  // The invoice's own typed VAT wins (supplier invoice edit, 5 November 2026): suppliers round differently. Zoho still
+  // computes its own 5% on the bill, so a typed VAT more than a few fils off 5% shows as a named reconciliation difference.
+  const typedVat = (poStatusRow as { supplier_invoice_vat_aed?: number | null } | null)?.supplier_invoice_vat_aed;
+  const gross = taxed ? round2(expectedNet + (typedVat != null ? round2(Number(typedVat)) : round2(expectedNet * 0.05))) : expectedNet;
   return { lines, charges, chargesSum, linesTotal, useEntered, expectedNet, partsRate, taxed, gross };
 }
 

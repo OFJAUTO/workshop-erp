@@ -17,6 +17,8 @@ export type SiPo = {
   supplier_invoice_number: string | null;
   supplier_invoice_date: string | null;
   supplier_invoice_amount: number | null;
+  /** The invoice's own VAT (supplier invoice edit, 5 November 2026): suppliers round differently. Empty = 5% of the amount. */
+  supplier_invoice_vat_aed?: number | null;
   supplier_invoice_at: string | null;
   received_at: string | null;
   checked_at: string | null;
@@ -57,7 +59,7 @@ export const MATCH_WORDS: Record<InvoiceMatch, string> = {
  * One LPO's part of a supplier invoice. Payment is recorded LPO by LPO ("Paid to supplier" on each LPO page), so each
  * share carries its own paid stamp: a split invoice can be partly paid.
  */
-export type InvoiceShare = { poId: string; poNumber: string; jobId: string | null; jobNumber: string | null; plate: string; car: string; amount: number; lpoTotal: number; parts: number; paidAt: string | null; /** Fix 4 (4 November 2026): the payment's own facts, so the proof box reads per LPO. */ paidMethod: string | null; paidReference: string | null; proofPath: string | null; paidBy: string | null };
+export type InvoiceShare = { poId: string; poNumber: string; jobId: string | null; jobNumber: string | null; plate: string; car: string; amount: number; /** This share's VAT (the LPO's typed VAT when one was entered, else 5% of the amount) and the share with it. */ vat: number; withVat: number; lpoTotal: number; parts: number; paidAt: string | null; /** Fix 4 (4 November 2026): the payment's own facts, so the proof box reads per LPO. */ paidMethod: string | null; paidReference: string | null; proofPath: string | null; paidBy: string | null };
 export type InvoiceRow = {
   key: string;
   supplier: string;
@@ -97,6 +99,18 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 /** The invoice number as a key: no spaces, dashes or case ("INV-4512" = "inv 4512"). */
 export const invoiceKeyNumber = (n: string | null | undefined) => String(n ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
+/**
+ * "Approved 12,228.30 → Invoiced 11,684.82 (−543.48)": the LPO's approved before-VAT total next to the invoice's own
+ * figure (supplier invoice edit, 5 November 2026). Null when they agree to the fils or either figure is missing.
+ */
+export function approvedVsInvoiced(lpoTotal: number, invoiced: number | null | undefined): string | null {
+  if (invoiced === null || invoiced === undefined || !(lpoTotal > 0) || !(invoiced > 0)) return null;
+  const diff = r2(invoiced - lpoTotal);
+  if (Math.abs(diff) <= 0.005) return null;
+  const fmt = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `Approved ${fmt(lpoTotal)} → Invoiced ${fmt(invoiced)} (${diff < 0 ? "−" : "+"}${fmt(Math.abs(diff))})`;
+}
+
 /** The rows, newest first. */
 export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppliers: SiSupplier[], vatPercent = 5): InvoiceRow[] {
   const jobOf = new Map(jobs.map((j) => [j.id, j]));
@@ -120,14 +134,18 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
     const shares: InvoiceShare[] = items.map((p) => {
       const j = p.job_id ? jobOf.get(p.job_id) : null;
       const mine = lines.filter((l) => l.po_id === p.id);
-      return { poId: p.id, poNumber: p.number, jobId: p.job_id, jobNumber: j?.job_number ?? null, plate: j?.plate ?? "", car: j?.car ?? "", amount: r2(waiting ? p.total_cost_aed : (p.supplier_invoice_amount ?? p.total_cost_aed)), lpoTotal: p.total_cost_aed, parts: mine.length, paidAt: p.paid_at, paidMethod: p.paid_method ?? null, paidReference: p.paid_reference ?? null, proofPath: p.proof_path ?? null, paidBy: p.paid_by ?? null };
+      const amount = r2(waiting ? p.total_cost_aed : (p.supplier_invoice_amount ?? p.total_cost_aed));
+      // The LPO's own typed VAT wins (supplier invoice edit, 5 November 2026); an unentered invoice has none yet.
+      const typedVat = waiting ? null : (p.supplier_invoice_vat_aed ?? null);
+      const vat = vatRegistered ? r2(typedVat ?? (amount * vatPercent) / 100) : 0;
+      return { poId: p.id, poNumber: p.number, jobId: p.job_id, jobNumber: j?.job_number ?? null, plate: j?.plate ?? "", car: j?.car ?? "", amount, vat, withVat: r2(amount + vat), lpoTotal: p.total_cost_aed, parts: mine.length, paidAt: p.paid_at, paidMethod: p.paid_method ?? null, paidReference: p.paid_reference ?? null, proofPath: p.proof_path ?? null, paidBy: p.paid_by ?? null };
     });
     const beforeVat = r2(shares.reduce((a, s) => a + s.amount, 0));
-    const vat = vatRegistered ? r2((beforeVat * vatPercent) / 100) : 0;
+    const vat = r2(shares.reduce((a, s) => a + s.vat, 0));
     const total = r2(beforeVat + vat);
     // Paid LPO by LPO: the paid shares with their VAT, the rest still to pay (all or nothing is exactly the total).
     const paidShares = shares.filter((s) => s.paidAt);
-    const paidAmount = paidShares.length === shares.length ? total : paidShares.length === 0 ? 0 : r2(paidShares.reduce((a, s) => a + s.amount, 0) * (1 + (vatRegistered ? vatPercent / 100 : 0)));
+    const paidAmount = paidShares.length === shares.length ? total : paidShares.length === 0 ? 0 : r2(paidShares.reduce((a, s) => a + s.withVat, 0));
     const mine = lines.filter((l) => items.some((p) => p.id === l.po_id));
     const match: InvoiceMatch[] = [];
     if (!mine.length) match.push("not_linked");
