@@ -88,7 +88,7 @@ try {
   /* ---------- B. the E-00055 shape: sent by the advisor, the owner starts v2 and completes it ---------- */
   const est2 = await mk(A.id, "sent", [{ type: "labour", title: "E2E BATTERY PROGRAMMING", total: 700 }]);
   await go(ownerB.page, `${base}/estimates/${est2.id}`);
-  await ownerB.page.getByRole("button", { name: /Start version 2/ }).click();
+  await ownerB.page.locator("[data-revise]").click();
   const v2 = await until(async () => (await sql("select id, created_by from public.quotations where number = $1 and version = 2", [est2.number]))[0]);
   made.push(v2?.id);
   check("B: the owner's new version is made by him", v2?.created_by === owner.id);

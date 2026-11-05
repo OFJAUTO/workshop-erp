@@ -425,6 +425,28 @@ export const hoursText = (h: number | null | undefined) => {
 };
 /** The hours a labour line is estimated at: the Est. h box, else the quoted hours. Never the rate. */
 export const estimateOf = (l: Pick<QuoteLine, "hours" | "hours_estimate">) => l.hours_estimate ?? l.hours ?? 0;
+
+/** The words beside the profit while own work has no hours (5 November 2026, E-00056). */
+export const HOURS_MISSING_WORDS = "Hours missing – profit not reliable";
+
+/**
+ * OWN WORK WITH NO HOURS (5 November 2026, E-00056: "painting exterior trims" showed 97.7% profit because its two
+ * lines carried no hours, so the one shared calculation found no labour to cost). A labour line with no hours (quoted
+ * or estimated), or a typed package line (own work, not from the packages list, which costs its own hours) with no
+ * installer hours - priced or included at 0 alike: the work still takes time. Outside work (its typed cost), parts,
+ * charges, unchosen options and left-off lines never count. While any line is listed the profit is not reliable:
+ * shown red with HOURS_MISSING_WORDS, never green - on estimates and job quotations alike. Once the technicians'
+ * clocked hours cost the labour (opts.clockedHours, the same figure quoteTotals takes), labour lines are costed.
+ */
+export function hoursMissingLines<T extends Pick<QuoteLine, "id" | "line_type" | "hours" | "hours_estimate"> & { is_active?: boolean; fee_kind?: string | null; outside_work?: boolean; package_key?: string | null; installer_hours?: number | null; option_group?: string | null; chosen?: boolean; left_off?: boolean }>(lines: T[], opts: { clockedHours?: number | null } = {}): T[] {
+  const clocked = (opts.clockedHours ?? 0) > 0;
+  return lines.filter((l) => {
+    if (l.is_active === false || l.fee_kind || isUnchosen(l) || isOutsideWork(l)) return false;
+    if (l.line_type === "labour") return !clocked && !((l.hours ?? 0) > 0) && !(estimateOf(l) > 0);
+    if (l.line_type === "package") return !l.package_key && !(Number(l.installer_hours) > 0);
+    return false;
+  });
+}
 /** No single job takes more than this: an estimate above it is not hours (the rate was typed in the box once). */
 export const ESTIMATE_MAX_LINE_HOURS = 50;
 /** Estimates totalling more than this many times the quoted hours are not trusted either. */

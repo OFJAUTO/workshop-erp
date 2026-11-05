@@ -35,7 +35,7 @@ import { PackageItemsToggle } from "@/components/PackageItemsToggle";
 import { damagePartSuggestions } from "@/lib/body-parts";
 import { compApprovalReason, compCost, compLinesOf, compProblem } from "@/lib/complimentary";
 import { NOT_PRICE_KEYS, belowCostAll, belowCostChangesIn, belowCostWords, type BelowCost } from "@/lib/quotes";
-import { INTERNAL_ONLY_LABEL, profitLines, approvalCovers, discountAgainstLimit, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
+import { HOURS_MISSING_WORDS, hoursMissingLines, INTERNAL_ONLY_LABEL, profitLines, approvalCovers, discountAgainstLimit, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { DEFAULT_COST_LIMITS, markupTooHigh, markupTooHighWords } from "@/lib/part-cost-check";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, roundQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
@@ -338,12 +338,6 @@ export function QuoteEditor({
   recoveryTypes = [],
   wait = null,
   workshopEstimate = null,
-  onRevise = null,
-  onAskRevise = null,
-  revision = null,
-  reviseReasons = [],
-  reviseDefault = null,
-  reviseOpen = false,
   ownerBox = null,
   tintBox = null,
   autoSend = false,
@@ -393,18 +387,6 @@ export function QuoteEditor({
   recoveryTypes?: RecoveryType[];
   wait?: PartsWait | null;
   workshopEstimate?: { hours: number | null; managerHours: number | null; agreed: boolean } | null;
-  /** "Revise quotation" in the bottom bar once the quotation was sent. */
-  onRevise?: ((formData: FormData) => Promise<void>) | null;
-  /** The customer approved: the advisor asks the owner for one revision (greyed Revise). */
-  onAskRevise?: ((formData: FormData) => Promise<void>) | null;
-  /** The revision request and the owner's answer, for the words in the bar. */
-  revision?: { requestedAt: string | null; requestedBy: string | null; reason: string | null; allowedAt: string | null; declinedAt: string | null; declinedNote: string | null } | null;
-  /** One-tap reasons for the revision request (Settings). */
-  reviseReasons?: string[];
-  /** Parts changed after approval (5 November 2026): the revision request comes prefilled with the changes. */
-  reviseDefault?: string | null;
-  /** Arriving from the advisor's "Parts changed after approval" notice: the request opens by itself. */
-  reviseOpen?: boolean;
   /** The owner's approval box (above the limit) or the revision request, shown under "Before sending". */
   ownerBox?: ReactNode;
   /** Section 5 (30 October 2026): the complimentary box - the earlier jobs to pick from, and whether the owner already decided (a free comeback). Null until the database has it. */
@@ -484,7 +466,6 @@ export function QuoteEditor({
       refresh();
     });
   };
-  const [reviseAsk, setReviseAsk] = useState(reviseOpen);
   // The answers already given on the way to "complete" (markup, parts, deposit): carried into the next check.
   const skips = useRef<{ skipMarkup?: boolean; skipParts?: boolean; skipDeposit?: boolean; lowProfitOk?: boolean; skipPositions?: boolean; highMarkupOk?: boolean }>({});
   const [positionsAsk, setPositionsAsk] = useState<string | null>(null);
@@ -960,6 +941,9 @@ export function QuoteEditor({
     return isOwner ? { block: false, words: `${words}. You will be asked why (logged).` } : { block: true, words: `Not saved: ${words}. Lower the discount – only the owner can sell below cost.` };
   };
   const totals = quoteTotals(lines, q, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, bankChargeFixed: liveFixed, clockedHours: settings.clockedHours ?? null, bodyshopRate: settings.bodyshopRate ?? 0, supplierCharges: settings.supplierCharges?.total ?? 0, packageCosting: liveCosting });
+  // Own work with no hours (5 November 2026, E-00056): THE rule; the profit is not reliable while any is listed.
+  const hoursMissing = hoursMissingLines(lines, { clockedHours: settings.clockedHours ?? null });
+  const hoursMissingIds = new Set(hoursMissing.map((x) => x.id));
   /** The totals WITHOUT the round-off: what the Round off window measures against. */
   const noRound = q.rounded_total_aed ? quoteTotals(lines, { ...q, rounded_total_aed: null }, { technicianCostRate: settings.technicianCostRate ?? 0, depositThreshold: settings.depositThreshold, depositPercent: settings.depositPercent, bankChargePercent: liveRate, bankChargeFixed: liveFixed, clockedHours: settings.clockedHours ?? null, bodyshopRate: settings.bodyshopRate ?? 0, supplierCharges: settings.supplierCharges?.total ?? 0, packageCosting: liveCosting }) : totals;
   // Section 5: what is free on this quotation and what it costs us, from the same calculation.
@@ -1332,10 +1316,12 @@ export function QuoteEditor({
                   <Input value={num(l.unit_cost)} placeholder="0" onChange={(e) => patch(l.id, { unit_cost: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} inputMode="decimal" disabled={disabled} aria-label="Our cost" className="w-16 text-right min-h-10 px-1 text-xs" data-our-cost />
                 </label>
               ) : null}
-              {isService && showProfit && (svc?.bodyshop_kind || svc?.department === "bodyshop" || (l.installer_hours ?? 0) > 0) ? (
-                <label className="inline-flex items-center gap-1" title="Estimated installer hours (internal): from the service's default, counted at the bodyshop rate until real clockings replace it" data-installer-hours>
-                  <span className="text-[10px] font-semibold text-muted">Inst. h</span>
-                  <Input value={num(l.installer_hours)} placeholder="0" onChange={(e) => patch(l.id, { installer_hours: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} inputMode="decimal" disabled={disabled} aria-label="Installer hours (internal)" className="w-14 text-right min-h-10 px-1 text-xs text-muted" />
+              {/* 5 November 2026 (E-00056): every fixed-price line of our own work takes hours, and the profit counts them
+                  (hours × the cost rate) - before, only bodyshop services showed the box, so typed lines had none. */}
+              {isService && showProfit && !l.outside_work && (!l.package_key || svc?.bodyshop_kind || svc?.department === "bodyshop" || (l.installer_hours ?? 0) > 0) ? (
+                <label className="inline-flex items-center gap-1" title={`The hours this work takes us (internal, never on the customer's documents): counted at AED ${settings.bodyshopRate ?? 50} an hour in the profit until real clockings replace them`} data-installer-hours>
+                  <span className={`text-[10px] font-semibold ${hoursMissingIds.has(l.id) ? "text-red" : "text-muted"}`}>our hours</span>
+                  <Input value={num(l.installer_hours)} placeholder="0" onChange={(e) => patch(l.id, { installer_hours: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} inputMode="decimal" disabled={disabled} aria-label="Our hours (internal)" className={`w-14 text-right min-h-10 px-1 text-xs ${hoursMissingIds.has(l.id) ? "border-red-bar text-red" : "text-muted"}`} data-hours-box={hoursMissingIds.has(l.id) ? "missing" : "ok"} />
                 </label>
               ) : null}
               {showQty ? (
@@ -1530,19 +1516,6 @@ export function QuoteEditor({
       onLocal={(c) => setHeader((h) => ({ ...h, commission_to: c.to, commission_kind: c.kind, commission_value: c.value, commission_status: c.status }))}
     />
   );
-  const reviseAskDialog = reviseAsk && onAskRevise ? (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-revise-ask>
-      <form action={onAskRevise} className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3">
-        <span className="text-lg font-extrabold">Ask the owner to allow a revision</span>
-        <p className="text-sm text-muted">The customer approved this quotation. Say why it has to change; the owner allows one revision or declines.</p>
-        <ReasonChips name="reason" label="Why?" rows={2} options={reviseReasons} defaultValue={reviseDefault ?? ""} required placeholder="Tap a reason, or type" />
-        <div className="flex flex-wrap gap-2">
-          <Button type="submit" size="md" data-ask-revise-send>Ask the owner</Button>
-          <Button type="button" tone="ghost" size="md" onClick={() => setReviseAsk(false)}>Cancel</Button>
-        </div>
-      </form>
-    </div>
-  ) : null;
   // Section 11: the tint box follows the lines - it shows while any line (or package item) is tint work.
   const hasTint = !!tintBox && lines.some((l) => l.is_active && lineIsTint(l, services.find((s) => s.id === l.service_id)?.bodyshop_kind ?? null));
   // Approved by the customer, replaced or invoiced: nothing can be typed or removed; the bar carries the one way forward.
@@ -1560,27 +1533,16 @@ export function QuoteEditor({
           ownerBox={ownerBox}
           tintBox={hasTint ? tintBox : null}
           statusText={statusText}
-          actions={
-            <>
-              {canSend && onRevise ? <form action={onRevise}><Button type="submit" size="md" data-revise-bar>Revise quotation</Button></form> : null}
-              {canSend && !onRevise && onAskRevise ? (
-                revision?.requestedAt && !revision.allowedAt && !revision.declinedAt ? (
-                  <span className="text-xs font-semibold text-amber" data-revise-pending>Owner asked {formatDayTime(revision.requestedAt)}, waiting</span>
-                ) : (
-                  <Button type="button" size="md" onClick={() => setReviseAsk(true)} data-ask-revise>Ask owner to revise</Button>
-                )
-              ) : null}
-              {revision?.declinedAt && !revision.allowedAt ? <span className="text-xs font-semibold text-red" data-revise-declined>Declined by the owner{revision.declinedNote ? `: ${revision.declinedNote}` : ""}</span> : null}
-              {canSend && onRevise && revision?.allowedAt ? <span className="text-xs font-semibold text-green" data-revise-allowed>Owner allowed one revision</span> : null}
-            </>
-          }
+          hoursMissing={hoursMissing.map((x) => x.title || "untitled line")}
+          /* Revise lives in the page header now (DocReviseButton, 5 November 2026): one place, at the top. */
+          actions={null}
         />
-        {reviseAskDialog}
       </>
     );
   }
   const margin = totals.net > 0 ? (totals.profit / totals.net) * 100 : 0;
-  const tone3 = marginToneOf(totals.profit, totals.net, { yellow: settings.marginYellow ?? 30, red: settings.marginRed ?? 20 });
+  // Own work with no hours (5 November 2026, E-00056): the profit is not reliable - red, never green.
+  const tone3 = hoursMissing.length ? "red" : marginToneOf(totals.profit, totals.net, { yellow: settings.marginYellow ?? 30, red: settings.marginRed ?? 20 });
   const marginTone = tone3 === "red" ? "text-red" : tone3 === "amber" ? "text-amber" : "text-green";
   const progressText = `${labourDone} of ${namedLabour.length} line${namedLabour.length === 1 ? "" : "s"} done${wait?.partsTotal ? ` · parts ${wait.partsPriced} of ${wait.partsTotal} priced` : ""}`;
   const scrollToFirstBlocker = () => {
@@ -2108,7 +2070,7 @@ export function QuoteEditor({
                 <span className="text-[11px] font-semibold text-muted">Customer will pay by</span>
                 <div className="flex flex-wrap gap-1">
                   {([["not_sure", "Not sure"], ["card", "Card"], ["link", "Payment link"], ["cash", "Cash"], ["cheque", "Cheque"], ["transfer", "Bank transfer"]] as const).map(([v, label]) => (
-                    <button key={v} type="button" disabled={disabled} onClick={() => setHeaderField({ expected_payment_method: v }, true)} aria-pressed={expectedMethod === v} className={`min-h-8 rounded-control border px-2 text-[11px] font-bold ${expectedMethod === v ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{label}</button>
+                    <button key={v} type="button" disabled={disabled} onClick={() => setHeaderField({ expected_payment_method: v }, true)} aria-pressed={expectedMethod === v} className={`min-h-9 rounded-control border px-2 text-[11px] font-bold ${expectedMethod === v ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{label}</button>
                   ))}
                 </div>
                 <span className="text-[11px] text-muted">Sets the estimated bank charge only. The customer may still pay any way; the real charge replaces it at payment.</span>
@@ -2128,7 +2090,7 @@ export function QuoteEditor({
                         {p.key === "labour" && settings.installerHistory && totals.installerHours > 0 ? <span className="block text-[11px]" data-installer-history>This model before: about {hoursText(settings.installerHistory.avgHours)} over {settings.installerHistory.jobs} job{settings.installerHistory.jobs === 1 ? "" : "s"}</span> : null}
                       </dt>
                       <dd className="text-right" data-profit-amount={p.key}>{aed(p.amount)}</dd>
-                      {p.key === "materials" && (department === "bodyshop" || Number(header.materials_cost_aed) > 0) ? (
+                      {p.key === "materials" && (department === "bodyshop" || quotation.kind === "estimate" || Number(header.materials_cost_aed) > 0) ? (
                         <>
                           <dt className="pl-3 text-[11px] text-muted">Typed materials (paint, extra film)</dt>
                           <dd className="text-right"><Input value={header.materials_cost_aed ? String(header.materials_cost_aed) : ""} onChange={(e) => setHeaderField({ materials_cost_aed: Number(e.target.value.replace(",", ".")) || 0 }, true)} inputMode="decimal" placeholder="0" disabled={disabled} aria-label="Materials cost" className="w-24 text-right min-h-8 text-xs" data-materials /></dd>
@@ -2147,6 +2109,7 @@ export function QuoteEditor({
                 )}
                 <dt className="font-semibold border-t border-line pt-1">= Total cost</dt><dd className="text-right font-semibold border-t border-line pt-1" data-profit-total-cost>{aed(totals.totalCost)}</dd>
                 <dt className="font-bold">PROFIT{totals.commissionPending ? <span className="ml-1 font-semibold text-amber" data-profit-commission-pending>(commission counted, pending owner approval)</span> : null}</dt><dd className={"text-right font-bold " + marginTone} data-profit-total>{aed(totals.profit)} · {margin.toFixed(1)}%</dd>
+                {hoursMissing.length ? <dd className="col-span-2 text-right font-bold text-red" data-hours-missing={hoursMissing.length}>{HOURS_MISSING_WORDS}<span className="block text-[11px] font-semibold">{hoursMissing.length} line{hoursMissing.length === 1 ? "" : "s"} without hours: {hoursMissing.map((x) => x.title || "untitled line").join(", ")}. Type the hours in each line&apos;s &quot;Hours&quot; or &quot;our hours&quot; box.</span></dd> : null}
                 <dt className="text-muted">{hasPackageLine(lines) ? "Package margin" : "Labour margin"}</dt><dd className="text-right" data-labour-margin>{aed(totals.labourMargin)}</dd>
                 <dt className="text-muted">Parts margin</dt><dd className="text-right">{aed(totals.partsMargin)}{totals.partsUnpriced ? <span className="block text-[11px] font-semibold text-amber" data-margin-incomplete>{totals.partsUnpriced} part{totals.partsUnpriced === 1 ? "" : "s"} not priced yet, margin incomplete</span> : null}</dd>
               </dl>
@@ -2323,7 +2286,6 @@ export function QuoteEditor({
           </div>
         </div>
       ) : null}
-      {reviseAskDialog}
       {lowAsk ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-low-profit-ask>
           <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card border-2 border-red-bar bg-white p-5 flex flex-col gap-3">
@@ -2484,7 +2446,7 @@ export function QuoteEditor({
         <div className="fixed bottom-0 left-0 right-0 nav:left-60 z-40 border-t border-line bg-white px-4 py-2.5">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-1">
             {!disabled ? <span className={`text-[11px] font-bold ${state === "offline" ? "text-amber" : "text-muted"}`}>{state === "saved" ? "Saved" : state === "saving" ? "Saving…" : "No connection · changes kept, will save"}</span> : null}
-            {showProfit ? <span className={`text-xs font-extrabold ${marginTone}`} data-margin-chip data-margin-tone={tone3}>Profit {margin.toFixed(0)}%</span> : null}
+            {showProfit ? <span className={`text-xs font-extrabold ${marginTone}`} data-margin-chip data-margin-tone={tone3} data-hours-missing-chip={hoursMissing.length ? "1" : undefined}>Profit {margin.toFixed(0)}%{hoursMissing.length ? ` · ${HOURS_MISSING_WORDS}` : ""}</span> : null}
             {(() => {
               const hist = settings.packageCost ?? {};
               let worst: "red" | "amber" | null = null;
@@ -2506,19 +2468,6 @@ export function QuoteEditor({
                 </Button>
               ) : null}
               {!sent && completed && canSend ? <SendQuoteControl isOwner={isOwner} quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={blockers.length > 0} onBlocked={scrollToFirstBlocker} existingToken={quotation.token} shortLink={shortLink} status={quotation.status} autoOpen={autoSend} compact /> : null}
-              {canSend && sent && onRevise ? <form action={onRevise}><Button type="submit" tone="secondary" size="md" data-revise-bar>Revise quotation</Button></form> : null}
-              {canSend && sent && !onRevise && onAskRevise ? (
-                <span className="inline-flex flex-wrap items-center gap-2" data-ask-revise-bar>
-                  <Button type="button" tone="secondary" size="md" disabled className="opacity-50" title="The customer approved this quotation: the owner must allow a revision">Revise quotation</Button>
-                  {revision?.requestedAt && !revision.allowedAt && !revision.declinedAt ? (
-                    <span className="text-xs font-semibold text-amber" data-revise-pending>Owner asked {formatDayTime(revision.requestedAt)}, waiting</span>
-                  ) : (
-                    <Button type="button" size="md" onClick={() => setReviseAsk(true)} data-ask-revise>Ask owner to revise</Button>
-                  )}
-                  {revision?.declinedAt ? <span className="text-xs font-semibold text-red" data-revise-declined>Declined by the owner{revision.declinedNote ? `: ${revision.declinedNote}` : ""}</span> : null}
-                </span>
-              ) : null}
-              {canSend && sent && onRevise && revision?.allowedAt ? <span className="text-xs font-semibold text-green" data-revise-allowed>Owner allowed one revision</span> : null}
               {canSend && sent && quotation.token && (quotation.status === "sent" || quotation.status === "opened") ? <SendQuoteControl quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={false} onBlocked={() => {}} existingToken={quotation.token} shortLink={shortLink} status={quotation.status} again /> : null}
             </span>
           </div>

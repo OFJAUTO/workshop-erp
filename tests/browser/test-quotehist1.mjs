@@ -88,7 +88,7 @@ try {
   const banner = await text(p.locator("[data-old-version-banner], [data-lock-banner]").first());
   check("B2b the old-version words show once", (await p.locator("[data-old-version-banner], [data-lock-banner]").count()) === 1);
   check("B2 v1 opens read-only with 'OLD VERSION – replaced by v2 on … by …'", /^OLD VERSION – replaced by v2 on \d+ \w+ by \S+/.test(banner) && (await p.locator("[data-quote-locked]").count()) > 0, banner);
-  check("B3 the versions dropdown lists v1 and v2 (current)", (await p.locator("[data-version-select] option").allTextContents()).join("|").includes("v2 (current)"));
+  check("B3 the version links by the title read v1 | v2, v1 marked (the one on screen)", (await p.locator("[data-version-links] [data-version-link]").evaluateAll((els) => els.map((e) => `${e.textContent}${e.hasAttribute("data-version-current") ? "*" : ""}`))).join("|") === "v1*|v2");
   await p.screenshot({ path: path.join(SHOTS, "B-v1-read-only.png") });
 
   const phone = await browserFor("owner", { viewport: { width: 390, height: 844 }, mobile: true, touch: true });

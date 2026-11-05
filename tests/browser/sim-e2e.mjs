@@ -4,14 +4,14 @@
 //   PATHS=a,b node --env-file=.env.test.local tests/browser/sim-e2e.mjs   (default: all eight)
 // Paths: a mechanical + supplier parts + deposit + pay-link · b stock parts + cash · c declined → fee →
 // gate-out · d revision after approval · e bodyshop PPF sign-off → handover · f mixed quotation ·
-// g recovery delivery · h commission approve → pay · i enter price myself (estimate + job quotation) · j parts changed after approval → resend for approval.
+// g recovery delivery · h commission approve → pay · i enter price myself (estimate + job quotation) · j parts changed after approval → resend for approval · k revise at the top + hours missing.
 import { mkdirSync } from "node:fs";
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -1257,6 +1257,146 @@ await section("j", "parts changed after approval → resend for approval", async
     const s8 = await states(page);
     check(`j8: handed over - now (and only now) every step is green (${bar(s8)})`, Object.values(s8).every((x) => x === "done"), bar(s8));
     await shot(page, "j8-all-green");
+    await browser.close();
+  }
+});
+
+/* ================================================================================================= */
+/* Path k — REVISE AT THE TOP + PROFIT WITH NO LABOUR COST (5 November 2026, E-00056): the one       */
+/* "Revise → version N" in the header (estimate and job quotation), "v1 | v2" by the title, the red   */
+/* "Hours missing – profit not reliable" until the hours are typed, at 1440×900 and 800×1280.         */
+/* ================================================================================================= */
+await section("k", "revise at the top + hours missing (estimate + job quotation)", async () => {
+  const advisor = (await sql("select id, display_name from public.staff where role_id = 'service_advisor' and is_active order by display_name limit 1"))[0];
+  const accounts = (await sql("select id from public.staff where role_id = 'accounts' and is_active order by display_name limit 1"))[0];
+  const rate = Number((await sql("select value #>> '{}' as v from public.settings where key = 'bodyshop_cost_rate_aed'"))[0]?.v) || 50;
+  const mm = (await sql("select m.id as make_id, v.id as model_id from public.vehicle_makes m join public.vehicle_models v on v.make_id = m.id where m.is_active and v.is_active order by m.name, v.name limit 1"))[0];
+  const vin = `WDK${Math.floor(1e13 + Math.random() * 8e13)}`.slice(0, 17).replace(/[IOQ]/g, "1");
+  const cust = (await sql("insert into public.customers (customer_type, full_name, phone) values ('individual', 'E2e Revise Top', '+971500000095') returning id"))[0].id;
+  const car = (await sql("insert into public.vehicles (customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, make_id, model_id, model_year, vin) values ($1, true, 'UAE', 'Dubai', 'K', '95155', $2, $3, 2024, $4) returning id", [cust, mm.make_id, mm.model_id, vin]))[0].id;
+  // E-00056's shape: a SENT estimate whose two typed fixed-price lines carry no hours (painting 6,000; removal and refix included at 0).
+  const est = (await sql("insert into public.quotations (kind, customer_id, vehicle_id, status, validity_days, created_by, updated_by) values ('estimate', $1, $2, 'draft', 7, $3, $3) returning id, number", [cust, car, advisor.id]))[0];
+  await sql("insert into public.quotation_lines (quotation_id, position, line_type, title, source_type, quantity, unit_price, line_total, created_by, updated_by) values ($1, 1, 'package', 'E2E PAINTING EXTERIOR TRIMS', 'manual', 1, 6000, 6000, $2, $2), ($1, 2, 'package', 'E2E REMOVAL AND REFIX', 'manual', 1, 0, 0, $2, $2)", [est.id, advisor.id]);
+  await sql("update public.quotations set status = 'sent', sent_at = now(), token = md5(random()::text), subtotal_aed = 6000, vat_aed = 300, total_aed = 6300 where id = $1", [est.id]);
+  const red = (el) => el.evaluate((e) => { const c = getComputedStyle(e).color.match(/\d+/g).map(Number); return c[0] > 150 && c[1] < 90 && c[2] < 90; });
+
+  /* -- the estimate, 1440×900, the advisor in charge -- */
+  let v2Id = null;
+  {
+    const { browser, page } = await browserForId(advisor.id, { viewport: { width: 1440, height: 900 } });
+    await go(page, `${base}/estimates/${est.id}`);
+    const rev = page.locator("[data-revise]");
+    const rb = await rev.boundingBox();
+    const pdf = await page.locator("a", { hasText: "Preview PDF" }).boundingBox();
+    check("k1: ONE black 'Revise → version 2' at the top, in the row with Preview PDF", (await rev.count()) === 1 && /Revise → version 2/.test((await rev.textContent()) ?? "") && !!rb && !!pdf && rb.y < 300 && Math.abs(rb.y - pdf.y) < 40, `${JSON.stringify(rb)} pdf ${JSON.stringify(pdf)}`);
+    check("k1: no Revise box at the bottom any more", (await page.getByRole("button", { name: /Start version/ }).count()) === 0);
+    check("k1: 'v1' next to the title, marked current", ((await page.locator("[data-version-links] [data-version-current]").textContent()) ?? "") === "v1");
+    const warn = page.locator("[data-hours-missing]");
+    const chip = page.locator("[data-margin-chip]");
+    check("k1: the profit says 'Hours missing – profit not reliable' in red (cause: typed fixed-price lines with no hours)", (await warn.count()) === 1 && /Hours missing – profit not reliable/.test((await warn.textContent()) ?? "") && /E2E PAINTING EXTERIOR TRIMS/.test((await warn.textContent()) ?? "") && (await red(warn)), ((await warn.textContent().catch(() => "")) ?? "").slice(0, 160));
+    check("k1: the profit chip is red, never green, while hours are missing", (await chip.getAttribute("data-margin-tone")) === "red" && (await chip.getAttribute("data-hours-missing-chip")) === "1" && (await red(chip)), (await chip.textContent()) ?? "");
+    await page.screenshot({ path: `${shots}/k1-estimate-revise-top-1440.png` });
+    await page.locator("[data-internal-box]").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${shots}/k1-estimate-hours-missing-1440.png` });
+    await rev.click();
+    await page.waitForURL((u) => /\/estimates\//.test(u.toString()) && !u.toString().includes(est.id), { timeout: 30000 }).catch(() => null);
+    v2Id = page.url().split("/estimates/")[1]?.split(/[?#]/)[0] ?? null;
+    const v = await sql("select id, version, status from public.quotations where number = $1 order by version", [est.number]);
+    // The copied lines (the automatic, hidden bank-charge line is made for every version and is not a copy).
+    const copied = v2Id ? await sql("select title from public.quotation_lines where quotation_id = $1 and is_active and fee_kind is null order by position", [v2Id]) : [];
+    check("k2: the top button made version 2 of the same number, a copy of v1 (v1 kept, replaced)", v.length === 2 && v[1].id === v2Id && v[1].status === "draft" && v[0].status === "superseded" && copied.length === 2, `${JSON.stringify(v)} · ${copied.map((c) => c.title).join(", ")}`);
+    await go(page, `${base}/estimates/${v2Id}`);
+    const links = await page.locator("[data-version-links] [data-version-link]").evaluateAll((els) => els.map((e) => `${e.textContent}${e.hasAttribute("data-version-current") ? "*" : ""}`));
+    check(`k2: 'v1 | v2' next to the title, v2 current (${links.join(" | ")})`, links.join("|") === "v1|v2*");
+    check("k2: a draft has no Revise button (nothing to revise until it is sent)", (await page.locator("[data-revise]").count()) === 0);
+    // Type the hours this work takes us: the profit counts them (hours × the bodyshop rate) and the warning goes.
+    const boxes = page.locator("[data-hours-box]");
+    check("k3: every typed fixed-price line has an 'our hours' box, red while empty", (await boxes.count()) === 2 && (await page.locator("[data-hours-box='missing']").count()) === 2);
+    await boxes.nth(0).pressSequentially("16", { delay: 60 });
+    await boxes.nth(1).pressSequentially("4", { delay: 60 });
+    const saved = await until(async () => (await sql("select coalesce(sum(installer_hours), 0)::float as h from public.quotation_lines where quotation_id = $1 and is_active", [v2Id]))[0]?.h === 20, 40, 500);
+    check("k3: the 20 hours are saved", !!saved);
+    const mat = page.locator("[data-materials]");
+    check("k3: the estimate has the Materials box too", (await mat.count()) === 1);
+    if (await mat.count()) await mat.pressSequentially("300", { delay: 60 });
+    await until(async () => Number((await sql("select materials_cost_aed from public.quotations where id = $1", [v2Id]))[0]?.materials_cost_aed) === 300, 40, 500);
+    await go(page, `${base}/estimates/${v2Id}`);
+    const labour = ((await page.locator("[data-profit-amount='labour']").textContent()) ?? "").replace(/\s+/g, " ");
+    const material = ((await page.locator("[data-profit-amount='materials']").textContent()) ?? "").replace(/\s+/g, " ");
+    const want = (20 * rate).toLocaleString("en-US", { minimumFractionDigits: 2 });
+    check(`k3: labour at cost = 20 h × AED ${rate} = ${want}, materials 300.00, from the one calculation`, labour.includes(want) && material.includes("300.00"), `${labour} · ${material}`);
+    check("k3: with the hours in, the warning is gone and the chip is no longer the hours warning", (await page.locator("[data-hours-missing]").count()) === 0 && (await page.locator("[data-hours-missing-chip]").count()) === 0);
+    await page.locator("[data-internal-box]").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${shots}/k3-estimate-hours-typed-1440.png` });
+    await page.locator("[data-version-link='1']").click();
+    await page.waitForURL((u) => u.toString().includes(est.id), { timeout: 20000 }).catch(() => null);
+    check("k4: v1 opens from the title, read-only, with no Revise (v2 is the newest)", (await page.locator("[data-old-version-banner]").count()) === 1 && (await page.locator("[data-revise]").count()) === 0 && (await page.locator("[data-hours-box]:not([disabled])").count()) === 0);
+    await browser.close();
+  }
+  {
+    const { browser, page } = await browserForId(accounts.id, { viewport: { width: 1440, height: 900 } });
+    await go(page, `${base}/estimates/${v2Id}`);
+    check("k4: accounts can read the estimate but never see Revise (owner and advisors only)", (await page.locator("[data-revise], [data-ask-revise]").count()) === 0);
+    await browser.close();
+  }
+  {
+    const { browser, page } = await browserForId(advisor.id, { viewport: { width: 800, height: 1280 }, hasTouch: true });
+    await go(page, `${base}/estimates/${v2Id}`);
+    await page.screenshot({ path: `${shots}/k4-estimate-v2-800.png` });
+    await browser.close();
+  }
+
+  /* -- the job quotation, 800×1280: approved by the customer, a typed fixed-price line with no hours -- */
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed.jobId;
+  const jobAdvisor = (await sql("select gated_in_by as id from public.jobs where id = $1", [jobId]))[0].id;
+  const q1 = (await sql("select id, number from public.quotations where job_id = $1 and status = 'approved' order by version desc limit 1", [jobId]))[0];
+  await sql("update public.quotations set status = 'draft' where id = $1", [q1.id]);
+  await sql("insert into public.quotation_lines (quotation_id, position, line_type, title, source_type, quantity, unit_price, line_total, created_by, updated_by) values ($1, 90, 'package', 'E2E PAINT REAR BUMPER', 'manual', 1, 1200, 1200, $2, $2)", [q1.id, jobAdvisor]);
+  await sql("update public.quotations set status = 'approved' where id = $1", [q1.id]);
+  {
+    const { browser, page } = await browserForId(jobAdvisor, { viewport: { width: 800, height: 1280 }, hasTouch: true });
+    await go(page, `${base}/jobs/${jobId}/quote/${q1.id}`);
+    const ask = page.locator("[data-ask-revise]");
+    const ab = await ask.boundingBox();
+    check("k5: on the approved quotation the advisor's one button sits at the top: 'Revise → version 2' (asks the owner first)", (await ask.count()) === 1 && /Revise → version 2/.test((await ask.textContent()) ?? "") && !!ab && ab.y < 500 && ab.x + ab.width <= 800, JSON.stringify(ab));
+    check("k5: nothing to revise in the bottom bar", (await page.locator("[data-locked-bar] button").count()) === 0);
+    const warn = page.locator("[data-hours-missing]");
+    check("k5: the locked quotation's profit says 'Hours missing – profit not reliable' in red", (await warn.count()) === 1 && /E2E PAINT REAR BUMPER/.test((await warn.textContent()) ?? "") && (await red(warn)), ((await warn.textContent().catch(() => "")) ?? "").slice(0, 160));
+    await page.screenshot({ path: `${shots}/k5-job-quote-advisor-800.png` });
+    await browser.close();
+  }
+  {
+    const { browser, page } = await browserFor("owner", { viewport: { width: 800, height: 1280 }, hasTouch: true });
+    await go(page, `${base}/jobs/${jobId}/quote/${q1.id}`);
+    const rev = page.locator("[data-revise]");
+    const rb = await rev.boundingBox();
+    check("k6: the owner's 'Revise → version 2' at the top, on screen at 800 px", (await rev.count()) === 1 && /Revise → version 2/.test((await rev.textContent()) ?? "") && !!rb && rb.x >= 0 && rb.x + rb.width <= 800 && rb.y < 500, JSON.stringify(rb));
+    check("k6: 'v1' next to the title", ((await page.locator("[data-version-links] [data-version-current]").textContent()) ?? "") === "v1");
+    await page.screenshot({ path: `${shots}/k6-job-quote-owner-800.png` });
+    await rev.click();
+    await page.waitForURL((u) => /\/quote\//.test(u.toString()) && !u.toString().includes(q1.id), { timeout: 30000 }).catch(() => null);
+    const q2 = page.url().split("/quote/")[1]?.split(/[?#]/)[0] ?? "";
+    const vs = await sql("select id, version, status from public.quotations where number = $1 order by version", [q1.number]);
+    check("k6: version 2 made, a copy (the approved v1 stands until v2 is approved)", vs.length === 2 && vs[1].id === q2 && vs[1].status === "draft" && vs[0].status === "approved", JSON.stringify(vs));
+    const chip = page.locator("[data-margin-chip]");
+    check("k7: v2's profit chip says 'Hours missing – profit not reliable' in red", (await chip.getAttribute("data-hours-missing-chip")) === "1" && /Hours missing – profit not reliable/.test((await chip.textContent()) ?? "") && (await red(chip)), (await chip.textContent()) ?? "");
+    const box = page.locator("[data-hours-box='missing']");
+    check("k7: the line without hours has its red 'our hours' box", (await box.count()) === 1);
+    await box.first().pressSequentially("6", { delay: 60 });
+    await until(async () => Number((await sql("select installer_hours from public.quotation_lines where quotation_id = $1 and title = 'E2E PAINT REAR BUMPER' and is_active", [q2]))[0]?.installer_hours) === 6, 40, 500);
+    await go(page, `${base}/jobs/${jobId}/quote/${q2}`);
+    check("k7: typed, saved, and the warning is gone", (await page.locator("[data-hours-missing], [data-hours-missing-chip]").count()) === 0);
+    const links = await page.locator("[data-version-links] [data-version-link]").evaluateAll((els) => els.map((e) => `${e.textContent}${e.hasAttribute("data-version-current") ? "*" : ""}`));
+    check(`k7: 'v1 | v2' next to the title (${links.join(" | ")})`, links.join("|") === "v1|v2*");
+    await page.screenshot({ path: `${shots}/k7-job-quote-v2-800.png` });
+    await browser.close();
+  }
+  {
+    const { browser, page } = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+    await go(page, `${base}/jobs/${jobId}/quote/${q1.id}`);
+    check("k8: at 1440 the approved v1 has no Revise (v2 is the newest) and links to v2", (await page.locator("[data-revise]").count()) === 0 && (await page.locator("[data-version-link='2']").count()) === 1);
+    await page.screenshot({ path: `${shots}/k8-job-quote-v1-1440.png` });
     await browser.close();
   }
 });

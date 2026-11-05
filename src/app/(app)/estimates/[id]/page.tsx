@@ -5,7 +5,7 @@ import Link from "next/link";
 import { installerHistoryFor } from "@/lib/bodyshop";
 import { packagesOf } from "@/lib/packages";
 import { redirect } from "next/navigation";
-import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { Badge, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
@@ -22,7 +22,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { reviseQuotation } from "@/app/(app)/quotes/actions";
 import { QuoteEditor } from "@/app/(app)/jobs/[id]/quote/[qid]/QuoteEditor";
-import { QuoteVersionSelect } from "@/components/QuoteVersionSelect";
+import { DocReviseButton } from "@/components/DocReviseButton";
+import { VersionLinks } from "@/components/VersionLinks";
 import { TintSpecPanel } from "@/components/TintSpecPanel";
 import { EstimateMenu } from "../EstimateMenu";
 import { loadCatalogue } from "@/lib/parts-catalogue";
@@ -112,6 +113,10 @@ export default async function EstimatePage({ params, searchParams }: { params: P
     ? (((await createAdminClient().from("quotation_lines").select("id, priced_at, unit_cost").eq("quotation_id", q.id).eq("is_active", true).eq("line_type", "part")).data ?? []) as { priced_at: string | null; unit_cost: number | string | null }[]).filter((l) => l.priced_at && l.unit_cost !== null).length
     : 0;
   const emCanCreate = mayManage || (!staff.viewingAs && role === "accounts");
+  // REVISE AT THE TOP (5 November 2026, E-00056): on the newest version, once sent (and an accepted estimate that is
+  // not on a job yet: the new version needs the customer's approval again). The owner and the advisor in charge.
+  const newestVersion = Math.max(...bundle.versions.map((v) => v.version), q.version);
+  const mayRevise = mayManage && q.version >= newestVersion && (["sent", "opened", "expired", "declined"].includes(q.status) || (accepted && !attached));
   const emCanRecord = ["owner", "accounts"].includes(role) && !staff.viewingAs;
   const emRecordReadOnly = ["owner", "accounts"].includes(role) && !!staff.viewingAs;
 
@@ -119,6 +124,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
     <>
       <PageHeader
         title={`${q.number} · Estimate`}
+        titleAfter={<VersionLinks versions={bundle.versions} currentId={q.id} hrefOf={(vid) => `/estimates/${vid}`} />}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
             <span>{vehicle ? `${formatPlate(vehicle)} · ${[vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")}` : ""}</span>
@@ -136,17 +142,16 @@ export default async function EstimatePage({ params, searchParams }: { params: P
             <a href={`/api/pdf/quotation/${q.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">
               Preview PDF
             </a>
+            <DocReviseButton version={q.version} onRevise={mayRevise ? reviseQuotation.bind(null, q.id) : null} />
           </>
         }
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {/* Section 1 (29 October 2026): an old version says so; every version is one pick away. */}
-      {bundle.versions.length > 1 ? (
-        <div className="flex flex-wrap items-center gap-2 text-sm" data-quote-version-bar>
-          {q.version < Math.max(...bundle.versions.map((v) => v.version)) ? <span className="rounded-card border border-line-strong bg-[#EDEDEF] px-3 py-2 font-bold text-[#3F3F46]" data-old-version-banner>OLD VERSION – v{q.version} of {bundle.versions.length}, kept for the record</span> : null}
-          <span className="font-semibold text-muted">Versions of {q.number}:</span>
-          <QuoteVersionSelect base="/estimates/" versions={bundle.versions.map((v) => { const by = (v as { created_by?: string | null }).created_by ?? null; return { id: v.id, version: v.version, status: v.status, by: by && by !== lead ? (leadNames.get(by) ?? null) : null }; })} selectedId={q.id} />
+      {/* Section 1 (29 October 2026): an old version says so (read-only); every version is one tap away by the title. */}
+      {q.version < newestVersion ? (
+        <div className="rounded-card border border-line-strong bg-[#EDEDEF] px-4 py-3 text-sm font-bold text-[#3F3F46]" data-old-version-banner>
+          OLD VERSION – v{q.version} of {bundle.versions.length}, kept for the record. Read-only: the newest is v{newestVersion}.
         </div>
       ) : null}
       <HandbackBanner handback={handback} leadName={leadName} />
@@ -252,14 +257,6 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         recoveryProviders={await recoveryProviderList(settings)}
         recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]}
       />
-      {mayManage && ["sent", "opened", "expired", "declined"].includes(q.status) ? (
-        <Card className="flex flex-col gap-2 max-w-xl">
-          <SectionLabel>Revise</SectionLabel>
-          <form action={reviseQuotation.bind(null, q.id)}>
-            <Button type="submit" tone="secondary" size="md">Start version {q.version + 1}</Button>
-          </form>
-        </Card>
-      ) : null}
       <Card className="flex flex-col gap-2 max-w-xl">
         <SectionLabel right={`${bundle.events.length}`}>History</SectionLabel>
         <ul className="flex flex-col divide-y divide-line text-xs">

@@ -7,7 +7,6 @@ import { anyApproved } from "@/lib/quote-history";
 import { packagesOf } from "@/lib/packages";
 import { quoteLockOf } from "@/lib/quote-lock";
 import { VinCopy } from "@/components/VinCopy";
-import Link from "next/link";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { redirect } from "next/navigation";
 import { Input,Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
@@ -37,7 +36,8 @@ import { jobCharges } from "@/lib/supplier-charges";
 import { bodyFindingWords, bodyLineTitle, loadBodyState } from "@/lib/bodyshop-findings";
 import { severityLabel } from "@/lib/car-outline";
 import { OwnerApprovalBox, discountByOf } from "@/app/(app)/quotes/OwnerApprovalBox";
-import { QuoteVersionSelect } from "@/components/QuoteVersionSelect";
+import { DocReviseButton } from "@/components/DocReviseButton";
+import { VersionLinks } from "@/components/VersionLinks";
 import { oldVersionBanner } from "@/lib/quote-history";
 import { loadJobQuotes, staffNames } from "@/lib/quote-history-data";
 import { approvedFeeOf } from "@/lib/inspection-fee-server";
@@ -77,8 +77,10 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const canEdit = !staff.viewingAs && (q.status === "draft" || q.status === "pending_owner");
   // Approved by the customer: locked for everyone (the database refuses too). Who may make a new version depends on the documents out.
   const lock = quoteLockOf(q, await invoicesForLock(q.job_id), { isOwner });
-  const mayRevise = !staff.viewingAs && (lock.locked ? (lock.reviseBy === "owner_or_allowed" ? isOwner || !!q.revision_allowed_at : lock.reviseBy === "owner" ? isOwner : false) : ["sent", "opened", "expired", "declined", "urgent_requested"].includes(q.status));
-  const mayAskRevise = !staff.viewingAs && lock.locked && lock.reviseBy === "owner_or_allowed" && !isOwner && !q.revision_allowed_at;
+  // Revise is offered on the newest version only (an older one already has its next version).
+  const isNewest = q.version >= Math.max(...bundle.versions.map((v) => v.version), q.version);
+  const mayRevise = isNewest && !staff.viewingAs && (lock.locked ? (lock.reviseBy === "owner_or_allowed" ? isOwner || !!q.revision_allowed_at : lock.reviseBy === "owner" ? isOwner : false) : ["sent", "opened", "expired", "declined", "urgent_requested"].includes(q.status));
+  const mayAskRevise = isNewest && !staff.viewingAs && lock.locked && lock.reviseBy === "owner_or_allowed" && !isOwner && !q.revision_allowed_at;
   // Parts changed after the customer's approval (5 November 2026, J-00985): the revision request comes prefilled with them.
   const partsAfter = mayAskRevise ? await loadPartsChanges(id) : null;
   // Someone else holding the editing lock (a heartbeat within the last minute and a half): read only for this person.
@@ -247,7 +249,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       <PendingChargeNote customerId={q.customer_id} />
       <PageHeader
         picture={<CarHeaderThumb vehicleId={q.vehicle_id} />}
-        title={`${q.number} · version ${q.version}`}
+        title={`${q.number} · Quotation`}
+        titleAfter={<VersionLinks versions={bundle.versions} currentId={q.id} hrefOf={(vid) => `/jobs/${id}/quote/${vid}`} />}
         subtitle={
           <span className="flex flex-wrap items-center gap-2 uppercase">
             <span>{vehicle ? `${formatPlate(vehicle)} · ${[vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")}` : ""}</span>
@@ -262,14 +265,19 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
           <>
             <LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>
             {bundle.inspection ? <LinkButton href={`/jobs/${id}/inspection`} tone="secondary" size="lg">Inspection report</LinkButton> : null}
-            {mayRevise ? (
-              <form action={reviseQuotation.bind(null, q.id)}>
-                <Button type="submit" size="lg" data-revise>Revise quotation</Button>
-              </form>
-            ) : null}
             <a href={`/api/pdf/quotation/${q.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">
               Preview PDF
             </a>
+            {/* REVISE AT THE TOP (5 November 2026): the one revise control, next to Preview PDF. */}
+            <DocReviseButton
+              version={q.version}
+              onRevise={mayRevise ? reviseQuotation.bind(null, q.id) : null}
+              onAskRevise={mayAskRevise ? requestRevision.bind(null, q.id) : null}
+              revision={{ requestedAt: q.revision_requested_at ?? null, allowedAt: q.revision_allowed_at ?? null, declinedAt: q.revision_declined_at ?? null, declinedNote: q.revision_decision_note ?? null }}
+              reasons={reasonsFor(settings, "revise_after_approval")}
+              reviseDefault={partsAfter?.words ? `Parts changed after approval: ${partsAfter.words.replace(/^Changes since approval: /, "")}` : null}
+              reviseOpen={mayAskRevise && revise === "parts"}
+            />
           </>
         }
       />
@@ -282,13 +290,6 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       {oldBanner && !lock.locked ? (
         <div className="rounded-card border border-line-strong bg-[#EDEDEF] px-4 py-3 text-sm font-bold text-[#3F3F46]" data-old-version-banner>
           {oldBanner}
-        </div>
-      ) : null}
-      {bundle.versions.length > 1 ? (
-        <div className="flex flex-wrap items-center gap-2 text-sm" data-quote-version-bar>
-          <span className="font-semibold text-muted">Versions of {q.number}:</span>
-          <QuoteVersionSelect jobId={id} versions={bundle.versions.map((v) => ({ id: v.id, version: v.version, status: v.status, by: v.created_by && v.created_by !== qLead ? (qNames.get(v.created_by) ?? null) : null }))} selectedId={q.id} />
-          {newerVersion ? <Link href={`/jobs/${id}/quote/${bundle.versions[bundle.versions.length - 1].id}`} className="font-semibold underline underline-offset-4" data-open-newest>Open the newest (v{bundle.versions[bundle.versions.length - 1].version})</Link> : null}
         </div>
       ) : null}
 
@@ -341,12 +342,6 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]}
         estimatedDays={estimatedDays}
         isRevision={q.version > 1}
-        onRevise={mayRevise ? reviseQuotation.bind(null, q.id) : null}
-        onAskRevise={mayAskRevise ? requestRevision.bind(null, q.id) : null}
-        revision={{ requestedAt: q.revision_requested_at ?? null, requestedBy: requesterName, reason: q.revision_request_reason ?? null, allowedAt: q.revision_allowed_at ?? null, declinedAt: q.revision_declined_at ?? null, declinedNote: q.revision_decision_note ?? null }}
-        reviseReasons={reasonsFor(settings, "revise_after_approval")}
-        reviseDefault={partsAfter?.words ? `Parts changed after approval: ${partsAfter.words.replace(/^Changes since approval: /, "")}` : null}
-        reviseOpen={mayAskRevise && revise === "parts"}
         ownerBox={ownerBox}
         discountBy={discountBy}
         viewerName={staff.display_name}

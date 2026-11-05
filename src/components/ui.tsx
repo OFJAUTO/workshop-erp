@@ -74,19 +74,29 @@ export function PageHeader({
   subtitle,
   actions,
   picture,
+  titleAfter,
 }: {
   title: string;
   subtitle?: ReactNode;
   actions?: ReactNode;
   /** The car's picture, shown to the left of the title on every car page. */
   picture?: ReactNode;
+  /** Beside the title, on its line (an estimate's or a quotation's "v1 | v2", 5 November 2026). */
+  titleAfter?: ReactNode;
 }) {
   return (
     <div className="flex flex-wrap items-end gap-4">
       <div className="flex min-w-0 items-center gap-4">
         {picture}
         <div className="flex flex-col gap-1">
-          <h1 className="text-3xl font-extrabold leading-tight">{title}</h1>
+          {titleAfter ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <h1 className="text-3xl font-extrabold leading-tight">{title}</h1>
+              {titleAfter}
+            </div>
+          ) : (
+            <h1 className="text-3xl font-extrabold leading-tight">{title}</h1>
+          )}
           {subtitle ? <p className="text-sm font-medium text-muted">{subtitle}</p> : null}
         </div>
       </div>

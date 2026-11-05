@@ -126,7 +126,7 @@ await section("1 quote builder and revision", async () => {
   const jobAfter1 = (await sql("select status from public.jobs where id = $1", [jobId]))[0];
   await page.reload();
   await until(async () => ((await page.locator("[data-revise]").count()) ? 1 : null), 30, 500);
-  check("A2: the sent, approved quotation shows a clear 'Revise quotation' button", (await page.locator("[data-revise]").count()) === 1);
+  check("A2: the sent, approved quotation shows a clear 'Revise → version 2' button", (await page.locator("[data-revise]").count()) === 1 && /Revise → version 2/.test((await page.locator("[data-revise]").textContent()) ?? ""));
   await page.locator("[data-revise]").click();
   await page.waitForURL((u) => !u.toString().includes(v1), { timeout: 30000 }).catch(() => null);
   v2 = page.url().match(/\/quote\/([0-9a-f-]{36})/)?.[1] ?? null;
