@@ -9,7 +9,7 @@ import { getCurrentStaff } from "@/lib/auth";
 import { LINE_TYPES, belowCostAll, belowCostChangesIn, belowCostWords, effectiveMarkupPercent, floorProblem, minimumMarkupAed, needsPackageCosting, parseHours, priceSideKeys, recoveryTitle, round2, worseBelowCost, type BelowCost, type BelowCostOpts, type LineType, type QuoteHeaderForTotals, type QuoteLine } from "@/lib/quotes";
 import { LINE_SELECT, SERVICE_SELECT, approvalReasonsNow, attachBelowCost, attachPartLineExtras, labourRateFor, loadQuotation, minMarkupFor, refreshQuoteTotals, toLine, logQuoteEvent, roundingByOwnerOf } from "@/lib/quote-data";
 import { belowCostOptsFor, flagBelowCost, headerOf, linesForBelowCost, stampBelowCost } from "@/lib/below-cost";
-import { belowCostReady, lineCostConfirmReady, partUnitsReady } from "@/lib/schema-ready";
+import { advisorPricePartsReady, belowCostReady, costConfirmReady, lineCostConfirmReady, partUnitsReady } from "@/lib/schema-ready";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { can, type RoleId } from "@/lib/roles";
 import { toSnapshot } from "@/lib/packages";
@@ -18,7 +18,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 import { formatPlate, type PlateFields } from "@/lib/types";
 import { isOurStock, isPlaceholderSupplier, placeholderSupplierWords } from "@/lib/parts-rows";
-import { costCheckForLine } from "@/lib/part-cost-history";
+import { costCheckForLine, costChecksFor, type PartForCheck } from "@/lib/part-cost-history";
+import { syncLineForPart } from "@/app/(app)/parts/actions";
 import { checkQuantity, cleanUnit, defaultUnitFor, qtyWithUnit, quantityChangeWords, whoOfRole, type PartUnit, type QtyWho } from "@/lib/part-units";
 import { setJobPartQuantity } from "@/lib/part-quantity";
 import { reopenPricingFor } from "@/lib/parts-pricing";
@@ -103,6 +104,11 @@ type Body = {
   notQuoted?: { key: string; reason: string | null };
   /** Estimate parts (30 October 2026): send these part lines to the parts desk to be priced. */
   sendToDesk?: { ids: string[] };
+  /** "Send to parts desk instead" on an advisor-priced estimate line (5 November 2026): back to their list, the typed price kept as a note. */
+  backToDesk?: { id: string };
+  /** "Enter price myself" on a JOB's part (5 November 2026): the cost typed straight onto the part item,
+   *  with the markup for its quotation line (the minimum floor still stands for advisors). */
+  partPrice?: { partId: string; cost: number | string; supplier: string; confirmCost?: number | string | null; markupMode?: string | null; markupValue?: number | string | null };
   /** Estimate parts: the advisor already has a price (a dealer on the phone). Marked "Priced by advisor"; the parts desk checks it. */
   advisorPrice?: { id: string; cost: number | string; supplier: string; /** "Yes, real price" for this very cost (2 November 2026). */ confirmCost?: number | string | null };
   /** The owner approves a line that already sells below its cost (Parts raised the cost), with his reason. */
@@ -457,13 +463,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  const vehicleWords = async () => {
+    const { data: v } = q.vehicle_id ? await admin.from("vehicles").select("kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", q.vehicle_id).maybeSingle() : { data: null };
+    const car = v as unknown as (PlateFields & { make: { name: string } | null; model: { name: string } | null }) | null;
+    return car ? `${formatPlate(car)} · ${[car.make?.name, car.model?.name].filter(Boolean).join(" ")}` : "";
+  };
+
   if (body.sendToDesk || body.advisorPrice) {
     if (q.kind !== "estimate") return NextResponse.json({ error: "A job's parts go through \"+ Add a part\"." }, { status: 400 });
-    const vehicleWords = async () => {
-      const { data: v } = q.vehicle_id ? await admin.from("vehicles").select("kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", q.vehicle_id).maybeSingle() : { data: null };
-      const car = v as unknown as (PlateFields & { make: { name: string } | null; model: { name: string } | null }) | null;
-      return car ? `${formatPlate(car)} · ${[car.make?.name, car.model?.name].filter(Boolean).join(" ")}` : "";
-    };
     if (body.sendToDesk) {
       const ids = Array.isArray(body.sendToDesk.ids) ? body.sendToDesk.ids.map(String).slice(0, 100) : [];
       const { data: rowsRaw } = ids.length ? await admin.from("quotation_lines").select(`id, title, quantity, line_type, part_item_id, unit_cost, price_requested_at, is_active${unitsReady ? ", unit" : ""}`).eq("quotation_id", q.id).in("id", ids) : { data: [] };
@@ -493,12 +500,12 @@ export async function POST(request: NextRequest) {
     const ap = body.advisorPrice!;
     const cost = n(ap.cost);
     const supplier = String(ap.supplier ?? "").trim().slice(0, 120);
-    if (cost === null || cost <= 0) return NextResponse.json({ error: "Type the cost of one part (before VAT)." }, { status: 400 });
-    if (!supplier) return NextResponse.json({ error: "Who quoted the price? Type the supplier." }, { status: 400 });
-    // 2 November 2026: never a stand-in supplier; a shelf part goes through the parts desk ("From our stock…").
-    if (isPlaceholderSupplier(supplier)) return NextResponse.json({ error: `${placeholderSupplierWords(supplier)}.` }, { status: 400 });
-    if (isOurStock(supplier)) return NextResponse.json({ error: "A part from our stock: send it to the parts desk, who pick the stock item (its cost is the stock list's)." }, { status: 400 });
-    const { data: cur } = await admin.from("quotation_lines").select("id, title, quantity, line_type, part_item_id, is_active, part_number").eq("id", String(ap.id)).eq("quotation_id", q.id).maybeSingle();
+    if (cost === null || cost <= 0) return NextResponse.json({ error: "Type the cost of one part (before VAT) - it cannot be 0." }, { status: 400 });
+    // 5 November 2026: the supplier is OPTIONAL on the advisor's own price (the cost is the price);
+    // a stand-in typed instead of a real name is still refused, and a shelf part goes through the parts desk.
+    if (supplier && isPlaceholderSupplier(supplier)) return NextResponse.json({ error: `${placeholderSupplierWords(supplier)}.` }, { status: 400 });
+    if (supplier && isOurStock(supplier)) return NextResponse.json({ error: "A part from our stock: send it to the parts desk, who pick the stock item (its cost is the stock list's)." }, { status: 400 });
+    const { data: cur } = await admin.from("quotation_lines").select("id, title, quantity, line_type, part_item_id, is_active, part_number, price_requested_at").eq("id", String(ap.id)).eq("quotation_id", q.id).maybeSingle();
     if (!cur || !cur.is_active || cur.line_type !== "part" || cur.part_item_id) return NextResponse.json({ error: "Part line not found." }, { status: 404 });
     if (!String(cur.title ?? "").trim()) return NextResponse.json({ error: "Type the name of the part first." }, { status: 400 });
     // THE cost check (2.1): a cheap price, or one far under what the part number was bought at, is asked once.
@@ -512,15 +519,116 @@ export async function POST(request: NextRequest) {
     const check = await costCheckForLine({ id: cur.id, title: String(cur.title), part_number: (cur.part_number as string | null) ?? null, cost, supplier, confirmedCost: confirmNow ? cost : storedConfirmed }, (siblings ?? []) as { id: string; title: string; part_number: string | null; unit_cost: number | null; supplier_text: string | null }[]);
     if (check.ask && check.hold && !confirmNow) return NextResponse.json({ error: check.ask.words, confirm: true, ask: "cost_check", kind: check.ask.kind, lineId: cur.id, cost, supplier, title: cur.title }, { status: 409 });
     const now = new Date().toISOString();
-    const { error } = await admin.from("quotation_lines").update({ unit_cost: cost, supplier_text: supplier, priced_by_advisor: true, priced_at: now, priced_by: staff.id, price_checked_at: null, price_checked_by: null, ...(lineReady ? { stock_item_id: null, ...(confirmNow ? { cost_confirmed_aed: cost, cost_confirmed_at: now, cost_confirmed_by: staff.id } : {}) } : {}), ...stamp }).eq("id", cur.id);
+    const fromWords = supplier ? ` from ${supplier}` : "";
+    const { error } = await admin.from("quotation_lines").update({ unit_cost: cost, supplier_text: supplier || null, priced_by_advisor: true, priced_at: now, priced_by: staff.id, price_checked_at: null, price_checked_by: null, ...(lineReady ? { stock_item_id: null, ...(confirmNow ? { cost_confirmed_aed: cost, cost_confirmed_at: now, cost_confirmed_by: staff.id } : {}) } : {}), ...stamp }).eq("id", cur.id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    if (confirmNow && check.hold) await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "part_cost_confirmed", note: `${staff.display_name} confirmed AED ${cost.toFixed(2)} is the real price of ${String(cur.title).toUpperCase()} from ${supplier}`, created_by: staff.id });
-    await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "part_priced_by_advisor", note: `${staff.display_name} priced ${cur.title} at AED ${cost.toLocaleString("en-GB")} each from ${supplier} (priced by advisor; the parts desk checks it)`, created_by: staff.id });
-    await notifyRoles(["parts"], { type: "estimate_price_check", title: `Check this price · ESTIMATE ${q.number}`, body: `${cur.title}: AED ${cost.toLocaleString("en-GB")} each from ${supplier}, typed by ${staff.display_name}. ${await vehicleWords()}`, href: `/parts/estimate/${q.id}` });
+    if (confirmNow && check.hold) await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "part_cost_confirmed", note: `${staff.display_name} confirmed AED ${cost.toFixed(2)} is the real price of ${String(cur.title).toUpperCase()}${fromWords}`, created_by: staff.id });
+    await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "part_priced_by_advisor", note: `${staff.display_name} priced ${cur.title} at AED ${cost.toLocaleString("en-GB")} each${fromWords} (priced by advisor)`, created_by: staff.id });
+    // The parts desk is told only when they already had it ("started on it"); it leaves their waiting list either way,
+    // and they can still look at it later (5 November 2026).
+    if (cur.price_requested_at) {
+      await notifyRoles(["parts"], { type: "estimate_price_check", title: `Priced by advisor · ESTIMATE ${q.number}`, body: `${cur.title}: AED ${cost.toLocaleString("en-GB")} each${fromWords}, typed by ${staff.display_name} - nothing left to price on this part. ${await vehicleWords()}`, href: `/parts/estimate/${q.id}` });
+    }
     await refreshed();
     // A cost is a fact, never refused; a line it puts below cost is written down and stops the send (2 November 2026).
     await flagBelowCost(q.id, [cur.id], staff.id, `${staff.display_name} typed the cost`);
     return NextResponse.json({ ok: true });
+  }
+
+  // "Send to parts desk instead" (5 November 2026): an advisor-priced line goes back to the desk's list,
+  // with what was typed kept as a note - never lost, never a silent overwrite.
+  if (body.backToDesk) {
+    // A JOB's part: the cost comes off the part itself; the desk sees it to price again with the advisor's figures as a note.
+    if (q.kind === "quotation") {
+      if (!q.job_id) return NextResponse.json({ error: "Part line not found." }, { status: 404 });
+      if (!(await advisorPricePartsReady())) return NextResponse.json({ error: "This waits for the owner's \"apply\" (one database change on the list)." }, { status: 400 });
+      const { data: ln } = await admin.from("quotation_lines").select("id, title, part_item_id, is_active").eq("id", String(body.backToDesk.id)).eq("quotation_id", q.id).maybeSingle();
+      if (!ln || !ln.is_active || !ln.part_item_id) return NextResponse.json({ error: "Part line not found." }, { status: 404 });
+      const costReady = await costConfirmReady();
+      const { data: p } = await admin.from("part_items").select("id, description, supplier, cost_aed, order_status, is_active, removed_at, priced_by_advisor, availability_note").eq("id", ln.part_item_id).eq("job_id", q.job_id).maybeSingle();
+      if (!p || p.is_active === false || p.removed_at) return NextResponse.json({ error: "That part is no longer on the job." }, { status: 404 });
+      if (!p.priced_by_advisor || p.cost_aed === null) return NextResponse.json({ error: "Only a price you entered yourself goes back to the parts desk this way." }, { status: 400 });
+      if ((p.order_status ?? "none") !== "none") return NextResponse.json({ error: "Already ordered or received: it cannot go back to pricing." }, { status: 400 });
+      const had = `Advisor had: AED ${Number(p.cost_aed).toLocaleString("en-GB", { minimumFractionDigits: 2 })} each${p.supplier ? ` from ${p.supplier}` : ""} (${staff.display_name})`;
+      const note = [String(p.availability_note ?? "").trim(), had].filter(Boolean).join(" · ").slice(0, 500);
+      const { error } = await admin.from("part_items").update({ cost_aed: null, priced_at: null, priced_by: null, priced_by_advisor: false, price_checked_at: null, price_checked_by: null, availability_note: note, ...(costReady ? { cost_confirmed_aed: null, cost_confirmed_at: null, cost_confirmed_by: null } : {}), updated_by: staff.id }).eq("id", p.id);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      await syncLineForPart(q.job_id, p.id, staff.id, { quiet: true });
+      await admin.from("job_events").insert({ job_id: q.job_id, event_type: "parts", note: `${staff.display_name} sent ${p.description} back to the parts desk to price (${had})`, created_by: staff.id });
+      await notifyRoles(["parts"], { type: "parts_request", title: `Part back to price · ${job?.job_number ?? ""}`, body: `${p.description} · ${had}.`, jobId: q.job_id, href: `/parts/${q.job_id}` });
+      await refreshed();
+      return NextResponse.json({ ok: true });
+    }
+    const { data: cur } = await admin.from("quotation_lines").select("id, title, quantity, line_type, part_item_id, is_active, unit_cost, supplier_text, priced_by_advisor, parts_note").eq("id", String(body.backToDesk.id)).eq("quotation_id", q.id).maybeSingle();
+    if (!cur || !cur.is_active || cur.line_type !== "part" || cur.part_item_id) return NextResponse.json({ error: "Part line not found." }, { status: 404 });
+    if (!cur.priced_by_advisor || cur.unit_cost === null) return NextResponse.json({ error: "Only a price you entered yourself goes back to the parts desk this way." }, { status: 400 });
+    const had = `Advisor had: AED ${Number(cur.unit_cost).toLocaleString("en-GB", { minimumFractionDigits: 2 })} each${cur.supplier_text ? ` from ${cur.supplier_text}` : ""} (${staff.display_name})`;
+    const note = [String(cur.parts_note ?? "").trim(), had].filter(Boolean).join(" · ").slice(0, LINE_TEXT_MAX);
+    const now = new Date().toISOString();
+    const lineReady = await lineCostConfirmReady();
+    const { error } = await admin.from("quotation_lines").update({ unit_cost: null, supplier_text: null, priced_by_advisor: false, priced_at: null, priced_by: null, price_checked_at: null, price_checked_by: null, parts_note: note, price_requested_at: now, price_requested_by: staff.id, ...(lineReady ? { cost_confirmed_aed: null, cost_confirmed_at: null, cost_confirmed_by: null } : {}), ...stamp }).eq("id", cur.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "parts_to_desk", note: `${staff.display_name} sent ${cur.title} back to the parts desk to price (${had})`, created_by: staff.id });
+    await notifyRoles(["parts"], { type: "estimate_parts_to_price", title: `ESTIMATE ${q.number} – part back to price`, body: `${cur.title} × ${Number(cur.quantity) || 1} · ${had}. ${await vehicleWords()}`, href: `/parts/estimate/${q.id}` });
+    await refreshed();
+    return NextResponse.json({ ok: true });
+  }
+
+  // "Enter price myself" on a JOB's part (5 November 2026): the owner or an advisor types the cost they already
+  // have straight onto the part. It counts as priced at once (the desk's list follows by itself), the desk is
+  // told, and the desk can still tap "Price is right ✓" when they look later.
+  if (body.partPrice) {
+    if (q.kind !== "quotation" || !q.job_id) return NextResponse.json({ error: "Only a job's part takes a price here." }, { status: 400 });
+    if (!(await advisorPricePartsReady())) return NextResponse.json({ error: "Entering a price yourself on a job's part waits for the owner's \"apply\" (one database change on the list). Ask the parts desk meanwhile." }, { status: 400 });
+    const cost = n(body.partPrice.cost);
+    const supplier = String(body.partPrice.supplier ?? "").trim().slice(0, 120);
+    if (cost === null || cost <= 0) return NextResponse.json({ error: "Type the cost of one part (before VAT) - it cannot be 0." }, { status: 400 });
+    if (supplier && isPlaceholderSupplier(supplier)) return NextResponse.json({ error: `${placeholderSupplierWords(supplier)}.` }, { status: 400 });
+    if (supplier && isOurStock(supplier)) return NextResponse.json({ error: "A part from our stock: the parts desk picks the stock item (its cost is the stock list's)." }, { status: 400 });
+    const costReady = await costConfirmReady();
+    // The select string is built (the confirm column is ready-gated), so the result loses its type: cast it.
+    const { data: pRaw } = await admin.from("part_items").select(`id, description, part_number, supplier, cost_aed, order_status, is_active, removed_at, disposition, priced_by_advisor, stock_item_id${costReady ? ", cost_confirmed_aed" : ""}`).eq("id", String(body.partPrice.partId)).eq("job_id", q.job_id).maybeSingle();
+    const p = pRaw as unknown as { id: string; description: string; part_number: string | null; supplier: string | null; cost_aed: number | string | null; order_status: string | null; is_active: boolean; removed_at: string | null; disposition: string | null; priced_by_advisor: boolean | null; stock_item_id: string | null; cost_confirmed_aed?: number | string | null } | null;
+    if (!p || p.is_active === false || p.removed_at) return NextResponse.json({ error: "That part is no longer on the job." }, { status: 404 });
+    if ((p.order_status ?? "none") !== "none") return NextResponse.json({ error: "Already ordered or received: a wrong cost there is fixed with \"Correct the cost…\" on the Parts page." }, { status: 400 });
+    if (p.disposition) return NextResponse.json({ error: "That part was removed (returned, kept in stock or cancelled)." }, { status: 400 });
+    if (p.cost_aed !== null && p.cost_aed !== undefined && !p.priced_by_advisor) {
+      return NextResponse.json({ error: `The parts desk has already priced it (AED ${Number(p.cost_aed).toLocaleString("en-GB")}${p.supplier ? ` from ${p.supplier}` : ""}): change the markup here, or ask the desk to correct the cost.` }, { status: 400 });
+    }
+    // THE cost check (2.1), the same question the desk's row and the estimate's own price ask.
+    const confirmCost = n(body.partPrice.confirmCost);
+    const confirmNow = confirmCost !== null && Math.abs(confirmCost - cost) < 0.005;
+    const stored = (p as { cost_confirmed_aed?: number | string | null }).cost_confirmed_aed;
+    const storedConfirmed = stored === null || stored === undefined ? null : Number(stored);
+    const { data: sibs } = await admin.from("part_items").select("id, job_id, description, part_number, cost_aed, final_cost_aed, supplier, stock_item_id").eq("job_id", q.job_id).eq("is_active", true);
+    const checks = await costChecksFor(
+      [{ id: p.id, job_id: q.job_id, description: String(p.description), part_number: (p.part_number as string | null) ?? null, cost_aed: cost, supplier: supplier || null, cost_confirmed_aed: confirmNow ? cost : storedConfirmed, stock_item_id: (p.stock_item_id as string | null) ?? null }],
+      ((sibs ?? []) as PartForCheck[]),
+    );
+    const check = checks.get(p.id);
+    if (check?.ask && check.hold && !confirmNow) return NextResponse.json({ error: check.ask.words, confirm: true, ask: "cost_check", kind: check.ask.kind, partId: p.id, cost, supplier, title: p.description }, { status: 409 });
+    const now = new Date().toISOString();
+    const fromWords = supplier ? ` from ${supplier}` : "";
+    const { error } = await admin.from("part_items").update({ cost_aed: cost, supplier: supplier || null, priced_at: now, priced_by: staff.id, priced_by_advisor: true, price_checked_at: null, price_checked_by: null, ...(costReady && confirmNow ? { cost_confirmed_aed: cost, cost_confirmed_at: now, cost_confirmed_by: staff.id } : {}), updated_by: staff.id }).eq("id", p.id);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    // THE one sync puts the cost on the quotation line (and makes the line when the part had none yet).
+    await syncLineForPart(q.job_id, p.id, staff.id, { quiet: true });
+    const { data: lineRow } = await admin.from("quotation_lines").select("id").eq("quotation_id", q.id).eq("part_item_id", p.id).eq("is_active", true).maybeSingle();
+    // The markup the advisor chose in the window, floored at the minimum (the owner may go below).
+    const mm = body.partPrice.markupMode === "aed" ? "aed" : body.partPrice.markupMode === "percent" ? "percent" : null;
+    const mv = n(body.partPrice.markupValue);
+    if (lineRow && mm && mv !== null) {
+      const fields = mm === "percent"
+        ? { markup_mode: "percent", markup_percent: isOwner ? mv : Math.max(mv, minMarkup) }
+        : { markup_mode: "aed", markup_aed: isOwner ? mv : Math.max(mv, minimumMarkupAed(cost, minMarkup)) };
+      await admin.from("quotation_lines").update({ ...fields, ...stamp }).eq("id", lineRow.id);
+    }
+    if (confirmNow && check?.hold) await admin.from("job_events").insert({ job_id: q.job_id, event_type: "parts", note: `${staff.display_name} confirmed AED ${cost.toFixed(2)} is the real price of ${String(p.description).toUpperCase()}${fromWords}`, created_by: staff.id });
+    await admin.from("job_events").insert({ job_id: q.job_id, event_type: "parts", note: `${staff.display_name} priced ${p.description} at AED ${cost.toLocaleString("en-GB")} each${fromWords} (Enter price myself; the parts desk can still check it)`, created_by: staff.id });
+    await notifyRoles(["parts"], { type: "parts_request", title: `Priced by advisor · ${job?.job_number ?? ""}`, body: `${p.description}: AED ${cost.toLocaleString("en-GB")} each${fromWords}, typed by ${staff.display_name} - nothing left to price on this part; order it once the customer approves.`, jobId: q.job_id, href: `/parts/${q.job_id}` });
+    await refreshed();
+    if (lineRow) await flagBelowCost(q.id, [lineRow.id], staff.id, `${staff.display_name} typed the cost`);
+    return NextResponse.json({ ok: true, lineId: lineRow?.id ?? null });
   }
 
   if (body.requestPart) {

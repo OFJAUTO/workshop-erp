@@ -235,6 +235,8 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           roundDownMax: roundoffLimitsOf(settings).downMax,
           roundUpMax: roundoffLimitsOf(settings).upMax,
           roundingByOwner: await roundingByOwnerOf(q.id, q.rounded_total_aed !== null && q.rounded_total_aed !== undefined),
+          // Enter price myself (5 November 2026): "Priced by <name>, <time>" on an advisor-priced line.
+          staffNames: Object.fromEntries(await staffNamesOf(bundle.lines.map((l) => (l as { priced_by?: string | null }).priced_by ?? ""))),
         }}
         readOnly={!canEdit}
         lockedBy={lockedBy}

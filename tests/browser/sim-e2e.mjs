@@ -4,14 +4,14 @@
 //   PATHS=a,b node --env-file=.env.test.local tests/browser/sim-e2e.mjs   (default: all eight)
 // Paths: a mechanical + supplier parts + deposit + pay-link · b stock parts + cash · c declined → fee →
 // gate-out · d revision after approval · e bodyshop PPF sign-off → handover · f mixed quotation ·
-// g recovery delivery · h commission approve → pay.
+// g recovery delivery · h commission approve → pay · i enter price myself (estimate + job quotation).
 import { mkdirSync } from "node:fs";
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -971,6 +971,146 @@ await section("h", "commission approve then pay", async () => {
   const month = today.slice(0, 7);
   const exp = await fetch(`${base}/api/export/commissions?month=${month}`, { headers: { cookie: await cookieHeader("owner") } });
   check("h5: the monthly export answers as xlsx", exp.status === 200 && /sheet|excel|octet/i.test(exp.headers.get("content-type") ?? ""), `${exp.status} ${exp.headers.get("content-type")}`);
+});
+
+/* ================================================================================================= */
+/* Path i — ENTER PRICE MYSELF (5 November 2026): the advisor's own price on an estimate line and on   */
+/* a job's part, in the centre window (the old in-table box opened off-screen on phones and tablets).  */
+/* ================================================================================================= */
+await section("i", "enter price myself (estimate + job quotation)", async () => {
+  const advisor = (await sql("select id, display_name from public.staff where role_id = 'service_advisor' and is_active order by display_name limit 1"))[0];
+  const mm = (await sql("select m.id as make_id, v.id as model_id from public.vehicle_makes m join public.vehicle_models v on v.make_id = m.id where m.is_active and v.is_active order by m.name, v.name limit 1"))[0];
+  const vin = `WDI${Math.floor(1e13 + Math.random() * 8e13)}`.slice(0, 17).replace(/[IOQ]/g, "1");
+  const cust = (await sql("insert into public.customers (customer_type, full_name, phone) values ('individual', 'E2e Own Price', '+971500000094') returning id"))[0].id;
+  const car = (await sql("insert into public.vehicles (customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, make_id, model_id, model_year, vin) values ($1, true, 'UAE', 'Dubai', 'I', '94155', $2, $3, 2024, $4) returning id", [cust, mm.make_id, mm.model_id, vin]))[0].id;
+  const est = (await sql("insert into public.quotations (kind, customer_id, vehicle_id, status, validity_days, created_by, updated_by) values ('estimate', $1, $2, 'draft', 7, $3, $3) returning id, number", [cust, car, advisor.id]))[0];
+  const line1 = (await sql("insert into public.quotation_lines (quotation_id, position, line_type, title, source_type, quantity, markup_percent, line_total, price_requested_at, price_requested_by, created_by, updated_by) values ($1, 1, 'part', 'STAR LIGHT WITH SHOOTING STAR MODULE', 'manual', 1, 50, 0, now(), $2, $2, $2) returning id", [est.id, advisor.id]))[0];
+  const line2 = (await sql("insert into public.quotation_lines (quotation_id, position, line_type, title, source_type, quantity, markup_percent, line_total, created_by, updated_by) values ($1, 2, 'part', 'ROOF TRIM CLIP SET', 'manual', 1, 50, 0, $2, $2) returning id", [est.id, advisor.id]))[0];
+
+  // THE GLITCH REGRESSION (the real E-00069 case): a tablet scrolled right to reach the button - the
+  // window must open fully ON SCREEN (the old in-table box sat at x < 0 inside the scrolled strip).
+  const { browser, page } = await browserForId(advisor.id, { viewport: { width: 800, height: 1280 }, hasTouch: true });
+  await go(page, `${base}/estimates/${est.id}`);
+  const btn1 = page.locator(`[data-est-own-price="${line1.id}"]`);
+  await btn1.scrollIntoViewIfNeeded();
+  await page.evaluate(() => { for (const el of document.querySelectorAll("div")) if (el.scrollWidth > el.clientWidth + 20 && /auto|scroll/.test(getComputedStyle(el).overflowX)) el.scrollLeft = el.scrollWidth; });
+  await btn1.click();
+  const dlg = page.locator("[data-price-dialog]");
+  await dlg.waitFor({ timeout: 10000 });
+  const bb = await dlg.locator("[data-price-cost]").boundingBox();
+  check("i1: the pricing window opens ON SCREEN on a tablet scrolled right (the glitch) — fixed", !!bb && bb.x >= 0 && bb.x + bb.width <= 800, JSON.stringify(bb));
+  await page.screenshot({ path: `${shots}/i1-price-window-tablet.png` });
+  // Cost + markup %: typing is smooth (no lost characters) and the selling price follows.
+  await dlg.locator("[data-price-cost]").pressSequentially("2000", { delay: 80 });
+  check("i1: no lost characters while typing the cost", (await dlg.locator("[data-price-cost]").inputValue()) === "2000");
+  await dlg.locator("[data-price-markup]").fill("50");
+  const sellLine = await until(async () => { const t = ((await dlg.locator("[data-price-sell-line]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " "); return t.includes("3,000.00") ? t : null; }, 20, 400);
+  check("i1: cost 2,000 at 50% sells at 3,000.00 live", !!sellLine, sellLine ?? "");
+  await page.screenshot({ path: `${shots}/i1-cost-and-markup.png` });
+  await dlg.locator("[data-price-save]").click();
+  const saved1 = await until(async () => (await sql("select unit_cost::text as c, priced_by_advisor as a, markup_percent::text as m from public.quotation_lines where id = $1 and priced_by_advisor", [line1.id]))[0]);
+  check("i1: saved - cost 2,000, markup 50, Priced by advisor", saved1?.c === "2000.00" && saved1?.a === true && Number(saved1?.m) === 50, JSON.stringify(saved1));
+  const told = await until(async () => (await sql("select title from public.notifications where type = 'estimate_price_check' and title like '%Priced by advisor%' and href = $1", [`/parts/estimate/${est.id}`]))[0]);
+  check("i1: the parts desk (who had it) is told \"Priced by advisor\"", !!told, told?.title ?? "");
+  check("i1: the part leaves the desk's waiting list at once", !((await sql("select 1 as x from public.quotation_lines where quotation_id = $1 and line_type = 'part' and is_active and unit_cost is null and price_requested_at is not null", [est.id]))[0]));
+  check("i1: the line says Priced by whom and when", !!(await until(async () => new RegExp(`Priced by ${advisor.display_name}`).test(((await page.locator(`[data-priced-by="${line1.id}"]`).textContent().catch(() => "")) ?? "")), 40, 500)));
+  await page.screenshot({ path: `${shots}/i1-priced-by-line.png` });
+
+  // The SELLING price typed instead: the markup is worked out (cost 400 → selling 500 = 25%).
+  await page.locator(`[data-est-own-price="${line2.id}"]`).click();
+  await dlg.waitFor({ timeout: 10000 });
+  await dlg.locator("[data-price-cost]").fill("400");
+  await dlg.locator("[data-price-selling]").click();
+  await dlg.locator("[data-price-selling]").press("Control+a");
+  await dlg.locator("[data-price-selling]").pressSequentially("500", { delay: 60 });
+  await dlg.locator("[data-price-selling]").press("Enter");
+  await until(async () => (await dlg.locator("[data-price-markup]").inputValue()) === "25", 20, 400);
+  check("i2: typing the selling price works the markup out (500 on 400 = 25%)", (await dlg.locator("[data-price-markup]").inputValue()) === "25");
+  await dlg.locator("[data-price-save]").click();
+  // The markup rides its own debounced patch: wait for THAT write, not the first (the price lands first).
+  const saved2 = await until(async () => (await sql("select markup_percent::text as m from public.quotation_lines where id = $1 and priced_by_advisor and markup_percent = 25", [line2.id]))[0]);
+  check("i2: saved with the worked-out markup", Number(saved2?.m) === 25, saved2?.m ?? "");
+
+  // "Send to parts desk instead": back on their list, the typed price kept as a note.
+  await go(page, `${base}/estimates/${est.id}`);
+  await page.locator(`[data-back-to-desk="${line2.id}"]`).click();
+  const back = await until(async () => (await sql("select parts_note, price_requested_at is not null as w from public.quotation_lines where id = $1 and unit_cost is null", [line2.id]))[0]);
+  check("i3: back with the desk, the advisor's price kept as a note", !!back?.w && /Advisor had: AED 400\.00/.test(back?.parts_note ?? ""), back?.parts_note ?? "");
+
+  // i6 THE JUMP-BACK (the second cause): a refresh that comes due while the price save is still on its way must never
+  // bring the server's older copy back over the line. Two quick saves put a refresh about ten seconds out; the price
+  // save is then held in flight for 12 seconds, so that refresh lands in the middle of it.
+  const line3 = (await sql("insert into public.quotation_lines (quotation_id, position, line_type, title, source_type, quantity, markup_percent, line_total, price_requested_at, price_requested_by, created_by, updated_by) values ($1, 3, 'part', 'ROOF LINING CLIP', 'manual', 1, 50, 0, now(), $2, $2, $2) returning id", [est.id, advisor.id]))[0];
+  await go(page, `${base}/estimates/${est.id}`);
+  const note = page.getByRole("textbox", { name: "Note to the customer" });
+  await note.fill("Price check");
+  await sleep(3000);
+  await note.fill("Price check today");
+  await sleep(2500);
+  await page.route("**/api/quote/save", async (route) => {
+    if ((route.request().postData() ?? "").includes("advisorPrice")) await sleep(12000);
+    await route.continue().catch(() => null);
+  });
+  await page.locator(`[data-est-own-price="${line3.id}"]`).click();
+  await dlg.waitFor({ timeout: 10000 });
+  await dlg.locator("[data-price-cost]").fill("150");
+  await dlg.locator("[data-price-save]").click();
+  const state3 = page.locator(`[data-est-part="${line3.id}"] [data-est-part-state]`);
+  let jumpedBack = "";
+  for (let i = 0; i < 30; i++) {
+    const t = ((await state3.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+    if (/With the parts desk/.test(t)) { jumpedBack = t; break; }
+    await sleep(500);
+  }
+  check("i6: a refresh while the price is still on its way never puts the line back to \"With the parts desk\"", !jumpedBack, jumpedBack);
+  await page.unroute("**/api/quote/save");
+  check("i6: and the price lands", !!(await until(async () => (await sql("select 1 as x from public.quotation_lines where id = $1 and priced_by_advisor and unit_cost = 150", [line3.id]))[0], 40, 500)));
+  await browser.close();
+
+  // ---------- The JOB quotation: an unpriced part priced by the advisor in the same window ----------
+  const seed = await api("/api/e2e/stage", { stage: "quote" });
+  const jobId = seed.json?.jobId;
+  const qid = seed.json?.quotationId;
+  if (!jobId || !qid) throw new Error("quote seed failed");
+  const desk = (await sql("select id from public.staff where role_id = 'parts' and is_active order by created_at limit 1"))[0];
+  const part = (await sql("insert into public.part_items (job_id, description, quantity, confirmed_quantity, availability, order_status, confirm_status, created_by, updated_by) values ($1, 'E2E HEADLIGHT WASHER PUMP', 1, 1, 'to_order', 'none', 'confirmed', $2, $2) returning id", [jobId, desk.id]))[0];
+  const ready = (await sql("select 1 as x from information_schema.columns where table_name = 'part_items' and column_name = 'priced_by_advisor'"))[0];
+  if (!ready) { check("i4: job side waits for the owner's apply (columns missing on this database)", true); return; }
+  const b2 = await browserForId(advisor.id, { viewport: { width: 1440, height: 1000 } });
+  await go(b2.page, `${base}/jobs/${jobId}/quote/${qid}`);
+  const row = b2.page.locator(`[data-job-unpriced="${part.id}"]`);
+  await row.scrollIntoViewIfNeeded();
+  check("i4: the job's unpriced part offers Enter price myself", (await row.count()) === 1);
+  await row.locator(`[data-est-own-price="${part.id}"]`).click();
+  const dlg2 = b2.page.locator("[data-price-dialog]");
+  await dlg2.waitFor({ timeout: 10000 });
+  await dlg2.locator("[data-price-cost]").fill("350");
+  await dlg2.locator("[data-price-cost]").press("Enter");
+  await dlg2.locator("[data-price-markup]").fill("40");
+  await dlg2.locator("[data-price-markup]").press("Enter");
+  await until(async () => ((await dlg2.locator("[data-price-sell-line]").textContent().catch(() => "")) ?? "").includes("490.00"), 20, 300);
+  await b2.page.screenshot({ path: `${shots}/i4-job-price-window.png` });
+  await dlg2.locator("[data-price-save]").click();
+  // On screen AT ONCE, before the server answers (the save itself takes several seconds).
+  check("i4: shown as priced at once (\"Priced by you\"), before the server answers", !!(await until(async () => (await b2.page.locator(`[data-job-priced-now="${part.id}"]`).count()) === 1, 10, 200)));
+  // The markup is the route's LAST write (after the line is made): wait for that one.
+  const savedJob = await until(async () => (await sql("select p.cost_aed::text as c, l.markup_percent::text as m from public.part_items p join public.quotation_lines l on l.part_item_id = p.id and l.quotation_id = $2 and l.is_active where p.id = $1 and p.priced_by_advisor and l.markup_percent = 40", [part.id, qid]))[0], 60, 500);
+  check("i4: the part is priced (350) with the line and markup 40 on the quotation", savedJob?.c === "350.00" && Number(savedJob?.m) === 40, JSON.stringify(savedJob));
+  const toldJob = await until(async () => (await sql("select title from public.notifications where type = 'parts_request' and title like 'Priced by advisor%' and job_id = $1", [jobId]))[0]);
+  check("i4: the parts desk is told (nothing left to price on it)", !!toldJob, toldJob?.title ?? "");
+  check("i4: the line shows Priced by the advisor", !!(await until(async () => new RegExp(`Priced by ${advisor.display_name}`).test(((await b2.page.locator("[data-priced-by]").first().textContent().catch(() => "")) ?? "")), 20, 500)));
+  await b2.page.screenshot({ path: `${shots}/i4-job-priced.png` });
+  // The desk's later look: Price is right ✓ on the job's Parts page.
+  const b3 = await browserForId(desk.id, { viewport: { width: 1500, height: 1400 } });
+  await go(b3.page, `${base}/parts/${jobId}`);
+  const chip = b3.page.locator('[data-advisor-priced="open"]').first();
+  await chip.scrollIntoViewIfNeeded().catch(() => null);
+  check("i5: the desk sees who priced it and can check it later", (await chip.count()) === 1, ((await chip.textContent().catch(() => "")) ?? "").slice(0, 120));
+  await b3.page.screenshot({ path: `${shots}/i5-desk-check.png` });
+  await chip.locator("[data-desk-price-right]").click();
+  check("i5: Price is right ✓ is written on the part", !!(await until(async () => (await sql("select 1 as x from public.part_items where id = $1 and price_checked_at is not null", [part.id]))[0])));
+  await b2.browser.close();
+  await b3.browser.close();
 });
 
 const failed = summary();

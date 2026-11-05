@@ -13,7 +13,7 @@ import { Button, Input,Badge, Card, LinkButton, Notice, PageHeader, SectionLabel
 import { requirePermission } from "@/lib/auth";
 import { STATUS_LABELS, type JobStatus,formatWait, workingMinutesSince, workingTimeOf } from "@/lib/jobs";
 import { REQUEST_SELECT } from "@/lib/quote-data";
-import { PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, partUnitsOf, toPartFull, toPo, toPoLine } from "@/lib/parts-data";
+import { PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, partAdvisorCols, partUnitsOf, toPartFull, toPo, toPoLine } from "@/lib/parts-data";
 import { SupplierLpoCard } from "./SupplierLpoCard";
 import { emailSupplierLpo, markSupplierOrdered, setPartExpectedDate } from "./lpo-actions";
 import { gmailConfigured } from "@/lib/gmail";
@@ -54,7 +54,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   const target = Number(settings.parts_pricing_target_hours) || 4;
   const [{ data: reqRows }, { data: partRows }] = await Promise.all([
     admin.from("part_requests").select(REQUEST_SELECT).eq("is_active", true).in("status", ["open"]).order("created_at"),
-    admin.from("part_items").select(PART_FULL_SELECT).eq("is_active", true).order("created_at"),
+    admin.from("part_items").select(PART_FULL_SELECT + (await partAdvisorCols())).eq("is_active", true).order("created_at"),
   ]);
   const requests = (reqRows ?? []) as PartRequest[];
   // Parts without a home, and returns still waiting for the supplier's credit note (3 November 2026): one count on the tab.
@@ -244,7 +244,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
                 <span className="text-sm"><span className="font-bold">{e.plate}</span> · {e.car}{e.advisor ? <span className="text-muted"> · Advisor {e.advisor}</span> : null}</span>
                 <span className="flex flex-wrap items-center gap-2 text-sm font-semibold text-amber">{estimateTaskWords(e)}{e.vin ? <CopyVin vin={e.vin} /> : <span className="text-xs font-normal text-muted">VIN not known yet</span>}</span>
               </span>
-              <LinkButton href={`/parts/estimate/${e.id}#pricing`} size="md" data-estimate-price-open>{e.toPrice ? "Price the parts" : e.toCheck ? "Check the price" : "Send to advisor"}</LinkButton>
+              <LinkButton href={`/parts/estimate/${e.id}#pricing`} size="md" data-estimate-price-open>{e.toPrice ? "Price the parts" : "Send to advisor"}</LinkButton>
             </Card>
           ))}
         </section>

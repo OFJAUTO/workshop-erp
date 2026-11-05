@@ -71,6 +71,11 @@ export const paymentReportsReady = () => schemaReady("payment_reports", "id, sta
  *  works and shows its results in the window; only the stored history and the one-run lock wait for the table. */
 export const syncRunsReady = () => schemaReady("zoho_sync_runs", "id, status, heartbeat_at, outbox_ids, items, removed, skipped");
 
+/** Enter price myself on a JOB's part (5 November 2026): the advisor's own price on the part itself, and the parts
+ *  desk's later "Price is right" tick. Migration 20261205180000_advisor_price_parts. Before it, jobs keep the old way
+ *  (the parts desk prices); estimates need no new column and work at once. */
+export const advisorPricePartsReady = () => schemaReady("part_items", "priced_by_advisor, price_checked_at, price_checked_by");
+
 /** Money from the estimate (4 November 2026): a proforma (complete or partial) from an estimate before any job,
  *  paid -> the tax invoice by itself; the bill-to block on its documents. Migration 20261204090000_estimate_money.
  *  Before it the estimate page shows no proforma card and nothing reads the new columns. */

@@ -145,6 +145,11 @@ export async function runPopups() {
   await check(p, "Round off (quotation)", "[data-roundoff-dialog]", () => click(p, "[data-roundoff-open]"), findings, shots);
   await goto(p, qUrl);
   if (await p.locator("[data-add-package]").count()) await check(p, "Add a package", "[data-package-ask]", () => click(p, "[data-add-package]"), findings, shots);
+  // Enter price myself (5 November 2026): the ONE price window, opened from a job part with no price yet.
+  await sql("insert into public.part_items (job_id, description, quantity, confirmed_quantity, availability, order_status, confirm_status, created_by, updated_by) select $1, 'E2E POPUP UNPRICED PUMP', 1, 1, 'to_order', 'none', 'confirmed', gated_in_by, gated_in_by from public.jobs where id = $1 and not exists (select 1 from public.part_items where job_id = $1 and description = 'E2E POPUP UNPRICED PUMP')", [quote.jobId]);
+  await goto(p, qUrl);
+  if (await p.locator("[data-job-unpriced-parts] [data-est-own-price]").count()) await check(p, "Enter price myself", "[data-price-dialog]", () => click(p, "[data-job-unpriced-parts] [data-est-own-price]"), findings, shots);
+  else notReached.push("Enter price myself: the job part with no price did not show (database change not applied here?)");
   /* ---- The Parts desk ---- */
   const pUrl = `/parts/${quote.jobId}`;
   await goto(p, pUrl);

@@ -22,12 +22,13 @@ import { ESTIMATED_COMPLETION, packageDetailsText, packageSnapshot, type Bodysho
 import { WARRANTY_CHOICES, isBatteryPart } from "@/lib/battery";
 import type { QuoteReference } from "@/lib/quote-reference";
 import { Badge, Button, Card, Input, Notice, SectionLabel, Textarea } from "@/components/ui";
-import { formatDayTime } from "@/lib/format";
+import { formatDateTime, formatDayTime } from "@/lib/format";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { customerAvailabilityWords, daysFromDate } from "@/lib/parts-rows";
 import { ESTIMATE_PART_WORDS, estimatePartState, isEstimatePart, unpricedEstimateParts, waitingWords } from "@/lib/estimate-parts";
 import { QtyUnitBox } from "@/components/QtyUnitBox";
-import { perUnitWords, qtyWithUnit, unitOf } from "@/lib/part-units";
+import { qtyWithUnit, unitOf } from "@/lib/part-units";
+import { PartPriceDialog, type PartPriceFields } from "@/components/PartPriceDialog";
 import { parseNumber } from "@/lib/price-import";
 import { CompBox } from "@/app/(app)/quotes/CompBox";
 import { PackageItemsToggle } from "@/components/PackageItemsToggle";
@@ -149,7 +150,9 @@ function useQuoteAutosave(quotationId: string, onSaved: () => void, onConfirm: (
   const dropFailedFor = useCallback((lineId: string) => {
     setFailed((fl) => fl.filter((o) => (o.patchLine as { id?: string } | undefined)?.id !== lineId));
   }, []);
-  return { save, state, error, failed, retryFailed, dropFailedFor };
+  /** A save still waiting or on its way (5 November 2026): the server's copy is older than the screen until it lands. */
+  const hasPending = useCallback(() => queue.current.length > 0 || busy.current, []);
+  return { save, state, error, failed, retryFailed, dropFailedFor, hasPending };
 }
 
 export type EditorSettings = {
@@ -218,6 +221,12 @@ export type EditorSettings = {
   roundUpMax?: number;
   /** The stored round-off was the owner's own (never a reason for his approval). */
   roundingByOwner?: boolean;
+  /** Enter price myself (5 November 2026): staff names for "Priced by <name>, <time>" on part lines. */
+  staffNames?: Record<string, string>;
+  /** True once the job-side columns exist (migration 20261205180000): "Enter price myself" on a JOB's part. */
+  advisorPriceParts?: boolean;
+  /** A job part's own pricing stamps: who, when, advisor's own price, checked by the desk. */
+  partPricedBy?: Record<string, { name: string | null; at: string | null; advisor: boolean; checked: boolean }>;
 };
 
 export type RecoveryType = { key: string; label: string; cost: number; price: number };
@@ -436,8 +445,9 @@ export function QuoteEditor({
   const [lowAsk, setLowAsk] = useState<string | null>(null);
   // Placeholder costs (2 November 2026): a part markup over the warning limit asks once before sending ("is the cost real?").
   const [highAsk, setHighAsk] = useState<string | null>(null);
-  // The advisor's "I have a price" asked "Is this the real price?" for a cheap or far-below cost: the answer goes with it.
-  const [costCheckAsk, setCostCheckAsk] = useState<null | { lineId: string; cost: number; supplier: string; words: string; kind: string }>(null);
+  // "Enter price myself" asked "Is this the real price?" for a cheap or far-below cost: the answer goes with it.
+  // On a job the server answers with the PART id; on an estimate with the line id.
+  const [costCheckAsk, setCostCheckAsk] = useState<null | { lineId: string; partId: string | null; cost: number; supplier: string; words: string; kind: string }>(null);
   /** A price typed as 0: ask whether the line is Complimentary / Included (the PPF package pattern). */
   const [compAsk, setCompAsk] = useState<string | null>(null);
   const [depositAsk, setDepositAsk] = useState<string | null>(null);
@@ -479,8 +489,38 @@ export function QuoteEditor({
   const [attempted, setAttempted] = useState(false);
   const [picker, setPicker] = useState<null | { kind: PickerKind; replace?: string; sourceType?: "item" | "tyre" | "request" | null; sourceKey?: string | null; label?: string }>(null);
   const [partPicker, setPartPicker] = useState(false);
-  /** Estimate parts (30 October 2026): the "I have a price" box open on a line, with what is typed in it. */
-  const [ownPrice, setOwnPrice] = useState<{ id: string; cost: string; supplier: string } | null>(null);
+  /** "Enter price myself" (5 November 2026): the centre pricing window open on a line (estimate, or a job's part).
+   *  NEVER a row inside the sideways-scrolling parts table: that opened off-screen on phones and tablets. */
+  const [priceFor, setPriceFor] = useState<{ lineId: string; partId: string | null; cost?: string; supplier?: string } | null>(null);
+  /** Job parts priced on THIS screen and not yet back from the server as a line: shown at once, counted at once. */
+  const [jobPriced, setJobPriced] = useState<Record<string, { cost: number }>>({});
+  const priceLine = priceFor ? ((lines.find((x) => x.id === priceFor.lineId) ?? (priceFor.partId ? lines.find((x) => x.part_item_id === priceFor.partId) : undefined)) ?? null) : null;
+  /** An UNPRICED job part has no quotation line yet: the window reads the part itself (the sync makes the line). */
+  const pricePart = priceFor?.partId ? (parts.find((p) => p.id === priceFor.partId) ?? null) : null;
+  const onPriceSave = (f: PartPriceFields) => {
+    if (!priceFor) return;
+    if (priceFor.partId) {
+      // A job's part: the server writes the part, makes or updates the line and floors the markup (ONE op).
+      save({ partPrice: { partId: priceFor.partId, cost: f.cost, supplier: f.supplier, markupMode: f.markupMode, markupValue: f.markupValue, ...(f.confirmLow ? { confirmCost: f.cost } : {}) } });
+      const pid = priceFor.partId;
+      setJobPriced((m) => ({ ...m, [pid]: { cost: f.cost } }));
+      if (priceLine) {
+        setLines((prev) => prev.map((x) => (x.id === priceLine.id ? { ...x, unit_cost: f.cost, supplier_text: f.supplier || null } : x)));
+        setDirty((d) => new Set(d).add(priceLine.id));
+      }
+      setPriceFor(null);
+      return;
+    }
+    if (!priceLine) return;
+    save({ advisorPrice: { id: priceLine.id, cost: f.cost, supplier: f.supplier, ...(f.confirmLow ? { confirmCost: f.cost } : {}) } });
+    // The markup rides the normal patch path: the minimum floor and the below-cost rules are THE rules there.
+    const fields: Partial<QuoteLine> = f.markupMode === "aed" ? { markup_mode: "aed", markup_aed: f.markupValue ?? 0 } : { markup_mode: "percent", markup_percent: f.markupValue ?? settings.minMarkup };
+    patch(priceLine.id, fields);
+    // On screen at once: the line reads priced; the strip counters follow from the lines.
+    setLines((prev) => prev.map((x) => (x.id === priceLine.id ? { ...x, unit_cost: f.cost, supplier_text: f.supplier || null, priced_by_advisor: true, priced_at: new Date().toISOString(), priced_by: null, price_checked_at: null, ...fields } : x)));
+    setDirty((d) => new Set(d).add(priceLine.id));
+    setPriceFor(null);
+  };
   const [skippedPositions, setSkippedPositions] = useState<Set<string>>(() => new Set());
   const [openRows, setOpenRows] = useState<Set<string>>(() => new Set());
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -515,11 +555,18 @@ export function QuoteEditor({
   // After saves the page refreshes at most every 10 seconds (the totals and blocks come from the server).
   const lastRefresh = useRef(0);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Filled from the autosave hook below (it is made after this refresh, which it calls back). */
+  const pendingRef = useRef<() => boolean>(() => false);
   const refresh = useCallback(() => {
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
     const wait = Math.max(0, lastRefresh.current + 10_000 - Date.now());
     refreshTimer.current = setTimeout(() => {
       refreshTimer.current = null;
+      // THE "I have a price" glitch (5 November 2026, E-00069): this used to forget the lines being edited while a save
+      // was still on its way, so the refresh brought the server's OLDER copy back over them - the price vanished and the
+      // line jumped back to "With the parts desk". A save in flight now holds the refresh; when the queue empties it
+      // calls refresh again with the server's up-to-date copy.
+      if (pendingRef.current()) return;
       lastRefresh.current = Date.now();
       setDirty(new Set());
       refreshWhenIdle(() => router.refresh());
@@ -527,7 +574,7 @@ export function QuoteEditor({
   }, [router]);
   const onConfirm = useCallback((op: Op, message: string, data: Record<string, unknown>) => {
     if (data.ask === "cost_check") {
-      setCostCheckAsk({ lineId: String(data.lineId ?? ""), cost: Number(data.cost) || 0, supplier: String(data.supplier ?? ""), words: message, kind: String(data.kind ?? "ask_cheap") });
+      setCostCheckAsk({ lineId: String(data.lineId ?? ""), partId: data.partId ? String(data.partId) : null, cost: Number(data.cost) || 0, supplier: String(data.supplier ?? ""), words: message, kind: String(data.kind ?? "ask_cheap") });
       return;
     }
     if (data.ask === "below_cost") {
@@ -539,7 +586,10 @@ export function QuoteEditor({
     }
     setConfirming({ op, message });
   }, [setConfirming, setBelowAsks, setCostCheckAsk]);
-  const { save, state, error, failed, retryFailed, dropFailedFor } = useQuoteAutosave(quotation.id, refresh, onConfirm);
+  const { save, state, error, failed, retryFailed, dropFailedFor, hasPending } = useQuoteAutosave(quotation.id, refresh, onConfirm);
+  useEffect(() => {
+    pendingRef.current = hasPending;
+  }, [hasPending]);
   /** New lines drawn on screen before the server answers: kept through refreshes until the server row arrives. */
   const pendingNew = useRef<Set<string>>(new Set());
   /** Section 11: the line order on screen while a reorder save is in flight (the merge keeps it until the server echoes it). */
@@ -933,6 +983,10 @@ export function QuoteEditor({
   const partLines = lines.filter((l) => l.is_active && blockOf(l) === "parts");
   // An estimate's own parts (30 October 2026): what still has no price, and what can go to the parts desk now.
   const estParts = isQuotation ? [] : partLines.filter((l) => isEstimatePart(l) && !l.left_off);
+  // Job parts priced here a moment ago that the server copy does not show as priced yet: counted at once (the
+  // server's own count takes over on the next refresh, so nothing is counted twice).
+  const pricedHere = Object.keys(jobPriced).filter((id) => { const p = parts.find((x) => x.id === id); return !!p && (p.cost_aed === null || p.cost_aed === undefined); }).length;
+  const partsPricedShown = wait ? Math.min(wait.partsTotal, wait.partsPriced + pricedHere) : 0;
   const estUnpriced = unpricedEstimateParts(estParts);
   const estToSend = estUnpriced.notSent.filter((l) => l.title.trim());
   const otherLines = lines.filter((l) => l.is_active && blockOf(l) === "other");
@@ -1672,7 +1726,7 @@ export function QuoteEditor({
         {/* Block 2: parts, priced by Parts; the advisor sets the markup and Include or Leave off */}
         {hasTint ? tintBox : null}
         <Card className="flex flex-col gap-3">
-          <SectionLabel right={wait?.partsTotal ? `${wait.partsPriced} of ${wait.partsTotal} priced` : !isQuotation && estParts.length ? `${estParts.filter((l) => l.unit_cost !== null && l.unit_cost !== undefined).length} of ${estParts.length} priced` : undefined}>Parts</SectionLabel>
+          <SectionLabel right={wait?.partsTotal ? `${partsPricedShown} of ${wait.partsTotal} priced` : !isQuotation && estParts.length ? `${estParts.filter((l) => l.unit_cost !== null && l.unit_cost !== undefined).length} of ${estParts.length} priced` : undefined}>Parts</SectionLabel>
           {!isQuotation && (estUnpriced.withDesk.length || estUnpriced.notSent.length) ? (
             <div className="flex flex-wrap items-center gap-2 rounded-control border border-amber-bar bg-amber-soft px-3 py-2 text-sm" data-est-parts-waiting>
               <span className="font-semibold">{[estUnpriced.withDesk.length ? waitingWords(estUnpriced.withDesk.length, true) : null, estUnpriced.notSent.length ? waitingWords(estUnpriced.notSent.length, false) : null].filter(Boolean).join(" · ")}</span>
@@ -1859,11 +1913,27 @@ export function QuoteEditor({
                         <td className="py-2 align-top text-right">
                           {est && !disabled ? (
                             <div className="mb-1 flex flex-col items-end gap-1" data-est-part-actions>
-                              {estState === "draft" ? <button type="button" disabled={!l.title.trim()} onClick={() => sendToDesk([l.id])} title={l.title.trim() ? undefined : "Type the name first"} className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-white whitespace-nowrap disabled:opacity-40" data-est-send={l.id}>Send to parts desk to price</button> : null}
-                              {estState === "draft" || estState === "with_desk" ? <button type="button" onClick={() => setOwnPrice(ownPrice?.id === l.id ? null : { id: l.id, cost: "", supplier: "" })} className="min-h-9 rounded-control border border-line-strong px-2.5 text-xs font-semibold whitespace-nowrap" data-est-own-price={l.id}>I have a price</button> : null}
+                              {estState === "draft" ? <button type="button" disabled={!l.title.trim()} onClick={() => sendToDesk([l.id])} title={l.title.trim() ? undefined : "Type the name first"} className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-white whitespace-nowrap disabled:opacity-40" data-est-send={l.id}>Send to parts desk</button> : null}
+                              {estState !== "priced" ? <button type="button" onClick={() => setPriceFor({ lineId: l.id, partId: null })} className="min-h-9 rounded-control border border-line-strong px-2.5 text-xs font-semibold whitespace-nowrap" data-est-own-price={l.id}>Enter price myself</button> : null}
+                              {estState === "advisor" || estState === "checked" ? <button type="button" onClick={() => { setLines((prev) => prev.map((x) => (x.id === l.id ? { ...x, unit_cost: null, priced_by_advisor: false, priced_at: null, price_requested_at: new Date().toISOString() } : x))); setDirty((d) => new Set(d).add(l.id)); save({ backToDesk: { id: l.id } }); }} className="min-h-9 rounded-control border border-line px-2.5 text-xs font-semibold text-muted whitespace-nowrap" data-back-to-desk={l.id}>Send to parts desk instead</button> : null}
+                              {(estState === "advisor" || estState === "checked") && l.priced_at ? <span className="text-right text-[11px] font-semibold text-muted" data-priced-by={l.id}>Priced by {settings.staffNames?.[l.priced_by ?? ""] ?? "advisor"}, {formatDateTime(l.priced_at)}{estState === "checked" ? " · checked ✓" : ""}</span> : null}
                               <button type="button" onClick={() => removeLine(l.id)} className="min-h-9 rounded-control border border-line px-2.5 text-xs font-semibold text-red whitespace-nowrap" data-est-remove={l.id}>Remove</button>
                             </div>
                           ) : null}
+                          {/* A JOB's part (5 November 2026, once the columns exist): the advisor enters the price himself,
+                              or hands his own price back to the parts desk. */}
+                          {!est && isQuotation && l.part_item_id && !disabled && settings.advisorPriceParts ? (() => {
+                            const pp = settings.partPricedBy?.[l.part_item_id] ?? null;
+                            const unpriced = l.unit_cost === null || l.unit_cost === undefined;
+                            if (!unpriced && !pp?.advisor) return null;
+                            return (
+                              <div className="mb-1 flex flex-col items-end gap-1" data-job-part-actions>
+                                <button type="button" onClick={() => setPriceFor({ lineId: l.id, partId: l.part_item_id ?? null })} className="min-h-9 rounded-control border border-line-strong px-2.5 text-xs font-semibold whitespace-nowrap" data-est-own-price={l.id}>Enter price myself</button>
+                                {pp?.advisor ? <button type="button" onClick={() => { setLines((prev) => prev.map((x) => (x.id === l.id ? { ...x, unit_cost: null } : x))); setDirty((d) => new Set(d).add(l.id)); save({ backToDesk: { id: l.id } }); }} className="min-h-9 rounded-control border border-line px-2.5 text-xs font-semibold text-muted whitespace-nowrap" data-back-to-desk={l.id}>Send to parts desk instead</button> : null}
+                                {pp?.advisor && pp.at ? <span className="text-right text-[11px] font-semibold text-muted" data-priced-by={l.id}>Priced by {pp.name ?? "advisor"}, {formatDateTime(pp.at)}{pp.checked ? " · checked ✓" : ""}</span> : null}
+                              </div>
+                            );
+                          })() : null}
                           {!disabled ? (
                             leftOff ? (
                               <button type="button" onClick={() => patch(l.id, { left_off: false }, true)} className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-white whitespace-nowrap">Put back</button>
@@ -1874,21 +1944,6 @@ export function QuoteEditor({
                           {!disabled && !leftOff ? <button type="button" onClick={() => patch(l.id, { visible_to_customer: l.visible_to_customer === false }, true)} title={INTERNAL_ONLY_LABEL} className="mt-1 block min-h-9 w-full text-right text-[11px] font-semibold text-muted underline underline-offset-4 whitespace-nowrap" data-internal-toggle={l.id}>{l.visible_to_customer === false ? "Show to customer" : "Internal only"}</button> : null}
                         </td>
                       </tr>
-                      {est && ownPrice?.id === l.id ? (
-                        <tr data-est-own-price-box={l.id}>
-                          <td />
-                          <td colSpan={8} className="pb-3">
-                            <div className="flex flex-wrap items-end gap-2 rounded-control border border-line-strong bg-chip p-3">
-                              <span className="w-full text-xs text-muted">A price you already have (a dealer on the phone). It shows as &quot;Priced by advisor&quot; inside the workshop only, and the parts desk checks it.</span>
-                              <label className="flex flex-col gap-1 text-xs font-semibold">Cost {perUnitWords(unitOf(l.unit))}, before VAT (AED)<Input value={ownPrice.cost} onChange={(e) => setOwnPrice({ ...ownPrice, cost: e.target.value })} inputMode="decimal" className="min-h-9" style={{ width: "8rem" }} data-est-own-cost /></label>
-                              {Number(ownPrice.cost.replace(/,/g, "")) > 0 ? <span className="self-center text-xs font-semibold" data-est-own-total>= {aed(Number(ownPrice.cost.replace(/,/g, "")) * (Number(l.quantity) || 1))} for {qtyWithUnit(Number(l.quantity) || 1, unitOf(l.unit))}</span> : null}
-                              <label className="flex flex-col gap-1 text-xs font-semibold">Supplier<Input value={ownPrice.supplier} onChange={(e) => setOwnPrice({ ...ownPrice, supplier: e.target.value })} className="min-h-9" style={{ width: "12rem" }} textCase="title" data-est-own-supplier /></label>
-                              <Button type="button" size="md" disabled={!(Number(ownPrice.cost.replace(/,/g, "")) > 0) || !ownPrice.supplier.trim()} onClick={() => { const cost = Number(ownPrice.cost.replace(/,/g, "")); setLines((prev) => prev.map((x) => (x.id === l.id ? { ...x, unit_cost: cost, supplier_text: ownPrice.supplier.trim(), priced_by_advisor: true, price_checked_at: null } : x))); setDirty((d) => new Set(d).add(l.id)); save({ advisorPrice: { id: l.id, cost, supplier: ownPrice.supplier.trim() } }); setOwnPrice(null); }} data-est-own-save>Use this price</Button>
-                              <Button type="button" tone="ghost" size="md" onClick={() => setOwnPrice(null)}>Cancel</Button>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : null}
                       </Fragment>
                     );
                   })}
@@ -1896,6 +1951,31 @@ export function QuoteEditor({
               </table>
             </div>
           )}
+          {/* A JOB's parts still with the desk (no price, so no line yet): the advisor can price one himself (5 November 2026). */}
+          {isQuotation && settings.advisorPriceParts && !disabled ? (() => {
+            const open = parts.filter((p) => p.is_active !== false && !p.removed_at && (p.order_status ?? "none") === "none" && (p.cost_aed === null || p.cost_aed === undefined) && !lines.some((x) => x.part_item_id === p.id && x.is_active !== false));
+            const waiting = open.filter((p) => !jobPriced[p.id]);
+            // Priced here a moment ago: shown as done at once, until the server's line takes its place.
+            const justNow = open.filter((p) => !!jobPriced[p.id]);
+            if (!waiting.length && !justNow.length) return null;
+            return (
+              <div className="flex flex-col gap-1.5 rounded-control bg-chip p-2 text-xs" data-job-unpriced-parts>
+                {waiting.length ? <span className="font-semibold">With the parts desk, no price yet:</span> : null}
+                {waiting.map((p) => (
+                  <div key={p.id} className="flex flex-wrap items-center gap-2" data-job-unpriced={p.id}>
+                    <span className="min-w-0 flex-1 font-bold uppercase break-words">{p.description} × {Number(p.confirmed_quantity ?? p.quantity) || 1}</span>
+                    <button type="button" onClick={() => setPriceFor({ lineId: "", partId: p.id })} className="min-h-9 rounded-control border border-line-strong bg-white px-2.5 font-semibold whitespace-nowrap" data-est-own-price={p.id}>Enter price myself</button>
+                  </div>
+                ))}
+                {justNow.map((p) => (
+                  <div key={p.id} className="flex flex-wrap items-center gap-2 font-semibold text-green" data-job-priced-now={p.id}>
+                    <span className="min-w-0 flex-1 font-bold uppercase break-words">{p.description}</span>
+                    <span>Priced by you · AED {aed(jobPriced[p.id].cost)} each · adding it to the quotation…</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })() : null}
           {partOffers.length ? (
             <div className="flex flex-wrap items-center gap-1.5 rounded-control bg-chip p-2 text-xs" data-goes-with>
               <span className="font-semibold">Goes with:</span>
@@ -2070,7 +2150,7 @@ export function QuoteEditor({
         </Card>
 
         {wait && isQuotation && !sent ? (
-          <Card className={`flex flex-col gap-2 ${wait.openRequests || wait.partsPriced < wait.partsTotal || wait.unavailable?.length ? "border-amber-bar" : ""}`}>
+          <Card className={`flex flex-col gap-2 ${wait.openRequests || partsPricedShown < wait.partsTotal || wait.unavailable?.length ? "border-amber-bar" : ""}`}>
             <SectionLabel>Parts</SectionLabel>
             {wait.unavailable?.length ? (
               <div className="rounded-control bg-amber-soft px-3 py-2 text-xs">
@@ -2079,8 +2159,8 @@ export function QuoteEditor({
                 <span className="text-muted">Offer the customer another way, or leave it off.</span>
               </div>
             ) : null}
-            <p className="text-sm font-semibold">{wait.partsTotal ? `${wait.partsPriced} of ${wait.partsTotal} parts priced` : "No parts requested"}{wait.openRequests ? ` · ${wait.openRequests} request${wait.openRequests === 1 ? "" : "s"} still open` : ""}</p>
-            {wait.openRequests || wait.partsPriced < wait.partsTotal ? (
+            <p className="text-sm font-semibold">{wait.partsTotal ? `${partsPricedShown} of ${wait.partsTotal} parts priced` : "No parts requested"}{wait.openRequests ? ` · ${wait.openRequests} request${wait.openRequests === 1 ? "" : "s"} still open` : ""}</p>
+            {wait.openRequests || partsPricedShown < wait.partsTotal ? (
               <>
                 <p className="text-xs text-muted">Waiting on {wait.partsNames || "Parts"}, {wait.waitingMinutes} min.</p>
                 {!disabled ? (
@@ -2262,14 +2342,33 @@ export function QuoteEditor({
           </div>
         </div>
       ) : null}
+      {/* ENTER PRICE MYSELF (5 November 2026): the one centre pricing window, estimates and job parts alike. */}
+      {priceFor && (priceLine || pricePart) ? (
+        <PartPriceDialog
+          title={priceLine?.title ?? pricePart?.description ?? "Part"}
+          qtyWords={`× ${Number(priceLine?.quantity ?? pricePart?.confirmed_quantity ?? pricePart?.quantity) || 1}${(priceLine?.unit ?? (pricePart as { unit?: string | null } | null)?.unit ?? "pc") !== "pc" ? ` ${priceLine?.unit ?? (pricePart as { unit?: string | null } | null)?.unit}` : ""}`}
+          minMarkup={settings.minMarkup}
+          isOwner={isOwner}
+          initial={{
+            cost: priceFor.cost ?? ((priceLine?.unit_cost ?? pricePart?.cost_aed) !== null && (priceLine?.unit_cost ?? pricePart?.cost_aed) !== undefined ? String(priceLine?.unit_cost ?? pricePart?.cost_aed) : ""),
+            supplier: priceFor.supplier ?? (priceLine?.supplier_text ?? pricePart?.supplier ?? ""),
+            markupMode: priceLine?.markup_mode === "aed" ? "aed" : "percent",
+            markupValue: priceLine?.markup_mode === "aed" ? String(priceLine.markup_aed ?? "") : String(priceLine?.markup_percent ?? settings.minMarkup),
+          }}
+          saving={false}
+          error={null}
+          onClose={() => setPriceFor(null)}
+          onSave={onPriceSave}
+        />
+      ) : null}
       {costCheckAsk ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4" data-est-cost-ask={costCheckAsk.kind}>
           <div className={`w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card border-2 bg-white p-5 flex flex-col gap-3 ${costCheckAsk.kind === "far_below" ? "border-red-bar" : "border-amber-bar"}`}>
             <span className={`text-lg font-extrabold ${costCheckAsk.kind === "far_below" ? "text-red" : ""}`}>{costCheckAsk.words}</span>
-            <p className="text-sm text-muted">{costCheckAsk.supplier}: the price is kept only when it is real. &quot;Yes, real price&quot; is written on the estimate.</p>
+            <p className="text-sm text-muted">{costCheckAsk.supplier ? `${costCheckAsk.supplier}: the` : "The"} price is kept only when it is real. &quot;Yes, real price&quot; is written down.</p>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" size="md" onClick={() => { const a = costCheckAsk; setCostCheckAsk(null); save({ advisorPrice: { id: a.lineId, cost: a.cost, supplier: a.supplier, confirmCost: a.cost } }); }} data-est-cost-confirm>Yes, real price</Button>
-              <Button type="button" tone="secondary" size="md" onClick={() => { const a = costCheckAsk; setCostCheckAsk(null); setOwnPrice({ id: a.lineId, cost: String(a.cost), supplier: a.supplier }); refresh(); }} data-est-cost-change>Change the price</Button>
+              <Button type="button" size="md" onClick={() => { const a = costCheckAsk; setCostCheckAsk(null); save(a.partId ? { partPrice: { partId: a.partId, cost: a.cost, supplier: a.supplier, confirmCost: a.cost } } : { advisorPrice: { id: a.lineId, cost: a.cost, supplier: a.supplier, confirmCost: a.cost } }); }} data-est-cost-confirm>Yes, real price</Button>
+              <Button type="button" tone="secondary" size="md" onClick={() => { const a = costCheckAsk; setCostCheckAsk(null); setPriceFor({ lineId: a.lineId, partId: a.partId, cost: String(a.cost), supplier: a.supplier }); refresh(); }} data-est-cost-change>Change the price</Button>
             </div>
           </div>
         </div>

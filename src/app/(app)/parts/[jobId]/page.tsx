@@ -19,6 +19,7 @@ import { valuesOfPart, valuesOfRequest } from "@/lib/parts-pricing";
 import { rowState, type SupplierOption } from "@/lib/parts-rows";
 import { reasonsFor } from "@/lib/reasons";
 import { PARTS_BUCKET, PART_SELECT, REQUEST_SELECT, signPaths, toPart } from "@/lib/quote-data";
+import { partAdvisorCols } from "@/lib/parts-data";
 import { type PartItem, type PartRequest } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
@@ -64,7 +65,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     admin.from("jobs").select("id, vehicle_id, job_number, status, is_open, parts_pricing_done_at, parts_pricing_reopened_at, plan_parts_done_at, plan_parts_ready_date, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, tyre_size_front, tyre_size_rear, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle(),
     admin.from("part_requests").select(REQUEST_SELECT + ", removed_at, removed_by, removed_reason, created_by").eq("job_id", jobId).eq("is_active", true).order("created_at"),
     // Removed parts ("not needed") stay on the list, greyed, with Put back.
-    admin.from("part_items").select(PART_SELECT + `, po_id, expected_date, received_qty, issue_status, return_status, replaced_part_id, replacement_part_id, not_needed_at, not_needed_reason, disposition, disposition_at, disposition_by, disposition_note, stock_item_id, final_cost_aed, exchange_status, quantity_changed_by${(await refusalsReady()) ? ", refused_at, refused_by, refused_reason" : ""}${(await costConfirmReady()) ? ", cost_confirmed_aed" : ""}${unitsReady ? ", unit" : ""}`).eq("job_id", jobId).or("is_active.eq.true,removed_at.not.is.null").order("created_at"),
+    admin.from("part_items").select(PART_SELECT + `, po_id, expected_date, received_qty, issue_status, return_status, replaced_part_id, replacement_part_id, not_needed_at, not_needed_reason, disposition, disposition_at, disposition_by, disposition_note, stock_item_id, final_cost_aed, exchange_status, quantity_changed_by${(await refusalsReady()) ? ", refused_at, refused_by, refused_reason" : ""}${(await costConfirmReady()) ? ", cost_confirmed_aed" : ""}${unitsReady ? ", unit" : ""}${await partAdvisorCols()}`).eq("job_id", jobId).or("is_active.eq.true,removed_at.not.is.null").order("created_at"),
     admin.from("suppliers").select("id, name, default_discount_percent, discount_by_type").eq("is_active", true).order("name"),
     admin.from("staff").select("id, display_name, role_id").eq("is_active", true),
     loadInspection(jobId),
@@ -154,7 +155,9 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     info: infoOf(r, p),
     shownPositions: p.positions?.length ? p.positions : (r?.positions ?? null),
     // The same values and state function as the server's counts (src/lib/parts-pricing.ts), so nothing can disagree.
-    values: valuesOfPart({ ...p, stock_item_id: (rawById.get(p.id)?.stock_item_id as string | null) ?? null }, today, costChecks.get(p.id), stockOfItem.get(String(rawById.get(p.id)?.stock_item_id ?? "")) ?? null),
+    values: valuesOfPart({ ...p, stock_item_id: (rawById.get(p.id)?.stock_item_id as string | null) ?? null, priced_by_advisor: (rawById.get(p.id)?.priced_by_advisor as boolean | null | undefined) ?? null, price_checked_at: (rawById.get(p.id)?.price_checked_at as string | null | undefined) ?? null }, today, costChecks.get(p.id), stockOfItem.get(String(rawById.get(p.id)?.stock_item_id ?? "")) ?? null),
+    // Enter price myself (5 November 2026): who priced it, for the desk's "Price is right ✓" look.
+    advisorPriced: rawById.get(p.id)?.priced_by_advisor ? { name: nameOf.get(String(rawById.get(p.id)?.priced_by ?? "")) ?? null, at: (rawById.get(p.id)?.priced_at as string | null) ?? null, checked: !!rawById.get(p.id)?.price_checked_at } : null,
     removed: endedRow(p) ? { by: endedRow(p)!.by, reason: endedRow(p)!.reason } : p.removed_at ? { by: nameOf.get(p.removed_by ?? "") ?? "Parts", reason: p.removed_reason ?? "" } : null,
     ended: endedRow(p)?.words ?? null,
     creditAwaited: !!endedRow(p)?.awaited,

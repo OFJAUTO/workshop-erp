@@ -15,7 +15,7 @@ import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { ReasonChips } from "@/components/ReasonChips";
 import { PartPicker } from "@/components/PartPicker";
 import { type CatalogueRow } from "@/lib/parts-list";
-import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, closePartRequest, confirmPartCost, coverRequest, markRequestUnavailable, noteCustomPartNames, replaceRefusedPart, splitPart } from "../actions";
+import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, checkPartPrice, closePartRequest, confirmPartCost, coverRequest, markRequestUnavailable, noteCustomPartNames, replaceRefusedPart, splitPart } from "../actions";
 import { endPartFromParts, putBackPart, removeNotNeeded } from "../remove-actions";
 import type { EndingChoices, EndingKey } from "@/lib/part-endings";
 import type { EndResult } from "@/lib/part-endings-server";
@@ -100,6 +100,8 @@ export type TableRow = {
   qtyMemory?: { qty: number; unit: PartUnit; words: string } | null;
   /** An estimate's part line (no job yet): what the advisor sent and his own price, for the desk to check. */
   estimate?: { state: EstimatePartState; note: string | null; advisorName: string | null; advisorCost: number | null; advisorSupplier: string | null } | null;
+  /** A JOB part the advisor priced himself (Enter price myself, 5 November 2026): who, when, and the desk's "Price is right ✓". */
+  advisorPriced?: { name: string | null; at: string | null; checked: boolean } | null;
 };
 
 type Action = (formData: FormData) => void | Promise<void>;
@@ -915,6 +917,8 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
         {unitsReady && unitOf(v.unit) !== "pc" && num(v.cost_aed) > 0 && state !== "removed" ? <span className="shrink-0 text-[11px] font-semibold" data-per-unit={unitOf(v.unit)}>AED {aed(num(v.cost_aed))} {perUnitWords(unitOf(v.unit))} × {qtyWithUnit(qty, unitOf(v.unit))}</span> : null}
         {row.qtyMemory && !readOnly && (Math.abs(row.qtyMemory.qty - qty) > 0.005 || (unitsReady && row.qtyMemory.unit !== unitOf(v.unit))) ? <button type="button" onClick={() => change({ qty: String(row.qtyMemory!.qty), ...(unitsReady ? { unit: row.qtyMemory!.unit } : {}) })} className="shrink-0 h-5 max-w-[60%] truncate rounded-control border border-ink bg-white px-2 text-[10px] font-bold" title="The quantity used last time on the same model (or make). Nothing changes until you tap it." data-qty-memory={`${row.qtyMemory.qty}${row.qtyMemory.unit}`}>{row.qtyMemory.words} · Use</button> : null}
         {row.estimate ? <EstimateLineExtras quotationId={estimate?.id ?? ""} lineId={partId ?? row.key} est={row.estimate} preparing={!!estimate?.preparing} canPrice={canPrice} onChecked={markChecked} /> : null}
+        {/* A JOB part the advisor priced himself (Enter price myself, 5 November 2026): the desk's later look, never a hold. */}
+        {!row.estimate && row.advisorPriced && partId && state !== "removed" ? <JobAdvisorPrice jobId={jobId} partId={partId} info={row.advisorPriced} cost={num(v.cost_aed)} supplier={v.supplier} canPrice={canPrice} onChecked={markChecked} /> : null}
         {memory && !v.list_price && !v.cost_aed && !readOnly ? <button type="button" onClick={useMemory} className="shrink-0 h-5 max-w-[55%] truncate rounded-control border border-green bg-green-soft px-2 text-[10px] font-bold text-green" title="The last price given for this part number" data-price-memory>Last: AED {memory.net !== null ? memory.net.toFixed(2) : "?"} net{memory.supplier ? ` · ${memory.supplier}` : ""}{memory.job ? ` · ${memory.job}` : ""}{memory.paid ? ` · bought at AED ${memory.paid.cost.toFixed(2)} (${memory.paid.where})` : ""} · Use</button> : null}
         {/* From our stock: the item and its average cost; Change opens the picker again */}
         {isOurStock(v.supplier) && !row.removed ? (
@@ -1097,7 +1101,7 @@ function EstimateLineExtras({ quotationId, lineId, est, preparing, canPrice, onC
       <span className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[10px] font-bold whitespace-nowrap ${shownState === "with_desk" || shownState === "advisor" ? "bg-amber-soft text-amber" : "border border-green text-green"}`} data-desk-part-state={shownState}>{ESTIMATE_PART_WORDS[shownState]}</span>
       {advisorPriced ? (
         <span className="inline-flex min-h-5 max-w-full flex-wrap items-center gap-1.5 rounded-control border border-amber-bar bg-amber-soft px-2 py-0.5 text-[11px] font-bold text-amber" data-desk-check>
-          <span className="break-words">Priced by {est.advisorName ?? "the advisor"}: {est.advisorCost !== null ? `AED ${aed(est.advisorCost)}` : ""} from {est.advisorSupplier ?? "?"}. Check it.</span>
+          <span className="break-words">Priced by {est.advisorName ?? "the advisor"}{est.advisorCost !== null ? `: AED ${aed(est.advisorCost)}` : ""}{est.advisorSupplier ? ` from ${est.advisorSupplier}` : ""}. Check it when you can.</span>
           {canPrice ? (
             <button
               type="button"
@@ -1137,6 +1141,48 @@ function EstimateLineExtras({ quotationId, lineId, est, preparing, canPrice, onC
         </details>
       ) : null}
     </>
+  );
+}
+
+/**
+ * A JOB part priced by the advisor himself (Enter price myself, 5 November 2026): the amber words with who and when,
+ * and the desk's "Price is right ✓" - a later look, never a hold (the part already counts as priced).
+ */
+function JobAdvisorPrice({ jobId, partId, info, cost, supplier, canPrice, onChecked }: { jobId: string; partId: string; info: NonNullable<TableRow["advisorPriced"]>; cost: number; supplier: string; canPrice: boolean; onChecked: () => void }) {
+  const router = useRouter();
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState<string | null>(null);
+  const [checked, setChecked] = useState(info.checked);
+  if (checked) {
+    return <span className="inline-flex h-5 shrink-0 items-center rounded-full border border-green px-2 text-[10px] font-bold text-green whitespace-nowrap" data-advisor-priced="checked">Priced by {info.name ?? "advisor"} · checked ✓</span>;
+  }
+  return (
+    <span className="inline-flex min-h-5 max-w-full flex-wrap items-center gap-1.5 rounded-control border border-amber-bar bg-amber-soft px-2 py-0.5 text-[11px] font-bold text-amber" data-advisor-priced="open">
+      <span className="break-words">Priced by {info.name ?? "the advisor"}{cost > 0 ? `: AED ${aed(cost)}` : ""}{supplier ? ` from ${supplier}` : ""}. Check it when you can.</span>
+      {canPrice ? (
+        <button
+          type="button"
+          disabled={checking}
+          onClick={async () => {
+            setChecking(true);
+            setCheckError(null);
+            const r = await checkPartPrice(jobId, partId).catch((e) => (reloadIfStale(e) ? { error: "" } : { error: "No connection. Try again." }));
+            setChecking(false);
+            if (r.error) setCheckError(r.error);
+            else {
+              setChecked(true);
+              onChecked();
+              router.refresh();
+            }
+          }}
+          className="min-h-9 rounded-control bg-ink px-2.5 text-[11px] font-bold text-white disabled:opacity-50"
+          data-desk-price-right
+        >
+          {checking ? "Saving…" : "Price is right ✓"}
+        </button>
+      ) : null}
+      {checkError ? <span className="w-full font-semibold text-red">{checkError}</span> : null}
+    </span>
   );
 }
 

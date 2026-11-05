@@ -4,7 +4,7 @@ import { PART_SELECT, toPart } from "./quote-data";
 import type { PartItem } from "./quotes";
 import { createAdminClient } from "./supabase/admin";
 import { poCharges, type SupplierCharge } from "./supplier-charges";
-import { partUnitsReady } from "./schema-ready";
+import { advisorPricePartsReady, partUnitsReady } from "./schema-ready";
 import { pageAllIn } from "./page-all";
 import { sidesToRelease } from "./job-sides";
 import type { Side } from "./teams";
@@ -94,6 +94,11 @@ export const PO_SELECT = "id, number, job_id, supplier_id, supplier_name, status
 export const PO_LINE_SELECT = "id, po_id, part_item_id, position, description, part_number, quantity, unit_cost, list_price, discount_percent, expected_date, received_qty, received_at, flag, flag_note, invoice_unit_cost, invoice_check, stock_item_id";
 /** The part columns the Parts desk needs after approval, on top of the quotation ones. */
 export const PART_FULL_SELECT = PART_SELECT + ", stickers_printed, po_id, po_line_id, expected_date, received_qty, issued_qty, issue_status, issued_at, issued_by, issue_confirmed_at, issue_confirmed_by, returned_qty, return_status, return_note, label_code, final_cost_aed, tech_received_qty, not_received_at, exchange_status, exchange_reason, exchange_note, exchange_at, replacement_part_id, replaced_part_id, not_needed_at, not_needed_by, not_needed_reason, disposition, disposition_at, disposition_by, disposition_note, credit_note_path, goodwill_cost_aed, ready_for_handover_at, ready_for_handover_by";
+
+/** "Enter price myself" columns (5 November 2026), appended to a select once the migration is applied ("" before). */
+export async function partAdvisorCols(): Promise<string> {
+  return (await advisorPricePartsReady()) ? ", priced_by_advisor, price_checked_at" : "";
+}
 
 export type PartFull = PartItem & {
   stickers_printed: number;

@@ -5,6 +5,7 @@ import { WaitingPanel } from "@/components/WaitingPanel";
 import { partsWaitingExtra } from "@/lib/parts-waiting";
 import { PartsSteps } from "@/components/PartsSteps";
 import type { CurrentStaff } from "@/lib/auth";
+import { partAdvisorCols } from "@/lib/parts-data";
 import { partsSteps, stepPartOf, type PartsStepKey } from "@/lib/parts-steps";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
@@ -30,11 +31,12 @@ export async function PartsDashboard({ staff }: { staff: CurrentStaff }) {
   const today = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
   const [{ data: reqRows }, { data: partRows }, { data: poRows }] = await Promise.all([
     admin.from("part_requests").select("id, job_id, status").eq("is_active", true).eq("status", "open"),
-    admin.from("part_items").select("id, job_id, is_active, order_status, received_qty, quantity, confirmed_quantity, issue_status, availability, supplier, po_id, return_status, cost_aed, confirm_status, expected_date, priced_at, removed_at").eq("is_active", true),
+    admin.from("part_items").select("id, job_id, is_active, order_status, received_qty, quantity, confirmed_quantity, issue_status, availability, supplier, po_id, return_status, cost_aed, confirm_status, expected_date, priced_at, removed_at" + (await partAdvisorCols())).eq("is_active", true),
     admin.from("purchase_orders").select("id, kind, status, supplier_invoice_status").eq("is_active", true),
   ]);
   const requests = (reqRows ?? []) as { id: string; job_id: string; status: string }[];
-  const parts = (partRows ?? []) as { id: string; job_id: string; is_active: boolean; order_status: string | null; received_qty: number | string; quantity: number | string; confirmed_quantity: number | string | null; issue_status: string | null; availability: string | null; supplier: string | null; po_id: string | null; return_status: string | null; cost_aed: number | string | null; confirm_status: string | null; expected_date: string | null; priced_at: string | null; removed_at: string | null }[];
+  // The select string is built (the advisor-price columns are ready-gated), so the result loses its type: cast it.
+  const parts = (partRows ?? []) as unknown as { id: string; job_id: string; is_active: boolean; order_status: string | null; received_qty: number | string; quantity: number | string; confirmed_quantity: number | string | null; issue_status: string | null; availability: string | null; supplier: string | null; po_id: string | null; return_status: string | null; cost_aed: number | string | null; confirm_status: string | null; expected_date: string | null; priced_at: string | null; removed_at: string | null; priced_by_advisor?: boolean | null }[];
   const pos = (poRows ?? []) as { id: string; kind: string; status: string; supplier_invoice_status: string | null }[];
   // A car whose only changes wait for the send (not available, removed) is counted through its own mark.
   const { data: heldRows } = await admin.from("jobs").select("id").eq("is_open", true).not("parts_pricing_reopened_at", "is", null).limit(300);

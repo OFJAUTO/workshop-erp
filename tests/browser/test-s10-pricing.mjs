@@ -234,9 +234,11 @@ try {
     const { browser, page } = await browserFor("parts", { viewport: { width: 1440, height: 900 } });
     await go(page, `${base}/parts/estimate/${EST}`);
     await until(async () => ((await page.locator("[data-pricing-bar]").count()) ? 1 : null), 30, 500);
-    check("C1: before the check the line is open: '0 of 1 priced'", (await progressOf(page)) === "0/1", await progressOf(page));
+    // Enter price myself (5 November 2026, the owner's rule): the advisor's own price counts as priced AT ONCE;
+    // "Price is right ✓" is the desk's later look, never a hold.
+    check("C1: the advisor's own price is priced at once: '1 of 1 priced' before any check", (await progressOf(page)) === "1/1", await progressOf(page));
     await page.locator("[data-desk-price-right]").click();
-    check("C2: after 'Price is right ✓' the bar says '1 of 1 priced' at once (no part number, type or availability asked)", !!(await until(async () => ((await progressOf(page)) === "1/1" ? 1 : null), 30, 400)), await progressOf(page));
+    check("C2: after 'Price is right ✓' it stays '1 of 1 priced' (no part number, type or availability asked)", !!(await until(async () => ((await progressOf(page)) === "1/1" ? 1 : null), 30, 400)), await progressOf(page));
     await sleep(1500);
     const lastId = (await sql("select coalesce(max(id), 0)::bigint::text as id from public.notifications"))[0]?.id ?? "0";
     await page.locator("[data-pricing-done]").click();

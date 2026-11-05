@@ -17,7 +17,7 @@ import { sendJobPricing } from "@/lib/pricing-send";
 import { NO_PART_NUMBER, OUR_STOCK, cleanPartNumber, dateFromDays, daysComplete, isOurStock, isPlaceholderSupplier, partNumberProblem, placeholderSupplierWords, realPartNumber, rowState, type RowValues } from "@/lib/parts-rows";
 import { costCheckValues, costChecksFor, forgetBoughtPrices, type PartForCheck } from "@/lib/part-cost-history";
 import { isSettledStatus } from "@/lib/part-cost-check";
-import { costConfirmReady, partUnitsReady } from "@/lib/schema-ready";
+import { advisorPricePartsReady, costConfirmReady, partUnitsReady } from "@/lib/schema-ready";
 import { checkQuantity, cleanUnit, defaultUnitFor, requestUnitOf, type PartUnit } from "@/lib/part-units";
 import { askerOfPart, logPartQuantity } from "@/lib/part-quantity";
 import { holdPerPartNotices } from "@/lib/pricing-done";
@@ -694,6 +694,23 @@ export async function confirmPartCost(jobId: string, partId: string, costEach: n
   const r = p.order_status === "to_order" ? await addPartsToOpenLpo(jobId, staff) : { added: 0 };
   refresh(jobId);
   return { ok: true, added: r.added };
+}
+
+/** "Price is right ✓" on a JOB part the advisor priced himself (5 November 2026): the desk's later look, never a hold. */
+export async function checkPartPrice(jobId: string, partId: string): Promise<{ error?: string; ok?: boolean }> {
+  const staff = await getCurrentStaff();
+  if (!staff || staff.viewingAs) return { error: "Please sign in again." };
+  if (!can(staff.role_id as RoleId, "priceParts")) return { error: "Only the parts desk or the owner checks prices." };
+  if (!(await advisorPricePartsReady())) return { error: "This waits for the owner's \"apply\" (one database change on the list)." };
+  const admin = createAdminClient();
+  const { data: p } = await admin.from("part_items").select("id, description, cost_aed, supplier, priced_by_advisor, price_checked_at, is_active").eq("id", partId).eq("job_id", jobId).maybeSingle();
+  if (!p || !p.is_active) return { error: "Part not found." };
+  if (!p.priced_by_advisor || p.price_checked_at) return { ok: true };
+  const { error } = await admin.from("part_items").update({ price_checked_at: new Date().toISOString(), price_checked_by: staff.id, updated_by: staff.id }).eq("id", p.id);
+  if (error) return { error: error.message };
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "parts", note: `${staff.display_name} checked the advisor's price on ${p.description}: AED ${Number(p.cost_aed ?? 0).toLocaleString("en-GB")} each${p.supplier ? ` from ${p.supplier}` : ""} is right`, created_by: staff.id });
+  refresh(jobId);
+  return { ok: true };
 }
 
 /**

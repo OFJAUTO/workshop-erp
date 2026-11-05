@@ -45,7 +45,8 @@ export const ESTIMATE_PART_WORDS: Record<EstimatePartState, string> = {
   draft: "Not sent to the parts desk",
   with_desk: "With the parts desk",
   priced: "Priced by the parts desk",
-  advisor: "Priced by advisor · parts desk to check",
+  // Enter price myself (5 November 2026): the advisor's price counts at once; the desk's ✓ is a later look, never a hold.
+  advisor: "Priced by advisor",
   checked: "Priced by advisor · checked by the parts desk",
 };
 

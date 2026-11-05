@@ -155,7 +155,7 @@ export function Field({
   );
 }
 
-const controlClass =
+export const controlClass =
   "min-h-11 w-full rounded-control border border-line-strong bg-white px-3.5 text-[15px] outline-none focus:border-ink focus:ring-2 focus:ring-ink/10 disabled:bg-canvas disabled:text-muted";
 
 const WORDY_TYPES = new Set([undefined, "text", "search", "url"]);

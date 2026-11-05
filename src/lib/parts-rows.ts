@@ -170,27 +170,27 @@ export const daysComplete = (days: string | null | undefined) => /^\d+$/.test(St
 /** What a row still needs before it counts as priced: part number, type, a net price above 0, a supplier and its availability. */
 export function rowMissing(v: RowValues): Missing[] {
   const out: Missing[] = [];
-  // An advisor's own price the parts desk checked ("Price is right ✓"): his cost and supplier are the price - no part
-  // number, type or availability was ever asked of him.
-  const advisorChecked = v.advisor_price === "checked";
-  if (!advisorChecked && v.tyre_row) {
+  // An advisor's own price ("Enter price myself", 5 November 2026): his cost is the price - no part number, type,
+  // availability or even supplier was ever asked of him, and it counts as PRICED at once (off the desk's waiting
+  // list); the desk's "Price is right ✓" is a later look, never a hold.
+  const advisorPriced = v.advisor_price === "1" || v.advisor_price === "checked";
+  if (!advisorPriced && v.tyre_row) {
     if (!(v.tyre_brand ?? "").trim() || !/^\d{3}\/\d{2} R\d{2}$/.test(v.tyre_size ?? "")) out.push({ field: "tyre", short: "Tyre size and brand needed", long: "tyre size and brand needed" });
-  } else if (!advisorChecked && !v.part_number.trim()) out.push({ field: "part_number", short: "No part number", long: "no part number" });
-  if (!advisorChecked && !v.part_type.trim()) out.push({ field: "part_type", short: "No type", long: "no type" });
+  } else if (!advisorPriced && !v.part_number.trim()) out.push({ field: "part_number", short: "No part number", long: "no part number" });
+  if (!advisorPriced && !v.part_type.trim()) out.push({ field: "part_type", short: "No type", long: "no type" });
   const netText = v.cost_aed.trim();
   const net = netText === "" ? null : Number(netText.replace(",", "."));
   if (net === null || !Number.isFinite(net)) out.push({ field: "cost_aed", short: "No price", long: "no net price" });
   else if (net <= 0) out.push({ field: "cost_aed", short: "Net price is 0", long: "net price is 0" });
   // Ordered or received: past pricing. Its supplier and cost are history here (Correct the cost… fixes a wrong one).
   const settled = v.settled === "1";
-  if (!v.supplier.trim()) out.push({ field: "supplier", short: "No supplier", long: "no supplier" });
+  if (!v.supplier.trim()) { if (!advisorPriced) out.push({ field: "supplier", short: "No supplier", long: "no supplier" }); }
   else if (!settled && isPlaceholderSupplier(v.supplier)) out.push({ field: "supplier", short: "Not a supplier", long: placeholderSupplierWords(v.supplier) });
   else if (!settled && isOurStock(v.supplier) && v.stock_item !== undefined && !v.stock_item.trim()) out.push({ field: "stock_item", short: "Pick the stock item", long: "from our stock: pick the stock item (From our stock…)" });
-  if (!advisorChecked && v.availability !== "in_stock" && v.availability !== "to_order") out.push({ field: "availability", short: "No availability", long: "no availability" });
-  else if (!advisorChecked && v.availability === "to_order" && !daysComplete(v.days)) out.push({ field: "days", short: "No days", long: "days to arrive missing" });
+  if (!advisorPriced && v.availability !== "in_stock" && v.availability !== "to_order") out.push({ field: "availability", short: "No availability", long: "no availability" });
+  else if (!advisorPriced && v.availability === "to_order" && !daysComplete(v.days)) out.push({ field: "days", short: "No days", long: "days to arrive missing" });
   // The cost question holds the row only while it is about the cost on the row and its answer can be stored.
   if (!settled && v.cost_ask && v.cost_ask_hold === "1" && sameCost(v.cost_ask_for, v.cost_aed)) out.push({ field: "cost_check", short: "Real price?", long: v.cost_ask });
-  if (v.advisor_price === "1") out.push({ field: "advisor_price", short: "Check the advisor's price", long: "the advisor's price to check (Price is right ✓)" });
   return out;
 }
 

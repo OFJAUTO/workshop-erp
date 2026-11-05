@@ -47,7 +47,7 @@ import { handbackOf, startersOf, staffNamesOf } from "@/lib/quote-lead";
 import { HandbackBanner } from "@/components/HandbackBanner";
 import { recoveryProviderList } from "@/lib/recovery-providers";
 import { requestPartsGone, revisionPreview } from "@/lib/quote-versions";
-import { belowCostReady, partUnitsReady } from "@/lib/schema-ready";
+import { advisorPricePartsReady, belowCostReady, partUnitsReady } from "@/lib/schema-ready";
 import { recoveryElsewhere } from "@/lib/charges";
 import { costLimitsOf } from "@/lib/part-cost-check";
 
@@ -163,6 +163,15 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const mayDeclineAll = canSend && jobOpen && !declinedOut && !anyApproved(jobFamilies);
   // The work the customer declined on earlier visits of this car, still not done: a reminder while quoting.
   const { data: declinedBefore } = q.vehicle_id ? await createAdminClient().from("declined_work").select("id, title, severity, declined_at").eq("vehicle_id", q.vehicle_id).eq("is_active", true).is("done_at", null).neq("job_id", id).order("declined_at", { ascending: false }).limit(12) : { data: [] as { id: string; title: string; severity: string | null; declined_at: string }[] };
+  // Enter price myself (5 November 2026): "Priced by <name>, <time>" per part, and the job-side buttons once the columns exist.
+  const advisorPriceParts = await advisorPricePartsReady();
+  const partPricedBy: Record<string, { name: string | null; at: string | null; advisor: boolean; checked: boolean }> = {};
+  if (advisorPriceParts && bundle.parts.length) {
+    const { data: apRows } = await createAdminClient().from("part_items").select("id, priced_at, priced_by, priced_by_advisor, price_checked_at").eq("job_id", id).eq("is_active", true);
+    const rows = (apRows ?? []) as { id: string; priced_at: string | null; priced_by: string | null; priced_by_advisor: boolean | null; price_checked_at: string | null }[];
+    const nm = await staffNames(rows.map((r) => r.priced_by).filter((x): x is string => !!x));
+    for (const r of rows) partPricedBy[r.id] = { name: r.priced_by ? (nm.get(r.priced_by) ?? null) : null, at: r.priced_at, advisor: !!r.priced_by_advisor, checked: !!r.price_checked_at };
+  }
   const editorSettings = {
     labourRate: labourRateFor(settings, job?.department ?? null, vehicle?.make?.name ?? null),
     minMarkup: minMarkupFor(settings, vehicle?.make?.name ?? null),
@@ -212,6 +221,9 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
     recoveryLeftOut: bundle.events.filter((e) => e.event_type === "recovery_not_copied" && e.note).map((e) => e.note as string),
     lastPrices,
           packageCost,
+    // Enter price myself (5 November 2026): the job-side buttons once the columns exist, and who priced each part.
+    advisorPriceParts,
+    partPricedBy,
   };
   const tone = q.status === "approved" ? "green" : q.status === "declined" || q.status === "expired" ? "red" : q.status === "draft" ? "outline" : "amber";
   // Section 1 (29 October 2026): an old version says so in grey, with who replaced it and when; it opens read-only.

@@ -4,6 +4,7 @@ import type { ExtraWaiting } from "@/components/WaitingPanel";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
 import { pricesToFix } from "./part-cost-history";
+import { partAdvisorCols } from "./parts-data";
 import { PLANNING_STATUSES, pricingTodoOf } from "./pricing-done";
 
 const PLATE_SELECT = "kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant";
@@ -23,7 +24,7 @@ export async function partsWaitingExtra(): Promise<ExtraWaiting[]> {
     car: e.car || null,
     what: `ESTIMATE ${e.number} – car not here yet: ${estimateTaskWords(e)}`,
     amount: null,
-    actionLabel: e.toPrice ? "Price the parts" : e.toCheck ? "Check the price" : "Send to advisor",
+    actionLabel: e.toPrice ? "Price the parts" : "Send to advisor",
     href: `/parts/estimate/${e.id}`,
     always: true,
     urgency: e.toPrice ? "amber" : "grey",
@@ -108,10 +109,10 @@ async function pricingToSendItems(): Promise<ExtraWaiting[]> {
   if (!jobs.length) return [];
   const ids = jobs.map((j) => j.id);
   const [{ data: partRows }, { data: reqRows }] = await Promise.all([
-    admin.from("part_items").select("job_id, is_active, confirm_status, order_status, cost_aed, priced_at, removed_at").in("job_id", ids).eq("is_active", true),
+    admin.from("part_items").select("job_id, is_active, confirm_status, order_status, cost_aed, priced_at, removed_at" + (await partAdvisorCols())).in("job_id", ids).eq("is_active", true),
     admin.from("part_requests").select("job_id, status").in("job_id", ids).eq("is_active", true).eq("status", "open"),
   ]);
-  const parts = (partRows ?? []) as { job_id: string; is_active: boolean; confirm_status: string | null; order_status: string | null; cost_aed: number | string | null; priced_at: string | null; removed_at: string | null }[];
+  const parts = (partRows ?? []) as unknown as { job_id: string; is_active: boolean; confirm_status: string | null; order_status: string | null; cost_aed: number | string | null; priced_at: string | null; removed_at: string | null; priced_by_advisor?: boolean | null }[];
   const reqs = (reqRows ?? []) as { job_id: string; status: string }[];
   const out: ExtraWaiting[] = [];
   for (const j of jobs) {

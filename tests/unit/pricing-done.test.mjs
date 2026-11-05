@@ -82,9 +82,14 @@ check("a left-off line never counts", estimateDeskTodo([{ unit_cost: null, price
 // priced on the bar and in the advisor's notification, as on the desk's list and in his editor.
 const R = await import("../../src/lib/parts-rows.ts");
 const advisorRow = { part_number: "", part_type: "", brand: "", list_price: "", discount: "", cost_aed: "80", supplier: "Gargash", availability: "", days: "", qty: "1" };
-check("an advisor's price waiting for the check is not finished", R.rowState({ ...advisorRow, advisor_price: "1" }) === "not_finished");
+// Enter price myself (5 November 2026, the owner's rule): the advisor's own price counts as PRICED at once - off the
+// desk's waiting list - and the desk's "Price is right ✓" is a later look, never a hold. Cost compulsory, never 0;
+// the supplier is optional; a stand-in supplier is still refused.
+check("an advisor's price is priced at once (the desk's check never holds it)", R.rowState({ ...advisorRow, advisor_price: "1" }) === "priced");
 check("an advisor's price the desk checked is priced (no part number, type or availability asked of him)", R.rowState({ ...advisorRow, advisor_price: "checked" }) === "priced");
-check("a checked advisor price still needs its cost and supplier", R.rowState({ ...advisorRow, cost_aed: "", advisor_price: "checked" }) === "not_finished" && R.rowState({ ...advisorRow, supplier: "", advisor_price: "checked" }) === "not_finished");
+check("an advisor's price with no supplier is still priced (the supplier is optional for him)", R.rowState({ ...advisorRow, supplier: "", advisor_price: "1" }) === "priced");
+check("an advisor's price still needs its cost, never 0", R.rowState({ ...advisorRow, cost_aed: "", advisor_price: "1" }) === "not_finished" && R.rowState({ ...advisorRow, cost_aed: "0", advisor_price: "1" }) === "not_finished");
+check("a stand-in supplier is refused even on an advisor's price", R.rowState({ ...advisorRow, supplier: "OFJ Additional", advisor_price: "1" }) === "not_finished");
 check("the desk's own price still needs the whole row", R.rowState(advisorRow) === "not_finished");
 
 console.log(failed ? `\n${failed} check(s) failed` : "\nAll pricing-done checks passed");

@@ -134,20 +134,24 @@ try {
   const fRow = ap.locator(`[data-est-part="${filter.id}"]`);
   await fRow.waitFor({ timeout: 15000 });
   await fRow.locator(`[data-est-own-price="${filter.id}"]`).click();
-  const box = ap.locator(`[data-est-own-price-box="${filter.id}"]`);
-  await box.locator("[data-est-own-cost]").fill("80");
-  await box.locator("[data-est-own-supplier]").fill("Dealer On The Phone");
-  await box.locator("[data-est-own-save]").click();
+  // "Enter price myself" (5 November 2026): a CENTRE window, never a row inside the scrolled table.
+  const dlg = ap.locator("[data-price-dialog]");
+  await dlg.waitFor({ timeout: 10000 });
+  await dlg.locator("[data-price-cost]").fill("80");
+  // The supplier is OPTIONAL on the advisor's own price (left empty here on purpose).
+  await dlg.locator("[data-price-save]").click();
   const own = await until(async () => { const l = await lineOf("Oil filter e2e"); return l?.priced_by_advisor && Number(l.unit_cost) === 80 ? l : null; });
-  check("D \"I have a price\": cost 80 from the dealer, marked \"Priced by advisor\" (internal)", !!own && /Priced by advisor/.test(await text(fRow.locator("[data-est-part-state]"))), `${!!own} · ${await text(fRow.locator("[data-est-part-state]"))}`);
+  check("D \"Enter price myself\": cost 80, no supplier needed, marked \"Priced by advisor\" (internal)", !!own && /Priced by advisor/.test(await text(fRow.locator("[data-est-part-state]"))), `${!!own} · ${await text(fRow.locator("[data-est-part-state]"))}`);
+  check("D the line says who priced it and when", /Priced by /.test(await text(ap.locator(`[data-priced-by="${filter.id}"]`))));
   await fRow.scrollIntoViewIfNeeded();
   await ap.screenshot({ path: path.join(SHOTS, "D-priced-by-advisor-1440.png") });
-  const checkTask = await until(async () => (await sql("select title from public.notifications where type = 'estimate_price_check' and href = $1", [`/parts/estimate/${est.id}`]))[0]);
-  check(`D the parts desk gets the "check this price" task: "${checkTask?.title ?? "?"}"`, !!checkTask);
+  // A DRAFT part (never with the desk) priced by the advisor: the desk is NOT told and NOT held on their list.
+  const checkTask = (await sql("select title from public.notifications where type = 'estimate_price_check' and href = $1", [`/parts/estimate/${est.id}`]))[0];
+  check("D the desk is not told about a part they never had", !checkTask, checkTask?.title ?? "");
   // The customer's copy never says who priced it.
   const tok = (await sql("update public.quotations set token = 'e2eestp' || floor(random()*1e9)::text where id = $1 returning token", [est.id]))[0].token;
   await go(pp, `${base}/parts`);
-  check("D the Parts desk entry now reads \"1 advisor price to check\"", /1 advisor price to check/.test(await text(pp.locator(`[data-estimate-to-price="${est.number}"]`))));
+  check("D the Parts desk entry never holds \"advisor price to check\" (off their waiting list)", !/advisor price to check/.test(await text(pp.locator(`[data-estimate-to-price="${est.number}"]`))));
   await go(pp, `${base}/parts/estimate/${est.id}`);
   await pp.locator(`[data-row-key="${filter.id}"] [data-desk-price-right]`).click();
   check("D \"Price is right ✓\" checks it", !!(await until(async () => !!(await lineOf("Oil filter e2e"))?.price_checked_at)));

@@ -109,7 +109,9 @@ export async function loadEstimatesToPrice(onlyId?: string): Promise<EstimateToP
     const todo = estimateDeskTodo(mine, stamps.get(q.id) ?? null, true);
     // A price waiting to be sent back only counts while the estimate is still being prepared (the desk can still press it).
     const pricedNotSent = ["draft", "pending_owner"].includes(q.status) ? todo.pricedNotSent : 0;
-    if (!todo.toPrice && !todo.toCheck && !pricedNotSent) continue;
+    // An advisor's own price never HOLDS the estimate on the desk's waiting list (5 November 2026): they are told once
+    // and can look at it later; only parts still to price, or prices waiting to be sent, keep it here.
+    if (!todo.toPrice && !pricedNotSent) continue;
     out.push({
       id: q.id,
       number: q.number,
@@ -127,10 +129,14 @@ export async function loadEstimatesToPrice(onlyId?: string): Promise<EstimateToP
   return out.sort((a, b) => ((a.since ?? "9") < (b.since ?? "9") ? -1 : 1));
 }
 
-/** "3 parts to price · 1 price to check", or "all priced – send to advisor". */
+/**
+ * "3 parts to price", or "all priced – send to advisor"; a price the advisor typed himself is information, never a task
+ * (5 November 2026: it leaves the desk's waiting list at once), so it rides along as "· 1 priced by advisor".
+ */
 export function estimateTaskWords(e: Pick<EstimateToPrice, "toPrice" | "toCheck"> & { pricedNotSent?: number }): string {
-  const words = [e.toPrice ? `${e.toPrice} part${e.toPrice === 1 ? "" : "s"} to price` : null, e.toCheck ? `${e.toCheck} advisor price${e.toCheck === 1 ? "" : "s"} to check` : null].filter(Boolean).join(" · ");
-  return words || (e.pricedNotSent ? "all priced – send to advisor" : "");
+  const task = e.toPrice ? `${e.toPrice} part${e.toPrice === 1 ? "" : "s"} to price` : e.pricedNotSent ? "all priced – send to advisor" : "";
+  const info = e.toCheck ? `${e.toCheck} priced by advisor` : "";
+  return [task, info].filter(Boolean).join(" · ");
 }
 
 /* ---------------------------------------------------------------------------------------------------------------

@@ -4,7 +4,7 @@ import { declinedItemsOf, saveDeclinedWork } from "@/lib/declined";
 import { isQuickJob } from "@/lib/inspection-fee";
 import { cleanPartNumber, dateFromDays, isOurStock } from "@/lib/parts-rows";
 import { estimatePartState } from "@/lib/estimate-parts";
-import { costConfirmReady, lineCostConfirmReady } from "@/lib/schema-ready";
+import { advisorPricePartsReady, costConfirmReady, lineCostConfirmReady } from "@/lib/schema-ready";
 import { dubaiDate } from "@/lib/jobs";
 import { recoveryElsewhere } from "@/lib/charges";
 import { isQuoteCharge } from "@/lib/charge-items";
@@ -243,6 +243,8 @@ export async function estimateLineRows(estimateId: string, quotationId: string, 
   const { data: extra } = lineReady ? await admin.from("quotation_lines").select("id, stock_item_id, cost_confirmed_aed").eq("quotation_id", estimateId).eq("is_active", true) : { data: [] as { id: string; stock_item_id: string | null; cost_confirmed_aed: number | string | null }[] };
   const extraOf = new Map((extra ?? []).map((x) => [x.id as string, x as { stock_item_id: string | null; cost_confirmed_aed: number | string | null }]));
   const partsReady = await costConfirmReady();
+  // Enter price myself (5 November 2026): "Priced by advisor" travels onto the part itself once the columns exist.
+  const apReady = await advisorPricePartsReady();
   const rows: Record<string, unknown>[] = [];
   const now = new Date().toISOString();
   // Section 9 (3 November 2026): the unit, the advisor's asked quantity and the desk's list price and discount travel too.
@@ -277,7 +279,7 @@ export async function estimateLineRows(estimateId: string, quotationId: string, 
     const delivery = l.availability === "to_order" && l.delivery_days !== null && l.delivery_days !== undefined ? dateFromDays(String(l.delivery_days), dubaiDate()) : null;
     const { data: item, error: itemError } = await admin
       .from("part_items")
-      .insert({ job_id: jobId, client_key: `estimate:${l.id}`, part_request_id: req.id, description: l.title, quantity: l.asked_quantity ?? qty, confirmed_quantity: qty, ...(l.unit !== undefined ? { unit: l.unit ?? "pc", list_price_aed: l.list_price_aed ?? null, discount_percent: l.supplier_discount_percent ?? null, ...(l.asked_quantity !== null && l.asked_quantity !== undefined && Math.abs(l.asked_quantity - qty) > 0.005 ? { quantity_changed_at: l.quantity_changed_at ?? now, quantity_changed_by: l.quantity_changed_by ?? by } : {}) } : {}), positions: l.positions ?? [], part_number: cleanPartNumber(l.part_number), part_type: l.part_type ?? null, brand: l.part_type && l.part_type !== "genuine" ? (l.brand ?? null) : null, cost_aed: l.unit_cost, supplier: l.supplier_text ?? null, availability: isOurStock(l.supplier_text) ? "in_stock" : (l.availability ?? null), delivery_date: delivery, stock_item_id: isOurStock(l.supplier_text) ? (extraOf.get(l.id)?.stock_item_id ?? null) : null, ...(partsReady && extraOf.get(l.id)?.cost_confirmed_aed !== null && extraOf.get(l.id)?.cost_confirmed_aed !== undefined ? { cost_confirmed_aed: extraOf.get(l.id)!.cost_confirmed_aed, cost_confirmed_at: now, cost_confirmed_by: by } : {}), confirm_status: "confirmed", confirmed_by: by, confirmed_at: now, ...(priced ? { priced_by: l.priced_by ?? by, priced_at: l.priced_at ?? now } : {}), added_by_role: l.priced_by_advisor ? "service_advisor" : "parts", created_by: by, updated_by: by })
+      .insert({ job_id: jobId, client_key: `estimate:${l.id}`, part_request_id: req.id, description: l.title, quantity: l.asked_quantity ?? qty, confirmed_quantity: qty, ...(l.unit !== undefined ? { unit: l.unit ?? "pc", list_price_aed: l.list_price_aed ?? null, discount_percent: l.supplier_discount_percent ?? null, ...(l.asked_quantity !== null && l.asked_quantity !== undefined && Math.abs(l.asked_quantity - qty) > 0.005 ? { quantity_changed_at: l.quantity_changed_at ?? now, quantity_changed_by: l.quantity_changed_by ?? by } : {}) } : {}), positions: l.positions ?? [], part_number: cleanPartNumber(l.part_number), part_type: l.part_type ?? null, brand: l.part_type && l.part_type !== "genuine" ? (l.brand ?? null) : null, cost_aed: l.unit_cost, supplier: l.supplier_text ?? null, availability: isOurStock(l.supplier_text) ? "in_stock" : (l.availability ?? null), delivery_date: delivery, stock_item_id: isOurStock(l.supplier_text) ? (extraOf.get(l.id)?.stock_item_id ?? null) : null, ...(partsReady && extraOf.get(l.id)?.cost_confirmed_aed !== null && extraOf.get(l.id)?.cost_confirmed_aed !== undefined ? { cost_confirmed_aed: extraOf.get(l.id)!.cost_confirmed_aed, cost_confirmed_at: now, cost_confirmed_by: by } : {}), confirm_status: "confirmed", confirmed_by: by, confirmed_at: now, ...(priced ? { priced_by: l.priced_by ?? by, priced_at: l.priced_at ?? now } : {}), ...(apReady && l.priced_by_advisor ? { priced_by_advisor: true, price_checked_at: l.price_checked_at ?? null, price_checked_by: l.price_checked_by ?? null } : {}), added_by_role: l.priced_by_advisor ? "service_advisor" : "parts", created_by: by, updated_by: by })
       .select("id")
       .single();
     if (itemError || !item) {

@@ -3,7 +3,7 @@ import { dubaiDate } from "@/lib/jobs";
 import { cleanPartNumber, daysFromDate, pricingSummary, rowState, type PricingSummary, type RowFlags, type RowState, type RowValues } from "@/lib/parts-rows";
 import { isSettledStatus } from "@/lib/part-cost-check";
 import { costCheckValues, costChecksFor, type CostCheck } from "@/lib/part-cost-history";
-import { costConfirmReady, partUnitsReady } from "@/lib/schema-ready";
+import { advisorPricePartsReady, costConfirmReady, partUnitsReady } from "@/lib/schema-ready";
 import { cleanUnit, requestUnitOf } from "@/lib/part-units";
 import { awaitingSend, inPricingPhase } from "@/lib/pricing-done";
 import { PAST_QUOTE } from "@/lib/parts-steps";
@@ -16,12 +16,15 @@ import { isTyreName, parseTyreSpec, tyreSizeIn } from "@/lib/tyres";
  * blockers, the job card) goes through here, so one definition of "priced" holds everywhere. Removed rows ("not
  * needed") stay in the list, greyed, and count for nothing.
  */
-export const PRICING_PART_SELECT = "id, part_request_id, description, original_description, part_number, part_type, brand, tyre_spec, list_price_aed, discount_percent, cost_aed, supplier, availability, delivery_date, quantity, confirmed_quantity, confirm_status, is_active, created_at, removed_at, removed_by, removed_reason, discount_approval_status, option_group, order_status, stock_item_id, final_cost_aed";
+export const PRICING_PART_SELECT = "id, part_request_id, description, original_description, part_number, part_type, brand, tyre_spec, list_price_aed, discount_percent, cost_aed, supplier, availability, delivery_date, quantity, confirmed_quantity, confirm_status, is_active, created_at, removed_at, removed_by, removed_reason, discount_approval_status, option_group, order_status, stock_item_id, final_cost_aed, priced_at, priced_by";
 /** The pricing select with "Yes, real price" once the database has it (migration 20261203100000_part_costs). */
 export async function pricingPartSelect(): Promise<string> {
-  const base = (await costConfirmReady()) ? `${PRICING_PART_SELECT}, cost_confirmed_aed` : PRICING_PART_SELECT;
+  let base = (await costConfirmReady()) ? `${PRICING_PART_SELECT}, cost_confirmed_aed` : PRICING_PART_SELECT;
   // Section 9 (3 November 2026): the part's unit once the database keeps it (migration 20261203160000).
-  return (await partUnitsReady()) ? `${base}, unit` : base;
+  if (await partUnitsReady()) base = `${base}, unit`;
+  // Enter price myself (5 November 2026): the advisor's own price on a job's part, read once the columns exist.
+  if (await advisorPricePartsReady()) base = `${base}, priced_by_advisor, price_checked_at`;
+  return base;
 }
 export const PRICING_REQUEST_SELECT = "id, label, status, quantity, unit, closed_reason, created_at, removed_at, removed_by, removed_reason";
 
@@ -58,6 +61,12 @@ export type PricingPart = {
   final_cost_aed?: number | string | null;
   /** Section 9: pieces, litres or sets (read once the column exists). */
   unit?: string | null;
+  /** When and by whom the part was priced (the desk's row save, or the advisor's own price). */
+  priced_at?: string | null;
+  priced_by?: string | null;
+  /** Enter price myself (5 November 2026, read once the columns exist): the advisor's own price, and the desk's later "Price is right ✓". */
+  priced_by_advisor?: boolean | null;
+  price_checked_at?: string | null;
 };
 
 export type PricingRequest = { id: string; label: string; status: string; quantity: number | string | null; unit?: string | null; closed_reason: string | null; created_at: string; removed_at?: string | null; removed_by?: string | null; removed_reason?: string | null };
@@ -89,6 +98,8 @@ export function valuesOfPart(p: PricingPart, today: string, check?: CostCheck | 
     days: p.availability === "to_order" ? daysFromDate(p.delivery_date, today) : "",
     qty: String(Number(p.confirmed_quantity ?? p.quantity) || 1),
     unit: cleanUnit(p.unit) ?? "pc",
+    // The advisor's own price counts as priced at once; "checked" once the desk tapped "Price is right ✓".
+    advisor_price: p.priced_by_advisor ? (p.price_checked_at ? "checked" : "1") : "",
     ...tyreValues(p.description, p.tyre_spec, p.brand),
   };
 }

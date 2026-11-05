@@ -124,13 +124,14 @@ export function jobPricingTodo(j: JobPricing, a: { openRequests: number; unprice
 }
 
 /** The same rule from a job's raw rows: its open requests and its parts not ordered yet (priced since the last send or not). */
-export function pricingTodoOf(j: JobPricing, requests: { status: string }[], parts: { is_active?: boolean | null; confirm_status?: string | null; order_status?: string | null; cost_aed: number | string | null; priced_at?: string | null; removed_at?: string | null }[]): "to_price" | "to_send" | null {
+export function pricingTodoOf(j: JobPricing, requests: { status: string }[], parts: { is_active?: boolean | null; confirm_status?: string | null; order_status?: string | null; cost_aed: number | string | null; priced_at?: string | null; removed_at?: string | null; priced_by_advisor?: boolean | null }[]): "to_price" | "to_send" | null {
   const live = parts.filter((p) => p.is_active !== false && p.confirm_status !== "rejected" && !p.removed_at && (p.order_status ?? "none") === "none");
   return jobPricingTodo(j, {
     openRequests: requests.filter((r) => r.status === "open").length,
     // A part is priced when its whole row was (priced_at is written then): a cost alone is still to price.
+    // The advisor's OWN price (Enter price myself, 5 November 2026) is already with the advisor: never "to send".
     unpricedParts: live.filter((p) => p.cost_aed === null || p.cost_aed === undefined || !p.priced_at).length,
-    pricedSinceSend: live.filter((p) => p.cost_aed !== null && p.cost_aed !== undefined && !!p.priced_at && (!j.parts_pricing_done_at || p.priced_at > j.parts_pricing_done_at)).length,
+    pricedSinceSend: live.filter((p) => !p.priced_by_advisor && p.cost_aed !== null && p.cost_aed !== undefined && !!p.priced_at && (!j.parts_pricing_done_at || p.priced_at > j.parts_pricing_done_at)).length,
   });
 }
 
