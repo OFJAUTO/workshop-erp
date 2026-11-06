@@ -1,5 +1,6 @@
 import "server-only";
 import { greetingNameOf } from "./messages";
+import { schemaReady } from "./schema-ready";
 import { getSettings } from "./settings";
 import { shortFor } from "./short-links";
 import { PRODUCTION_SITE_URL } from "./site";
@@ -13,13 +14,15 @@ import { formatPlate } from "./types";
  */
 export async function quoteMessageFor(quotationId: string, advisorName: string): Promise<{ message: string; phoneDigits: string; token: string | null } | null> {
   const admin = createAdminClient();
-  const { data: q } = await admin
+  // "How to address" (Section 7) is asked for only once its column exists (WAITING FOR APPLY until then).
+  const addressCol = (await schemaReady("customers", "address_as")) ? ", address_as" : "";
+  const quoteSelect = `kind, version, token, sent_to_phone, customer:customers(full_name, company_name, phone${addressCol}), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))`;
+  const { data: rowData } = await admin
     .from("quotations")
-    .select("kind, version, token, sent_to_phone, customer:customers(full_name, company_name, phone, address_as), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))")
+    .select(quoteSelect)
     .eq("id", quotationId)
     .maybeSingle();
-  // address_as ("How to address") may not exist yet (Section 7, waiting for apply): read again without it.
-  const row = q ?? (await admin.from("quotations").select("kind, version, token, sent_to_phone, customer:customers(full_name, company_name, phone), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", quotationId).maybeSingle()).data;
+  const row = rowData as unknown as { kind: string; version: number; token: string | null; sent_to_phone: string | null; customer: unknown; vehicle: unknown } | null;
   if (!row) return null;
   const settings = await getSettings();
   type C = Parameters<typeof greetingNameOf>[0] & { phone: string | null };
