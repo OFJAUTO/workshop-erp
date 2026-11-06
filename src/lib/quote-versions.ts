@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { invoicesForLock, refuseIfLocked } from "./quote-lock-server";
 import { liveInvoicesOf } from "./quote-lock";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
@@ -59,7 +60,7 @@ export async function createNextVersion(quotationId: string, by: VersionActor, o
     .insert({ kind: q.kind, number: q.number, version: q.version + 1, parent_id: q.id, token: newToken(), job_id: q.job_id, customer_id: q.customer_id, vehicle_id: q.vehicle_id, estimate_id: q.estimate_id, additional_to_id: q.additional_to_id ?? null, discount_percent: q.discount_percent, vat_percent: q.vat_percent, promised_at: q.promised_at, validity_days: q.validity_days, customer_note: q.customer_note, payment_by_card: q.payment_by_card, not_quoted: q.not_quoted ?? {}, discount_kind: q.discount_kind ?? null, discount_value: q.discount_value ?? null, discount_scope: q.discount_scope ?? "labour", discount_set_by: q.discount_set_by ?? null, discount_set_at: q.discount_set_at ?? null, expected_payment_method: q.expected_payment_method ?? "not_sure", materials_cost_aed: q.materials_cost_aed ?? null, tint_spec: q.tint_spec ?? null, ...carried, created_by: by.id, updated_by: by.id })
     .select("id")
     .single();
-  if (error || !created) return { error: error?.message ?? "Could not revise." };
+  if (error || !created) return { error: (error ? dbWords(error, "lib/quote-versions") : "Could not revise.") };
   if (com?.commission_to) {
     await admin
       .from("quotations")

@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
@@ -63,7 +64,7 @@ export async function bulkDeleteParts(jobId: string, keys: { partIds: string[]; 
 
   if (free.length) {
     const { error } = await admin.from("part_items").update({ is_active: false, deleted_at: now, deleted_by: staff.id, delete_batch: batch, updated_by: staff.id }).in("id", free.map((p) => p.id));
-    if (error) return { error: error.message };
+    if (error) return { error: dbWords(error, "parts/bulk-actions") };
   }
   if (requestIds.length) {
     // Only requests with no other live part are deleted.
@@ -72,7 +73,7 @@ export async function bulkDeleteParts(jobId: string, keys: { partIds: string[]; 
     const toDelete = requestIds.filter((id) => !stillLive.has(id));
     if (toDelete.length) {
       const { error } = await admin.from("part_requests").update({ is_active: false, deleted_at: now, deleted_by: staff.id, delete_batch: batch, updated_by: staff.id }).in("id", toDelete);
-      if (error) return { error: error.message };
+      if (error) return { error: dbWords(error, "parts/bulk-actions") };
     }
   }
   // Their lines come off the open quotation. A line on an APPROVED quotation stays (the customer's price never
@@ -95,10 +96,10 @@ export async function undoBulkDelete(jobId: string, batch: string): Promise<{ er
   const ids = (parts ?? []).map((p) => p.id as string);
   if (ids.length) {
     const { error } = await admin.from("part_items").update({ is_active: true, deleted_at: null, deleted_by: null, delete_batch: null, updated_by: staff.id }).in("id", ids);
-    if (error) return { error: error.message };
+    if (error) return { error: dbWords(error, "parts/bulk-actions") };
   }
   const { data: reqs, error: re } = await admin.from("part_requests").update({ is_active: true, deleted_at: null, deleted_by: null, delete_batch: null, updated_by: staff.id }).eq("job_id", jobId).eq("delete_batch", batch).select("id");
-  if (re) return { error: re.message };
+  if (re) return { error: dbWords(re, "parts/bulk-actions") };
   for (const id of ids) await syncLineForPart(jobId, id, staff.id);
   // Lines cut from a still-pending main LPO come back with the parts (Fix 2.3).
   await restorePendingLpoLines(jobId, ids, staff);

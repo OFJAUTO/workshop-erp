@@ -1,4 +1,5 @@
 "use server";
+import { dbWords, dbDetail } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -34,12 +35,12 @@ export async function saveStockItemDetails(formData: FormData) {
   const admin = createAdminClient();
   if (id) {
     const { error } = await admin.from("stock_items").update(row).eq("id", id);
-    if (error) back({ error: error.message });
+    if (error) back({ error: dbWords(error, "parts/stock/actions") });
   } else {
     const opening = Math.max(0, num("quantity"));
     const cost = Math.max(0, num("unit_cost"));
     const { data, error } = await admin.from("stock_items").insert({ ...row, quantity: 0, unit_cost: cost, created_by: staff.id }).select("id").single();
-    if (error || !data) back({ error: error?.message ?? "Could not add the item." });
+    if (error || !data) back({ error: (error ? dbWords(error, "parts/stock/actions") : "Could not add the item.") });
     if (opening > 0) await recordStockMovement(data!.id, { kind: "in", quantity: opening, unitCost: cost, note: "Opening stock" }, staff);
   }
   refresh();
@@ -117,12 +118,12 @@ export async function createStockOrder(formData: FormData) {
   const settings = await getSettings();
   const fixedAsset = orderType === "tools" && total >= (Number(settings.fixed_asset_threshold_aed) || 2000);
   const { data: po, error } = await admin.from("purchase_orders").insert({ job_id: null, kind: "stock", order_type: orderType, fixed_asset: fixedAsset, supplier_id: supplier!.id, supplier_name: supplier!.name, status: "pending_approval", total_cost_aed: total, notes: blankToNull(formData.get("notes")), created_by: staff.id, updated_by: staff.id }).select("id, number").single();
-  if (error || !po) back({ error: error?.message ?? "Could not raise the stock order." }, "?order=1");
+  if (error || !po) back({ error: (error ? dbWords(error, "parts/stock/actions") : "Could not raise the stock order.") }, "?order=1");
   const { error: lineError } = await admin.from("purchase_order_lines").insert(lines.map((l, i) => ({ po_id: po!.id, part_item_id: null, stock_item_id: l.stock_item_id, position: i + 1, description: l.description, part_number: l.part_number, quantity: l.quantity, unit_cost: l.unit_cost, created_by: staff.id, updated_by: staff.id })));
   if (lineError) {
     // Never leave an empty order behind: it is cancelled and the reason shown.
-    await admin.from("purchase_orders").update({ status: "cancelled", notes: `Could not save the lines: ${lineError.message}`, updated_by: staff.id }).eq("id", po!.id);
-    back({ error: `Could not save the order lines: ${lineError.message}` }, "?order=1");
+    await admin.from("purchase_orders").update({ status: "cancelled", notes: `Could not save the lines: ${dbDetail(lineError, "parts/stock/actions")}`, updated_by: staff.id }).eq("id", po!.id);
+    back({ error: `Could not save the order lines: ${dbDetail(lineError, "parts/stock/actions")}` }, "?order=1");
   }
   await notifyRoles(["owner"], { type: "po_approval", title: `Stock order to approve · ${po!.number}`, body: `${supplier!.name} · ${lines.length} item${lines.length === 1 ? "" : "s"} · AED ${total.toLocaleString("en-GB")} · raised by ${staff.display_name}`, href: `/parts/orders/${po!.id}` });
   if (fixedAsset) await notifyRoles(["accounts"], { type: "fixed_asset", title: `Fixed asset to record: ${po!.number}, AED ${total.toLocaleString("en-GB")}`, body: `Tools and equipment from ${supplier!.name}: ${lines.map((l) => l.description).join(", ")}. Record it in the asset register once it is received.`, href: `/parts/orders/${po!.id}` });

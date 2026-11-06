@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -70,7 +71,7 @@ export async function createLooseGateIn(_state: FormState, formData: FormData): 
     if (name.length < 2) return { error: "Enter the customer's name.", values };
     if (phone.length < 7) return { error: "Enter the customer's phone number.", values };
     const { data: created, error } = await supabase.from("customers").insert({ customer_type: "individual", full_name: name, phone: normalisePhone(phone) }).select("id").single();
-    if (error || !created) return { error: error?.message ?? "Could not save the customer.", values };
+    if (error || !created) return { error: (error ? dbWords(error, "gate-in/loose-actions") : "Could not save the customer."), values };
     customerId = created.id;
   }
 
@@ -78,7 +79,7 @@ export async function createLooseGateIn(_state: FormState, formData: FormData): 
   const summary = itemSummary(items);
   const makeId = await ensureLooseMake();
   const { data: vehicle, error: vError } = await admin.from("vehicles").insert({ customer_id: customerId, kind: "loose", has_plate: false, plate_country: "UAE", make_id: makeId, variant: summary, created_by: staff.id, updated_by: staff.id }).select("id").single();
-  if (vError || !vehicle) return { error: vError?.message ?? "Could not open the record.", values };
+  if (vError || !vehicle) return { error: (vError ? dbWords(vError, "gate-in/loose-actions") : "Could not open the record."), values };
 
   const now = new Date().toISOString();
   const broughtBy = blankToNull(get("brought_by"));
@@ -87,7 +88,7 @@ export async function createLooseGateIn(_state: FormState, formData: FormData): 
     .insert({ vehicle_id: vehicle.id, customer_id: customerId, priority, department, gated_in_by: staff.id, job_kind: "loose", status: "pending_quote", stage: "quote", first_approval_at: now, stage_entered_at: now, brought_by: broughtBy, assessment_note: blankToNull(get("assessment_note")), created_by: staff.id, updated_by: staff.id })
     .select("id, job_number")
     .single();
-  if (jobError || !job) return { error: jobError?.message ?? "Could not open the job card.", values };
+  if (jobError || !job) return { error: (jobError ? dbWords(jobError, "gate-in/loose-actions") : "Could not open the job card."), values };
 
   // Items, each with its own QR tag.
   const itemOfRow = new Map<number, string>();

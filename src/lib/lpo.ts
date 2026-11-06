@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { newLabelCode } from "@/lib/parts-data";
 import "server-only";
 import { randomBytes } from "node:crypto";
@@ -162,7 +163,7 @@ export async function createMainLpo(jobId: string, by: Actor, opts: { /** "Resen
   const total = round2(lines.reduce((a, l) => a + l.quantity * l.unit_cost, 0));
   const supplierNames = Array.from(new Set(toOrder.map((p) => (p.supplier ?? "").trim()).filter(Boolean)));
   const { data: po, error } = await admin.from("purchase_orders").insert({ job_id: jobId, kind: "main", supplier_id: null, supplier_name: supplierNames.length === 1 ? supplierNames[0] : `${supplierNames.length} suppliers`, total_cost_aed: total, verify_token: randomBytes(18).toString("hex"), created_by: by.id, updated_by: by.id }).select("id, number").single();
-  if (error || !po) return { error: error?.message ?? "Could not raise the LPO." };
+  if (error || !po) return { error: (error ? dbWords(error, "lib/lpo") : "Could not raise the LPO.") };
   const { data: created } = await admin.from("purchase_order_lines").insert(lines.map((l) => ({ ...l, po_id: po.id, created_by: by.id, updated_by: by.id }))).select("id, part_item_id");
   for (const l of created ?? []) await admin.from("part_items").update({ po_id: po.id, po_line_id: l.id, updated_by: by.id }).eq("id", l.part_item_id);
   // The suppliers' charges (courier, freight) ride on the LPO as "Other charges": the total includes them.

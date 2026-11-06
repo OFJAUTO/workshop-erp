@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
@@ -75,7 +76,7 @@ export async function roundInvoice(invoiceId: string, target: number | null): Pr
   const paid = round2(((pays ?? []) as { amount_aed: number | string }[]).reduce((a, p) => a + (Number(p.amount_aed) || 0), 0));
   if (target === null) {
     const { error } = await admin.from("invoices").update({ taxable_aed: base.taxable, vat_aed: base.vat, total_aed: base.total, updated_by: staff.id }).eq("id", inv.id).eq("kind", "proforma").is("converted_to", null);
-    if (error) return { error: error.message };
+    if (error) return { error: dbWords(error, "invoices/actions") };
     if (inv.job_id) await admin.from("job_events").insert({ job_id: inv.job_id, event_type: "invoice_rounded", note: `${inv.number}: the round-off was removed by ${staff.display_name} (total back to ${base.total.toFixed(2)})`, created_by: staff.id });
     refresh(inv.job_id, inv.id);
     return { ok: true };
@@ -85,7 +86,7 @@ export async function roundInvoice(invoiceId: string, target: number | null): Pr
   if (check.error) return { error: check.error };
   if (fit.total + 0.004 < paid) return { error: `AED ${paid.toLocaleString("en-GB", { minimumFractionDigits: 2 })} is already paid on ${inv.number}: the total cannot go below it.` };
   const { error } = await admin.from("invoices").update({ taxable_aed: fit.taxable, vat_aed: fit.vat, total_aed: fit.total, updated_by: staff.id }).eq("id", inv.id).eq("kind", "proforma").is("converted_to", null);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "invoices/actions") };
   if (inv.job_id) await admin.from("job_events").insert({ job_id: inv.job_id, event_type: "invoice_rounded", note: `${inv.number} set to ${fit.total.toFixed(2)} (${roundoffWords(round2(fit.taxable - base.taxable))}, from ${base.total.toFixed(2)}) by ${staff.display_name}`, created_by: staff.id });
   else await admin.from("audit_log").insert({ table_name: "invoices", record_id: inv.id, action: "UPDATE", new_data: { note: `${inv.number} set to ${fit.total.toFixed(2)} (${roundoffWords(round2(fit.taxable - base.taxable))}) by ${staff.display_name}` }, changed_by: staff.id }).then(() => null, () => null);
   // A paid-in-full proforma becomes the tax invoice at once (the usual rule).
@@ -353,7 +354,7 @@ export async function issueCreditNote(invoiceId: string, formData: FormData) {
   const number = await nextDocumentNumber("credit_note", settings);
   const admin = createAdminClient();
   const { data: cn, error } = await admin.from("invoices").insert({ number, kind: "credit_note", job_id: bundle.invoice.job_id, customer_id: bundle.invoice.customer_id, vehicle_id: bundle.invoice.vehicle_id, credit_of: invoiceId, token: newToken(), subtotal_aed: round2(amount), discount_aed: 0, taxable_aed: round2(amount), vat_aed: vat, total_aed: round2(amount + vat), prepared_by: staff.id, issued_by: staff.id, approved_by: staff.id, notes: `Credit against ${bundle.invoice.number}: ${description}`, customer_snapshot: bundle.invoice.customer_snapshot, vehicle_snapshot: bundle.invoice.vehicle_snapshot, created_by: staff.id, updated_by: staff.id }).select("id").single();
-  if (error || !cn) redirect(`${back}?error=${encodeURIComponent(error?.message ?? "Could not issue the credit note.")}`);
+  if (error || !cn) redirect(`${back}?error=${encodeURIComponent((error ? dbWords(error, "invoices/actions") : "Could not issue the credit note."))}`);
   await admin.from("invoice_lines").insert({ invoice_id: cn.id, position: 0, section: "services", description, quantity: 1, unit_price: round2(amount), amount_aed: round2(amount), vat_aed: vat, total_aed: round2(amount + vat), created_by: staff.id, updated_by: staff.id });
   // A credit note on a job that carries a commission: the owner is flagged (a clawback may apply).
   if (bundle.invoice.job_id) {
@@ -394,7 +395,7 @@ export async function recordCnRefund(invoiceId: string, formData: FormData) {
   // Once only: the update matches only while no refund is stored, and a second submit that loses the race is told
   // so — it writes no history line, queues nothing and never claims its own figure was recorded.
   const { data: won, error } = await admin.from("invoices").update({ refund_paid_at: now, refund_paid_by: staff.id, refund_method: method, refund_reference: reference, refund_amount_aed: amount, updated_by: staff.id }).eq("id", invoiceId).is("refund_paid_at", null).select("id");
-  if (error) redirect(`${back}?error=${encodeURIComponent(error.message)}`);
+  if (error) redirect(`${back}?error=${encodeURIComponent(dbWords(error, "invoices/actions"))}`);
   if (!won?.length) redirect(`${back}?message=${encodeURIComponent("The refund was already recorded by someone else: the card shows what was stored.")}`);
   if (bundle.invoice.job_id) await admin.from("job_events").insert({ job_id: bundle.invoice.job_id, event_type: "payment", note: `${bundle.invoice.number}: AED ${amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })} refunded to the customer by ${staff.display_name} (${method === "cash" ? "cash" : `bank transfer${reference ? `, ref ${reference}` : ""}`})`, created_by: staff.id });
   await tryEnqueueZoho("cnrefund", invoiceId, bundle.invoice.job_id, staff.id);

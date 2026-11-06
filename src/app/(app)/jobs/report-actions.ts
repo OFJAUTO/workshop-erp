@@ -1,4 +1,5 @@
 "use server";
+import { dbDetail } from "@/lib/app-errors";
 
 import { revalidatePath } from "next/cache";
 import { shortFor } from "@/lib/short-links";
@@ -27,11 +28,11 @@ export async function createReportLink(jobId: string, _prev: ReportLinkState, _f
   if (bundle.inspection.status !== "approved") return { error: "The report can be sent once the workshop manager has approved it." };
   const admin = createAdminClient();
   const { data: existing, error: readError } = await admin.from("report_links").select("id, token").eq("job_id", jobId).order("created_at", { ascending: false }).limit(1).maybeSingle();
-  if (readError) return { error: `Could not check for an existing link: ${readError.message}` };
+  if (readError) return { error: `Could not check for an existing link: ${dbDetail(readError, "jobs/report-actions")}` };
   let row = existing as { id: string; token: string } | null;
   if (!row) {
     const { data: created, error } = await admin.from("report_links").insert({ job_id: jobId, inspection_id: bundle.inspection.id, token: newToken(), created_by: staff.id, updated_by: staff.id }).select("id, token").single();
-    if (error || !created) return { error: `Could not create the link: ${error?.message ?? "unknown error"}` };
+    if (error || !created) return { error: `Could not create the link: ${error ? dbDetail(error, "jobs/report-actions") : "unknown error"}` };
     row = created as { id: string; token: string };
     await admin.from("job_events").insert({ job_id: jobId, event_type: "report_link_created", note: `Inspection report link created by ${staff.display_name}`, created_by: staff.id });
   }
@@ -51,7 +52,7 @@ export async function markReportSent(jobId: string, linkId: string, method: stri
     .eq("job_id", jobId)
     .eq("status", "created")
     .select("id");
-  if (error) return { error: `Could not record the send: ${error.message}` };
+  if (error) return { error: `Could not record the send: ${dbDetail(error, "jobs/report-actions")}` };
   if (updated?.length) {
     await admin.from("job_events").insert({ job_id: jobId, event_type: "report_sent", note: `Inspection report sent to the customer by ${staff.display_name} (${method})`, created_by: staff.id });
   }

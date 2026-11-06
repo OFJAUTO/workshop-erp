@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -35,7 +36,7 @@ export async function setAssignmentNote(jobId: string, formData: FormData) {
   if (!job || !job.is_open) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("This job is closed."));
   const admin = createAdminClient();
   const { error } = await admin.from("jobs").update({ assignment_note: note ? note.slice(0, 500) : null, assignment_note_by: note ? staff.id : null, assignment_note_at: note ? new Date().toISOString() : null, updated_by: staff.id }).eq("id", jobId);
-  if (error) redirect(`/jobs/${jobId}?error=` + encodeURIComponent(error.message));
+  if (error) redirect(`/jobs/${jobId}?error=` + encodeURIComponent(dbWords(error, "jobs/assignment-actions")));
   await admin.from("job_events").insert({ job_id: jobId, event_type: "assignment_note", note: note ? `Note to the workshop manager: ${note}` : "Note to the workshop manager removed", created_by: staff.id });
   if (note) {
     await notifyManagers(job.department ?? null, { type: "assignment_note", title: `Note from ${staff.display_name} · ${job.job_number}`, body: note, jobId, href: `/jobs/${jobId}` });
@@ -81,7 +82,7 @@ export async function decideRoadTest(jobId: string, formData: FormData) {
   if (decision === "not_possible") Object.assign(row, { status: "not_possible", not_possible_reason: note, done_at: before?.status === "done" ? before.done_at : now });
   else if (before?.status === "not_possible") Object.assign(row, { status: "not_started", not_possible_reason: null, done_at: null });
   const { error } = await admin.from("road_tests").upsert(row, { onConflict: "job_id" });
-  if (error) redirect(`/jobs/${jobId}?error=` + encodeURIComponent(error.message));
+  if (error) redirect(`/jobs/${jobId}?error=` + encodeURIComponent(dbWords(error, "jobs/assignment-actions")));
 
   const nowWaiting = roadTestWaiting({ status: decision === "not_possible" ? "not_possible" : (before?.status === "not_possible" ? "not_started" : (before?.status ?? "not_started")), decision });
   // The waiting car sits in its own step: Pending road test while the QC inspector is needed, Pending inspection otherwise.

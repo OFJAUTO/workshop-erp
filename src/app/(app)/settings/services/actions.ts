@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { BODYSHOP_KINDS } from "@/lib/bodyshop-kinds";
 
@@ -81,7 +82,7 @@ export async function addCategory(formData: FormData) {
   const admin = createAdminClient();
   const { data: last } = await admin.from("service_categories").select("position").eq("is_active", true).order("position", { ascending: false }).limit(1).maybeSingle();
   const { error } = await admin.from("service_categories").insert({ name: name.slice(0, 80), position: (Number(last?.position) || 0) + 1, created_by: staff.id, updated_by: staff.id });
-  back(`Category "${name}" added.`, error?.message);
+  back(`Category "${name}" added.`, (error ? dbWords(error, "settings/services/actions") : undefined));
 }
 
 export async function renameCategory(id: string, formData: FormData) {
@@ -89,7 +90,7 @@ export async function renameCategory(id: string, formData: FormData) {
   const name = blankToNull(formData.get("name"));
   if (!name) back(null, "Type the category name.");
   const { error } = await createAdminClient().from("service_categories").update({ name: name.slice(0, 80), updated_by: staff.id }).eq("id", id);
-  back(`Renamed to "${name}".`, error?.message);
+  back(`Renamed to "${name}".`, (error ? dbWords(error, "settings/services/actions") : undefined));
 }
 
 export async function moveCategory(id: string, dir: "up" | "down") {
@@ -105,7 +106,7 @@ export async function removeCategory(id: string) {
   if (count) back(null, `Move or remove its ${count} service${count === 1 ? "" : "s"} first.`);
   const { error } = await admin.from("service_categories").update({ is_active: false, updated_by: staff.id }).eq("id", id);
   if (!error) await renumber("service_categories");
-  back("Category removed.", error?.message);
+  back("Category removed.", (error ? dbWords(error, "settings/services/actions") : undefined));
 }
 
 export async function addService(categoryId: string, formData: FormData) {
@@ -115,7 +116,7 @@ export async function addService(categoryId: string, formData: FormData) {
   const admin = createAdminClient();
   const { data: last } = await admin.from("services").select("position").eq("category_id", categoryId).eq("is_active", true).order("position", { ascending: false }).limit(1).maybeSingle();
   const { error } = await admin.from("services").insert({ ...fields, category_id: categoryId, position: (Number(last?.position) || 0) + 1, created_by: staff.id, updated_by: staff.id });
-  back(`"${String(fields.name)}" added.`, error?.message);
+  back(`"${String(fields.name)}" added.`, (error ? dbWords(error, "settings/services/actions") : undefined));
 }
 
 export async function saveService(id: string, formData: FormData) {
@@ -132,7 +133,7 @@ export async function saveService(id: string, formData: FormData) {
   }
   const { error } = await admin.from("services").update(patch).eq("id", id);
   if (!error && current?.category_id && categoryId !== current.category_id) await renumber("services", current.category_id);
-  back(`"${String(fields.name)}" saved.`, error?.message);
+  back(`"${String(fields.name)}" saved.`, (error ? dbWords(error, "settings/services/actions") : undefined));
 }
 
 export async function moveService(id: string, dir: "up" | "down") {
@@ -147,7 +148,7 @@ export async function removeService(id: string) {
   const admin = createAdminClient();
   const { data, error } = await admin.from("services").update({ is_active: false, updated_by: staff.id }).eq("id", id).select("name, category_id").maybeSingle();
   if (data?.category_id) await renumber("services", data.category_id);
-  back(`"${data?.name ?? "Service"}" removed.`, error?.message);
+  back(`"${data?.name ?? "Service"}" removed.`, (error ? dbWords(error, "settings/services/actions") : undefined));
 }
 
 /** A custom job typed on quotations joins the list as an hourly job in the chosen category. */
@@ -159,7 +160,7 @@ export async function adoptCustomJob(name: string, formData: FormData) {
   const { data: last } = await admin.from("services").select("position").eq("category_id", categoryId).eq("is_active", true).order("position", { ascending: false }).limit(1).maybeSingle();
   if (name.trim().length > LINE_TEXT_MAX) back(null, tooLongWords(name.trim().length));
   const { error } = await admin.from("services").insert({ name: name.trim(), department: "both", price_aed: null, default_hours: null, category_id: categoryId, position: (Number(last?.position) || 0) + 1, created_by: staff.id, updated_by: staff.id });
-  if (error && !/unique|duplicate/i.test(error.message)) back(null, error.message);
+  if (error && !/unique|duplicate/i.test(error.message)) back(null, dbWords(error, "settings/services/actions"));
   await dropCustomJob(name);
   back(`"${name}" added to the list.`);
 }

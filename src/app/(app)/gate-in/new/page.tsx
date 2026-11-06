@@ -118,6 +118,7 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
             mileageContext={{ modelYear: v.model_year, lastKm: v.last_mileage, lastVisitAt: visits[0]?.gated_in_at ?? null }}
             estimates={openEstimates}
             rechecks={rechecks}
+            plateAsk={v.has_plate === false}
             initialVisit={sp.visit === "recheck" ? "recheck" : "normal"}
             comebacks={recentJobs}
             // 30 October 2026: an advisor or the owner doing the gate-in chooses the fee here; the gate-in person leaves it for the advisor (approval link).

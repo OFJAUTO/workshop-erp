@@ -1,3 +1,4 @@
+import { dbDetail } from "@/lib/app-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { cookies } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -23,7 +24,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
 
   const admin = createAdminClient();
   const { error: pwError } = await admin.auth.admin.updateUserById(link.staff_id, { password, email_confirm: true });
-  if (pwError) return back("Could not save the password: " + pwError.message);
+  if (pwError) return back("Could not save the password: " + dbDetail(pwError, "api/auth/setup/[token]"));
   await markSetupTokenUsed(link.id);
 
   // Sign them in straight away.

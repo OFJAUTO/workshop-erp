@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import "server-only";
 import { fetchNgeniusStatus } from "./ngenius";
 import { recordPaymentCore } from "./payments";
@@ -22,7 +23,7 @@ export async function settleNgeniusOrder(reference: string): Promise<{ paid: boo
   try {
     status = await fetchNgeniusStatus(reference);
   } catch (e) {
-    return { paid: false, error: e instanceof Error ? e.message : "Could not reach the gateway.", invoiceId: row.invoice_id, token };
+    return { paid: false, error: e instanceof Error ? dbWords(e, "lib/pay-now") : "Could not reach the gateway.", invoiceId: row.invoice_id, token };
   }
   await admin.from("payment_links").update({ state: status.rawState }).eq("id", row.id);
   if (status.state !== "paid") return { paid: false, invoiceId: row.invoice_id, token };

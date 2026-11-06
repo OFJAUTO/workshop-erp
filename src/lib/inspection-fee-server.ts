@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import "server-only";
 import { checkFee, feeWords, isOldFeeWording, type FeeBounds, type FeeInput } from "./inspection-fee";
 import type { Settings } from "./settings";
@@ -61,7 +62,7 @@ export async function saveFeeChoice(jobId: string, input: FeeInput, actor: { id:
       updated_by: actor.id,
     })
     .eq("id", jobId);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "lib/inspection-fee-server") };
   const outside = "outside" in check && check.outside ? " (outside the usual range: the owner's decision)" : "";
   const why = job.first_approval_at ? ` after the customer's approval. Reason: ${String(opts.ownerReason).trim()}` : "";
   await admin.from("job_events").insert({ job_id: jobId, event_type: "inspection_fee", note: `${actor.display_name}: ${job.inspection_fee_choice ? `${before} → ` : ""}${after}${input.choice === "none" && input.note ? ` (${input.note})` : ""}${outside}${why}`, created_by: actor.id });

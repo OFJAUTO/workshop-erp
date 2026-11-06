@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { feeInputFrom, feeNoticeTexts } from "@/lib/inspection-fee";
@@ -137,7 +138,7 @@ export async function assignJob(jobId: string, formData: FormData) {
     .from("jobs")
     .update({ assigned_to: tech.id, assigned_at: new Date().toISOString(), status: toStatus, stage: STATUS_STAGE[toStatus] })
     .eq("id", jobId);
-  if (error) redirect(`/jobs/${jobId}?error=` + encodeURIComponent(error.message));
+  if (error) redirect(`/jobs/${jobId}?error=` + encodeURIComponent(dbWords(error, "jobs/actions")));
 
   await logEvent(supabase, jobId, staff.id, {
     event_type: "assigned",
@@ -190,7 +191,7 @@ export async function moveJob(jobId: string, formData: FormData) {
   if (job.status === toStatus) redirect(`/jobs/${jobId}?message=` + encodeURIComponent("The job is already at that step."));
   const now = new Date().toISOString();
   const { error } = await admin.from("jobs").update({ status: toStatus, stage: STATUS_STAGE[toStatus], stage_entered_at: now }).eq("id", jobId);
-  if (error) redirect(`/jobs/${jobId}?error=` + encodeURIComponent(error.message));
+  if (error) redirect(`/jobs/${jobId}?error=` + encodeURIComponent(dbWords(error, "jobs/actions")));
   await applyStageSideEffects(jobId, toStatus, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id }, await getSettings());
   const time = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Dubai", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(now));
   await admin.from("job_events").insert({ job_id: jobId, event_type: "override", from_status: job.status, to_status: toStatus, from_stage: STATUS_STAGE[job.status as JobStatus], to_stage: STATUS_STAGE[toStatus], note: `Moved to ${STATUS_LABELS[toStatus]} by ${staff.display_name}, ${time}. Reason: ${reason}`, created_by: staff.id });
@@ -229,7 +230,7 @@ export async function setPromisedDate(jobId: string, formData: FormData) {
   if (!job.promised_at) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("The promised date is set in the quotation, once every part has its delivery date."));
   if (job.promised_at === date) redirect(`/jobs/${jobId}`);
   const { error } = await supabase.from("jobs").update({ promised_at: date }).eq("id", jobId);
-  if (error) redirect(`/jobs/${jobId}?error=` + encodeURIComponent(error.message));
+  if (error) redirect(`/jobs/${jobId}?error=` + encodeURIComponent(dbWords(error, "jobs/actions")));
   await logEvent(supabase, jobId, staff.id, { event_type: "promised_date", note: `Promised date ${job.promised_at} → ${date}: ${reason}` });
   refresh(jobId);
   redirect(`/jobs/${jobId}?message=` + encodeURIComponent("Promised date saved."));
@@ -318,7 +319,7 @@ export async function updateGateIn(jobId: string, _state: FormState, formData: F
       ...(gi?.is_complete ? {} : { customer_requests: requests.map((r, i) => `${i + 1}. ${r}`).join("\n") }),
     })
     .eq("job_id", jobId);
-  if (error) return { error: error.message, values };
+  if (error) return { error: dbWords(error, "jobs/actions"), values };
   const dept = String(formData.get("department") ?? "");
   if (["mechanical", "bodyshop", "both"].includes(dept)) await supabase.from("jobs").update({ department: dept }).eq("id", jobId);
   // 30 October 2026: the fee choice changes until the customer approves the job card (THE rule: saveFeeChoice); then it
@@ -445,7 +446,7 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
     })
     .select("id")
     .single();
-  if (error || !created) return { error: error?.message ?? "Could not create the link.", values };
+  if (error || !created) return { error: (error ? dbWords(error, "jobs/actions") : "Could not create the link."), values };
 
   await logEvent(supabase, jobId, staff.id, { event_type: "approval_created", note: `Approval link created for ${name || phone}` });
   refresh(jobId);
@@ -527,13 +528,13 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
     release_reason: releaseBy ? releaseReason : null,
     notes,
   });
-  if (error) return { error: error.message, values };
+  if (error) return { error: dbWords(error, "jobs/actions"), values };
 
   const { error: jobError } = await supabase
     .from("jobs")
     .update({ status: "closed", stage: "ready", is_open: false, gated_out_at: new Date().toISOString(), gated_out_by: staff.id })
     .eq("id", jobId);
-  if (jobError) return { error: jobError.message, values };
+  if (jobError) return { error: dbWords(jobError, "jobs/actions"), values };
   await createAdminClient().from("appointments").update({ status: "done", updated_by: staff.id }).eq("job_id", jobId).eq("kind", "customer_collects").eq("status", "booked");
 
   await logEvent(supabase, jobId, staff.id, {

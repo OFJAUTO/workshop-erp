@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import "server-only";
 import { z } from "zod";
 import { blankToNull, normalisePhone } from "./format";
@@ -170,7 +171,7 @@ export async function resolveCustomerCar(formData: FormData, staff: { id: string
       .insert({ customer_type: c.company_name ? "company" : "individual", full_name: c.full_name, company_name: blankToNull(c.company_name), phone: normalisePhone(c.phone), email: blankToNull(c.email), trn: blankToNull(c.trn) })
       .select("id")
       .single();
-    if (error || !newCustomer) return { error: error?.message ?? "Could not save the customer." };
+    if (error || !newCustomer) return { error: (error ? dbWords(error, "lib/customer-car") : "Could not save the customer.") };
     customerId = newCustomer.id;
     created.push("customer");
   } else {

@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { canEditBody, cleanFinding, isBodyshopAssessor, isBodyshopStaff, loadBodyState, notifyBodyshopAssessment } from "@/lib/bodyshop-findings";
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
     else {
       const { count } = await admin.from("bodyshop_findings").select("id", { count: "exact", head: true }).eq("inspection_id", insp.id).eq("is_active", true);
       const { error } = await admin.from("bodyshop_findings").insert({ ...f, inspection_id: insp.id, job_id: insp.job_id, position: count ?? 0, created_by: staff.id, ...stamp });
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      if (error) return NextResponse.json({ error: dbWords(error, "api/inspection/body") }, { status: 500 });
     }
     if (!insp.bodyshop_opened_at) await admin.from("inspections").update({ bodyshop_opened_at: now, bodyshop_opened_by: staff.id, ...stamp }).eq("id", insp.id);
     // The bodyshop manager hears about the first finding (once), unless the bodyshop is already on it.

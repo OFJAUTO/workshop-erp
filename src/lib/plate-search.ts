@@ -20,14 +20,20 @@ export function plateParts(q: string): { code: string | null; number: string } |
 
 /**
  * The PostgREST or-filter for vehicles: the VIN, the plate number as typed (letters and digits only), and - when the
- * words end in a plate code and number - that code with that number.
+ * words end in a plate code and number - that code with that number. With `oldPlates` (the caller passes
+ * plateHistoryReady(): filtering a column that does not exist yet fails the WHOLE query) a changed or merged plate
+ * still finds the same car: `old_plates` holds each one formatted and compact ("Dubai DD 23864 DD23864").
  */
-export function vehicleOrFilter(q: string): string {
+export function vehicleOrFilter(q: string, opts: { oldPlates?: boolean } = {}): string {
   const t = cleanNeedle(q);
   const compact = t.replace(/[^\p{L}\p{N}]/gu, "");
   const parts = plateParts(t);
   const ors = [`vin.ilike.%${compact || t}%`, `plate_number.ilike.%${compact || t}%`];
   if (parts?.code) ors.push(`and(plate_code.ilike.${parts.code},plate_number.ilike.%${parts.number}%)`);
   else if (parts) ors.push(`plate_number.ilike.%${parts.number}%`);
+  if (opts.oldPlates) {
+    ors.push(`old_plates.ilike.%${compact || t}%`);
+    if (parts?.code) ors.push(`old_plates.ilike.%${parts.code}${parts.number}%`);
+  }
   return ors.join(",");
 }

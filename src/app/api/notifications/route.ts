@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { NextResponse, after, type NextRequest } from "next/server";
 import { checkLateJobs } from "@/lib/background-jobs";
 import { getCurrentStaff } from "@/lib/auth";
@@ -42,6 +43,6 @@ export async function POST(request: NextRequest) {
     q = q.in("id", ids);
   }
   const { error } = await q;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: dbWords(error, "api/notifications") }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

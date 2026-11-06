@@ -1,5 +1,5 @@
 import "server-only";
-import { logAppError, SAVE_FAILED } from "./app-errors";
+import { logAppError, SAVE_FAILED, dbWords } from "./app-errors";
 import { addPartToStock } from "./stock";
 import { tryEnqueueZoho } from "./zoho-sync";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
@@ -107,7 +107,7 @@ export async function receivePartsByTechnician(jobId: string, input: { technicia
   const items: HandoverItem[] = takeable.map((p) => ({ id: p.id, description: p.description, part_number: realPartNumber(p.part_number), quantity: p.received_qty || Number(p.confirmed_quantity ?? p.quantity) || 1 }));
   const fromStaff = (takeable.find((p) => p.ready_for_handover_by)?.ready_for_handover_by as string | null) ?? null;
   const { data: handover, error } = await admin.from("part_handovers").insert({ job_id: jobId, kind: "handover", status: "confirmed", from_staff: fromStaff, to_staff: tech.id, confirmed_by: tech.id, confirmed_at: now, pin_used: true, signed_at_counter: false, device_id: input.deviceId ?? null, items, stickers: {}, created_by: actor.id, updated_by: actor.id }).select("id").single();
-  if (error || !handover) return { error: error?.message ?? "Could not record the receipt." };
+  if (error || !handover) return { error: (error ? dbWords(error, "lib/handover") : "Could not record the receipt.") };
   for (const it of items) {
     await admin.from("part_items").update({ issue_status: "confirmed", issued_qty: it.quantity, tech_received_qty: it.quantity, not_received_at: null, issued_at: now, issued_by: fromStaff, issue_confirmed_at: now, issue_confirmed_by: tech.id, handover_id: handover.id, pending_handover_id: null, updated_by: actor.id }).eq("id", it.id);
   }
@@ -171,7 +171,7 @@ export async function exchangePart(jobId: string, partId: string, actor: Actor, 
   const reprice = isOurStock(p.supplier) || isPlaceholderSupplier(p.supplier) || p.availability === "in_stock" || !(Number(p.cost_aed) > 1);
   const priced = reprice ? { supplier: null, cost_aed: null, availability: null, priced_by: null, priced_at: null, order_status: "none" } : { supplier: p.supplier, cost_aed: p.cost_aed, availability: "to_order", priced_by: p.priced_by, priced_at: p.priced_at, order_status: "to_order" };
   const { data: replacement, error } = await admin.from("part_items").insert({ job_id: jobId, part_request_id: p.part_request_id, part_number: cleanPartNumber(p.part_number), description: p.description, quantity: qty, ...priced, confirm_status: "confirmed", confirmed_quantity: qty, confirmed_at: new Date().toISOString(), part_type: p.part_type, brand: p.brand, positions: p.positions ?? null, replaced_part_id: p.id, added_by_role: actor.role_id, created_by: actor.id, updated_by: actor.id }).select("id").single();
-  if (error || !replacement) return { error: error?.message ?? "Could not raise the replacement." };
+  if (error || !replacement) return { error: (error ? dbWords(error, "lib/handover") : "Could not raise the replacement.") };
   const now = new Date().toISOString();
   await admin.from("part_items").update({ exchange_status: "needed", exchange_reason: input.reason, exchange_note: input.note, exchange_at: now, exchange_by: actor.id, replacement_part_id: replacement.id, updated_by: actor.id }).eq("id", p.id);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "part_exchange", note: `${p.description}: ${note.toLowerCase()} (${actor.display_name}). Back to the supplier; the correct part is raised for ordering.`, created_by: actor.id });

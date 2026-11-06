@@ -1,3 +1,4 @@
+import { dbWords, dbDetail } from "@/lib/app-errors";
 import "server-only";
 import { gzipSync } from "node:zlib";
 import { createAdminClient } from "./supabase/admin";
@@ -30,7 +31,7 @@ export type ClearResult = {
 async function backupToStorage(stamp: string): Promise<{ path: string; rows: number; files: number; warnings: string[] }> {
   const admin = createAdminClient();
   const { data: tables, error } = await admin.rpc("list_public_tables");
-  if (error) return { path: `backups/${stamp}`, rows: 0, files: 0, warnings: [`Could not list the tables: ${error.message}`] };
+  if (error) return { path: `backups/${stamp}`, rows: 0, files: 0, warnings: [`Could not list the tables: ${dbDetail(error, "lib/clear-test-data")}`] };
   let total = 0;
   let files = 0;
   const warnings: string[] = [];
@@ -58,7 +59,7 @@ async function backupToStorage(stamp: string): Promise<{ path: string; rows: num
       }
       await flush();
     } catch (e) {
-      warnings.push(`${t.table_name}: ${e instanceof Error ? e.message : String(e)}`);
+      warnings.push(`${t.table_name}: ${e instanceof Error ? dbWords(e, "lib/clear-test-data") : String(e)}`);
     }
   }
   return { path: `backups/${stamp}`, rows: total, files, warnings };
@@ -95,7 +96,7 @@ async function clearBucket(bucket: string): Promise<{ removed: number; warning: 
     }
     return { removed, warning: null };
   } catch (e) {
-    return { removed, warning: e instanceof Error ? e.message : String(e) };
+    return { removed, warning: e instanceof Error ? dbWords(e, "lib/clear-test-data") : String(e) };
   }
 }
 

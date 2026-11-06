@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff } from "@/lib/auth";
@@ -163,7 +164,7 @@ export async function saveEstimatePartRow(quotationId: string, row: RowSave): Pr
     updated_by: staff.id,
   };
   const { error } = await admin.from("quotation_lines").update(patch).eq("id", l.id);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "parts/estimate-actions") };
   const title = (renamed ? name : l.title).toUpperCase();
   if (renamed) await logQuoteEvent(q.id, null, staff.id, "part_renamed", `${staff.display_name} renamed ${String(l.title).toUpperCase()} to ${title} (the advisor wrote: ${String(l.title).toUpperCase()})`);
   if (qtyChanged) {
@@ -251,7 +252,7 @@ export async function checkEstimatePrice(quotationId: string, lineId: string): P
   const { q, l } = found;
   if (!l.priced_by_advisor) return { ok: true };
   const { error } = await createAdminClient().from("quotation_lines").update({ price_checked_at: new Date().toISOString(), price_checked_by: staff.id }).eq("id", l.id);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "parts/estimate-actions") };
   await logQuoteEvent(q.id, null, staff.id, "price_checked", `${staff.display_name} checked the advisor's price on ${l.title}: AED ${Number(l.unit_cost).toLocaleString("en-GB")} each from ${l.supplier_text ?? "the supplier"} is right`);
   revalidatePath(`/parts/estimate/${q.id}`);
   revalidatePath("/parts");

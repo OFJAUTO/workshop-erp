@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
@@ -37,7 +38,7 @@ async function readOrg(org: string, title: string): Promise<OrgRead> {
     const [taxes, accounts, banks, modes] = await Promise.all([listTaxes(org), listAccounts(org), listBankAccounts(org).catch(() => []), listPaymentModes(org)]);
     return { org, title, taxes: taxes.map((t) => ({ name: t.tax_name, pct: Number(t.tax_percentage) })), accounts, banks: banks.map((b) => `${b.account_name} (${b.account_type})`), modes };
   } catch (e) {
-    return { org, title, error: e instanceof Error ? e.message : String(e) };
+    return { org, title, error: e instanceof Error ? dbWords(e, "settings/zoho") : String(e) };
   }
 }
 
@@ -60,7 +61,7 @@ export default async function ZohoSettingsPage({ searchParams }: { searchParams:
     try {
       orgs = await listOrganizations();
     } catch (e) {
-      orgsError = e instanceof Error ? e.message : String(e);
+      orgsError = e instanceof Error ? dbWords(e, "settings/zoho") : String(e);
     }
     if (!orgsError) {
       const real = orgs.find((o) => String(o.organization_id) === ZOHO_REAL_ORG_ID);

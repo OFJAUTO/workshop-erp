@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
@@ -132,7 +133,7 @@ export async function decideAdditionalWork(id: string, formData: FormData) {
   }
   const settings = await getSettings();
   const { data: q, error } = await admin.from("quotations").insert({ kind: "quotation", job_id: a.job_id, customer_id: job.customer_id, vehicle_id: job.vehicle_id, validity_days: Number(settings.quote_validity_days) || 7, vat_percent: 5, created_by: job.gated_in_by, updated_by: staff.id }).select("id, number").single();
-  if (error || !q) redirect(`${back}?error=${encodeURIComponent(error?.message ?? "Could not start the additional quotation.")}`);
+  if (error || !q) redirect(`${back}?error=${encodeURIComponent((error ? dbWords(error, "jobs/work-actions") : "Could not start the additional quotation."))}`);
   await admin.from("quotation_lines").insert({ quotation_id: q.id, position: 0, line_type: "labour", title: a.remark, details: note ?? "Found by the technician during the work", group_label: "Additional work", source_type: "manual", labour_rate: labourRateFor(settings, job.department), quantity: 1, created_by: staff.id, updated_by: staff.id });
   if (a.parts_needed) {
     await admin.from("part_requests").insert({ job_id: a.job_id, source_type: "manual", source_key: `additional:${a.id}`, label: a.parts_needed, requested_text: `Additional work: ${a.remark}`, created_by: staff.id, updated_by: staff.id });

@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { latestWheel, loadGateInFlags, loadMedia, mediaChecklist } from "@/lib/media";
 import { authoriseUpload } from "@/lib/upload-auth";
@@ -27,13 +28,13 @@ export async function POST(request: NextRequest) {
     const row = latestWheel(await loadMedia(jobId), kind);
     if (!row) return NextResponse.json({ error: "Take the wheel photo first." }, { status: 400 });
     const { error } = await admin.from("gate_in_media").update({ wheel_condition: conditions, updated_by: who.staffId }).eq("id", row.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/media/details") }, { status: 500 });
   }
 
   if (typeof body.damageNote === "string") {
     const note = body.damageNote.trim().slice(0, 500) || null;
     const { error } = await admin.from("gate_ins").update({ damage_note: note, updated_by: who.staffId }).eq("job_id", jobId);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/media/details") }, { status: 500 });
   }
 
   const checklist = mediaChecklist(await loadMedia(jobId), await loadGateInFlags(jobId));

@@ -24,7 +24,7 @@ import { SUPPLIER_PAY_METHODS, flagZohoAttention, reopenZoho, tryEnqueueZoho, zo
 import { JOB_FILES_BUCKET, ensureWorkLines } from "@/lib/work-data";
 import { checkPickable } from "@/lib/staff-picker";
 import { invoiceEditReady, notifyInvoiceReceived, siQueryReady } from "@/lib/supplier-invoices";
-import { logAppError } from "@/lib/app-errors";
+import { logAppError, dbWords } from "@/lib/app-errors";
 import { applyInvoicePrices } from "@/lib/price-change-server";
 import { DEFAULT_UNDO_MINUTES, mayUndo } from "@/lib/money-undo";
 import { objectExists } from "@/lib/upload-targets/common";
@@ -643,7 +643,7 @@ export async function saveStockItem(formData: FormData) {
   const admin = createAdminClient();
   const { error } = id ? await admin.from("stock_items").update(row).eq("id", id) : await admin.from("stock_items").insert({ ...row, created_by: staff.id });
   revalidatePath("/parts/stock");
-  redirect(`/parts/stock?${error ? `error=${encodeURIComponent(error.message)}` : `message=${encodeURIComponent("Saved.")}`}`);
+  redirect(`/parts/stock?${error ? `error=${encodeURIComponent(dbWords(error, "parts/order-actions"))}` : `message=${encodeURIComponent("Saved.")}`}`);
 }
 
 /** Consumables issued to a job by quantity, confirmed by the technician's PIN like a part. */

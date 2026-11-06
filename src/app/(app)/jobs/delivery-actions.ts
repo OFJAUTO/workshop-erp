@@ -1,4 +1,5 @@
 "use server";
+import { dbDetail } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -293,7 +294,7 @@ export async function markMonthPaid(formData: FormData) {
   const sumTotal = Math.round((total + Number(existing?.total_aed ?? 0)) * 100) / 100;
   const sumCount = unpaid.length + (Number(existing?.trip_count) || 0);
   const { data: payout, error: payoutError } = await admin.from("recovery_payouts").upsert({ who, month, total_aed: sumTotal, trip_count: sumCount, paid_at: now, paid_by: staff.id, created_by: staff.id, updated_by: staff.id }, { onConflict: "who,month" }).select("id").single();
-  if (payoutError || !payout) redirect(`/recovery?month=${month}&error=${encodeURIComponent(`The trips are marked paid but the payout record did not save (${payoutError?.message ?? "unknown"}). Tell the owner before paying anyone.`)}`);
+  if (payoutError || !payout) redirect(`/recovery?month=${month}&error=${encodeURIComponent(`The trips are marked paid but the payout record did not save (${payoutError ? dbDetail(payoutError, "jobs/delivery-actions") : "unknown"}). Tell the owner before paying anyone.`)}`);
   if (existing) await reopenZoho("recovery", String(payout.id));
   else await tryEnqueueZoho("recovery", String(payout.id), null, staff.id);
   revalidatePath("/recovery");

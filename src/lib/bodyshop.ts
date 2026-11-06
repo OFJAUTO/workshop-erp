@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { getSettings } from "@/lib/settings";
 import { ppfByCutMethod } from "./ppf-cut-data";
 import { workingTimeOf } from "@/lib/jobs";
@@ -189,9 +190,9 @@ export async function createBodyshopJob(customerId: string, vehicleId: string, a
   if (open) return { error: `This car already has ${open.status === "booked" ? "a booked quotation" : "an open job"} (${open.job_number}).` };
   const now = new Date().toISOString();
   const { data: job, error } = await admin.from("jobs").insert({ vehicle_id: vehicleId, customer_id: customerId, status: "booked", stage: "quote", is_open: false, department: "bodyshop", priority: "normal", gated_in_by: actor.id, advisor_id: actor.id, gated_in_at: now, booked_at: now, bodyshop_handover_token: randomBytes(18).toString("hex"), created_by: actor.id, updated_by: actor.id }).select("id, job_number").single();
-  if (error || !job) return { error: error?.message ?? "Could not create the booking." };
+  if (error || !job) return { error: (error ? dbWords(error, "lib/bodyshop") : "Could not create the booking.") };
   const { data: q, error: qErr } = await admin.from("quotations").insert({ kind: "quotation", job_id: job.id, customer_id: customerId, vehicle_id: vehicleId, validity_days: Number(settings.quote_validity_days) || 7, vat_percent: 5, created_by: actor.id, updated_by: actor.id }).select("id, number").single();
-  if (qErr || !q) return { error: qErr?.message ?? "Could not start the quotation." };
+  if (qErr || !q) return { error: (qErr ? dbWords(qErr, "lib/bodyshop") : "Could not start the quotation.") };
   await admin.from("job_events").insert({ job_id: job.id, event_type: "bodyshop_booked", note: `Bodyshop quotation ${q.number} started before the car arrived (${actor.display_name})`, created_by: actor.id });
   return { jobId: job.id, quotationId: q.id };
 }
@@ -234,7 +235,7 @@ export async function requestDeposit(jobId: string, amount: number, actor: Actor
   const number = await nextDocumentNumber("proforma", settings);
   const token = newToken();
   const { data: inv, error } = await admin.from("invoices").insert({ number, kind: "proforma", job_id: jobId, customer_id: job.customer_id, vehicle_id: job.vehicle_id, token, labour_mode: "itemised", subtotal_aed: net, discount_aed: 0, taxable_aed: net, vat_aed: vat, total_aed: amount, agreed_total_aed: null, warranty_credit_aed: 0, discount_note: null, deposit_for_quotation_id: q.id, issue_reason: "Deposit", prepared_by: actor.id, issued_by: actor.id, customer_snapshot: customer ?? null, vehicle_snapshot: v ? { title: [v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" "), variant: null, plate: formatPlate(v), vin: v.vin } : null, created_by: actor.id, updated_by: actor.id }).select("id, number, token").single();
-  if (error || !inv) return { error: error?.message ?? "Could not prepare the deposit proforma." };
+  if (error || !inv) return { error: (error ? dbWords(error, "lib/bodyshop") : "Could not prepare the deposit proforma.") };
   await admin.from("invoice_lines").insert({ invoice_id: inv.id, position: 0, section: "fees", description: `Deposit on quotation ${q.number}`, details: `Deducted from the final invoice (quotation total AED ${q.total_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })})`, part_number: null, quantity: 1, unit_price: net, amount_aed: net, vat_aed: vat, total_aed: amount, cost_aed: null });
   await admin.from("job_events").insert({ job_id: jobId, event_type: "proforma_issued", note: `Deposit proforma ${number} for AED ${amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })} (${actor.display_name})`, created_by: actor.id });
   return { number: inv.number, token: inv.token };

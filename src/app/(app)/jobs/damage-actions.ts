@@ -9,7 +9,7 @@ import { fillTemplate } from "@/lib/calendar";
 import { seesCustomers } from "@/lib/customer-data";
 import { DEFAULT_DAMAGE_FOUND, cleanDamageAfter, itemLine } from "@/lib/damage";
 import { damageAfterReady } from "@/lib/damage-data";
-import { SAVE_FAILED } from "@/lib/app-errors";
+import { SAVE_FAILED, dbWords } from "@/lib/app-errors";
 import { greetingNameOf } from "@/lib/messages";
 import { notifyJobAdvisors } from "@/lib/notifications";
 import { getSettings } from "@/lib/settings";
@@ -31,7 +31,7 @@ export async function saveGateInDamage(jobId: string, json: string): Promise<{ e
   const { data: job } = await admin.from("jobs").select("gated_out_at").eq("id", jobId).maybeSingle();
   if (job?.gated_out_at) return { error: "The car has left: the gate-in can no longer be changed." };
   const { error } = await admin.from("gate_ins").update({ damage_panels: marks, updated_by: staff.id }).eq("id", gi.id);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "jobs/damage-actions") };
   revalidatePath(`/jobs/${jobId}/gate-in`);
   return {};
 }
@@ -43,7 +43,7 @@ export async function savePreworkCheck(jobId: string, json: string): Promise<{ e
   let marks;
   try { marks = cleanPanelMarks(JSON.parse(json)); } catch { return { error: "Bad marking." }; }
   const { error } = await createAdminClient().from("jobs").update({ prework_panels: marks, updated_by: staff.id }).eq("id", jobId);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "jobs/damage-actions") };
   revalidatePath(`/bodyshop/${jobId}`);
   return {};
 }

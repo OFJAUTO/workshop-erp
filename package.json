@@ -177,6 +177,7 @@
     "test:partsinspect": "node --env-file=.env.test.local tests/browser/test-partsinspect.mjs",
     "test:partsmenu": "node --env-file=.env.test.local tests/browser/test-partsmenu.mjs",
     "test:sticker50": "node --env-file=.env.test.local tests/browser/test-sticker50.mjs",
+    "test:plate": "node --env-file=.env.test.local tests/browser/test-plate.mjs",
     "backup:offsite": "node --env-file=.env.local scripts/offsite/backup-db.mjs",
     "backup:storage": "node --env-file=.env.local scripts/offsite/backup-storage.mjs",
     "backup:restore-test": "node --env-file=.env.local scripts/offsite/restore-test.mjs",

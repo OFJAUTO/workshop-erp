@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
@@ -15,7 +16,7 @@ export async function savePackages(payload: unknown): Promise<{ error?: string; 
     { key: "bodyshop_packages", label: "Bodyshop packages", value: cleaned, updated_by: staff.id },
     { onConflict: "key" },
   );
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "settings/packages/actions") };
   revalidatePath("/settings/packages");
   return { ok: true };
 }

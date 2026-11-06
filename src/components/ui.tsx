@@ -2,6 +2,7 @@ import Link from "next/link";
 import { NumericInput } from "./NumericInput";
 import { CasedInput, CasedTextarea } from "./CasedInput";
 import { noSpellName } from "@/lib/spell-rules";
+import { staffWords } from "@/lib/db-words";
 import { KeptSelect } from "./KeptSelect";
 import type { TextCase } from "@/lib/text-case";
 import type { ReactNode } from "react";
@@ -254,9 +255,11 @@ export function Notice({ tone, children }: { tone: "error" | "success" | "info";
     success: "bg-green-soft text-green",
     info: "bg-chip text-ink",
   }[tone];
+  // The last safety net (6 November 2026): database words never reach a screen, even from a path that forgot dbWords.
+  const shown = typeof children === "string" ? staffWords(children) : children;
   return (
     <div role={tone === "error" ? "alert" : "status"} className={`rounded-control px-4 py-3 text-sm font-semibold ${cls}`}>
-      {children}
+      {shown}
     </div>
   );
 }

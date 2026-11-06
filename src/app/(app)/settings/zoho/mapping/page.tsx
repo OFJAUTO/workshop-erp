@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { Button, Card, Field, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
@@ -63,7 +64,7 @@ export default async function ZohoMappingPage({ searchParams }: { searchParams: 
     try {
       chart = (await listAccounts(org)).filter((a) => a.is_active !== false);
     } catch (e) {
-      chartError = e instanceof Error ? e.message : String(e);
+      chartError = e instanceof Error ? dbWords(e, "settings/zoho/mapping") : String(e);
     }
   }
   const chartNames = chart.map((a) => a.account_name);

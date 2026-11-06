@@ -493,6 +493,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             <span>· {job.job_number}</span>
             {seesCustomerDetails && (customer ?? customerPublic) ? <span data-job-customer>· <CustomerName name={(customer ?? customerPublic)!.company_name ?? (customer ?? customerPublic)!.full_name} jobId={id} className="font-semibold text-ink" /></span> : null}
             {!loose ? <VinCopy vin={vehicle.vin} /> : null}
+            {/* A car still without its plate (6 November 2026): one tap to the shared car form that adds it. */}
+            {!loose && vehicle.has_plate === false && can(role, "editVehicles") ? <LinkButton href={`/vehicles/${job.vehicle_id}/edit`} size="md" data-add-plate>Add the number plate</LinkButton> : null}
             <PriorityBadge priority={job.priority} />
             {inspection && inspectionDangerous(inspection).length ? <Badge tone="red">DANGEROUS TO DRIVE</Badge> : null}
             {isVip ? <Badge tone="ink">VIP</Badge> : null}

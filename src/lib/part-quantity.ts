@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import "server-only";
 import { jobAdvisorIds, notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import { askerOfRequest, checkQuantity, cleanUnit, qtyWithUnit, quantityChangeWords, whoOfRole, type PartUnit, type QtyWho } from "./part-units";
@@ -74,7 +75,7 @@ export async function setJobPartQuantity(jobId: string, partId: string, input: {
   if (Math.abs(cur - qty) < 0.005 && unit === curUnit) return { changed: false };
   const now = new Date().toISOString();
   const { error } = await admin.from("part_items").update({ confirmed_quantity: qty, quantity_changed_at: now, quantity_changed_by: by.id, ...(unitsReady ? { unit } : {}), updated_by: by.id }).eq("id", p.id).eq("order_status", "none");
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "lib/part-quantity") };
   // Who set the quantity it had: the last person who changed it, else whoever asked for the part.
   let askedBy: QtyWho = await askerOfPart(p);
   if (p.quantity_changed_by) {

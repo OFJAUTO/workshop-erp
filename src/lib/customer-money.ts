@@ -6,7 +6,7 @@ import { INVOICE_SELECT, PAYMENT_SELECT, creditsOnDocs, draftFrom, invoiceBalanc
 import { round2 } from "./money";
 import { pageAllIn } from "./page-all";
 import { notifyStaff, jobAdvisorIds } from "./notifications";
-import { paymentsAnytimeReady } from "./schema-ready";
+import { paymentsAnytimeReady, plateHistoryReady } from "./schema-ready";
 import type { Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
@@ -300,7 +300,7 @@ export async function payerRows(q: string, settings: Settings): Promise<PayerRow
   const [{ data: custs }, { data: phones }, { data: cars }, { data: jobs }] = await Promise.all([
     admin.from("customers").select("id").or(`full_name.ilike.${like},company_name.ilike.${like},customer_number.ilike.${like}`).limit(8),
     digits.length >= 5 ? admin.from("customers").select("id").ilike("phone", `%${digits.slice(-9)}%`).limit(8) : Promise.resolve({ data: [] as { id: string }[] }),
-    admin.from("vehicles").select("id").or(vehicleOrFilter(needle)).limit(8),
+    admin.from("vehicles").select("id").or(vehicleOrFilter(needle, { oldPlates: await plateHistoryReady() })).limit(8),
     admin.from("jobs").select("id").ilike("job_number", like).limit(6),
   ]);
   type J = { id: string; job_number: string; customer_id: string; vehicle_id: string; is_open: boolean };

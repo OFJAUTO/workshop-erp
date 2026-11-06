@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import "server-only";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { formatDateTime } from "./format";
@@ -49,7 +50,7 @@ export async function replacePaymentLink(invoiceId: string, url: string | null, 
   await admin.from("payment_links").update({ replaced_at: now, updated_by: staff.id }).eq("invoice_id", invoiceId).is("replaced_at", null);
   if (url) {
     const { error } = await admin.from("payment_links").insert({ job_id: inv.job_id, invoice_id: invoiceId, url, added_by: staff.id, created_by: staff.id, updated_by: staff.id });
-    if (error) return { error: error.message };
+    if (error) return { error: dbWords(error, "lib/payment-links") };
   }
   await admin.from("invoices").update({ payment_link_url: url, updated_by: staff.id }).eq("id", invoiceId);
   if (inv.job_id) await admin.from("job_events").insert({ job_id: inv.job_id, event_type: "payment_link", note: url ? `Payment link added to ${inv.number} by ${staff.display_name}` : `Payment link removed from ${inv.number} by ${staff.display_name}`, created_by: staff.id });
@@ -94,7 +95,7 @@ export async function ensureAutoPayLink(invoiceId: string, staff: { id: string |
       cancelUrl: `${siteUrl}/proforma/${info.token ?? ""}?cancelled=1`,
     });
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Pay now is unavailable right now. Paste a payment link instead." };
+    return { error: e instanceof Error ? dbWords(e, "lib/payment-links") : "Pay now is unavailable right now. Paste a payment link instead." };
   }
   // The old link (pasted or automatic) is replaced; the new order is the one the customer's Pay now opens.
   await admin.from("payment_links").update({ replaced_at: now, updated_by: staff?.id ?? null }).eq("invoice_id", invoiceId).is("replaced_at", null);
@@ -103,7 +104,7 @@ export async function ensureAutoPayLink(invoiceId: string, staff: { id: string |
     .insert({ job_id: info.jobId, invoice_id: invoiceId, url: order.paymentUrl, provider: "ngenius", order_reference: order.reference, amount_aed: info.balance, state: "STARTED", added_by: staff?.id ?? null, created_by: staff?.id ?? null, updated_by: staff?.id ?? null })
     .select(SELECT)
     .single();
-  if (error || !row) return { error: error?.message ?? "Could not save the payment link." };
+  if (error || !row) return { error: (error ? dbWords(error, "lib/payment-links") : "Could not save the payment link.") };
   await admin.from("invoices").update({ payment_link_url: order.paymentUrl, pay_now_enabled: true, updated_by: staff?.id ?? null }).eq("id", invoiceId);
   if (info.jobId) await admin.from("job_events").insert({ job_id: info.jobId, event_type: "payment_link", note: `Pay now (Network International) on ${info.number} for AED ${info.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}${cur ? ", replacing the earlier link" : ""}${staff ? ` by ${staff.display_name}` : ""}`, created_by: staff?.id ?? null });
   return { link: { ...(row as unknown as PaymentLinkRow), amount_aed: Number((row as { amount_aed: unknown }).amount_aed) } };
@@ -138,7 +139,7 @@ export async function openPaymentLink(token: string, siteUrl?: string): Promise<
   const firstOpen = !cur.opened_at;
   if (firstOpen) {
     const { error } = await admin.from("payment_links").update({ opened_at: now }).eq("id", cur.id).is("opened_at", null);
-    if (error) return { error: error.message };
+    if (error) return { error: dbWords(error, "lib/payment-links") };
   }
   if (inv.job_id && firstOpen) {
     const { data: job } = await admin.from("jobs").select("job_number, gated_in_by").eq("id", inv.job_id).maybeSingle();

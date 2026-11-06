@@ -21,6 +21,9 @@ import { knownWordsUp } from "@/lib/text-case";
 import { linkRecheck, ppfJobsOfCar } from "@/lib/recheck";
 import { checkFee, feeInputFrom } from "@/lib/inspection-fee";
 import { feeBoundsFor } from "@/lib/inspection-fee-server";
+import { SAVE_FAILED, logAppError, dbWords, dbDetail } from "@/lib/app-errors";
+import { checkPlateInput, friendlyVehicleError, plateFieldsOf } from "@/lib/plate-rules";
+import { vehicleWords } from "@/lib/vehicle-merge";
 import { OPEN_ESTIMATE_STATUSES } from "@/lib/quote-history";
 
 /* ---------------------------------------------------------------------------
@@ -34,9 +37,9 @@ async function saveCarPicture(vehicleId: string, file: FormDataEntryValue | null
   const path = `${vehicleId}/profile-${Date.now()}-${randomBytes(4).toString("hex")}.jpg`;
   const supabase = await createClient();
   const { error: upError } = await supabase.storage.from("vehicle-photos").upload(path, file, { contentType: file.type, upsert: false });
-  if (upError) return "Picture upload failed: " + upError.message;
+  if (upError) return "Picture upload failed: " + dbDetail(upError, "gate-in/actions");
   const { error } = await supabase.from("vehicles").update({ photo_path: path }).eq("id", vehicleId);
-  if (error) return error.message;
+  if (error) return dbWords(error, "gate-in/actions");
   return null;
 }
 
@@ -159,7 +162,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const supabase = await createClient();
   const { data: vehicle } = await supabase
     .from("vehicles")
-    .select("id, customer_id, is_active, photo_path, model_year, last_mileage, make:vehicle_makes(name), customer:customers(is_vip, vip_note)")
+    .select("id, customer_id, is_active, has_plate, photo_path, model_year, last_mileage, make:vehicle_makes(name), customer:customers(is_vip, vip_note)")
     .eq("id", vehicleId)
     .maybeSingle();
   if (!vehicle || !vehicle.is_active) return { error: "Car not found.", values };
@@ -199,6 +202,48 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   // 30 October 2026: a warning with a way forward - the job card it is already on, one tap away.
   if (openJob) return { error: `This car is already in the workshop on job ${openJob.job_number}.`, values: { ...values, open_job_id: openJob.id, open_job_number: openJob.job_number } };
 
+  // PLATE AT GATE-IN (6 November 2026): a car saved without its plate gets the real one here - compulsory unless it
+  // genuinely has none (a reason is picked). Owner, advisors and the gate-in person alike, on this form only.
+  let plateEventNote: string | null = null;
+  if ((vehicle as { has_plate?: boolean }).has_plate === false) {
+    const giNoPlate = formData.get("gi_no_plate") === "on";
+    const giNumber = String(formData.get("gi_plate_number") ?? "").trim();
+    if (giNumber && !giNoPlate) {
+      const input = { noPlate: false, country: String(formData.get("gi_plate_country") ?? "UAE") || "UAE", emirate: String(formData.get("gi_plate_emirate") ?? ""), code: String(formData.get("gi_plate_code") ?? ""), number: giNumber };
+      const problem = checkPlateInput(input);
+      if (problem) return { error: problem, values };
+      const fields = plateFieldsOf(input);
+      const admin = createAdminClient();
+      // The same plate on another record: at the gate the right move is to open THAT car (merging is done on the car's page).
+      const { data: twins } = await admin
+        .from("vehicles")
+        .select("id, kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)")
+        .eq("is_active", true).eq("has_plate", true).eq("plate_country", fields.plate_country).eq("plate_number", fields.plate_number!).neq("id", vehicleId).limit(5);
+      type GiTwin = { id: string; kind: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null };
+      const twin = ((twins ?? []) as unknown as GiTwin[]).find((x) => (x.plate_emirate ?? "") === (fields.plate_emirate ?? "") && (x.plate_code ?? "") === (fields.plate_code ?? ""));
+      if (twin) return { error: `This plate is already on ${vehicleWords(twin)}. Gate THAT car in instead - or ask an advisor to merge the two records on the car's edit page first.`, values };
+      const { error: plateError } = await admin.from("vehicles").update({ ...fields, updated_by: staff.id }).eq("id", vehicleId);
+      if (plateError) {
+        const friendly = friendlyVehicleError(plateError.message);
+        if (!friendly) await logAppError("gate-in-plate", plateError, { detail: { vehicleId } });
+        return { error: friendly ?? SAVE_FAILED, values };
+      }
+      const plateWords = [fields.plate_emirate ?? fields.plate_country, fields.plate_code, fields.plate_number].filter(Boolean).join(" ");
+      plateEventNote = `Number plate ${plateWords} added at gate-in by ${staff.display_name}`;
+      await admin
+        .from("audit_log")
+        .insert({ table_name: "vehicles", record_id: vehicleId, action: "update", changed_by: staff.id, new_data: { plate_added: plateWords, by: staff.display_name, at: "gate-in" } })
+        .then(({ error: e }) => (e ? logAppError("gate-in-plate", e, { detail: { vehicleId, step: "audit" } }) : null));
+    } else if (giNoPlate) {
+      const reason = String(formData.get("gi_no_plate_reason") ?? "").trim();
+      if (!reason) return { error: "Pick why the car genuinely has no plate.", values };
+      const note = String(formData.get("gi_no_plate_note") ?? "").trim();
+      plateEventNote = `No number plate: ${reason}${note ? ` - ${note}` : ""} (gate-in by ${staff.display_name})`;
+    } else {
+      return { error: 'Type the car’s number plate, or tick "Genuinely no plate" and pick why.', values };
+    }
+  }
+
   if (hasNewPicture) {
     const picError = await saveCarPicture(vehicleId, picture);
     if (picError) return { error: picError, values };
@@ -237,7 +282,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const { data: job, error: jobError } = reuse
     ? await createAdminClient().from("jobs").update({ ...jobFields, ...(booked ? {} : { department: d.department }), ...(heldJob && !estimate ? { estimate_id: heldJob.estimate_id } : {}), status: "gate_in_pending", stage: "gate_in", stage_entered_at: nowIso, gated_in_at: nowIso, is_open: true, updated_by: staff.id }).eq("id", reuse.id).select("id, job_number").single()
     : await supabase.from("jobs").insert(jobFields).select("id, job_number").single();
-  if (jobError || !job) return { error: jobError?.message ?? "Could not open the job card.", values };
+  if (jobError || !job) return { error: (jobError ? dbWords(jobError, "gate-in/actions") : "Could not open the job card."), values };
 
   const { error: giError } = await supabase.from("gate_ins").insert({
     job_id: job.id,
@@ -263,7 +308,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
     location_lat: Number.isFinite(lat) ? lat : null,
     location_lng: Number.isFinite(lng) ? lng : null,
   });
-  if (giError) return { error: giError.message, values };
+  if (giError) return { error: dbWords(giError, "gate-in/actions"), values };
 
   await supabase.from("job_requests").insert(requests.map((text, i) => ({ job_id: job.id, position: i + 1, text })));
 
@@ -275,6 +320,11 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
       .update({ status: "arrived", job_id: job.id, vehicle_id: vehicleId, updated_by: staff.id })
       .eq("id", appointmentId)
       .in("status", ["booked", "arrived"]);
+  }
+
+  // The plate added (or the reason there is none) goes on the job's record, next to the gate-in itself.
+  if (plateEventNote) {
+    await supabase.from("job_events").insert({ job_id: job.id, event_type: "gate_in", note: plateEventNote, created_by: staff.id });
   }
 
   // VIP is a customer mark; the gate-in switch sets it and the change is logged with who and when.
@@ -291,7 +341,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   if (carried.length) {
     const { error: carryError } = await createAdminClient().from("quotations").update({ carried_job_id: job.id, updated_by: staff.id }).in("id", carried.map((e) => e.id));
     const words = carried.map((e) => `${e.number} (${e.id === estimate?.id ? "original" : "additional"}, ${e.status === "approved" ? "accepted" : "not accepted yet"})`).join(", ");
-    await supabase.from("job_events").insert({ job_id: job.id, event_type: "estimate_attached", note: carryError ? `Estimates ${words} could not all be marked as carried over: ${carryError.message}` : `Carried over at gate-in: ${words}. Each opens as its own quotation once the inspection is approved.`, created_by: staff.id });
+    await supabase.from("job_events").insert({ job_id: job.id, event_type: "estimate_attached", note: carryError ? `Estimates ${words} could not all be marked as carried over: ${dbDetail(carryError, "gate-in/actions")}` : `Carried over at gate-in: ${words}. Each opens as its own quotation once the inspection is approved.`, created_by: staff.id });
     // Part 2 (4 November 2026): the estimates' proformas, payments and tax invoices follow the car onto the
     // job, so Paid so far and Already invoiced stand on the job card from the first minute.
     try {
@@ -490,7 +540,7 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
     })
     .select("id")
     .single();
-  if (cError || !newCustomer) return { error: cError?.message ?? "Could not save the customer.", values };
+  if (cError || !newCustomer) return { error: (cError ? dbWords(cError, "gate-in/actions") : "Could not save the customer."), values };
   customer = newCustomer;
 
   const noPlate = d.no_plate === "on";
@@ -530,7 +580,7 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
       if (hit) existing = { id: hit.id as string, plate: formatPlate(hit) };
     }
     return {
-      error: plateTaken ? "A car with this plate is already on record." : vinTaken ? "A car with this VIN is already on record." : msg || "Could not save the car.",
+      error: plateTaken ? "A car with this plate is already on record." : vinTaken ? "A car with this VIN is already on record." : vError ? dbWords(vError, "gate-in/actions") : "Could not save the car.",
       values: existing ? { ...values, existing_car_id: existing.id, existing_car_plate: existing.plate } : values,
     };
   }

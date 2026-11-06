@@ -1,4 +1,5 @@
 "use server";
+import { dbDetail } from "@/lib/app-errors";
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -42,7 +43,7 @@ export async function registerThisTablet(formData: FormData) {
     created_by: owner.id,
     updated_by: owner.id,
   });
-  if (error) redirect("/tablet/register?error=" + encodeURIComponent("Could not register: " + error.message));
+  if (error) redirect("/tablet/register?error=" + encodeURIComponent("Could not register: " + dbDetail(error, "tablet/register/actions")));
 
   const cookieStore = await cookies();
   cookieStore.set(DEVICE_COOKIE, token, deviceCookieOptions());

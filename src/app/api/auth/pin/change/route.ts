@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { PIN_PATTERN, hashPin, verifyPin } from "@/lib/pin";
@@ -21,6 +22,6 @@ export async function POST(request: NextRequest) {
   const { data: priv } = await admin.from("staff_private").select("pin_hash").eq("staff_id", staff.id).maybeSingle();
   if (priv?.pin_hash && verifyPin(pin, priv.pin_hash)) return NextResponse.json({ error: "That is the temporary PIN. Choose a new one." }, { status: 400 });
   const { error } = await admin.from("staff_private").update({ pin_hash: hashPin(pin), pin_must_change: false, pin_failed_attempts: 0, pin_locked_until: null, pin_updated_at: new Date().toISOString(), updated_by: staff.id }).eq("staff_id", staff.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: dbWords(error, "api/auth/pin/change") }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

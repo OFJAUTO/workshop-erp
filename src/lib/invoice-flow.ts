@@ -1,3 +1,4 @@
+import { dbWords, dbDetail } from "@/lib/app-errors";
 import { noChargeJob } from "./comp-data";
 import { chargesToInvoice, markChargesInvoiced } from "./charges";
 import { chargeNet } from "./charge-rules";
@@ -219,7 +220,7 @@ export async function createDepositInvoice(jobId: string, paymentId: string, amo
     })
     .select("id, number")
     .single();
-  if (error || !inv) return { error: error?.message ?? "Could not make the deposit invoice." };
+  if (error || !inv) return { error: (error ? dbWords(error, "lib/invoice-flow") : "Could not make the deposit invoice.") };
   await admin.from("invoice_lines").insert({ invoice_id: inv.id, position: 0, section: "services", description, details: null, part_number: null, quantity: 1, unit_price: taxable, amount_aed: taxable, vat_aed: vat, total_aed: total, cost_aed: 0, quotation_line_id: null, part_item_id: null });
   await admin.from("payments").update({ invoice_id: inv.id, deposit_invoice_number: inv.number, updated_by: by }).eq("id", paymentId);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_issued", note: `${inv.number} issued for the deposit (AED ${total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}) by ${actor?.display_name ?? "staff"}`, created_by: by });
@@ -259,7 +260,7 @@ export async function createChargeInvoice(jobId: string, actor: Actor, settings:
     })
     .select("id, number, token")
     .single();
-  if (error || !inv) return { error: error?.message ?? "Could not make the invoice." };
+  if (error || !inv) return { error: (error ? dbWords(error, "lib/invoice-flow") : "Could not make the invoice.") };
   const lineRows = [
     ...(main > 0 ? [{ description, net: main, cost: 0, free: false }] : []),
     ...agreed.map((c) => ({ description: c.description, net: chargeNet(c), cost: c.cost_aed, free: c.free })),
@@ -267,7 +268,7 @@ export async function createChargeInvoice(jobId: string, actor: Actor, settings:
   const { error: lineErr } = await admin.from("invoice_lines").insert(lineRows.map((l, i) => ({ invoice_id: inv.id, position: i, section: "services", description: l.description, details: null, part_number: null, quantity: 1, unit_price: l.net, amount_aed: l.net, vat_aed: round2(l.net * (vatPercent / 100)), total_aed: round2(l.net * (1 + vatPercent / 100)), cost_aed: l.cost, quotation_line_id: null, part_item_id: null, price_display: l.free ? "complimentary" : "normal", created_by: by, updated_by: by })));
   if (lineErr) {
     await admin.from("invoices").update({ is_active: false, status: "cancelled", updated_by: by }).eq("id", inv.id);
-    return { error: `Could not add the line to the invoice: ${lineErr.message}` };
+    return { error: `Could not add the line to the invoice: ${dbDetail(lineErr, "lib/invoice-flow")}` };
   }
   await markChargesInvoiced(agreed.map((c) => c.id), String(inv.id));
   // 1 November 2026: an advance already paid on this job comes off this invoice by itself (as it would off the proforma).

@@ -1,3 +1,4 @@
+import { plateHistoryReady } from "./schema-ready";
 import "server-only";
 import { supplierInvoicesToCheckCount } from "./supplier-invoices";
 import { signCarPictures } from "./car-pictures";
@@ -447,7 +448,7 @@ async function searchMatches(q: string): Promise<SearchMatches> {
   const [{ data: byNumber }, { data: byDoc }, { data: cars }, { data: custs }, { data: phones }] = await Promise.all([
     admin.from("jobs").select("id").ilike("job_number", like).limit(40),
     admin.from("invoices").select("job_id").ilike("number", like).not("job_id", "is", null).limit(40),
-    admin.from("vehicles").select("id").or(vehicleOrFilter(needle)).limit(20),
+    admin.from("vehicles").select("id").or(vehicleOrFilter(needle, { oldPlates: await plateHistoryReady() })).limit(20),
     admin.from("customers").select("id").or(`full_name.ilike.${like},company_name.ilike.${like}`).limit(20),
     digits.length >= 5 ? admin.from("customers").select("id").ilike("phone", `%${digits.slice(-9)}%`).limit(20) : Promise.resolve({ data: [] as { id: string }[] }),
   ]);

@@ -118,7 +118,7 @@ async function seedPages() {
   const who = (await sql("select customer_id::text as c, vehicle_id::text as v from public.jobs where id = $1", [job]))[0];
   if (who) await sql("insert into public.payments (customer_id, method, amount_aed, is_deposit, status, notes, vehicle_id) values ($1, 'cash', 250, true, 'recorded', 'Layout check: an advance not allocated yet', $2)", [who.c, who.v]);
   return {
-    staff: [...(who ? [`/vehicles/${who.v}`, `/customers/${who.c}`] : []), `/jobs/${job}`, `/jobs/${job}/quote/${seededCar.quotationId}`, `/jobs/${job}/inspection`, `/jobs/${job}/invoice`, `/jobs/${job}/work`, `/jobs/${job}/gate-in`, `/parts/${job}`, `/estimates/new`, `/settings`, `/settings/inspection`, `/settings/services`],
+    staff: [...(who ? [`/vehicles/${who.v}`, `/vehicles/${who.v}/edit`, `/customers/${who.c}`] : []), `/jobs/${job}`, `/jobs/${job}/quote/${seededCar.quotationId}`, `/jobs/${job}/inspection`, `/jobs/${job}/invoice`, `/jobs/${job}/work`, `/jobs/${job}/gate-in`, `/parts/${job}`, `/estimates/new`, `/settings`, `/settings/inspection`, `/settings/services`],
     customer: [qToken ? `/quote/${qToken}` : null, seededCar.invoice?.token ? `/invoice/${seededCar.invoice.token}` : null, seededCar.invoice?.token ? `/proforma/${seededCar.invoice.token}` : null, insp ? `/report/${reportToken}` : null, `/approve/${approvalToken}`].filter(Boolean),
   };
 }
@@ -140,7 +140,7 @@ const roles = [
 // Pages reached from inside another page (not in the menu) that still need checking.
 // The parts desk's estimate pricing page (30 October 2026) opens any estimate read-only: the newest one is used.
 const anEstimate = (await sql("select id from public.quotations where kind = 'estimate' and is_active and deleted_at is null order by created_at desc limit 1"))[0]?.id ?? null;
-const EXTRA_PAGES = { owner: ["/settings/packages", "/commissions", "/settings/warranty", "/warranties", "/card-settlements", "/estimates/new", "/reports/inspection-fees"], advisor: ["/estimates/new"], accounts: ["/commissions", "/card-settlements"], parts: ["/parts/inspections", ...(anEstimate ? [`/parts/estimate/${anEstimate}`] : [])] };
+const EXTRA_PAGES = { owner: ["/settings/packages", "/commissions", "/settings/warranty", "/warranties", "/card-settlements", "/estimates/new", "/reports/inspection-fees", "/settings/problems"], advisor: ["/estimates/new"], accounts: ["/commissions", "/card-settlements"], parts: ["/parts/inspections", ...(anEstimate ? [`/parts/estimate/${anEstimate}`] : [])] };
 const slice = (list) => {
   if (partOf <= 1) return list;
   const size = Math.ceil(list.length / partOf);

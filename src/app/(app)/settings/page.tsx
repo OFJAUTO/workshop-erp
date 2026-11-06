@@ -116,6 +116,9 @@ export default async function SettingsPage() {
             <LinkButton href="/settings/uploads" tone="secondary">
               Failed uploads
             </LinkButton>
+            <LinkButton href="/settings/problems" tone="secondary" data-problems-link>
+              Problems behind the scenes
+            </LinkButton>
             <LinkButton href="/settings/refusals" tone="secondary" data-refusals-link>
               Refusals
             </LinkButton>

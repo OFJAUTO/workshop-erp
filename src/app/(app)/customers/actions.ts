@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -81,7 +82,7 @@ export async function createCustomer(_state: FormState, formData: FormData): Pro
 
   const supabase = await createClient();
   const { data, error } = await supabase.from("customers").insert({ ...toRow(parsed.data), ...creditTermsOf(formData, staff) }).select("id").single();
-  if (error || !data) return { error: error?.message ?? "Could not save.", values };
+  if (error || !data) return { error: (error ? dbWords(error, "customers/actions") : "Could not save."), values };
 
   revalidatePath("/customers");
   redirect(`/customers/${data.id}`);
@@ -95,7 +96,7 @@ export async function updateCustomer(id: string, _state: FormState, formData: Fo
 
   const supabase = await createClient();
   const { error } = await supabase.from("customers").update({ ...toRow(parsed.data), ...creditTermsOf(formData, staff) }).eq("id", id);
-  if (error) return { error: error.message, values };
+  if (error) return { error: dbWords(error, "customers/actions"), values };
 
   revalidatePath("/customers");
   revalidatePath(`/customers/${id}`);
@@ -108,7 +109,7 @@ export async function setCustomerActive(id: string, active: boolean) {
   const { error } = await supabase.from("customers").update({ is_active: active }).eq("id", id);
   revalidatePath("/customers");
   revalidatePath(`/customers/${id}`);
-  if (error) redirect(`/customers/${id}?error=` + encodeURIComponent(error.message));
+  if (error) redirect(`/customers/${id}?error=` + encodeURIComponent(dbWords(error, "customers/actions")));
   redirect(`/customers/${id}?message=` + encodeURIComponent(active ? "Customer re-activated." : "Customer archived."));
 }
 
@@ -138,7 +139,7 @@ export async function addContact(customerId: string, _state: FormState, formData
     relationship: blankToNull(parsed.data.relationship),
     can_approve: parsed.data.can_approve,
   });
-  if (error) return { error: error.message, values };
+  if (error) return { error: dbWords(error, "customers/actions"), values };
 
   revalidatePath(`/customers/${customerId}`);
   return { success: "Contact added." };

@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { reopenZoho } from "@/lib/zoho-sync";
@@ -24,7 +25,7 @@ export async function POST(request: NextRequest) {
   const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 5) || "jpg";
   const path = `commission-payments/${paymentId}/${Date.now()}.${ext}`;
   const { error: upErr } = await admin.storage.from("job-files").upload(path, Buffer.from(await file.arrayBuffer()), { contentType: file.type || "application/octet-stream", upsert: true });
-  if (upErr) return NextResponse.json({ error: upErr.message }, { status: 500 });
+  if (upErr) return NextResponse.json({ error: dbWords(upErr, "api/commissions/proof") }, { status: 500 });
   await admin.from("commission_payments").update({ proof_path: path, proof_uploaded_at: new Date().toISOString(), proof_uploaded_by: staff.id, updated_by: staff.id }).eq("id", paymentId);
   // Zoho Books phase 2: a proof uploaded after the expense posted attaches on the next sync run.
   await reopenZoho("commission", paymentId);

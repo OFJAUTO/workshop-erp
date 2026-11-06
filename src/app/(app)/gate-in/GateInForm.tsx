@@ -11,8 +11,10 @@ import { RequestsList } from "@/components/RequestsList";
 import { InspectionFeeChoice } from "@/components/InspectionFeeChoice";
 import type { FeeBounds, FeeInput } from "@/lib/inspection-fee";
 import { FormDraft } from "@/components/FormDraft";
-import { Card, ChoiceButtons, Field, Input, LinkButton, SectionLabel, Textarea } from "@/components/ui";
+import { Card, ChoiceButtons, Field, Input, LinkButton, SectionLabel, Select, Textarea } from "@/components/ui";
 import { ARRIVED_BY, CLEANLINESS, CONDITIONS, FUEL_LEVELS } from "@/lib/jobs";
+import { NO_PLATE_REASONS } from "@/lib/plate-rules";
+import { EMIRATES, PLATE_COUNTRIES } from "@/lib/types";
 import type { MileageUnit } from "@/lib/mileage";
 import type { Branch } from "@/lib/settings";
 import { GeoCapture } from "./GeoCapture";
@@ -41,6 +43,7 @@ export function GateInForm({
   inspectionFee = null,
   rechecks = [],
   initialVisit = "normal",
+  plateAsk = false,
 }: {
   action: FormAction;
   isElectric: boolean;
@@ -73,11 +76,16 @@ export function GateInForm({
   /** Section 8: the inspection fee if no work is approved - the default (premium brands higher), who may lower it, and the lock after approval. */
   /** 30 October 2026: the fee choice when an advisor or the owner does the gate-in (null for the gate-in person). */
   inspectionFee?: { initial: FeeInput; bounds: FeeBounds; isOwner: boolean; locked: boolean; words: string } | null;
+  /** The car was saved without its plate (6 November 2026): the form asks for the real one, or a reason it has none. */
+  plateAsk?: boolean;
 }) {
   const [arrivedBy, setArrivedBy] = useState(initialValues?.arrived_by ?? "");
   const [location, setLocation] = useState(initialValues?.location_choice ?? (branches[0]?.name ?? "customer"));
   const [vip, setVip] = useState(initialValues?.vip === "on");
   const [visit, setVisit] = useState<"normal" | "recheck">(initialValues?.visit_type === "recheck" || (initialVisit === "recheck" && rechecks.length) ? "recheck" : "normal");
+  // Plate at gate-in (6 November 2026): a plate, or the tick with a reason. Typing a plate unticks "genuinely no plate".
+  const [giNoPlate, setGiNoPlate] = useState(false);
+  const [giCountry, setGiCountry] = useState("UAE");
   const recheck = visit === "recheck";
   const atBranch = branches.some((b) => b.name === location);
 
@@ -95,6 +103,49 @@ export function GateInForm({
           <input type="hidden" name="is_electric" value={isElectric ? "yes" : "no"} />
           {v.appointment_id ? <input type="hidden" name="appointment_id" value={v.appointment_id} /> : null}
           {returnTo ? <input type="hidden" name="return_to" value={returnTo} /> : null}
+
+          {plateAsk ? (
+            <Card className="flex flex-col gap-4 !border-amber-bar" data-gatein-plate>
+              <SectionLabel>Number plate</SectionLabel>
+              <p className="text-sm">This car was saved without its plate. Type the real plate now - or tick below if it genuinely has none.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field label="Country">
+                  <Select name="gi_plate_country" value={giCountry} onChange={(e) => setGiCountry(e.target.value)}>
+                    {PLATE_COUNTRIES.map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </Select>
+                </Field>
+                <div className="grid grid-cols-3 gap-3">
+                  <Field label="Code" optional hint="AA, DD, 1, 16">
+                    <Input name="gi_plate_code" defaultValue={v.gi_plate_code} className="uppercase" maxLength={5} textCase="upper" onChange={(e) => { if (e.target.value.trim()) setGiNoPlate(false); }} data-gatein-plate-code />
+                  </Field>
+                  <div className="col-span-2">
+                    <Field label="Number" hint={giCountry === "UAE" ? "1-5 digits" : undefined} optional={giNoPlate}>
+                      <Input name="gi_plate_number" defaultValue={v.gi_plate_number} required={!giNoPlate} className="uppercase text-lg font-bold tracking-[0.05em]" textCase="upper" onChange={(e) => { if (e.target.value.trim()) setGiNoPlate(false); }} data-gatein-plate-number />
+                    </Field>
+                  </div>
+                </div>
+              </div>
+              {giCountry === "UAE" ? (
+                <Field label="Emirate">
+                  <ChoiceButtons name="gi_plate_emirate" columns={4} defaultValue={v.gi_plate_emirate || "Dubai"} options={EMIRATES.map((em) => ({ value: em, label: em }))} />
+                </Field>
+              ) : null}
+              <label className="flex items-center gap-3 min-h-11 cursor-pointer">
+                <input type="checkbox" name="gi_no_plate" checked={giNoPlate} onChange={(e) => setGiNoPlate(e.target.checked)} className="h-5 w-5 accent-ink" data-gatein-no-plate />
+                <span className="text-sm font-semibold">Genuinely no plate (new car, export, test plate)</span>
+              </label>
+              {giNoPlate ? (
+                <div data-gatein-no-plate-reason>
+                  <Field label="Why is there no plate?">
+                    <ChoiceButtons name="gi_no_plate_reason" columns={4} defaultValue={v.gi_no_plate_reason} options={NO_PLATE_REASONS.map((r) => ({ value: r, label: r.split(" - ")[0].split(" / ")[0] }))} />
+                  </Field>
+                  <Input name="gi_no_plate_note" defaultValue={v.gi_no_plate_note} placeholder="A few words more (optional)" textCase="sentence" className="mt-2" />
+                </div>
+              ) : null}
+            </Card>
+          ) : null}
 
           {mode === "create" && rechecks.length ? (
             // 30 October 2026: the free 10-day final check after a PPF job is its own visit, next to the normal one.

@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -24,7 +25,7 @@ export async function saveRoadTestChips(_state: FormState, formData: FormData): 
   }
   const admin = createAdminClient();
   const { error } = await admin.from("settings").upsert({ key: "road_test_chips", value: out, label: "Road test one-tap remarks", description: "Per road test item: rows of chips (what, where, when) that write the remark." }, { onConflict: "key" });
-  if (error) return { error: error.message, values };
+  if (error) return { error: dbWords(error, "settings/inspection/chips-actions"), values };
   revalidatePath("/", "layout");
   return { success: "Road test remarks saved." };
 }

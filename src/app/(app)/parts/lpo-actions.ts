@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { warnOwnerIfDepositShort } from "@/lib/deposits";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
@@ -170,7 +171,7 @@ export async function emailSupplierLpo(poId: string): Promise<{ error?: string; 
   try {
     await sendGmail({ from, fromName: "OFJ Automotive, Parts", to, subject: `Purchase order ${po.number} from OFJ Automotive`, text, attachments: [{ filename: `OFJ ${po.number}.pdf`, content: pdf, contentType: "application/pdf" }] });
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "The email could not be sent." };
+    return { error: e instanceof Error ? dbWords(e, "parts/lpo-actions") : "The email could not be sent." };
   }
   const admin = createAdminClient();
   const now = new Date().toISOString();

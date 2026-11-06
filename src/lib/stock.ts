@@ -1,3 +1,4 @@
+import { dbWords, dbDetail } from "@/lib/app-errors";
 import "server-only";
 import { notifyRoles } from "./notifications";
 import { compactPartNumber } from "./price-import";
@@ -67,11 +68,11 @@ export async function recordStockMovement(itemId: string, input: { kind: Movemen
   // Every answer checked (3 November 2026): a shelf change that did not save is said, never silent; a movement that did
   // not write puts the item's figures back, so the count and its history never disagree.
   const { error: upErr } = await admin.from("stock_items").update({ quantity: after, unit_cost: unitCost, ...(input.kind === "count" ? { last_counted_at: now, last_counted_by: actor.id } : {}), ...(after > item.minimum_level ? { low_notified_at: null } : {}), updated_by: actor.id }).eq("id", itemId);
-  if (upErr) return { error: `Couldn't update the stock item: ${upErr.message}` };
+  if (upErr) return { error: `Couldn't update the stock item: ${dbDetail(upErr, "lib/stock")}` };
   const { error: mvErr } = await admin.from("stock_movements").insert({ stock_item_id: itemId, kind: input.kind, quantity: input.kind === "count" ? round2(after - item.quantity) : input.kind === "out" ? -qty : qty, unit_cost: input.kind === "in" || input.kind === "return" ? (input.unitCost ?? item.unit_cost) : item.unit_cost, quantity_after: after, job_id: input.jobId ?? null, po_id: input.poId ?? null, part_item_id: input.partItemId ?? null, note: input.note ?? null, created_by: actor.id, updated_by: actor.id });
   if (mvErr) {
     await admin.from("stock_items").update({ quantity: item.quantity, unit_cost: item.unit_cost, updated_by: actor.id }).eq("id", itemId);
-    return { error: `Couldn't record the stock movement: ${mvErr.message}` };
+    return { error: `Couldn't record the stock movement: ${dbDetail(mvErr, "lib/stock")}` };
   }
   return { after };
 }
@@ -121,7 +122,7 @@ export async function addPartToStock(part: { id: string; description: string; pa
   }
   if (!item) {
     const { data, error } = await admin.from("stock_items").insert({ name: part.description.trim().slice(0, 120), unit: part.unit === "l" ? "L" : part.unit === "set" ? "set" : "pc", quantity: 0, minimum_level: 0, unit_cost: cost ?? 0, part_number: realPartNumber(part.part_number), created_by: actor.id, updated_by: actor.id }).select("id, name").single();
-    if (error || !data) return { error: error?.message ?? "Could not add the stock item." };
+    if (error || !data) return { error: (error ? dbWords(error, "lib/stock") : "Could not add the stock item.") };
     item = data;
   }
   const r = await recordStockMovement(item.id, { kind: "in", quantity: qty, unitCost: cost, jobId, partItemId: part.id, note: "Kept in stock from a job" }, actor);

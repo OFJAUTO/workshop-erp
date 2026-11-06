@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { chooserValues, resolveCustomerCar } from "@/lib/customer-car";
 import { startersOf } from "@/lib/quote-lead";
@@ -91,7 +92,7 @@ export async function createEstimate(_state: FormState, formData: FormData): Pro
     .insert({ kind: "estimate", customer_id: customerId, vehicle_id: vehicleId, additional_to_id: addTo?.id ?? null, validity_days: Number(settings.quote_validity_days) || 7, created_by: staff.id, updated_by: staff.id })
     .select("id, number")
     .single();
-  if (error || !created) return { error: error?.message ?? "Could not create the estimate.", values };
+  if (error || !created) return { error: (error ? dbWords(error, "estimates/actions") : "Could not create the estimate."), values };
   await logQuoteEvent(created.id, null, staff.id, "estimate_started", `Estimate ${created.number} started by ${staff.display_name}`);
   if (addTo) await logQuoteEvent(created.id, null, staff.id, "estimate_additional", `Additional estimate ${created.number}, in addition to ${addTo.number}, started by ${staff.display_name}`);
   revalidatePath("/estimates");
@@ -197,7 +198,7 @@ export async function copyEstimate(id: string): Promise<{ error?: string; id?: s
     .insert({ kind: "estimate", customer_id: q.customer_id, vehicle_id: q.vehicle_id, discount_percent: q.discount_percent, vat_percent: q.vat_percent, validity_days: q.validity_days, customer_note: q.customer_note, payment_by_card: q.payment_by_card, discount_kind: q.discount_kind ?? null, discount_value: q.discount_value ?? null, discount_scope: q.discount_scope ?? "labour", discount_set_by: q.discount_set_by ?? null, discount_set_at: q.discount_set_at ?? null, expected_payment_method: q.expected_payment_method ?? "not_sure", materials_cost_aed: q.materials_cost_aed ?? null, tint_spec: q.tint_spec ?? null, film_rolls_est: q.film_rolls_est ?? null, copied_from_id: q.id, created_by: staff.id, updated_by: staff.id })
     .select("id, number")
     .single();
-  if (error || !created) return { error: error?.message ?? "Could not copy the estimate." };
+  if (error || !created) return { error: (error ? dbWords(error, "estimates/actions") : "Could not copy the estimate.") };
   const lines = bundle.lines.filter((l) => l.is_active && !l.fee_kind);
   const idMap = new Map<string, string>();
   for (const l of lines.filter((x) => !x.parent_line_id)) {

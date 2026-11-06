@@ -77,6 +77,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "po_approval", label: "An LPO needs approval (owner or head accountant)", locked: true },
   { type: "parts_changed_after_approval", label: "Parts changed after the customer's approval on your car (revise the quotation if the price should change)", locked: true },
   { type: "hours_missing", label: "Your estimates or quotations count work with no hours (the profit is not reliable until the hours are typed)" },
+  { type: "plate_missing", label: "A car of yours in the workshop still has no number plate on record" },
   { type: "po_decided", label: "Your LPO was approved or refused", locked: true },
   { type: "parts_arrived", label: "Parts arrived for your car", locked: true },
   { type: "parts_late", label: "A part is past its expected date", locked: true },

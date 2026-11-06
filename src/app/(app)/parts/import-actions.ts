@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import * as XLSX from "xlsx";
 import { revalidatePath } from "next/cache";
@@ -145,7 +146,7 @@ export async function saveImportMapping(supplierId: string, headings: string[], 
   const clean: ColumnMapping = {};
   for (const [k, v] of Object.entries(mapping)) if (typeof v === "number" && v >= 0 && k !== "ignore") (clean as Record<string, number>)[k] = v;
   const { error } = await createAdminClient().from("suppliers").update({ import_mapping: { headings: headings.map((h) => String(h).slice(0, 80)).slice(0, 40), mapping: clean }, updated_by: staff.id }).eq("id", supplierId);
-  return error ? { error: error.message } : { ok: true };
+  return error ? { error: dbWords(error, "parts/import-actions") } : { ok: true };
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -224,7 +225,7 @@ export async function applyImport(jobId: string, payload: { supplierId: string |
       const dup = (existingCharges ?? []).some((e) => Number(e.amount_aed) === amount && String(e.description).toLowerCase() === description.toLowerCase() && String(e.supplier_name).toLowerCase() === supplier!.name.toLowerCase());
       if (dup) continue;
       const { error } = await admin.from("supplier_charges").insert({ job_id: jobId, supplier_id: supplier.id, supplier_name: supplier.name, description, amount_aed: amount, import_id: importId, created_by: staff.id, updated_by: staff.id });
-      if (error) failed.push({ name: description, error: error.message });
+      if (error) failed.push({ name: description, error: dbWords(error, "parts/import-actions") });
       else charges++;
     }
   }

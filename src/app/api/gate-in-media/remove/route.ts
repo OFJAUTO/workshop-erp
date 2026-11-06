@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { revalidatePath } from "next/cache";
 import { getCurrentStaff } from "@/lib/auth";
@@ -32,7 +33,7 @@ export async function POST(request: NextRequest) {
   if (!job?.is_open) return NextResponse.json({ error: "This job is closed." }, { status: 403 });
   if (gi?.is_complete && staff.role_id !== "owner") return NextResponse.json({ error: "The gate-in is finished: only the owner can remove a photo or video now." }, { status: 403 });
   const { error } = await admin.from("gate_in_media").update({ removed_at: new Date().toISOString(), removed_by: staff.id, updated_by: staff.id }).eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: dbWords(error, "api/gate-in-media/remove") }, { status: 500 });
   const label = MEDIA_KIND_LABELS[row.kind as keyof typeof MEDIA_KIND_LABELS] ?? row.kind;
   await admin.from("job_events").insert({ job_id: row.job_id, event_type: "amendment", note: `Gate-in ${/video/.test(row.kind) ? "video" : "photo"} removed: ${label}`, created_by: staff.id });
   revalidatePath(`/jobs/${row.job_id}`);

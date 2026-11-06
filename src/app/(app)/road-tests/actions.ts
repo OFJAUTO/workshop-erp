@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -54,7 +55,7 @@ export async function saveRoadTest(jobId: string, _state: FormState, formData: F
     }
   }
   const { error } = await admin.from("road_tests").upsert(row, { onConflict: "job_id" });
-  if (error) return { error: error.message, values };
+  if (error) return { error: dbWords(error, "road-tests/actions"), values };
   // The car waited in Pending road test: it moves to Pending inspection now, and the inspection clock starts fresh.
   const opened = job.status === "pending_road_test";
   if (opened) await admin.from("jobs").update({ status: "pending_inspection", stage: "inspection", stage_entered_at: now, updated_by: staff.id }).eq("id", jobId);

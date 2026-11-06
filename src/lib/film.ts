@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import "server-only";
 import { notifyRoles } from "./notifications";
 import { round2 } from "./money";
@@ -81,7 +82,7 @@ export async function openRoll(input: { kind: "film" | "tint"; filmKey: string |
     price = Number(settings.tint_roll_price_aed) || 0;
   }
   const { data, error } = await admin.from("film_rolls").insert({ kind: input.kind, film_key: input.filmKey, name: input.name.trim() || "Roll", length_m: length, price_aed: price, created_by: by, updated_by: by }).select("id").single();
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "lib/film") };
   return { id: data.id as string };
 }
 
@@ -95,7 +96,7 @@ export async function recordFilmUsage(jobId: string, rollId: string, metres: num
   const perM = Number(roll.length_m) > 0 ? Number(roll.price_aed) / Number(roll.length_m) : 0;
   const cost = round2(metres * perM);
   const { error } = await admin.from("film_usage").insert({ job_id: jobId, roll_id: rollId, metres, cost_aed: cost, photo_path: photoPath, created_by: by, updated_by: by });
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "lib/film") };
   return { cost };
 }
 
@@ -109,7 +110,7 @@ export async function recordTintUsage(jobId: string, rollId: string, by: string)
   if (already?.length) return { error: "This car is already on that roll." };
   const cost = round2((Number(roll.price_aed) || 0) / 10);
   const { error } = await admin.from("film_usage").insert({ job_id: jobId, roll_id: rollId, metres: null, cost_aed: cost, created_by: by, updated_by: by });
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "lib/film") };
   return { cost };
 }
 

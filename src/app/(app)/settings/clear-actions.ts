@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
@@ -30,6 +31,6 @@ export async function clearTestDataAction(_state: FormState, formData: FormData)
     revalidatePath("/", "layout");
     return { success: r.fileWarnings.length ? "Test data cleared, with files left over (see below)." : "Test data cleared.", values: { report: lines.join("\n") } };
   } catch (e) {
-    return { error: e instanceof Error ? e.message : "Could not clear the test data.", values: { confirm } };
+    return { error: e instanceof Error ? dbWords(e, "settings/clear-actions") : "Could not clear the test data.", values: { confirm } };
   }
 }

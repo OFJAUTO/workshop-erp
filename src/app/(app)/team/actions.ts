@@ -1,4 +1,5 @@
 "use server";
+import { dbWords, dbDetail } from "@/lib/app-errors";
 
 import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
@@ -112,7 +113,7 @@ export async function createStaff(_state: FormState, formData: FormData): Promis
     await admin.auth.admin.deleteUser(id);
     const msg = staffError.message.includes("employee_number")
       ? "That employee number is already used."
-      : staffError.message;
+      : dbWords(staffError, "team/actions");
     return { error: msg, values };
   }
 
@@ -124,7 +125,7 @@ export async function createStaff(_state: FormState, formData: FormData): Promis
     pin_updated_at: d.login_type !== "password" ? new Date().toISOString() : null,
     updated_by: owner.id,
   });
-  if (privError) return { error: privError.message, values };
+  if (privError) return { error: dbWords(privError, "team/actions"), values };
 
   revalidatePath("/team");
   if (d.login_type !== "pin") {
@@ -165,7 +166,7 @@ export async function updateStaff(id: string, _state: FormState, formData: FormD
     .eq("id", id);
   if (error) {
     return {
-      error: error.message.includes("employee_number") ? "That employee number is already used." : error.message,
+      error: error.message.includes("employee_number") ? "That employee number is already used." : dbWords(error, "team/actions"),
       values,
     };
   }
@@ -174,14 +175,14 @@ export async function updateStaff(id: string, _state: FormState, formData: FormD
     .from("staff_private")
     .update({ email: blankToNull(d.email), phone: d.phone ? normalisePhone(d.phone) : null })
     .eq("staff_id", id);
-  if (privError) return { error: privError.message, values };
+  if (privError) return { error: dbWords(privError, "team/actions"), values };
 
   if (current.login_type !== "pin" && d.email) {
     const admin = createAdminClient();
     const { data: u } = await admin.auth.admin.getUserById(id);
     if (u.user && u.user.email?.toLowerCase() !== d.email) {
       const { error: emailError } = await admin.auth.admin.updateUserById(id, { email: d.email, email_confirm: true });
-      if (emailError) return { error: "Saved, but the login email could not be changed: " + emailError.message, values };
+      if (emailError) return { error: "Saved, but the login email could not be changed: " + dbDetail(emailError, "team/actions"), values };
     }
   }
 
@@ -199,7 +200,7 @@ export async function setStaffActive(id: string, active: boolean) {
     .from("staff")
     .update({ is_active: active, disabled_at: active ? null : new Date().toISOString() })
     .eq("id", id);
-  if (error) redirect(`/team/${id}?error=` + encodeURIComponent(error.message));
+  if (error) redirect(`/team/${id}?error=` + encodeURIComponent(dbWords(error, "team/actions")));
 
   // Disabled people are also blocked at the login level so open sessions end.
   const admin = createAdminClient();
@@ -227,7 +228,7 @@ export async function resetPin(id: string, _state: FormState, formData: FormData
       updated_by: owner.id,
     })
     .eq("staff_id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "team/actions") };
 
   revalidatePath(`/team/${id}`);
   return { success: "Temporary PIN saved. The person chooses their own PIN the first time they log in with it." };
@@ -263,10 +264,10 @@ export async function uploadStaffPhoto(id: string, _state: FormState, formData: 
   const { error: upError } = await supabase.storage
     .from("staff-photos")
     .upload(path, file, { contentType: file.type, upsert: false });
-  if (upError) return { error: "Upload failed: " + upError.message };
+  if (upError) return { error: "Upload failed: " + dbDetail(upError, "team/actions") };
 
   const { error } = await supabase.from("staff").update({ photo_path: path }).eq("id", id);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "team/actions") };
 
   revalidatePath(`/team/${id}`);
   revalidatePath("/team");
@@ -278,7 +279,7 @@ export async function setDeviceActive(id: string, active: boolean) {
   const supabase = await createClient();
   const { error } = await supabase.from("devices").update({ is_active: active }).eq("id", id);
   revalidatePath("/team/tablets");
-  if (error) redirect("/team/tablets?error=" + encodeURIComponent(error.message));
+  if (error) redirect("/team/tablets?error=" + encodeURIComponent(dbWords(error, "team/actions")));
   redirect("/team/tablets");
 }
 
@@ -305,11 +306,11 @@ export async function setLoginType(id: string, formData: FormData) {
     const { data: u } = await admin.auth.admin.getUserById(id);
     if (u.user && u.user.email?.toLowerCase() !== priv.email.toLowerCase()) {
       const { error } = await admin.auth.admin.updateUserById(id, { email: priv.email, email_confirm: true });
-      if (error) redirect(`/team/${id}?error=` + encodeURIComponent("Could not set the login email: " + error.message));
+      if (error) redirect(`/team/${id}?error=` + encodeURIComponent("Could not set the login email: " + dbDetail(error, "team/actions")));
     }
   }
   const { error } = await supabase.from("staff").update({ login_type: loginType }).eq("id", id);
-  if (error) redirect(`/team/${id}?error=` + encodeURIComponent(error.message));
+  if (error) redirect(`/team/${id}?error=` + encodeURIComponent(dbWords(error, "team/actions")));
   void owner;
   revalidatePath("/team");
   revalidatePath(`/team/${id}`);
@@ -323,7 +324,7 @@ export async function blockDevice(id: string) {
   const supabase = await createClient();
   const { error } = await supabase.from("devices").update({ is_active: false, blocked_at: new Date().toISOString(), blocked_by: staff.id, removed_at: new Date().toISOString() }).eq("id", id);
   revalidatePath("/team/tablets");
-  if (error) redirect("/team/tablets?error=" + encodeURIComponent(error.message));
+  if (error) redirect("/team/tablets?error=" + encodeURIComponent(dbWords(error, "team/actions")));
   redirect("/team/tablets?message=" + encodeURIComponent("Device blocked. It is locked out at once."));
 }
 
@@ -336,7 +337,7 @@ export async function setDeviceKind(id: string, formData: FormData) {
   const supabase = await createClient();
   const { error } = await supabase.from("devices").update({ kind, staff_id: staffId }).eq("id", id);
   revalidatePath("/team/tablets");
-  if (error) redirect("/team/tablets?error=" + encodeURIComponent(error.message));
+  if (error) redirect("/team/tablets?error=" + encodeURIComponent(dbWords(error, "team/actions")));
   redirect("/team/tablets?message=" + encodeURIComponent(kind === "personal" ? "Now a personal device: it stays logged in; the PIN is asked only to sign for parts or finish a job." : "Now a shared device: it opens on the photos and locks when idle."));
 }
 
@@ -345,6 +346,6 @@ export async function removeDevice(id: string) {
   const supabase = await createClient();
   const { error } = await supabase.from("devices").update({ is_active: false, removed_at: new Date().toISOString() }).eq("id", id);
   revalidatePath("/team/tablets");
-  if (error) redirect("/team/tablets?error=" + encodeURIComponent(error.message));
+  if (error) redirect("/team/tablets?error=" + encodeURIComponent(dbWords(error, "team/actions")));
   redirect("/team/tablets?message=" + encodeURIComponent("Device removed. It stops working immediately."));
 }

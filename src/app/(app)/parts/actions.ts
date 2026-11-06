@@ -1,4 +1,5 @@
 "use server";
+import { dbWords, dbDetail } from "@/lib/app-errors";
 
 import { isTyreName, tyreSizeIn, type TyreSpec } from "@/lib/tyres";
 import { endingOf } from "@/lib/part-endings";
@@ -138,11 +139,11 @@ export async function savePartRows(jobId: string, requestId: string | null, _sta
     const ext = file.type === "application/pdf" ? "pdf" : file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
     const path = `${jobId}/${Date.now()}-${randomBytes(3).toString("hex")}.${ext}`;
     const { error: upError } = await admin.storage.from(PARTS_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
-    if (upError) return { error: "Diagram upload failed: " + upError.message, values };
+    if (upError) return { error: "Diagram upload failed: " + dbDetail(upError, "parts/actions"), values };
     rows[0].diagram_path = path;
   }
   const { data: created, error } = await admin.from("part_items").insert(rows).select("id");
-  if (error || !created) return { error: error?.message ?? "Could not save the parts.", values };
+  if (error || !created) return { error: (error ? dbWords(error, "parts/actions") : "Could not save the parts."), values };
   if (requestId) await admin.from("part_requests").update({ status: "done", updated_by: staff.id }).eq("id", requestId);
   for (const c of created) await syncLineForPart(jobId, c.id, staff.id);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_listed", note: `${rows.length} part${rows.length === 1 ? "" : "s"} priced by ${staff.display_name}${requestId ? "" : " (added without a request)"}`, created_by: staff.id });
@@ -161,7 +162,7 @@ export async function updatePart(partId: string, _state: FormState, formData: Fo
   const { data: p } = await admin.from("part_items").select("id, job_id").eq("id", partId).maybeSingle();
   if (!p) return { error: "Part not found.", values };
   const { error } = await admin.from("part_items").update({ ...r.row, priced_by: staff.id, priced_at: new Date().toISOString(), updated_by: staff.id }).eq("id", partId);
-  if (error) return { error: error.message, values };
+  if (error) return { error: dbWords(error, "parts/actions"), values };
   await syncLineForPart(p.job_id, partId, staff.id);
   refresh(p.job_id);
   return { success: "Saved." };
@@ -181,7 +182,7 @@ export async function addOption(partId: string, _state: FormState, formData: For
   if (!base.option_group) await admin.from("part_items").update({ option_group: group, updated_by: staff.id }).eq("id", base.id);
   const now = new Date().toISOString();
   const { data: created, error } = await admin.from("part_items").insert({ job_id: base.job_id, part_request_id: base.part_request_id, option_group: group, ...r.row, confirm_status: "confirmed", confirmed_by: staff.id, confirmed_at: now, priced_by: staff.id, priced_at: now, added_by_role: "parts", created_by: staff.id, updated_by: staff.id }).select("id").single();
-  if (error || !created) return { error: error?.message ?? "Could not add the option.", values };
+  if (error || !created) return { error: (error ? dbWords(error, "parts/actions") : "Could not add the option."), values };
   // The first part of the group keeps its line as the chosen one; the option joins as a choice.
   const quotationId = await draftQuotation(base.job_id);
   if (quotationId) await admin.from("quotation_lines").update({ option_group: group, updated_by: staff.id }).eq("quotation_id", quotationId).eq("part_item_id", base.id);
@@ -259,7 +260,7 @@ export async function markRequestUnavailable(requestId: string, formData: FormDa
   const { data: r } = await admin.from("part_requests").select("id, job_id, label").eq("id", requestId).maybeSingle();
   if (!r) redirect("/parts");
   const { error } = await admin.from("part_requests").update({ status: "unavailable", closed_reason: note ?? "Not available", updated_by: staff.id }).eq("id", requestId);
-  if (error) redirect(`/parts/${r.job_id}?error=${encodeURIComponent(error.message)}`);
+  if (error) redirect(`/parts/${r.job_id}?error=${encodeURIComponent(dbWords(error, "parts/actions"))}`);
   await admin.from("job_events").insert({ job_id: r.job_id, event_type: "parts_unavailable", note: `${r.label}: not available (${staff.display_name})${note ? `: ${note}` : ""}`, created_by: staff.id });
   const job = await jobOf(r.job_id);
   // Held for the send only while one is expected; the car then stays on the parts desk's list until it is pressed.
@@ -509,7 +510,7 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
     requestId = cur.part_request_id ?? requestId;
     askerFor = { part_request_id: cur.part_request_id, added_by_role: cur.added_by_role };
     const { error } = await admin.from("part_items").update(patch).eq("id", partId);
-    if (error) return { error: error.message };
+    if (error) return { error: dbWords(error, "parts/actions") };
   } else {
     let quantity = qty ?? 1;
     let positions: string[] = [];
@@ -546,7 +547,7 @@ export async function autoSavePartRow(jobId: string, row: RowSave): Promise<{ er
       .insert({ job_id: jobId, client_key: clientKey, part_request_id: requestId, description, original_description: req2?.label && req2.label !== description ? req2.label : null, quantity: req2 ? Number(req2.quantity) || quantity : quantity, confirmed_quantity: quantity, ...(unitsReady ? { unit: newUnit } : {}), positions, option_group: newGroup, ...fields, ...approval, ...(confirmNow ? { cost_confirmed_aed: cost, cost_confirmed_at: now, cost_confirmed_by: staff.id } : {}), ...(qtyChange ? { quantity_changed_at: now, quantity_changed_by: staff.id } : {}), confirm_status: "confirmed", confirmed_by: staff.id, confirmed_at: now, ...(complete ? { priced_by: staff.id, priced_at: now } : {}), added_by_role: role, created_by: staff.id, updated_by: staff.id })
       .select("id")
       .single();
-    if (error || !created) return { error: error?.message ?? "Could not save the part." };
+    if (error || !created) return { error: (error ? dbWords(error, "parts/actions") : "Could not save the part.") };
     partId = created.id;
     if (newGroup && row.optionOf) {
       const quotationId = await draftQuotation(jobId);
@@ -654,7 +655,7 @@ export async function stockItemQuick(input: { id?: string | null; name?: string;
       else if (Math.abs(Number(hit.unit_cost) - cost) >= 0.005) note = `${hit.name.toUpperCase()} is already on the stock list at AED ${Number(hit.unit_cost).toFixed(2)} each: that cost is used.`;
     } else {
       const { data: made, error } = await admin.from("stock_items").insert({ item_type: "part", name, unit: (input.unit ?? "pc").trim().slice(0, 20) || "pc", part_number: pn, quantity: 0, minimum_level: 0, unit_cost: cost, created_by: staff.id, updated_by: staff.id }).select("id").single();
-      if (error || !made) return { error: error?.message ?? "Could not add the stock item." };
+      if (error || !made) return { error: (error ? dbWords(error, "parts/actions") : "Could not add the stock item.") };
       id = made.id as string;
     }
   }
@@ -687,7 +688,7 @@ export async function confirmPartCost(jobId: string, partId: string, costEach: n
   if (isPlaceholderSupplier(p.supplier)) return { error: `${placeholderSupplierWords(p.supplier)} (Remove: not needed, then Replace with the real supplier).` };
   const now = new Date().toISOString();
   const { error } = await admin.from("part_items").update({ cost_confirmed_aed: cost, cost_confirmed_at: now, cost_confirmed_by: staff.id, updated_by: staff.id }).eq("id", partId);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "parts/actions") };
   const pn = realPartNumber(p.part_number as string | null);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "part_cost_confirmed", note: `${staff.display_name} confirmed AED ${cost.toFixed(2)} is the real price of ${String(p.description).toUpperCase()}${pn ? ` (${pn})` : ""}${p.supplier ? ` from ${p.supplier}` : ""} (already approved by the customer)`, created_by: staff.id });
   // Approved and on no LPO: it joins the LPO that waits (or a new one after an approved main LPO).
@@ -707,7 +708,7 @@ export async function checkPartPrice(jobId: string, partId: string): Promise<{ e
   if (!p || !p.is_active) return { error: "Part not found." };
   if (!p.priced_by_advisor || p.price_checked_at) return { ok: true };
   const { error } = await admin.from("part_items").update({ price_checked_at: new Date().toISOString(), price_checked_by: staff.id, updated_by: staff.id }).eq("id", p.id);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "parts/actions") };
   await admin.from("job_events").insert({ job_id: jobId, event_type: "parts", note: `${staff.display_name} checked the advisor's price on ${p.description}: AED ${Number(p.cost_aed ?? 0).toLocaleString("en-GB")} each${p.supplier ? ` from ${p.supplier}` : ""} is right`, created_by: staff.id });
   refresh(jobId);
   return { ok: true };
@@ -789,7 +790,7 @@ export async function correctSettledCost(jobId: string, partId: string, input: {
     }
   }
   const { error } = await admin.from("part_items").update(patch).eq("id", partId);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "parts/actions") };
   // A proforma already made for the job carries the part's cost on its line (internal only): it follows.
   for (const l of lines) await admin.from("invoice_lines").update({ cost_aed: round2(newCost * (Number(l.quantity) || qty)), updated_by: staff.id }).eq("id", l.id);
   const beforeWords = before === null ? "no cost" : `AED ${before.toFixed(2)}`;
@@ -853,7 +854,7 @@ export async function addSupplierQuick(name: string): Promise<{ error?: string; 
     return { supplier: { id: same.id, name: same.name, discount: Number(same.default_discount_percent) || 0, byType: (same.discount_by_type as Record<string, number> | null) ?? {} } };
   }
   const { data: created, error } = await admin.from("suppliers").insert({ name: clean, created_by: staff.id, updated_by: staff.id }).select("id, name").single();
-  if (error || !created) return { error: error?.message ?? "Could not add the supplier." };
+  if (error || !created) return { error: (error ? dbWords(error, "parts/actions") : "Could not add the supplier.") };
   revalidatePath("/parts/suppliers");
   return { supplier: { id: created.id, name: created.name, discount: 0, byType: {} } };
 }
@@ -904,7 +905,7 @@ export async function attachDiagram(partId: string, formData: FormData) {
   const ext = file.type === "application/pdf" ? "pdf" : file.type === "image/png" ? "png" : file.type === "image/webp" ? "webp" : "jpg";
   const path = `${p.job_id}/${Date.now()}-${randomBytes(3).toString("hex")}.${ext}`;
   const { error: upError } = await admin.storage.from(PARTS_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
-  if (upError) redirect(`/parts/${p.job_id}?error=${encodeURIComponent("Diagram upload failed: " + upError.message)}`);
+  if (upError) redirect(`/parts/${p.job_id}?error=${encodeURIComponent("Diagram upload failed: " + dbDetail(upError, "parts/actions"))}`);
   await admin.from("part_items").update({ diagram_path: path, updated_by: staff.id }).eq("id", partId);
   refresh(p.job_id);
   redirect(`/parts/${p.job_id}?message=${encodeURIComponent("Diagram attached.")}`);
@@ -972,7 +973,7 @@ export async function replaceRefusedPart(jobId: string, partId: string): Promise
     .insert({ job_id: jobId, client_key: `replace:${p.id}`, part_request_id: p.part_request_id, description: p.description, quantity: p.quantity, confirmed_quantity: p.confirmed_quantity ?? p.quantity, positions: p.positions ?? [], part_type: p.part_type, brand: p.brand, confirm_status: "confirmed", confirmed_by: staff.id, confirmed_at: now, replaced_part_id: p.id, added_by_role: staff.role_id, created_by: staff.id, updated_by: staff.id })
     .select("id")
     .single();
-  if (error || !made) return { error: error?.message ?? "Could not add the replacement." };
+  if (error || !made) return { error: (error ? dbWords(error, "parts/actions") : "Could not add the replacement.") };
   await admin.from("part_items").update({ replacement_part_id: made.id, updated_by: staff.id }).eq("id", p.id);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "part_replacement", note: `${p.description.toUpperCase()}: replacement row added by ${staff.display_name} (replaces the ${p.refused_at ? "refused" : "not needed"} line${p.supplier ? `, ${p.supplier}` : ""})`, created_by: staff.id });
   refresh(jobId);

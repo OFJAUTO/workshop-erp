@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -62,7 +63,7 @@ export async function payCommissions(formData: FormData) {
     .insert({ recipient: recipients[0], recipient_phone: rows[0].phone, method, paid_on: paidOn, amount_aed: amount, reference, note, paid_by: staff.id, created_by: staff.id, updated_by: staff.id })
     .select("id, number")
     .single();
-  if (error || !pay) back(error?.message ?? "Could not record the payment.", true);
+  if (error || !pay) back((error ? dbWords(error, "commissions/actions") : "Could not record the payment."), true);
   const now = new Date().toISOString();
   for (const r of rows) {
     await admin.from("quotations").update({ commission_paid_at: now, commission_paid_by: staff.id, commission_paid_method: method, commission_paid_note: note, commission_payment_id: pay!.id, updated_by: staff.id }).eq("id", r.quotationId);

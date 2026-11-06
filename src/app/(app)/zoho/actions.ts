@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect, unstable_rethrow } from "next/navigation";
 import { requirePermission } from "@/lib/auth";
@@ -37,7 +38,7 @@ export async function retryZohoRow(id: string, formData: FormData) {
   } catch (e) {
     unstable_rethrow(e);
     kind = "error";
-    words = `Back in the queue; the run hit a problem: ${e instanceof Error ? e.message : String(e)}`;
+    words = `Back in the queue; the run hit a problem: ${e instanceof Error ? dbWords(e, "zoho/actions") : String(e)}`;
   }
   return to(kind, words);
 }
@@ -87,7 +88,7 @@ export async function zohoSyncChunkAction(runId: string | null, ids: string[]): 
     return await runSyncChunk(staff, runId && UUID.test(runId) ? runId : null, Array.isArray(ids) ? ids : []);
   } catch (e) {
     unstable_rethrow(e);
-    return { items: [], left: [], stopped: null, error: `The sync stopped part-way: ${e instanceof Error ? e.message : String(e)}. What was sent stays posted; press Sync to Zoho again for the rest.` };
+    return { items: [], left: [], stopped: null, error: `The sync stopped part-way: ${e instanceof Error ? dbWords(e, "zoho/actions") : String(e)}. What was sent stays posted; press Sync to Zoho again for the rest.` };
   }
 }
 
@@ -176,7 +177,7 @@ export async function backfillZoho() {
   } catch (e) {
     unstable_rethrow(e);
     kind = "error";
-    words = e instanceof Error ? e.message : String(e);
+    words = e instanceof Error ? dbWords(e, "zoho/actions") : String(e);
   }
   return back(kind, words);
 }
@@ -188,6 +189,6 @@ export async function tickGoLiveReview() {
   if (staff.role_id !== "accounts") return back("error", "This tick belongs to accounts: Mathew confirms the review from his own login.");
   const admin = createAdminClient();
   const { error } = await admin.from("settings").update({ value: { by: staff.id, name: staff.display_name, at: new Date().toISOString() }, updated_by: staff.id }).eq("key", "zoho_golive_reviewed");
-  if (error) return back("error", error.message);
+  if (error) return back("error", dbWords(error, "zoho/actions"));
   return back("message", "Review ticked. The owner sees it green on the go-live checklist.");
 }

@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect, unstable_rethrow } from "next/navigation";
 import { requirePermission } from "@/lib/auth";
@@ -21,7 +22,7 @@ export async function recheckDay(day: string, formData: FormData) {
   } catch (e) {
     unstable_rethrow(e);
     kind = "error";
-    words = e instanceof Error ? e.message : String(e);
+    words = e instanceof Error ? dbWords(e, "zoho/reconciliation/actions") : String(e);
   }
   return back(kind, words);
 }
@@ -42,7 +43,7 @@ export async function backfillReconciliation() {
   } catch (e) {
     unstable_rethrow(e);
     kind = "error";
-    words = e instanceof Error ? e.message : String(e);
+    words = e instanceof Error ? dbWords(e, "zoho/reconciliation/actions") : String(e);
   }
   return back(kind, words);
 }

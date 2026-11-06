@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
@@ -244,7 +245,7 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
     },
     { onConflict: "job_id" },
   );
-  if (error) return { error: error.message, values };
+  if (error) return { error: dbWords(error, "jobs/gate-out-actions"), values };
   if (mileageOn) await mileageAfterGateOut(jobId, job.job_number, job.vehicle_id, io, unreadableNote, staff.id);
   if (savedDriver) await admin.from("job_events").insert({ job_id: jobId, event_type: "note", note: `Driver saved on the customer: ${collector}, ${collectorPhone}`, created_by: staff.id });
   if (method === "recovery" && companyChoice === "other" && company) {

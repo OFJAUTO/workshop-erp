@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { can, type RoleId } from "@/lib/roles";
@@ -22,6 +23,6 @@ export async function POST(request: NextRequest) {
   const allowed = file.uploaded_by === staff.id || role === "owner" || role === "accounts" || can(role, "managePurchaseOrders");
   if (!allowed) return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   const { error } = await admin.from("job_files").update({ removed_at: new Date().toISOString(), removed_by: staff.id, updated_by: staff.id }).eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: dbWords(error, "api/files/remove") }, { status: 500 });
   return NextResponse.json({ ok: true });
 }

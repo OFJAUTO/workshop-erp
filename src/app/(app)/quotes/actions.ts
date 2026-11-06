@@ -1,4 +1,5 @@
 "use server";
+import { dbWords, dbDetail } from "@/lib/app-errors";
 
 import { declinedItemsOf, saveDeclinedWork } from "@/lib/declined";
 import { isQuickJob } from "@/lib/inspection-fee";
@@ -127,7 +128,7 @@ export async function startQuotation(jobId: string) {
     .insert({ kind: "quotation", job_id: jobId, customer_id: job!.customer_id, vehicle_id: job!.vehicle_id, estimate_id: job!.estimate_id, validity_days: Number(settings.quote_validity_days) || 7, vat_percent: 5, created_by: staff!.id, updated_by: staff!.id })
     .select("id, number")
     .single();
-  if (error || !created) err(error?.message ?? "Could not start the quotation.");
+  if (error || !created) err((error ? dbWords(error, "quotes/actions") : "Could not start the quotation."));
 
   let lines: Record<string, unknown>[] = [];
   if (job!.estimate_id) {
@@ -142,7 +143,7 @@ export async function startQuotation(jobId: string) {
     const { error: lineError } = await admin.from("quotation_lines").insert(lines);
     if (lineError) {
       console.error("startQuotation: estimate lines not copied", lineError.message);
-      await logQuoteEvent(created!.id, jobId, staff!.id, "quote_started", `The lines of the estimate could not all be copied: ${lineError.message}`);
+      await logQuoteEvent(created!.id, jobId, staff!.id, "quote_started", `The lines of the estimate could not all be copied: ${dbDetail(lineError, "quotes/actions")}`);
     }
   }
   // Tyres marked Replace on the report: one row, the count as the quantity, the positions on it. The advisor only checks it.
@@ -353,7 +354,7 @@ async function quotationsFromCarriedEstimates(job: { id: string; customer_id: st
       .select("id, number")
       .single();
     if (error || !q) {
-      await admin.from("job_events").insert({ job_id: job.id, event_type: "estimate_attached", note: `Estimate ${e.number} could not become a quotation: ${error?.message ?? "unknown"}. Start it with New quotation.`, created_by: staff.id });
+      await admin.from("job_events").insert({ job_id: job.id, event_type: "estimate_attached", note: `Estimate ${e.number} could not become a quotation: ${error ? dbDetail(error, "quotes/actions") : "unknown"}. Start it with New quotation.`, created_by: staff.id });
       continue;
     }
     // 8.2: an additional estimate's recovery is not copied when the car already has one (the original quotation, an
@@ -361,7 +362,7 @@ async function quotationsFromCarriedEstimates(job: { id: string; customer_id: st
     const rows = await leaveOutRepeatedRecovery(await estimateLineRows(e.id, q.id, staff.id, job.id), job.id, { id: q.id, number: q.number }, e.id, staff);
     if (rows.length) {
       const { error: lineError } = await admin.from("quotation_lines").insert(rows);
-      if (lineError) await logQuoteEvent(q.id, job.id, staff.id, "quote_started", `The lines of estimate ${e.number} could not all be copied: ${lineError.message}`);
+      if (lineError) await logQuoteEvent(q.id, job.id, staff.id, "quote_started", `The lines of estimate ${e.number} could not all be copied: ${dbDetail(lineError, "quotes/actions")}`);
     }
     await carryEstimateHeader(e.id, { id: q.id, number: q.number }, job.id, staff.id);
     await refreshQuoteTotals(q.id, settings, staff.id);
@@ -382,7 +383,7 @@ export async function newQuotation(jobId: string) {
     .insert({ kind: "quotation", job_id: jobId, customer_id: job.customer_id, vehicle_id: job.vehicle_id, validity_days: Number(settings.quote_validity_days) || 7, created_by: staff.id, updated_by: staff.id })
     .select("id, number")
     .single();
-  if (error || !created) redirect(`/jobs/${jobId}?error=${encodeURIComponent(error?.message ?? "Could not add the quotation.")}`);
+  if (error || !created) redirect(`/jobs/${jobId}?error=${encodeURIComponent((error ? dbWords(error, "quotes/actions") : "Could not add the quotation."))}`);
   await logQuoteEvent(created.id, jobId, staff.id, "quote_started", `Quotation ${created.number} started by ${staff.display_name} for extra work`);
   refresh(jobId, created.id);
   redirect(`/jobs/${jobId}/quote/${created.id}`);
@@ -524,7 +525,7 @@ export async function setPartWarranty(partId: string, months: number): Promise<{
   const { data: p } = await admin.from("part_items").select("id, job_id, description").eq("id", partId).maybeSingle();
   if (!p) return { error: "Part not found." };
   const { error } = await admin.from("part_items").update({ warranty_months: m, updated_by: staff.id }).eq("id", partId);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "quotes/actions") };
   await admin.from("job_events").insert({ job_id: p.job_id, event_type: "amendment", note: `Battery warranty ${m} months on ${p.description} (${staff.display_name})`, created_by: staff.id });
   revalidatePath(`/jobs/${p.job_id}`);
   return { ok: true };
@@ -548,7 +549,7 @@ export async function saveCustomService(name: string, kind: "labour" | "service"
   if (!cat) return { error: "Could not make the Custom category." };
   const { data: lastSvc } = await admin.from("services").select("position").eq("category_id", cat.id).order("position", { ascending: false }).limit(1).maybeSingle();
   const { error } = await admin.from("services").insert({ category_id: cat.id, name: clean, department: "both", price_aed: null, default_hours: null, line_kind: kind, price_per: "job", position: (Number(lastSvc?.position) || 0) + 1, created_by: staff.id, updated_by: staff.id });
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "quotes/actions") };
   revalidatePath("/settings/services");
   return { ok: true };
 }
@@ -608,7 +609,7 @@ export async function sendQuotation(quotationId: string, _prev: SendQuoteState, 
   const patch: Record<string, unknown> = { token, valid_until: validUntil, status: "draft", sent_to_name: bundle.customer?.company_name ?? bundle.customer?.full_name ?? null, sent_to_phone: bundle.customer?.phone ?? null, updated_by: staff.id };
   if (reasons.length && staff.role_id === "owner") Object.assign(patch, { owner_approved_by: staff.id, owner_approved_at: new Date().toISOString(), owner_approval_reason: reasons.join("; ") });
   const { error } = await admin.from("quotations").update(patch).eq("id", q.id);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "quotes/actions") };
   if (staff.role_id === "owner" && q.comp_status !== "approved") {
     const c = await stampComp(bundle, settings, staff.id, "approved", "Owner's own choice");
     if (c) await logQuoteEvent(q.id, q.job_id, staff.id, "comp_auto_approved", `Complimentary on ${q.number} approved by itself: the owner sent it (${compCostWords(c.cost)})`);
@@ -1127,7 +1128,7 @@ export async function saveCommission(quotationId: string, formData: FormData): P
     }
   }
   const { error } = await admin.from("quotations").update({ commission_to: to, commission_kind: kind, commission_value: value, commission_status: status, commission_set_by: staff.id, commission_set_at: now, commission_decided_by: isOwner ? staff.id : null, commission_decided_at: isOwner ? now : null, commission_decision_note: null, updated_by: staff.id }).eq("id", q.id);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "quotes/actions") };
   const people = ((settings.commission_people ?? []) as string[]).map(String);
   if (!people.includes(to)) await admin.from("settings").upsert({ key: "commission_people", value: [...people, to], label: "Commission: people", description: "People we pay commission to, offered as one-tap choices in the internal box of a quotation." }, { onConflict: "key" });
   await refreshQuoteTotals(q.id, settings, staff.id);

@@ -11,11 +11,18 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-| # | Migration | What it adds | Backup taken first |
-|---|---|---|---|
-| 1 | `20261205120000_offsite_backup_jobs.sql` (off-site backups) | Three rows in the background-jobs watch list (nightly off-site backup, weekly storage copy, monthly restore test), so Settings > Background jobs shows every run and the owner's bell rings when one is late or fails. The backups themselves run either way — this only switches the WATCHING on. | `backups/2026-11-05T05-15-52` (111 tables, 250,256 rows) |
-| 2 | `20261205150000_supplier_invoice_edit.sql` (supplier invoice edit) | The invoice's own VAT on the LPO (`purchase_orders.supplier_invoice_vat_aed`; empty = 5% as today) and the server-only `supplier_invoice_edits` table (who, when, the remark and every old → new of an edit). Until it is applied, the "Edit invoice" button stays hidden and VAT reads as 5%; nothing existing changes. Needed for the Gargash case LPO-00037-2 (Mathew edits it with the new button once this is applied). | `backups/2026-11-05T06-25-24` (111 tables, 250,788 rows) |
-| 3 | `20261205180000_advisor_price_parts.sql` (enter price myself on a JOB's part) | Three columns on parts: the advisor's own price (`priced_by_advisor`) and the parts desk's later "Price is right ✓" (`price_checked_at/by`). ESTIMATES need nothing and work at once on deploy; until this is applied, the job-side "Enter price myself" buttons stay hidden and the server refuses them in plain words. | `backups/2026-11-05T08-03-52` (111 tables, 251,280 rows) |
+Nothing is waiting.
+
+## Applied on 6 November 2026, morning
+
+The owner replied "apply" (08:25 Dubai). A fresh backup was taken first: `backups/2026-11-06T04-25-07` (111 tables, 253,750 rows). The rows each file touches were read before and after (none of the four was recorded yet; parts 774 and cars 65 before and after). The four files were run with `scripts/db-sql.mjs` and recorded with `scripts/db-record-migration.mjs`, in order, without an error. The plate file has no "reload schema" line, so that was sent on its own afterwards. `npm run check:live`: 33 passed, 0 failed.
+
+| # | Migration | What it did on live |
+|---|---|---|
+| 1 | `20261205120000_offsite_backup_jobs.sql` (off-site backups) | Added the three watch rows: nightly backup, weekly storage copy, monthly restore test. Today's nightly run (05:43 Dubai) failed with "B2_KEY_ID is not set" because the Backblaze key is not saved yet. From the next run (tomorrow early morning) the watch sees it: the owner's bell rings "Off-site database backup FAILED" until the key is saved and a run succeeds. That is the watch working. |
+| 2 | `20261205150000_supplier_invoice_edit.sql` (supplier invoice edit) | Added the invoice's own VAT column on LPOs (all empty, so VAT reads 5% as before) and the server-only edit history table (RLS on; only postgres and service_role hold rights). The "Edit invoice" button is now on for the owner and accounts, so Mathew can correct LPO-00037-2 (Gargash). |
+| 3 | `20261205180000_advisor_price_parts.sql` (enter price myself on a job's part) | Added the three columns on parts (all 774 parts start as not priced by an advisor). "Enter price myself" on a job's part is now on. |
+| 4 | `20261206090000_plate_history.sql` (plate can be added) | Added `old_plates` and `merged_into` on cars (65 cars, both empty). They come into use with the plate deploy: the old-plate search and the merge pointer. |
 
 ## Applied on 5 November 2026, morning
 

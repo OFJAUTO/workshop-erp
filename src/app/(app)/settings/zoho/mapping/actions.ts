@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { requirePermission } from "@/lib/auth";
@@ -51,7 +52,7 @@ export async function saveZohoMapping(formData: FormData) {
     ...(map.paidFrom ? [] : ["Paid-from account"]),
   ];
   const { error } = await createAdminClient().from("settings").update({ value: map as unknown as Record<string, unknown>, updated_by: staff.id }).eq("key", "zoho_account_map");
-  if (error) return back("error", error.message);
+  if (error) return back("error", dbWords(error, "settings/zoho/mapping/actions"));
   return back("message", missing.length ? `Saved. Still missing: ${missing.join(", ")} — those documents will fail with "Mapping missing" until picked.` : "Saved. Every line type and payment method has its account.");
 }
 
@@ -75,6 +76,6 @@ export async function useSuggestedMapping() {
     advancesRefund: stored.advancesRefund || SUGGESTED_MAP.advancesRefund,
   };
   const { error } = await admin.from("settings").update({ value: map as unknown as Record<string, unknown>, updated_by: staff.id }).eq("key", "zoho_account_map");
-  if (error) return back("error", error.message);
+  if (error) return back("error", dbWords(error, "settings/zoho/mapping/actions"));
   return back("message", "Every empty box took the suggested name. Accounts that do not exist yet are created in OFJ TEST at the first sync; in the REAL book the accountant creates them before go-live.");
 }

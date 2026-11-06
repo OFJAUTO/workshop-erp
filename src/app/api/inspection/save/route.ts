@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { CHECK_STATUSES, DISC_ACTIONS, DISC_CONDITIONS, ITEM_STATUSES, LEAK_REPAIRS, AC_LEAKS, AC_REPAIRS, LEAK_SEVERITIES, TYRE_POSITIONS, cleanMeasurementValue, cleanPartsRows, partsRowsText } from "@/lib/inspection";
@@ -146,18 +147,18 @@ export async function POST(request: NextRequest) {
     if (!cur) return NextResponse.json({ error: "Item not found." }, { status: 404 });
     if (reviewing) Object.assign(patch, reviewStamp, cur.original ? {} : { original: { status: cur.status, remarks: cur.remarks, parts_needed: cur.parts_needed } });
     const { error } = await admin.from("inspection_items").update(patch).eq("inspection_id", insp.id).eq("item_key", String(it.key));
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/inspection/save") }, { status: 500 });
     if (patch.dangerous === true && !cur.dangerous) await alertDanger(cur.item_label, (patch.dangerous_reason as string | null) ?? cur.dangerous_reason ?? null);
   }
   if (body.sectionAllGood) {
     const { error } = await admin.from("inspection_items").update({ status: "good", ...stamp }).eq("inspection_id", insp.id).eq("section_key", String(body.sectionAllGood)).is("status", null);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/inspection/save") }, { status: 500 });
   }
   if (body.sectionAll) {
     const status = String(body.sectionAll.status ?? "");
     if (!(ITEM_STATUSES as readonly string[]).includes(status)) return NextResponse.json({ error: "Bad status." }, { status: 400 });
     const { error } = await admin.from("inspection_items").update({ status, ...stamp, ...reviewStamp }).eq("inspection_id", insp.id).eq("section_key", String(body.sectionAll.key));
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/inspection/save") }, { status: 500 });
   }
   if (body.finding) {
     const status = body.finding.status ? String(body.finding.status) : null;
@@ -171,7 +172,7 @@ export async function POST(request: NextRequest) {
       Object.assign(row, reviewStamp, cur && !cur.original ? { original: { found: cur.found, needs: cur.needs, status: cur.status } } : {});
     }
     const { error } = await admin.from("inspection_findings").upsert(row, { onConflict: "inspection_id,job_request_id" });
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/inspection/save") }, { status: 500 });
   }
   if (body.measurements) {
     const before = { ...(insp.measurements ?? {}) };
@@ -183,7 +184,7 @@ export async function POST(request: NextRequest) {
     const mPatch: Record<string, unknown> = { measurements: next, ...stamp };
     if (reviewing) Object.assign(mPatch, { measurements_edited_by: staff.id, measurements_edited_at: new Date().toISOString() }, insp.measurements_original ? {} : { measurements_original: insp.measurements ?? {} });
     const { error } = await admin.from("inspections").update(mPatch).eq("id", insp.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/inspection/save") }, { status: 500 });
     for (const p of TYRE_POSITIONS) {
       if (String(next[`tyre_${p.key}_danger`] ?? "") === "1" && String(before[`tyre_${p.key}_danger`] ?? "") !== "1") await alertDanger(`${p.label} tyre`, String(next[`tyre_${p.key}_danger_reason`] ?? "") || null);
     }
@@ -195,16 +196,16 @@ export async function POST(request: NextRequest) {
     const changed = JSON.stringify(cleanPartsList(insp.parts_list)) !== JSON.stringify(list);
     tickCleared = changed && !!insp.parts_list_confirmed_at;
     const { error } = await admin.from("inspections").update({ parts_list: list, ...(tickCleared ? { parts_list_confirmed_at: null, parts_list_confirmed_by: null } : {}), ...stamp }).eq("id", insp.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/inspection/save") }, { status: 500 });
   }
   if (body.noPartItems !== undefined) {
     const keys = Array.isArray(body.noPartItems) ? Array.from(new Set(body.noPartItems.map((k) => String(k).slice(0, 120)).filter(Boolean))).slice(0, 200) : [];
     const { error } = await admin.from("inspections").update({ no_part_items: keys, ...stamp }).eq("id", insp.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/inspection/save") }, { status: 500 });
   }
   if (body.technicianNotes !== undefined) {
     const { error } = await admin.from("inspections").update({ technician_notes: text(body.technicianNotes, 4000), ...stamp }).eq("id", insp.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/inspection/save") }, { status: 500 });
   }
   if (body.inspection) {
     const i = body.inspection;
@@ -224,7 +225,7 @@ export async function POST(request: NextRequest) {
     if (i.scan_read) patch.scan_read_at = new Date().toISOString();
     if ("scan_not_possible_reason" in i) patch.scan_not_possible_reason = text(i.scan_not_possible_reason, 300);
     const { error } = await admin.from("inspections").update(patch).eq("id", insp.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/inspection/save") }, { status: 500 });
     if (patch.scan_not_possible_reason) {
       const { data: job } = await admin.from("jobs").select("id, job_number, department").eq("id", insp.job_id).maybeSingle();
       if (job) await notifyManagers(job.department, { type: "scan_approval", title: `Scan not possible, approve? · ${job.job_number}`, body: `${staff.display_name}: ${patch.scan_not_possible_reason}`, jobId: job.id, href: `/jobs/${job.id}/inspection` });

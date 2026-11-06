@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
@@ -34,7 +35,7 @@ export async function saveTintSpec(quotationId: string, raw: unknown): Promise<{
   const stage = await tintStageStarted(q.job_id);
   if (stage.started && !isOwner) return { error: `The tint work has started (${stage.label}): the choice can no longer change. Ask the owner if it must.` };
   const { error } = await admin.from("quotations").update({ tint_spec: spec, updated_by: staff.id }).eq("id", q.id);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "quotes/tint-actions") };
 
   const settings = await getSettings();
   const limit = tintLimitOf(settings);

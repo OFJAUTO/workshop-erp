@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { revalidatePath } from "next/cache";
 import { formValues, type FormState } from "@/lib/form-state";
@@ -401,7 +402,7 @@ export async function saveSettings(_state: FormState, formData: FormData): Promi
 
   for (const u of updates) {
     const { error } = await supabase.from("settings").update({ value: u.value }).eq("key", u.key);
-    if (error) return { error: error.message, values };
+    if (error) return { error: dbWords(error, "settings/actions"), values };
   }
 
   revalidatePath("/", "layout");
@@ -454,7 +455,7 @@ export async function saveInspectionChecklist(_state: FormState, formData: FormD
   const { error } = await supabase
     .from("settings")
     .upsert({ key: "inspection_checklist", value: clean, label: "Inspection checklist", description: "Sections and items of the mechanical inspection report." }, { onConflict: "key" });
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "settings/actions") };
   const { error: e2 } = await supabase
     .from("settings")
     .upsert({ key: "complaint_keywords", value: complaints, label: "Complaint keywords", description: 'Words in a customer request that tag a checklist section with "Customer complaint".' }, { onConflict: "key" });
@@ -479,7 +480,7 @@ export async function saveManagerNotePresets(_state: FormState, formData: FormDa
   const { error } = await supabase
     .from("settings")
     .upsert({ key: "manager_note_presets", value: lines, label: "Manager note presets", description: "One-tap notes on the report approval. Most used come first." }, { onConflict: "key" });
-  if (error) return { error: error.message, values };
+  if (error) return { error: dbWords(error, "settings/actions"), values };
   const { error: e2 } = await supabase
     .from("settings")
     .upsert({ key: "manager_note_groups", value: groups, label: "Manager note groups", description: "The one-tap notes on the report approval, under four small headings." }, { onConflict: "key" });
@@ -523,10 +524,10 @@ export async function savePartCatalogue(_state: FormState, formData: FormData): 
     seen.add(key);
     if (r.id) {
       const { error } = await admin.from("part_catalogue").update({ name, category, needs_position: !!r.needs_position, paired: !!r.paired, goes_with: goesWithList(r.goes_with), position, updated_by: staff.id }).eq("id", String(r.id));
-      if (error) return { error: error.message };
+      if (error) return { error: dbWords(error, "settings/actions") };
     } else {
       const { error } = await admin.from("part_catalogue").insert({ name, category, needs_position: !!r.needs_position, paired: !!r.paired, goes_with: goesWithList(r.goes_with), position, created_by: staff.id, updated_by: staff.id });
-      if (error) return { error: /unique|duplicate/i.test(error.message) ? `"${name}" is already in the list.` : error.message };
+      if (error) return { error: /unique|duplicate/i.test(error.message) ? `"${name}" is already in the list.` : dbWords(error, "settings/actions") };
       added++;
     }
   }
@@ -542,7 +543,7 @@ export async function adoptCustomPart(name: string, formData: FormData) {
   const { data: last } = await admin.from("part_catalogue").select("position").order("position", { ascending: false }).limit(1).maybeSingle();
   if (name.trim().length > LINE_TEXT_MAX) redirect(`/settings/parts?error=${encodeURIComponent(tooLongWords(name.trim().length))}`);
   const { error } = await admin.from("part_catalogue").insert({ name: name.trim(), category, needs_position: formData.get("needs_position") === "on", position: (Number(last?.position) || 0) + 1, created_by: staff.id, updated_by: staff.id });
-  if (error && !/unique|duplicate/i.test(error.message)) redirect(`/settings/parts?error=${encodeURIComponent(error.message)}`);
+  if (error && !/unique|duplicate/i.test(error.message)) redirect(`/settings/parts?error=${encodeURIComponent(dbWords(error, "settings/actions"))}`);
   await dropCustom(name);
   revalidatePath("/", "layout");
   redirect(`/settings/parts?message=${encodeURIComponent(`"${name}" added to the parts list.`)}`);

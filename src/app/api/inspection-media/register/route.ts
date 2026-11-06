@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { INSPECTION_BUCKET } from "@/lib/inspection-data";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
     })
     .select("id")
     .single();
-  if (error || !row) return NextResponse.json({ error: error?.message ?? "Could not record the file." }, { status: 500 });
+  if (error || !row) return NextResponse.json({ error: (error ? dbWords(error, "api/inspection-media/register") : "Could not record the file.") }, { status: 500 });
   const { data: signed } = await admin.storage.from(INSPECTION_BUCKET).createSignedUrl(path, 3600);
   return NextResponse.json({ ok: true, id: row.id, url: signed?.signedUrl ?? null });
 }

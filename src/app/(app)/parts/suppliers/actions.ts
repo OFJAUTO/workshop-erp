@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -82,7 +83,7 @@ export async function addSupplier(formData: FormData) {
     back(`${row.name} is already on the list.`, false);
   }
   const { error } = await admin.from("suppliers").insert({ ...row, ...(readDiscounts(formData) ?? {}), created_by: staff.id, updated_by: staff.id });
-  if (error) back(error.message, false);
+  if (error) back(dbWords(error, "parts/suppliers/actions"), false);
   revalidatePath("/parts/suppliers");
   revalidatePath("/parts");
   back(`${row.name} added.`, true);
@@ -95,7 +96,7 @@ export async function updateSupplier(id: string, formData: FormData) {
   const { data: before } = await admin.from("suppliers").select("name, trn, default_discount_percent, discount_by_type, vat_registered").eq("id", id).maybeSingle();
   const discounts = readDiscounts(formData);
   const { error } = await admin.from("suppliers").update({ ...row, ...(discounts ?? {}), updated_by: staff.id }).eq("id", id);
-  if (error) back(error.message, false);
+  if (error) back(dbWords(error, "parts/suppliers/actions"), false);
   // Bills already in Zoho carry the VAT standing they were posted with: a change now makes each of them wrong,
   // so each turns red on the Zoho page for the accountant to correct (never silently re-figured).
   if (before && (before.vat_registered !== false) !== row.vat_registered) await flagBillsAfterVatChange(id, row.name, row.vat_registered);

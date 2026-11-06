@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { withBreak } from "@/lib/breaks";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { workingTimeOf } from "@/lib/jobs";
@@ -211,7 +212,7 @@ async function bump(table: string, id: string, column: string): Promise<number> 
 export async function rejectPause(pauseId: string, actor: Actor, accepted: boolean): Promise<Result> {
   const admin = createAdminClient();
   const { error } = await admin.from("work_pauses").update(accepted ? { accepted: true, rejected_by: null, rejected_at: null, updated_by: actor.id } : { accepted: false, rejected_by: actor.id, rejected_at: new Date().toISOString(), updated_by: actor.id }).eq("id", pauseId);
-  return error ? { error: error.message } : { ok: true };
+  return error ? { error: dbWords(error, "lib/work-flow") } : { ok: true };
 }
 
 /** The manager puts a technician on a car (or back on it after he left). */

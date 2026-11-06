@@ -2,7 +2,7 @@ import "server-only";
 import { DEFAULT_UNDO_MINUTES, mayUndo } from "./money-undo";
 import { afterPendingChargePayment } from "./charges";
 import { afterEstimatePayment, estimateOfInvoice } from "./estimate-money";
-import { SAVE_FAILED, logAppError } from "@/lib/app-errors";
+import { SAVE_FAILED, logAppError, dbWords } from "@/lib/app-errors";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { INVOICE_SELECT, PAYMENT_SELECT, creditsOnDocs, invoiceBalance, toInvoice, toPayment, type PaymentRow } from "./invoice-data";
 import { round2 } from "./money";
@@ -342,7 +342,7 @@ export async function verifyPayment(paymentId: string, actor: Actor): Promise<Pa
   if (!actor.id || !(actor.role_id === "owner" || actor.role_id === "accounts")) return { error: "Only accounts verify payments." };
   const admin = createAdminClient();
   const { error } = await admin.from("payments").update({ verified_at: new Date().toISOString(), verified_by: actor.id, updated_by: actor.id }).eq("id", paymentId).is("verified_at", null);
-  return error ? { error: error.message } : { ok: true, message: "Verified." };
+  return error ? { error: dbWords(error, "lib/payments") } : { ok: true, message: "Verified." };
 }
 
 /** The owner approves a payment above the balance (it becomes a recorded receipt) or refuses it (voided). */

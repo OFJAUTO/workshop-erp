@@ -1,4 +1,5 @@
 "use server";
+import { dbWords, dbDetail } from "@/lib/app-errors";
 
 import { redirect, unstable_rethrow } from "next/navigation";
 import { requirePermission } from "@/lib/auth";
@@ -51,7 +52,7 @@ export async function mirrorZohoAction() {
   } catch (e) {
     unstable_rethrow(e);
     kind = "error";
-    words = e instanceof Error ? e.message : "The mirror could not run.";
+    words = e instanceof Error ? dbWords(e, "settings/zoho/actions") : "The mirror could not run.";
   }
   return back(kind, words);
 }
@@ -70,7 +71,7 @@ export async function setGoLiveStartDate(formData: FormData) {
   if (date.slice(8) !== "01") return back("error", "The start date is the 1st of a month (the opening balances are taken as of the 1st).");
   const admin = createAdminClient();
   const { error } = await admin.from("settings").update({ value: date, updated_by: staff.id }).eq("key", "zoho_golive_start_date");
-  if (error) return back("error", error.message);
+  if (error) return back("error", dbWords(error, "settings/zoho/actions"));
   return back("message", `Go-live start date saved: documents from ${date} will post to the REAL book; anything earlier never posts. The switch unlocks on that day.`);
 }
 
@@ -133,7 +134,7 @@ export async function flipGoLive(formData: FormData) {
   if (!testOrg) return back("error", "OFJ TEST is not picked on this page, so its queue cannot be archived.");
   const admin = createAdminClient();
   const { data: moved, error } = await admin.rpc("zoho_switch_org", { p_from: testOrg, p_to: ZOHO_REAL_ORG_ID, p_live: true, p_by: staff.id, p_start: checklist.startDate });
-  if (error) return back("error", `The switch did not happen: ${error.message}`);
+  if (error) return back("error", `The switch did not happen: ${dbDetail(error, "settings/zoho/actions")}`);
   const now = new Date().toISOString();
   let replay: string;
   let followupOk = true;
@@ -141,7 +142,7 @@ export async function flipGoLive(formData: FormData) {
     replay = await runGoLiveFollowup(staff.id);
   } catch (e) {
     followupOk = false;
-    replay = `NOT queued yet (${e instanceof Error ? e.message : String(e)}) — press "Finish the go-live queue" on Settings > Zoho Books`;
+    replay = `NOT queued yet (${e instanceof Error ? dbWords(e, "settings/zoho/actions") : String(e)}) — press "Finish the go-live queue" on Settings > Zoho Books`;
   }
   await logGoLive({ action: "live", by: staff.id, name: staff.display_name, at: now, start_date: checklist.startDate, moved, replay }, staff.id);
   await admin.from("audit_log").insert({ table_name: "settings", record_id: "zoho_live_enabled", action: "golive", new_data: { live: true, start_date: checklist.startDate, moved, replay }, changed_by: staff.id }).then(() => null, () => null);
@@ -164,7 +165,7 @@ export async function finishGoLiveFollowup() {
   } catch (e) {
     unstable_rethrow(e);
     kind = "error";
-    words = e instanceof Error ? e.message : String(e);
+    words = e instanceof Error ? dbWords(e, "settings/zoho/actions") : String(e);
   }
   return back(kind, words);
 }
@@ -181,7 +182,7 @@ export async function flipGoLiveBack(formData: FormData) {
   if (!(await zohoBooksNow()).live) return back("message", "Posting to the REAL book is already stopped.");
   const admin = createAdminClient();
   const { error } = await admin.from("settings").update({ value: false, updated_by: staff.id }).eq("key", "zoho_live_enabled");
-  if (error) return back("error", error.message);
+  if (error) return back("error", dbWords(error, "settings/zoho/actions"));
   const now = new Date().toISOString();
   await logGoLive({ action: "stop", by: staff.id, name: staff.display_name, at: now, reason }, staff.id);
   await admin.from("audit_log").insert({ table_name: "settings", record_id: "zoho_live_enabled", action: "golive_stop", new_data: { live: false, reason }, changed_by: staff.id }).then(() => null, () => null);
@@ -199,7 +200,7 @@ export async function resumeGoLive(formData: FormData) {
   if (books.live) return back("message", "Posting to the REAL book is already on.");
   const admin = createAdminClient();
   const { error } = await admin.from("settings").update({ value: true, updated_by: staff.id }).eq("key", "zoho_live_enabled");
-  if (error) return back("error", error.message);
+  if (error) return back("error", dbWords(error, "settings/zoho/actions"));
   const now = new Date().toISOString();
   await logGoLive({ action: "resume", by: staff.id, name: staff.display_name, at: now }, staff.id);
   await admin.from("audit_log").insert({ table_name: "settings", record_id: "zoho_live_enabled", action: "golive_resume", new_data: { live: true }, changed_by: staff.id }).then(() => null, () => null);

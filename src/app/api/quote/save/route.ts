@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { capsText } from "@/lib/text-case";
 import { refuseIfLocked } from "@/lib/quote-lock-server";
 import { handBack, keepBaseline } from "@/lib/quote-lead";
@@ -458,7 +459,7 @@ export async function POST(request: NextRequest) {
       map[key] = reason;
     }
     const { error } = await admin.from("quotations").update({ not_quoted: map, ...stamp }).eq("id", q.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/quote/save") }, { status: 500 });
     await refreshed();
     return NextResponse.json({ ok: true });
   }
@@ -481,7 +482,7 @@ export async function POST(request: NextRequest) {
       if (!toSend.length) return NextResponse.json({ ok: true, sent: 0 });
       const now = new Date().toISOString();
       const { error } = await admin.from("quotation_lines").update({ price_requested_at: now, price_requested_by: staff.id, ...stamp }).in("id", toSend.map((l) => l.id));
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      if (error) return NextResponse.json({ error: dbWords(error, "api/quote/save") }, { status: 500 });
       // Section 9 (3 November 2026): a fluid's name sends it in litres (ENGINE OIL, COOLANT…) unless a unit was chosen.
       if (unitsReady) {
         for (const l of toSend) {
@@ -521,7 +522,7 @@ export async function POST(request: NextRequest) {
     const now = new Date().toISOString();
     const fromWords = supplier ? ` from ${supplier}` : "";
     const { error } = await admin.from("quotation_lines").update({ unit_cost: cost, supplier_text: supplier || null, priced_by_advisor: true, priced_at: now, priced_by: staff.id, price_checked_at: null, price_checked_by: null, ...(lineReady ? { stock_item_id: null, ...(confirmNow ? { cost_confirmed_aed: cost, cost_confirmed_at: now, cost_confirmed_by: staff.id } : {}) } : {}), ...stamp }).eq("id", cur.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/quote/save") }, { status: 500 });
     if (confirmNow && check.hold) await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "part_cost_confirmed", note: `${staff.display_name} confirmed AED ${cost.toFixed(2)} is the real price of ${String(cur.title).toUpperCase()}${fromWords}`, created_by: staff.id });
     await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "part_priced_by_advisor", note: `${staff.display_name} priced ${cur.title} at AED ${cost.toLocaleString("en-GB")} each${fromWords} (priced by advisor)`, created_by: staff.id });
     // The parts desk is told only when they already had it ("started on it"); it leaves their waiting list either way,
@@ -552,7 +553,7 @@ export async function POST(request: NextRequest) {
       const had = `Advisor had: AED ${Number(p.cost_aed).toLocaleString("en-GB", { minimumFractionDigits: 2 })} each${p.supplier ? ` from ${p.supplier}` : ""} (${staff.display_name})`;
       const note = [String(p.availability_note ?? "").trim(), had].filter(Boolean).join(" · ").slice(0, 500);
       const { error } = await admin.from("part_items").update({ cost_aed: null, priced_at: null, priced_by: null, priced_by_advisor: false, price_checked_at: null, price_checked_by: null, availability_note: note, ...(costReady ? { cost_confirmed_aed: null, cost_confirmed_at: null, cost_confirmed_by: null } : {}), updated_by: staff.id }).eq("id", p.id);
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      if (error) return NextResponse.json({ error: dbWords(error, "api/quote/save") }, { status: 500 });
       await syncLineForPart(q.job_id, p.id, staff.id, { quiet: true });
       await admin.from("job_events").insert({ job_id: q.job_id, event_type: "parts", note: `${staff.display_name} sent ${p.description} back to the parts desk to price (${had})`, created_by: staff.id });
       await notifyRoles(["parts"], { type: "parts_request", title: `Part back to price · ${job?.job_number ?? ""}`, body: `${p.description} · ${had}.`, jobId: q.job_id, href: `/parts/${q.job_id}` });
@@ -567,7 +568,7 @@ export async function POST(request: NextRequest) {
     const now = new Date().toISOString();
     const lineReady = await lineCostConfirmReady();
     const { error } = await admin.from("quotation_lines").update({ unit_cost: null, supplier_text: null, priced_by_advisor: false, priced_at: null, priced_by: null, price_checked_at: null, price_checked_by: null, parts_note: note, price_requested_at: now, price_requested_by: staff.id, ...(lineReady ? { cost_confirmed_aed: null, cost_confirmed_at: null, cost_confirmed_by: null } : {}), ...stamp }).eq("id", cur.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/quote/save") }, { status: 500 });
     await admin.from("quotation_events").insert({ quotation_id: q.id, job_id: null, event_type: "parts_to_desk", note: `${staff.display_name} sent ${cur.title} back to the parts desk to price (${had})`, created_by: staff.id });
     await notifyRoles(["parts"], { type: "estimate_parts_to_price", title: `ESTIMATE ${q.number} – part back to price`, body: `${cur.title} × ${Number(cur.quantity) || 1} · ${had}. ${await vehicleWords()}`, href: `/parts/estimate/${q.id}` });
     await refreshed();
@@ -610,7 +611,7 @@ export async function POST(request: NextRequest) {
     const now = new Date().toISOString();
     const fromWords = supplier ? ` from ${supplier}` : "";
     const { error } = await admin.from("part_items").update({ cost_aed: cost, supplier: supplier || null, priced_at: now, priced_by: staff.id, priced_by_advisor: true, price_checked_at: null, price_checked_by: null, ...(costReady && confirmNow ? { cost_confirmed_aed: cost, cost_confirmed_at: now, cost_confirmed_by: staff.id } : {}), updated_by: staff.id }).eq("id", p.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/quote/save") }, { status: 500 });
     // THE one sync puts the cost on the quotation line (and makes the line when the part had none yet).
     await syncLineForPart(q.job_id, p.id, staff.id, { quiet: true });
     const { data: lineRow } = await admin.from("quotation_lines").select("id").eq("quotation_id", q.id).eq("part_item_id", p.id).eq("is_active", true).maybeSingle();
@@ -648,7 +649,7 @@ export async function POST(request: NextRequest) {
       if (same) return NextResponse.json({ ok: true });
     }
     const { error } = await admin.from("part_requests").insert({ job_id: q.job_id, source_type: srcType, source_key: srcKey, label: description, positions: reqPositions, catalogue_id: reqCatalogue, requested_text: `Quantity ${qty} · asked by ${staff.display_name} on ${q.number}`, quantity: qty, client_key: opKey, created_by: staff.id, ...stamp });
-    if (error) return NextResponse.json({ ok: !!/client_key/.test(error.message), error: /client_key/.test(error.message) ? undefined : error.message }, { status: /client_key/.test(error.message) ? 200 : 500 });
+    if (error) return NextResponse.json({ ok: !!/client_key/.test(error.message), error: /client_key/.test(error.message) ? undefined : dbWords(error, "api/quote/save") }, { status: /client_key/.test(error.message) ? 200 : 500 });
     if (reqCatalogue) {
       const { data: row } = await admin.from("part_catalogue").select("usage_count").eq("id", reqCatalogue).maybeSingle();
       if (row) await admin.from("part_catalogue").update({ usage_count: (Number(row.usage_count) || 0) + 1 }).eq("id", reqCatalogue);
@@ -738,7 +739,7 @@ export async function POST(request: NextRequest) {
     if (typeof row.title === "string") row.title = capsText(row.title);
     if (typeof row.details === "string") row.details = capsText(row.details);
     const { data: created, error } = await admin.from("quotation_lines").insert(row).select("id").single();
-    if (error || !created) return NextResponse.json({ error: error?.message ?? "Could not add the line." }, { status: 500 });
+    if (error || !created) return NextResponse.json({ error: (error ? dbWords(error, "api/quote/save") : "Could not add the line.") }, { status: 500 });
     if (addGate && "stamps" in addGate) await stampAll(addGate.stamps, a.below_cost_reason, (l) => (l.id === NEW_ID ? created.id : l.id));
     if (linked) {
       await admin.from("part_requests").insert(linked.rows);
@@ -802,7 +803,7 @@ export async function POST(request: NextRequest) {
     if (typeof patch.title === "string") patch.title = capsText(patch.title);
     if (typeof patch.details === "string") patch.details = capsText(patch.details);
     const { error } = await admin.from("quotation_lines").update({ ...patch, ...stamp }).eq("id", cur.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/quote/save") }, { status: 500 });
     if (estQtyChange && cur.price_requested_at) {
       // Who set the quantity it had: the last person who changed it (the desk), else the advisor himself.
       let askedBy: QtyWho = "advisor";
@@ -835,7 +836,7 @@ export async function POST(request: NextRequest) {
     const gone = (await belowLines()).lines.find((l) => l.id === cur.id);
     const removalHits = gone ? await belowChanges({ ...gone, is_active: false }) : [];
     const { error } = await admin.from("quotation_lines").update({ is_active: false, ...stamp }).eq("id", cur.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/quote/save") }, { status: 500 });
     const actor = { id: staff.id, display_name: staff.display_name };
     if (cur.line_type === "labour" || cur.line_type === "package") {
       if (body.removeLine.withParts && q.job_id) {
@@ -953,7 +954,7 @@ export async function POST(request: NextRequest) {
     // The film rolls are a cost (the package's film): never refused, written down when they take a package below cost.
     const rollsBefore = h.film_rolls_est !== undefined ? await belowLines() : null;
     const { error } = await admin.from("quotations").update(patch).eq("id", q.id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) return NextResponse.json({ error: dbWords(error, "api/quote/save") }, { status: 500 });
     await refreshed();
     if (headerGate && "stamps" in headerGate) await stampAll(headerGate.stamps, h.below_cost_reason);
     if (rollsBefore) {

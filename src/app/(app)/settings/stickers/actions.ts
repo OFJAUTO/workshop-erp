@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -72,7 +73,7 @@ export async function uploadStickerLogo(formData: FormData) {
   const ext = type === "image/svg+xml" ? "svg" : type === "image/png" ? "png" : "jpg";
   const path = `branding/sticker-logo-${Date.now()}.${ext}`;
   const { error } = await admin.storage.from("job-files").upload(path, Buffer.from(await f.arrayBuffer()), { contentType: type, upsert: true });
-  if (error) back(error.message, false);
+  if (error) back(dbWords(error, "settings/stickers/actions"), false);
   await admin.from("settings").update({ value: path }).eq("key", "sticker_logo_url");
   revalidatePath("/settings/stickers");
   back("Logo saved for the stickers.", true);

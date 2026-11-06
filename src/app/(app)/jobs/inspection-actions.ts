@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -230,7 +231,7 @@ export async function confirmPartsList(jobId: string): Promise<{ at?: string; by
   const admin = createAdminClient();
   const at = new Date().toISOString();
   const { error } = await admin.from("inspections").update({ parts_list_confirmed_at: at, parts_list_confirmed_by: staff.id, updated_by: staff.id }).eq("id", bundle.inspection.id);
-  if (error) return { error: error.message };
+  if (error) return { error: dbWords(error, "jobs/inspection-actions") };
   const count = mergePartsList(cleanPartsList(bundle.inspection.parts_list)).length;
   await logEvent(jobId, staff.id, "parts_list_checked", count ? `Parts list checked by ${staff.display_name} (${count} line${count === 1 ? "" : "s"})` : `${staff.display_name} confirmed no parts are needed`);
   refresh(jobId);

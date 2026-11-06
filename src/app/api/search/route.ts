@@ -1,3 +1,4 @@
+import { plateHistoryReady } from "@/lib/schema-ready";
 import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentStaff } from "@/lib/auth";
 import { signCarPictures } from "@/lib/car-pictures";
@@ -23,10 +24,12 @@ export async function GET(request: NextRequest) {
   const admin = createAdminClient();
   const like = `%${q.replace(/[%_]/g, "")}%`;
   const quoteHits = await quotationHits(q, staff.role_id as RoleId);
+  // Old plates keep finding the car (6 November 2026); the filter only once its column is applied.
+  const historyOn = await plateHistoryReady();
   const compact = `%${q.replace(/[^\p{L}\p{N}]/gu, "")}%`;
   const [{ data: vehicles }, { data: customers }, { data: byNumber }] = await Promise.all([
     // "GG 13706" finds the plate whose code and number the database keeps apart (2 November 2026, one rule with the Record payment window).
-    admin.from("vehicles").select("id").or(vehicleOrFilter(q)).limit(25),
+    admin.from("vehicles").select("id").or(vehicleOrFilter(q, { oldPlates: historyOn })).limit(25),
     // Only the owner, advisors and accounts may find a car by its customer's name or phone (29 October 2026).
     can(staff.role_id as RoleId, "viewCustomers") ? admin.from("customers").select("id").or(`full_name.ilike.${like},company_name.ilike.${like},phone.ilike.${compact}`).limit(25) : Promise.resolve({ data: [] as { id: string }[] }),
     admin.from("jobs").select("id").ilike("job_number", like).limit(10),

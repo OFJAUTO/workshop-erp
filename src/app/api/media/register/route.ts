@@ -1,3 +1,4 @@
+import { dbWords } from "@/lib/app-errors";
 import { NextResponse, type NextRequest } from "next/server";
 import { GATE_IN_BUCKET, loadGateInFlags, loadMedia, mediaChecklist } from "@/lib/media";
 import { authoriseUpload } from "@/lib/upload-auth";
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
     created_by: who.staffId,
     updated_by: who.staffId,
   });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: dbWords(error, "api/media/register") }, { status: 500 });
 
   if (kind === "car_picture") {
     // The car's picture for the Cars page, the dashboard and the job card: a copy goes to the car's own folder.

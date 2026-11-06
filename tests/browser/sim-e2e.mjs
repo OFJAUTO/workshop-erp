@@ -4,14 +4,15 @@
 //   PATHS=a,b node --env-file=.env.test.local tests/browser/sim-e2e.mjs   (default: all eight)
 // Paths: a mechanical + supplier parts + deposit + pay-link · b stock parts + cash · c declined → fee →
 // gate-out · d revision after approval · e bodyshop PPF sign-off → handover · f mixed quotation ·
-// g recovery delivery · h commission approve → pay · i enter price myself (estimate + job quotation) · j parts changed after approval → resend for approval · k revise at the top + hours missing · l supplier amounts with VAT.
+// g recovery delivery · h commission approve → pay · i enter price myself (estimate + job quotation) · j parts changed after approval → resend for approval · k revise at the top + hours missing · l supplier amounts with VAT ·
+// m no-plate car → gate-in asks → plate added (duplicate refused first) → every page shows it.
 import fs, { mkdirSync } from "node:fs";
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -1559,6 +1560,84 @@ await section("l", "supplier amounts with VAT + LPO tab counts + cancelled LPOs"
     await browser.close();
   }
   await sql("update public.purchase_orders set is_active = false where number = 'E2E-LPO-L-REFUSED'");
+});
+
+/* ================================================================================================= */
+/* Path m — no-plate car arrives: the gate-in asks for the plate, refuses a duplicate in plain words,  */
+/* saves the real one, and every page shows it (6 November 2026, the AL TAMIMI Audi A8 case).         */
+/* ================================================================================================= */
+await section("m", "no-plate car → gate-in asks → plate added → shown everywhere", async () => {
+  const CUST = "22222222-0000-4000-8000-00000000ea11";
+  const CAR = "22222222-0000-4000-8000-00000000ea12"; // saved without its plate (the AL TAMIMI shape)
+  const OTHER = "22222222-0000-4000-8000-00000000ea13"; // another record already carrying DUBAI GG 44444
+  const mm = (await sql("select m.id as make_id, v.id as model_id from public.vehicle_makes m join public.vehicle_models v on v.make_id = m.id where m.is_active and v.is_active order by m.name, v.name limit 1"))[0];
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  await sql("insert into public.customers (id, customer_type, full_name, company_name, phone, created_by) values ($1, 'company', 'E2e Contact', 'E2e Sim Plate Company', '+971500000097', $2)", [CUST, ownerId]);
+  await sql("insert into public.vehicles (id, customer_id, has_plate, plate_country, make_id, model_id, model_year, created_by) values ($1, $2, false, 'UAE', $3, $4, 2024, $5)", [CAR, CUST, mm.make_id, mm.model_id, ownerId]);
+  await sql("insert into public.vehicles (id, customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, make_id, model_id, model_year, created_by) values ($1, $2, true, 'UAE', 'Dubai', 'GG', '44444', $3, $4, 2023, $5)", [OTHER, CUST, mm.make_id, mm.model_id, ownerId]);
+  // The sql helper hides insert errors: stop here in plain words if the seed did not land.
+  if ((await sql("select id from public.vehicles where id in ($1, $2)", [CAR, OTHER])).length !== 2) throw new Error("seed failed: the two test cars were not created");
+
+  // m1. The gate-in person opens the form: it asks for the plate before anything else.
+  const g = await browserFor("gate_in", { viewport: { width: 1180, height: 900 } });
+  const { page } = g;
+  await go(page, `${base}/gate-in/new?vehicle=${CAR}`);
+  check("m1: the gate-in form asks for the missing plate — R2", (await page.locator("[data-gatein-plate]").count()) === 1);
+  await shot(page, "m1-gatein-asks-plate");
+  const pick = (name, value) => page.locator(`input[name="${name}"][value="${value}"]`).first().evaluate((el) => el.click());
+  await pick("arrived_by", "customer_drove");
+  await pick("condition", "runs_drives");
+  await pick("fuel_level", "half");
+  await pick("cleanliness", "clean");
+  await pick("dash_cam", "no");
+  await pick("major_damage", "no");
+  await pick("keys_count", "1");
+  await pick("keys_keychain", "no");
+  await pick("old_parts_return", "no");
+  await pick("department", "mechanical");
+  const addr = page.locator('textarea[name="location_address"]');
+  if (await addr.count()) await addr.fill("Sim plate walk");
+  await page.locator('input[name="mileage_display"]').pressSequentially("12000");
+  await page.keyboard.press("Tab");
+  await page.locator('input[name="requests"]:visible').first().pressSequentially("General check");
+  await sleep(400);
+
+  // m2. He types ANOTHER car's plate: refused in plain words, nothing created, the typed form is kept.
+  await page.locator("[data-gatein-plate-code]").pressSequentially("GG", { delay: 25 });
+  await page.locator("[data-gatein-plate-number]").pressSequentially("44444", { delay: 25 });
+  await page.getByText("Save and continue to photos and video").click();
+  await until(async () => /Gate THAT car in instead/.test(((await page.textContent("body").catch(() => "")) ?? "")));
+  const refusal = ((await page.textContent("body").catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check(`m2: a duplicate plate is refused in plain words, naming the other car — R1 ("${(refusal.match(/This plate is already on [^.]+\./) ?? [""])[0]}")`, /This plate is already on DUBAI GG 44444/.test(refusal) && /Gate THAT car in instead/.test(refusal));
+  check("m2: no job was created on the refusal", (await sql("select count(*)::int as n from public.jobs where vehicle_id = $1", [CAR]))[0].n === 0);
+  await shot(page, "m2-duplicate-refused");
+
+  // m3. He fixes the number: the gate-in goes through, the plate is SAVED on the car with the story on the job.
+  await page.locator("[data-gatein-plate-number]").evaluate((el) => { el.focus(); el.select(); });
+  await page.locator("[data-gatein-plate-number]").pressSequentially("44555", { delay: 25 });
+  await sleep(5200); // FormGuard swallows a second tap within five seconds of the first
+  await page.getByText("Save and continue to photos and video").click();
+  await page.waitForURL((u) => /\/media/.test(u.toString()), { timeout: 30000 }).catch(() => null);
+  const jobM = await until(async () => (await sql("select id, job_number from public.jobs where vehicle_id = $1", [CAR]))[0]);
+  check("m3: the gate-in went through with the fixed plate — R1", !!jobM && /\/media/.test(page.url()), page.url());
+  const carM = (await sql("select has_plate, plate_emirate, plate_code, plate_number from public.vehicles where id = $1", [CAR]))[0];
+  check("m3: DUBAI GG 44555 is on the car record", carM?.has_plate === true && carM.plate_emirate === "Dubai" && carM.plate_code === "GG" && carM.plate_number === "44555", JSON.stringify(carM));
+  const evM = jobM ? (await sql("select note from public.job_events where job_id = $1 and note like 'Number plate%' limit 1", [jobM.id]))[0] : null;
+  check(`m3: the job's record says who added it ("${evM?.note ?? ""}")`, /^Number plate Dubai GG 44555 added at gate-in by /.test(evM?.note ?? ""));
+  await shot(page, "m3-gatein-saved");
+  await g.browser.close();
+
+  // m4. The next person's screens carry the plate: the job card and Cars → Edit — R2.
+  if (jobM) {
+    const body = await nextScreen("m4", "owner", `/jobs/${jobM.id}`, [/GG 44555/i], "m4-jobcard-shows-plate");
+    check("m4: the job card no longer offers 'Add the number plate'", !/Add the number plate/.test(body));
+  }
+  const o = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  await go(o.page, `${base}/vehicles/${CAR}/edit`);
+  const title = ((await o.page.locator("h1").first().textContent()) ?? "").trim();
+  check(`m4: Cars → Edit title carries the plate ("${title}")`, /^Edit car · .+ · DUBAI GG 44555$/.test(title));
+  await shot(o.page, "m4-edit-title-plate");
+  await o.browser.close();
 });
 
 const failed = summary();

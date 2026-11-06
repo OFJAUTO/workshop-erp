@@ -1,4 +1,5 @@
 "use server";
+import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -86,7 +87,7 @@ async function resolveCustomer(supabase: Client, d: Parsed): Promise<{ id: strin
   const { data: existing } = await supabase.from("customers").select("id, full_name").eq("phone", phone).eq("is_active", true).maybeSingle();
   if (existing) return { id: existing.id }; // Same phone: it is the same customer.
   const { data, error } = await supabase.from("customers").insert({ customer_type: "individual", full_name: d.new_name, phone }).select("id").single();
-  if (error || !data) return { error: error?.message ?? "Could not add the customer." };
+  if (error || !data) return { error: (error ? dbWords(error, "calendar/actions") : "Could not add the customer.") };
   return { id: data.id };
 }
 
@@ -146,7 +147,7 @@ export async function createAppointment(_state: FormState, formData: FormData): 
   if ("error" in row) return { error: String(row.error), values };
 
   const { data: appt, error } = await supabase.from("appointments").insert(row).select("id").single();
-  if (error || !appt) return { error: error?.message ?? "Could not book the appointment.", values };
+  if (error || !appt) return { error: (error ? dbWords(error, "calendar/actions") : "Could not book the appointment."), values };
 
   if (row.advisor_id && row.advisor_id !== staff.id) {
     await notifyStaff([String(row.advisor_id)], {
@@ -180,7 +181,7 @@ export async function updateAppointment(id: string, _state: FormState, formData:
   if ("error" in row) return { error: String(row.error), values };
 
   const { error } = await supabase.from("appointments").update(row).eq("id", id);
-  if (error) return { error: error.message, values };
+  if (error) return { error: dbWords(error, "calendar/actions"), values };
   revalidatePath("/calendar");
   revalidatePath(`/calendar/${id}`);
   redirect(`/calendar/${id}?message=${encodeURIComponent("Booking updated.")}`);
