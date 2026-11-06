@@ -8,7 +8,7 @@
 //   E2E_BASE=http://localhost:3101 node --env-file=.env.test.local tests/browser/test-viewer7.mjs
 import path from "node:path";
 import fs from "node:fs";
-import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, sleep, sql, doorUpload } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const SHOTS = path.join(here, "shots", "viewer");
@@ -18,13 +18,8 @@ const until = async (fn, tries = 40, gap = 400) => { for (let i = 0; i < tries; 
 const owner = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
 
 async function uploadMedia(jobId, kind, contentType, bytes) {
-  const cookies = await cookieHeader("owner");
-  const prep = await api("/api/media/prepare", { jobId, kind, contentType }, cookies);
-  if (!prep.json?.url) throw new Error(`prepare failed: ${JSON.stringify(prep.json ?? prep.text)}`);
-  const put = await fetch(prep.json.url, { method: "PUT", headers: { "Content-Type": contentType, "x-upsert": "false", apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "" }, body: bytes });
-  if (!put.ok) throw new Error(`put failed: ${put.status}`);
-  const reg = await api("/api/media/register", { jobId, kind, path: prep.json.path }, cookies);
-  if (!reg.json?.ok) throw new Error(`register failed: ${JSON.stringify(reg.json ?? reg.text)}`);
+  const reg = await doorUpload({ target: "gate_in", scopeId: jobId, contentType, bytes, fields: { kind }, cookie: await cookieHeader("owner") });
+  if (!reg.ok) throw new Error(`upload failed at ${reg.stage}: ${JSON.stringify(reg.json).slice(0, 200)}`);
 }
 
 cleanupDb();

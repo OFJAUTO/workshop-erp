@@ -7,7 +7,7 @@
 //   node --env-file=.env.test.local tests/browser/test-g.mjs --clear    (also presses Clear test data at the end: everything goes)
 import fs from "node:fs";
 import path from "node:path";
-import { api, base, browserFor, cleanupDb, go, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, go, makeChecks, projectRoot, sleep, sql, doorUpload } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const CLEAR = process.argv.includes("--clear");
@@ -224,10 +224,8 @@ if (CLEAR) {
     check("A6: two dummy cars made", cars.length === 2 && cars.every((c) => c?.job_id), JSON.stringify(cars));
     const cookies = await (await import("./pw-lib.mjs")).cookieHeader("owner");
     for (const c of cars) {
-      const prep = await api("/api/media/prepare", { jobId: c.job_id, kind: "car_picture", contentType: "image/png" }, cookies);
-      await fetch(prep.json.url, { method: "PUT", headers: { "Content-Type": "image/png", "x-upsert": "false", apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "" }, body: PNG });
-      const reg = await api("/api/media/register", { jobId: c.job_id, kind: "car_picture", path: prep.json.path }, cookies);
-      check("A6: a photo saved for the dummy car", !!reg.json?.ok);
+      const reg = await doorUpload({ target: "gate_in", scopeId: c.job_id, contentType: "image/png", bytes: PNG, fields: { kind: "car_picture" }, cookie: cookies });
+      check("A6: a photo saved for the dummy car", reg.ok, `${reg.stage} ${JSON.stringify(reg.json).slice(0, 120)}`);
     }
     const countsBefore = (await sql("select json_build_object('jobs', (select count(*) from jobs), 'vehicles', (select count(*) from vehicles), 'customers', (select count(*) from customers), 'gate_in_media', (select count(*) from gate_in_media), 'files', (select count(*) from storage.objects where bucket_id in ('gate-in-media','vehicle-photos','inspection-media','job-files')), 'audit_log', (select count(*) from audit_log)) as c"))[0]?.c;
     console.log("   counts before:", JSON.stringify(countsBefore));

@@ -3,7 +3,7 @@
 // Run against a local dev server: E2E_BASE=http://localhost:3101 npm run test:b2
 import path from "node:path";
 import fs from "node:fs";
-import { api, base, browserForId, cleanupDb, cookieHeader, go, here, makeChecks, sql, submitted, sleep } from "./pw-lib.mjs";
+import { api, base, browserForId, cleanupDb, cookieHeader, go, here, makeChecks, sql, submitted, sleep, doorRegister } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const SHOTS = path.join(here, "shots", "b2");
@@ -156,9 +156,10 @@ await sql("insert into public.aftercare_checks (job_id, due_date) select $1, cur
   const pm = await fetch(`${base}/api/parts/price-memory?pn=A1673306800`, { headers: { cookie } });
   check("28 price memory (part costs) is refused to a team leader", pm.status === 403, String(pm.status));
   const anyFile = (await sql("select storage_path from public.job_files where job_id = $1 and removed_at is null limit 1", [JOB]))[0]?.storage_path;
-  const again = await fetch(`${base}/api/files/register`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ jobId: JOB, path: anyFile, kind: "bodyshop_photo" }) });
-  check("29 a stored file is never signed again for someone else", !!anyFile && again.status === 403, String(again.status));
-  const money = await fetch(`${base}/api/files/register`, { method: "POST", headers: { cookie, "content-type": "application/json" }, body: JSON.stringify({ jobId: JOB, path: `${JOB}/x.pdf`, kind: "supplier_invoice" }) });
+  // THE upload door (audit M15): a stored file is never registered again as someone else's, and a leader adds bodyshop photos only.
+  const again = await doorRegister({ target: "job_file", scopeId: JOB, path: anyFile, fields: { kind: "bodyshop_photo" }, cookie });
+  check("29 a stored file is never signed again for someone else", !!anyFile && again.status >= 400 && again.status < 500, String(again.status));
+  const money = await doorRegister({ target: "job_file", scopeId: JOB, path: `${JOB}/x.pdf`, fields: { kind: "supplier_invoice" }, cookie });
   check("30 a team leader may add bodyshop photos only", money.status === 403, String(money.status));
 }
 

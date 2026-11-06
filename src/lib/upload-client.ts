@@ -23,7 +23,7 @@ const STALL_SECONDS = 90;
  * The gate-in's own prepare -> send -> register steps (prepareUpload, registerMedia, uploadFile) are gone (31 October
  * 2026): every gate-in file - the checklist tiles, the outline's panel photos, the damage found after check-in - goes
  * through THE send queue (src/lib/send-queue.ts, useSendQueue with target "gate_in"), which keeps it on the device
- * until /api/uploads/register has recorded it. /api/media/prepare and /api/media/register stay for the tests' scripts.
+ * until /api/uploads/register has recorded it. (The old doors were removed on 7 November 2026, audit M15.)
  */
 
 /**

@@ -162,3 +162,30 @@ export async function confirmMoney(page, hook) {
   await page.locator(`[data-confirm-open="${hook}"]`).first().click();
   await page.locator(`[data-confirm-yes-money="${hook}"]`).click();
 }
+
+/**
+ * Uploads a file through THE upload door (31 October 2026; the old doors left on 7 November 2026, audit M15):
+ * prepare (the file's own uuid) → PUT to storage → register. `fields` carry the place's own keys (kind, refId,
+ * token, caption…); `cookie` signs in as a person (empty = a phone link's token in `fields`).
+ * Returns { stage, status, ok, json, path } - the step it reached and that step's answer.
+ */
+export async function doorUpload({ target, scopeId, contentType, bytes, fields = {}, cookie = "" }) {
+  const headers = { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) };
+  const fileId = crypto.randomUUID();
+  const prep = await fetch(`${base}/api/uploads/prepare`, { method: "POST", headers, body: JSON.stringify({ target, scopeId, fileId, contentType, ...fields }) });
+  const pj = await prep.json().catch(() => ({}));
+  if (!prep.ok) return { stage: "prepare", status: prep.status, ok: false, json: pj, path: null };
+  if (pj.url) {
+    const put = await fetch(pj.url, { method: "PUT", headers: { "Content-Type": contentType, "x-upsert": "false", apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "" }, body: bytes });
+    if (!put.ok) return { stage: "put", status: put.status, ok: false, json: {}, path: pj.path };
+  }
+  const reg = await fetch(`${base}/api/uploads/register`, { method: "POST", headers, body: JSON.stringify({ target, scopeId, path: pj.path, contentType, ...fields }) });
+  const rj = await reg.json().catch(() => ({}));
+  return { stage: "register", status: reg.status, ok: reg.ok, json: rj, path: pj.path };
+}
+
+/** Register a path through THE door without uploading (tests of the door's refusals). */
+export async function doorRegister({ target, scopeId, path, fields = {}, cookie = "" }) {
+  const r = await fetch(`${base}/api/uploads/register`, { method: "POST", headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) }, body: JSON.stringify({ target, scopeId, path, ...fields }) });
+  return { status: r.status, json: await r.json().catch(() => ({})) };
+}

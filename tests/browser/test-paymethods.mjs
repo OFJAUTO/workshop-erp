@@ -5,7 +5,7 @@
 // row, and clearing it ends the task. A bad file reference gets a plain sentence and lands in app_errors.
 //   node --env-file=.env.test.local tests/browser/test-paymethods.mjs   (dev server; E2E_BASE for another port)
 import path from "node:path";
-import { api, base, browserForId, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql, pressRecord } from "./pw-lib.mjs";
+import { api, base, browserForId, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql, pressRecord, doorUpload } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shot = (name) => path.join(here, "shots", name);
@@ -130,10 +130,12 @@ try {
   /* C. A bad file reference: a plain sentence for staff, the technical error kept for us. */
   {
     const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
-    const r = await fetch(`${base}/api/files/register`, { method: "POST", headers: { "content-type": "application/json", cookie: await cookieHeader(MATHEW) }, body: JSON.stringify({ jobId: seed.jobId, path: `${seed.jobId}/x.png`, kind: "payment_proof", refId: "pay:bd614843-6386-48b9-822c-8d4e57ad9f40" }) });
-    const j = await r.json();
+    // THE upload door (audit M15): a real file first (the door checks it arrived), then the bad reference is refused in words.
+    const up = await doorUpload({ target: "job_file", scopeId: seed.jobId, contentType: "image/png", bytes: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64"), fields: { kind: "payment_proof", refId: "pay:bd614843-6386-48b9-822c-8d4e57ad9f40" }, cookie: await cookieHeader(MATHEW) });
+    const r = { status: up.status };
+    const j = up.json;
     check("C: a bad reference gets a plain sentence, no database words", r.status === 400 && /^Couldn't attach the file – nothing was saved/.test(j.error ?? "") && !/uuid|syntax/i.test(j.error ?? ""), j.error);
-    check("C: the technical error is kept in app_errors", (await sql("select count(*)::int as n from public.app_errors where at > $1 and place like 'file register%' and message like '%pay:%'", [mark]))[0].n >= 1);
+    check("C: the technical error is kept in app_errors", (await sql("select count(*)::int as n from public.app_errors where at > $1 and place like '%register%' and message like '%pay:%'", [mark]))[0].n >= 1);
   }
 } catch (e) {
   check("walked without a crash", false, (e?.message ?? String(e)).slice(0, 300));

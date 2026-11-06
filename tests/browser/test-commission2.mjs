@@ -4,7 +4,7 @@
 // "Paid - proof missing" (amber) and sits on accounts' Waiting on you; the export carries the columns.
 // Run: node --env-file=.env.test.local tests/browser/test-commission2.mjs   (dev server on :3100)
 import path from "node:path";
-import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, settle, sleep, sql, doorUpload } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shot = (name) => path.join(here, "shots", name);
@@ -82,16 +82,11 @@ check("3: a technician is refused the voucher", refused.status === 403, `${refus
 
 // Upload the signed proof (a tiny PNG) and watch the amber go.
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
-const fd = new FormData();
-fd.set("payment_id", payA.id);
-fd.set("file", new File([png], "signed-voucher.png", { type: "image/png" }));
-const up = await fetch(`${base}/api/commissions/proof`, { method: "POST", headers: { cookie }, body: fd });
-check("4: the signed voucher uploads", up.status === 200, `${up.status} ${await up.text().then((t) => t.slice(0, 80))}`);
-const fdT = new FormData();
-fdT.set("payment_id", payA.id);
-fdT.set("file", new File([png], "x.png", { type: "image/png" }));
-const upTech = await fetch(`${base}/api/commissions/proof`, { method: "POST", headers: { cookie: techCookie }, body: fdT });
-check("4: a technician cannot upload proof", upTech.status === 403, `${upTech.status}`);
+// THE upload door (audit M15, 7 November 2026).
+const up = await doorUpload({ target: "commission_proof", scopeId: payA.id, contentType: "image/png", bytes: png, cookie });
+check("4: the signed voucher uploads", up.ok, `${up.stage} ${up.status} ${JSON.stringify(up.json).slice(0, 80)}`);
+const upTech = await doorUpload({ target: "commission_proof", scopeId: payA.id, contentType: "image/png", bytes: png, cookie: techCookie });
+check("4: a technician cannot upload proof", upTech.status === 403, `${upTech.stage} ${upTech.status}`);
 await go(page, `${base}/commissions`);
 check("4: after the upload the row shows Proof ✓ and the amber is gone for it", (await page.locator("[data-proof-link]").count()) >= 1 && (await page.locator(`[data-proof-upload="${payA.id}"]`).count()) === 0);
 

@@ -15,7 +15,7 @@ const kindOf = (body: UploadBody) => String(body.kind ?? "");
 
 const jobExists = (jobId: string) => rowExists("jobs", jobId);
 
-/** A team leader adds bodyshop photos only (the rule of /api/files/register), and the film plotter photo of the Materials card. */
+/** A team leader adds bodyshop photos only (the old /api/files/register rule, kept), and the film plotter photo of the Materials card. */
 function kindAllowed(roleId: string | null, kind: string, caption?: unknown): boolean {
   // Payment proofs belong to whoever records payments: accounts and the owner.
   if (kind === "payment_proof") return roleId === "owner" || roleId === "accounts";

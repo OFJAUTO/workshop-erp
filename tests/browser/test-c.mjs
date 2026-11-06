@@ -5,7 +5,7 @@
 // and the PDF page layout. Run against `npx next dev -p 3100`:
 //   node --env-file=.env.test.local tests/browser/test-c.mjs
 import { createRequire } from "node:module";
-import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, doorUpload } from "./pw-lib.mjs";
 
 const require = createRequire(import.meta.url);
 const { check, summary } = makeChecks();
@@ -182,17 +182,11 @@ await section("2 gate-in upload updates the PC", async () => {
   const token = (phoneUrl ?? "").split("/u/")[1];
   check("phone link with token on the PC page", !!token, phoneUrl ?? "");
   // The phone: prepare, put, register through the token, no login.
-  const prep = await fetch(`${base}/api/media/prepare`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId, kind: "video_exterior", contentType: "video/mp4", token }) });
-  const pj = await prep.json();
-  check("phone upload prepared through the token (2)", prep.status === 200 && !!pj.url, JSON.stringify(pj).slice(0, 160));
-  if (pj.url) {
-    const blob = new Uint8Array(2048);
-    const put = await fetch(pj.url, { method: "PUT", headers: { "Content-Type": "video/mp4", "x-upsert": "false", apikey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "" }, body: blob });
-    check("file stored", put.status >= 200 && put.status < 300, String(put.status));
-    const reg = await fetch(`${base}/api/media/register`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId, kind: "video_exterior", path: pj.path, duration: 12, token }) });
-    const rj = await reg.json();
-    check("register answers with the server's checklist (2)", reg.status === 200 && rj.checklist?.videoExterior === true, JSON.stringify(rj).slice(0, 160));
-  }
+  // THE upload door (audit M15, 7 November 2026): prepare, put and register through the token, no login.
+  const up = await doorUpload({ target: "gate_in", scopeId: jobId, contentType: "video/mp4", bytes: new Uint8Array(2048), fields: { kind: "video_exterior", duration: 12, token } });
+  check("phone upload prepared through the token (2)", up.stage !== "prepare", JSON.stringify(up.json).slice(0, 160));
+  check("file stored", up.stage === "register", up.stage);
+  check("register answers with the server's checklist (2)", up.ok && up.json.checklist?.videoExterior === true, JSON.stringify(up.json).slice(0, 160));
   // The PC page must turn the row green on its own, with no reload, within a few seconds.
   let text = "";
   for (let i = 0; i < 12; i++) {
