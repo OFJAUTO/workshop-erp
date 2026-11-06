@@ -1,4 +1,7 @@
 import { compJobChoices } from "@/lib/quote-data";
+import { QuoteSendButton } from "@/components/QuoteSendButton";
+import { sendStateOf } from "@/lib/quote-send-state";
+import { lastResendWords } from "@/lib/quote-message";
 import { belowCostReady, partUnitsReady } from "@/lib/schema-ready";
 import { damagedPanelsOf } from "@/lib/damage-data";
 import Link from "next/link";
@@ -43,11 +46,11 @@ import { OrderPartsNow } from "./OrderPartsNow";
 export const dynamic = "force-dynamic";
 
 /** The estimate builder: the same lines and prices as a quotation, no promised date, sent to a page headed "Estimate". Owner and the advisor who made it only. */
-export default async function EstimatePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string; packages?: string }> }) {
+export default async function EstimatePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string; packages?: string; send?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
   const { id } = await params;
-  const { message, error, packages: openPackages } = await searchParams;
+  const { message, error, packages: openPackages, send } = await searchParams;
   const [bundle, settings, site] = await Promise.all([loadQuotation(id), getSettings(), getSiteUrl()]);
   if (!bundle || bundle.quotation.kind !== "estimate") return refuseRecord("estimate", id);
   const { quotation: q, vehicle, customer } = bundle;
@@ -62,6 +65,9 @@ export default async function EstimatePage({ params, searchParams }: { params: P
   if (!(isOwner || can(role, "viewEstimates"))) redirect("/estimates");
   const mayManage = !staff.viewingAs && (isOwner || mine);
   const canEdit = mayManage && q.status === "draft";
+  // The one send/resend button (6 November 2026), next to Revise.
+  const sendState = sendStateOf(bundle.versions.map((v) => ({ id: v.id, version: v.version, status: v.status })), { kind: "estimate" });
+  const resentWords = await lastResendWords(bundle.versions.map((v) => v.id));
   // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
   const lockFresh = !!q.editing_by && q.editing_by !== staff.id && !!q.editing_at && Date.now() - Date.parse(q.editing_at) < 90000;
   const { data: locker } = lockFresh ? await createAdminClient().from("staff").select("display_name").eq("id", q.editing_by!).maybeSingle() : { data: null };
@@ -142,6 +148,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
             <a href={`/api/pdf/quotation/${q.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">
               Preview PDF
             </a>
+            {mayManage && sendState ? <QuoteSendButton state={sendState} pageHref={`/estimates/${sendState.targetId}`} resentWords={resentWords[sendState.targetId] ?? null} autoOpen={send === "1"} /> : null}
             <DocReviseButton version={q.version} onRevise={mayRevise ? reviseQuotation.bind(null, q.id) : null} />
           </>
         }
@@ -194,6 +201,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         />
       ) : null}
       <QuoteEditor
+        autoSend={send === "1"}
         comp={await compJobChoices(q, null)}
         damagePanels={await damagedPanelsOf(q.job_id)}
         ownerBox={<OwnerApprovalBox q={q} mayApprove={can(role, "approveQuotes") && !staff.viewingAs} discountBy={discountBy} />}

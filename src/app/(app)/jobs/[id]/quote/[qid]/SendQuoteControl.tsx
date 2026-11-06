@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { SendLinkDialog } from "@/components/SendLinkDialog";
 import { Button } from "@/components/ui";
@@ -62,6 +62,15 @@ export function SendQuoteControl({ quotationId, kind, siteUrl, messageTemplate, 
       router.refresh();
     });
 
+  // Arriving with ?send=1 on a first send (6 November 2026): the link is made and the window opens by itself.
+  const autoStarted = useRef(false);
+  useEffect(() => {
+    if (autoOpen && !existingToken && !blocked && !again && !autoStarted.current) {
+      autoStarted.current = true;
+      go();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on arrival
+  }, []);
   return (
     <div className={compact ? "flex flex-wrap items-center gap-2" : "flex flex-col gap-2"}>
       {again ? (

@@ -13,7 +13,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -1843,6 +1843,64 @@ await section("o", "estimate → job exact copy + the red warning + Add the miss
     check(`o2: …and the total equals the estimate again (${t2.q} vs ${t2.e})`, Math.abs(t2.q - t2.e) < 0.005);
     await browser.close();
   }
+});
+
+/* ================================================================================================= */
+/* Path p — always a way to send or resend (6 November 2026, Q-00062): the one button on the job      */
+/* card's quotation list and the page header: Send / greyed with the reason / Resend / Resend v1      */
+/* (v2 not finished); a resend is logged and a declined quote opens for approval again.               */
+/* ================================================================================================= */
+await section("p", "send / resend quote: the one button in every state", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-06-resend-quote";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "quote" })).json;
+  const jobId = seed?.jobId;
+  const qid = seed?.quotationId;
+  if (!jobId || !qid) throw new Error("seed failed");
+  const label = async (page) => ((await page.locator(`[data-quote-row] [data-quote-send]`).first().getAttribute("data-quote-send").catch(() => null)) ?? "");
+  const { browser, page } = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  // p1. Being prepared: "Send to customer" on the card, opening the quotation ready to send.
+  await go(page, `${base}/jobs/${jobId}`);
+  check(`p1: a quotation being prepared shows "Send to customer" on the job card (${await label(page)})`, (await label(page)) === "Send to customer");
+  await page.locator("[data-quote-row]").first().screenshot({ path: `${proof}/p1-card-send-1440.png` });
+  // p2. Waiting for the owner: greyed, with the reason.
+  await sql("update public.quotations set status = 'pending_owner' where id = $1", [qid]);
+  await go(page, `${base}/jobs/${jobId}`);
+  const greyed = page.locator("[data-quote-row] [data-quote-send]").first();
+  check("p2: not ready = greyed with the reason (Waiting for the owner's approval)", (await greyed.getAttribute("data-quote-send-ready")) === "0" && /Waiting for the owner/.test(((await greyed.textContent()) ?? "")));
+  await greyed.screenshot({ path: `${proof}/p2-greyed-not-ready-1440.png` });
+  // p3. Sent: "Resend quote"; the window opens here; the resend is logged and shown.
+  await sql("update public.quotations set status = 'sent', sent_at = now() where id = $1", [qid]);
+  await go(page, `${base}/jobs/${jobId}`);
+  check(`p3: a sent quotation shows "Resend quote" (${await label(page)})`, (await label(page)) === "Resend quote");
+  await page.locator("[data-quote-row] [data-quote-send-open]").first().click();
+  await page.locator("[data-send-message]").waitFor({ timeout: 20000 }).catch(() => null);
+  check("p3: Resend opens the send window with the message", (await page.locator("[data-send-message]").count()) === 1);
+  await page.getByRole("button", { name: /Copy message/ }).first().click();
+  const resent = await until(async () => (await sql("select note from public.quotation_events where quotation_id = $1 and event_type = 'quote_resent' limit 1", [qid]))[0]);
+  check(`p3: the resend is logged ("${resent?.note ?? ""}")`, /resent by /.test(resent?.note ?? ""));
+  await page.keyboard.press("Escape").catch(() => null);
+  await go(page, `${base}/jobs/${jobId}`);
+  check("p3: the card says who resent it and when", /Resent by .+, \d/.test(((await page.locator("[data-quote-row] [data-quote-resent-words]").first().textContent().catch(() => "")) ?? "")));
+  // p4. Declined: Resend opens it for approval again.
+  await sql("update public.quotations set status = 'declined', responded_at = now() where id = $1", [qid]);
+  await go(page, `${base}/jobs/${jobId}/quote/${qid}?send=1`);
+  await page.locator("[data-send-message]").waitFor({ timeout: 20000 }).catch(() => null);
+  check("p4: from the page header (?send=1) the window opens by itself on a declined quote", (await page.locator("[data-send-message]").count()) === 1);
+  await page.getByRole("button", { name: /Copy message/ }).first().click();
+  const back = await until(async () => (await sql("select status from public.quotations where id = $1", [qid]))[0]?.status === "sent");
+  check("p4: …and the declined quote is open for approval again (status sent)", !!back);
+  // p5. A newer version still being prepared: the newest FINISHED version is resent.
+  const v2 = (await sql("insert into public.quotations (kind, number, version, parent_id, status, job_id, customer_id, vehicle_id, vat_percent, validity_days, created_by, updated_by) select kind, number, version + 1, id, 'draft', job_id, customer_id, vehicle_id, vat_percent, validity_days, created_by, created_by from public.quotations where id = $1 returning id", [qid]))[0];
+  await go(page, `${base}/jobs/${jobId}`);
+  check(`p5: v2 being prepared: "${await label(page)}"`, !!v2 && (await label(page)) === "Resend v1 (v2 not finished)");
+  await browser.close();
+  // p6. The 800 px card never slides sideways.
+  const t = await browserFor("owner", { viewport: { width: 800, height: 1280 }, hasTouch: true });
+  await go(t.page, `${base}/jobs/${jobId}`);
+  const sideways = await t.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  check(`p6: the job card at 800 px never slides sideways (${sideways}px)`, sideways <= 1);
+  await t.browser.close();
 });
 
 const failed = summary();

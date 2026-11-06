@@ -1,4 +1,7 @@
 import { compJobChoices } from "@/lib/quote-data";
+import { QuoteSendButton } from "@/components/QuoteSendButton";
+import { sendStateOf } from "@/lib/quote-send-state";
+import { lastResendWords } from "@/lib/quote-message";
 import { PendingChargeNote } from "@/components/PendingChargeNote";
 import { damagedPanelsOf } from "@/lib/damage-data";
 import { invoicesForLock } from "@/lib/quote-lock-server";
@@ -93,6 +96,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const { data: locker } = lockFresh ? await createAdminClient().from("staff").select("display_name").eq("id", q.editing_by!).maybeSingle() : { data: null };
   const lockedBy = lockFresh ? (locker?.display_name ?? "Someone") : null;
   const canSend = !staff.viewingAs;
+  const sendState = sendStateOf(bundle.versions.map((v) => ({ id: v.id, version: v.version, status: v.status })), { kind: q.kind });
+  const resentWords = await lastResendWords(bundle.versions.map((v) => v.id));
   const services = await loadServices(staff.id);
   const [checks, partsWait] = await Promise.all([loadQuoteChecks(id), loadPartsWait(id)]);
   const candidateMap = (settings.custom_jobs_used ?? {}) as Record<string, number>;
@@ -272,6 +277,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
             <a href={`/api/pdf/quotation/${q.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">
               Preview PDF
             </a>
+            {/* ALWAYS A WAY TO SEND OR RESEND (6 November 2026, Q-00062): the one button, next to Revise. */}
+            {canSend && sendState ? <QuoteSendButton state={sendState} pageHref={`/jobs/${id}/quote/${sendState.targetId}`} resentWords={resentWords[sendState.targetId] ?? null} autoOpen={send === "1"} /> : null}
             {/* REVISE AT THE TOP (5 November 2026): the one revise control, next to Preview PDF. */}
             <DocReviseButton
               version={q.version}

@@ -43,6 +43,7 @@ export function EstimateMenu({ id, number, status, neverSent, canManage }: { id:
       {anchor ? (
         <FloatingMenu anchor={anchor} onClose={close} width={240} label={`More for ${number}`}>
           {canExtend ? <Item hook="extend" label={status === "expired" ? "Re-send / extend" : "Re-send (fresh validity)"} onClick={() => { close(); run(async () => { const r = await extendEstimate(id); if (r.error) setError(r.error); else setSend({ message: r.message ?? "", phone: r.phone ?? "", validUntil: r.validUntil ?? "" }); }); }} /> : null}
+          {canManage ? <Item hook="send" label={neverSent ? "Send to customer…" : "Resend estimate…"} onClick={() => { close(); router.push(`/estimates/${id}?send=1`); }} /> : null}
           <Item hook="copy" label="Copy estimate" onClick={() => { close(); run(async () => { const r = await copyEstimate(id); if (r.error) setError(r.error); else router.push(`/estimates/${r.id}?message=${encodeURIComponent(`${r.number} copied from ${number}. The commission is not copied.`)}`); }); }} />
           {canCancel ? <Item hook="cancel" label="Cancel…" red onClick={() => { close(); setReason(""); setDialog("cancel"); }} /> : null}
           {canDelete ? <Item hook="delete" label="Delete…" red onClick={() => { close(); setDialog("delete"); }} /> : null}

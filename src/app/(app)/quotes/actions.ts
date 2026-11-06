@@ -43,6 +43,8 @@ import { compCostWords, compLinesOf, compProblem } from "@/lib/complimentary";
 import { attachPartLineExtras, compCostForBundle } from "@/lib/quote-data";
 import { attachTeams } from "@/lib/line-teams-data";
 import { carryDifferences, carryWarning } from "@/lib/carry-check";
+import { quoteMessageFor } from "@/lib/quote-message";
+import { FINISHED_STATUSES } from "@/lib/quote-send-state";
 import { compReady } from "@/lib/schema-ready";
 
 function refresh(jobId: string | null, quotationId?: string) {
@@ -1292,4 +1294,45 @@ export async function setCustomerPartName(partId: string, formData: FormData): P
     refresh(part.job_id as string);
   }
   return { ok: true, title };
+}
+
+/**
+ * Resend a quotation or an estimate (6 November 2026, Q-00062): the one send/resend button's server half. A finished
+ * version only (sent, opened, approved, urgent-only asked, declined or expired); an expired one gets its new link first.
+ * Returns the customer message for the send window.
+ */
+export async function prepareQuoteResend(quotationId: string): Promise<{ message?: string; phoneDigits?: string; error?: string }> {
+  const bundle = await loadQuotation(quotationId);
+  if (!bundle) return { error: "Quotation not found." };
+  const q = bundle.quotation;
+  const staff = await mayEdit(q.job_id, q.created_by);
+  if (!staff) return { error: "Only the owner and the advisors send quotations." };
+  if (!FINISHED_STATUSES.includes(q.status)) return { error: "Finish it first: open it and press Quotation complete." };
+  if (q.status === "expired") {
+    const r = await resendQuotation(quotationId);
+    if (r.error) return { error: r.error };
+  } else if (!q.token) {
+    return { error: "This version has no customer link yet - open it and send it from there." };
+  }
+  const m = await quoteMessageFor(quotationId, staff.display_name);
+  return m ? { message: m.message, phoneDigits: m.phoneDigits } : { error: "Couldn't build the message - try again." };
+}
+
+/** The resend went out: "Resent by …" on the card; a declined quotation is open for approval again. */
+export async function logQuoteResend(quotationId: string, method: "whatsapp" | "copy"): Promise<{ ok?: boolean; error?: string }> {
+  const bundle = await loadQuotation(quotationId);
+  if (!bundle) return { error: "Quotation not found." };
+  const q = bundle.quotation;
+  const staff = await mayEdit(q.job_id, q.created_by);
+  if (!staff) return { error: "Not allowed." };
+  const admin = createAdminClient();
+  let reopened = false;
+  if (q.status === "declined") {
+    const { error } = await admin.from("quotations").update({ status: "sent", responded_at: null, declined_note: null, declined_by: null, updated_by: staff.id }).eq("id", q.id).eq("status", "declined");
+    if (error) return { error: dbWords(error, "quotes/resend-reopen", { staffId: staff.id }) };
+    reopened = true;
+  }
+  await logQuoteEvent(q.id, q.job_id, staff.id, "quote_resent", `${q.number} v${q.version} resent by ${staff.display_name} (${method === "whatsapp" ? "WhatsApp" : "link copied"})${reopened ? " - the customer can approve it again" : q.status === "approved" ? " - the approved, locked copy" : ""}`);
+  refresh(q.job_id, q.id);
+  return { ok: true };
 }

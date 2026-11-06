@@ -1,4 +1,5 @@
 import { LiveRefresh } from "@/components/LiveRefresh";
+import { QuoteSendMenu } from "@/components/QuoteSendMenu";
 import { Empty, PageHeader } from "@/components/ui";
 import { QuoteListSections, type QuoteListRow } from "@/components/QuoteListSections";
 import { requirePermission } from "@/lib/auth";
@@ -63,6 +64,8 @@ export default async function QuotationsPage() {
       followUp: false,
       versions: versions.filter((v) => v.number === r.number).map((v) => ({ id: v.id, version: Number(v.version) || 1, status: v.status, by: v.created_by && v.created_by !== starters.get(r.number) && v.created_by !== lead ? (names.get(v.created_by) ?? null) : null })),
       versionBase: `/jobs/${r.job_id}/quote/`,
+      // The one send/resend (6 November 2026): from the row's "…" menu; the quotation's page decides which version and whether it is ready.
+      menu: <QuoteSendMenu href={`/jobs/${r.job_id}/quote/${r.id}`} number={r.number} />,
     };
   });
   return (

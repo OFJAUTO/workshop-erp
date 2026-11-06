@@ -3,6 +3,8 @@ import { newQuotation, reviseQuotation } from "@/app/(app)/quotes/actions";
 import { aed } from "@/lib/quotes";
 import { quoteMoney, statusWords, type QuoteFamily } from "@/lib/quote-history";
 import { QuoteVersionSelect } from "./QuoteVersionSelect";
+import { QuoteSendButton } from "./QuoteSendButton";
+import { sendStateOf } from "@/lib/quote-send-state";
 import { Button, LinkButton } from "./ui";
 
 /**
@@ -16,7 +18,7 @@ const REVISABLE = ["sent", "opened", "expired", "declined", "urgent_requested"];
 const PREPARING = ["draft", "pending_owner"];
 const CHIP: Record<QuoteFamily["role"], string | null> = { original: "ORIGINAL", additional: "ADDITIONAL", single: null };
 
-export function QuotationList({ jobId, families, canQuote, jobOpen, kind = "quotation", removedAfterApproval }: { jobId?: string; families: QuoteFamily[]; canQuote: boolean; jobOpen: boolean; kind?: "quotation" | "estimate"; /** Fix 2.5 (4 November 2026): "2 parts removed by Peter after approval" - a quiet line, never a task. */ removedAfterApproval?: string | null }) {
+export function QuotationList({ jobId, families, canQuote, jobOpen, kind = "quotation", removedAfterApproval, canSend = canQuote, resent = {} }: { jobId?: string; families: QuoteFamily[]; canQuote: boolean; jobOpen: boolean; kind?: "quotation" | "estimate"; /** The one send/resend button (6 November 2026): owner and advisors. */ canSend?: boolean; /** "Resent by …" per quotation id. */ resent?: Record<string, string>; /** Fix 2.5 (4 November 2026): "2 parts removed by Peter after approval" - a quiet line, never a task. */ removedAfterApproval?: string | null }) {
   if (!families.length) return null;
   const estimates = kind === "estimate";
   const money = quoteMoney(families);
@@ -56,6 +58,10 @@ export function QuotationList({ jobId, families, canQuote, jobOpen, kind = "quot
                 <a href={`/api/pdf/quotation/${c.id}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold hover:bg-canvas" data-quote-pdf={f.number}>
                   PDF
                 </a>
+                {canSend ? (() => {
+                  const st = sendStateOf(f.versions, { kind });
+                  return st ? <QuoteSendButton state={st} pageHref={openHref(st.targetId)} resentWords={resent[st.targetId] ?? null} /> : null;
+                })() : null}
                 {canQuote && !estimates && REVISABLE.includes(c.status) ? (
                   <form action={reviseQuotation.bind(null, c.id)}>
                     <Button type="submit" tone="secondary" size="md" data-quote-revise={f.number}>Revise</Button>

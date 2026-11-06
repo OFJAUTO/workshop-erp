@@ -1,4 +1,5 @@
 import { compCostOf, loadCompJobs, reworkByOriginal } from "@/lib/comp-data";
+import { lastResendWords } from "@/lib/quote-message";
 import { DamageSection } from "@/components/DamageSection";
 import { DamageFoundAfter } from "@/components/DamageFoundAfter";
 import { loadCarDamage, damageAfterReady } from "@/lib/damage-data";
@@ -814,7 +815,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <Card id="quotation" className={`${tile(quoteBox)}${quoteFamilies.length > 1 ? " col-span-2" : ""}`} data-stage-card="quotation" data-state={quoteBox}>
           <span className={boxTitle(quoteBox)}>{tick(quoteBox)}{quoteFamilies.length > 1 ? `Quotations · ${quoteFamilies.length}` : "Quotation"}</span>
           <span className="text-sm font-semibold">{qState.text}</span>
-          <QuotationList jobId={id} families={quoteFamilies} canQuote={canQuote} jobOpen={job.is_open} removedAfterApproval={removedAfterApproval} />
+          <QuotationList jobId={id} families={quoteFamilies} canQuote={canQuote} jobOpen={job.is_open} removedAfterApproval={removedAfterApproval} resent={await lastResendWords(quoteFamilies.flatMap((f) => f.versions.map((v) => v.id)))} />
           {mayDeclineAll ? <div><DeclinedAllButton jobId={id} fee={Number(job.inspection_fee_aed) || 0} isOwner={role === "owner"} oldWording={oldWording} /></div> : null}
           <div className="flex flex-wrap gap-2 mt-auto">
             {!latestQuote && canQuote && (loose || isQuickJob(job) || inspection?.inspection.status === "approved" || role === "owner") ? (
