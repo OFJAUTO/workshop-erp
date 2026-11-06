@@ -73,6 +73,8 @@ export default async function PartLabelsPage({ params, searchParams }: { params:
           printer={ss.printerPart}
           info={`${labels.length} sticker${labels.length === 1 ? "" : "s"} · ${ss.partW} × ${ss.partH} mm · ${test === "1" ? "test print" : jobNumber}`}
           auto={auto === "1"}
+          pdfHref={test === "1" ? undefined : `/api/pdf/part-labels?job=${jobId}`}
+          testHref="/api/pdf/part-labels?test=1"
           extra={<a href={backHref} style={{ marginLeft: "auto" }}>Back</a>}
         >
           {labels.map((l) => (

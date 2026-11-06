@@ -128,7 +128,11 @@ export default async function ArrivalsPage({ searchParams }: { searchParams: Pro
 
   return (
     <>
-      <PageHeader title="Parts arrivals" subtitle="What is coming, day by day: supplier, car and LPO. Overdue parts sit on top; one tap moves a date and tells the advisor." />
+      <PageHeader
+        title="Parts arrivals"
+        subtitle="What is coming, day by day: supplier, car and LPO. Overdue parts sit on top; one tap moves a date and tells the advisor."
+        actions={<a href="/api/pdf/part-labels?today=1" target="_blank" rel="noopener" className="inline-flex min-h-11 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-arrivals-labels>Print today&apos;s labels</a>}
+      />
       <LiveRefresh tables={["purchase_orders", "part_items"]} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}

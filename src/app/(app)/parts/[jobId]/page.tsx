@@ -196,6 +196,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     // Approved by the customer, not ordered yet: the row is locked, but its cost question can still be answered.
     approvedNotOrdered: p.order_status === "to_order" && !rawById.get(p.id)?.refused_at && !rawById.get(p.id)?.not_needed_at,
     settledFix: endingOfPart(p) ? null : settledFixOf(p),
+    labelHref: Number(rawById.get(p.id)?.received_qty ?? 0) > 0 && !endingOfPart(p) ? `/api/pdf/part-labels?job=${jobId}&parts=${p.id}` : null,
     onLpo: !!rawById.get(p.id)?.po_id,
     orderLabel: endingOfPart(p) ? null : orderLabel(p),
     diagramUrl: p.diagram_path ? (urls[p.diagram_path] ?? null) : null,

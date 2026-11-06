@@ -62,6 +62,8 @@ export type TableRow = {
   /** Ordered or received with a cost that is not real ("AED 1.00 is not a real price", a stand-in supplier): the words,
    *  and "Correct the cost…" on the row (2 November 2026). */
   settledFix?: string | null;
+  /** A received part's QR label (Section 8, 6 November 2026): its 50 × 25 mm PDF, reprinted any time. */
+  labelHref?: string | null;
   /** On an LPO (bought from a supplier): "Correct the cost…" never offers our stock for it. */
   onLpo?: boolean;
   orderLabel: string | null;
@@ -883,6 +885,7 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
                   {estimate ? null : <>
                   {partId && !row.locked ? <MenuItem label="Split into separate parts" onClick={() => { setMenu(null); setSplit(true); }} /> : null}
                   {partId && complete && !row.locked ? <MenuItem label="Add an option for this part" onClick={() => { setMenu(null); onAddOption(); }} /> : null}
+                  {row.labelHref ? <MenuItem label="Print the QR label" onClick={() => { setMenu(null); window.open(row.labelHref!, "_blank", "noopener"); }} /> : null}
                   {partId ? <MenuItem label="Attach diagram" onClick={() => { setMenu(null); fileRef.current?.click(); }} /> : null}
                   {partId && (!row.question || row.answer) ? <MenuItem label="Ask the workshop manager" onClick={() => { setMenu(null); const q = window.prompt("Your question for the workshop manager", "Is this the right part?"); if (q !== null) { const fd = new FormData(); fd.set("question", q); run(() => askManager(partId, fd)); } }} /> : null}
                   {row.requestId && !row.unavailable && !partId ? <MenuItem label="Not available" onClick={() => { setMenu(null); const note = window.prompt("Not available. A note for the advisor (optional)", ""); if (note !== null) { const fd = new FormData(); fd.set("note", note); run(() => markRequestUnavailable(row.requestId!, fd)); } }} /> : null}

@@ -532,7 +532,9 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {(po.status === "received" || po.status === "partly_received") && po.job_id ? (
             <Card className="flex flex-col gap-2">
               <SectionLabel>Next for the workshop</SectionLabel>
-              <LinkButton href={`/parts/labels/${po.job_id}`} tone="secondary" size="md">Print the QR labels</LinkButton>
+              {/* Section 8 (6 November 2026): this LPO's labels as the 50 × 25 mm PDF, one label a page; the sheet to pick fewer. */}
+              <a href={`/api/pdf/part-labels?po=${po.id}`} target="_blank" rel="noopener" className="inline-flex min-h-11 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-lpo-labels-pdf>Print the QR labels</a>
+              <LinkButton href={`/parts/labels/${po.job_id}`} tone="secondary" size="md">Pick which labels</LinkButton>
               {canManage ? <LinkButton href={`/parts/issue/${po.job_id}`} size="md">Issue the parts</LinkButton> : null}
             </Card>
           ) : null}

@@ -8,12 +8,16 @@ import { useEffect, useState, type ReactNode } from "react";
  * button at the top print every ticked sticker in one job, one page each, in order. The print
  * output is the stickers alone: the bar, the tick boxes and the grid chrome all disappear.
  */
-export function StickerSheet({ items, printer, info, auto = false, extra, children }: {
+export function StickerSheet({ items, printer, info, auto = false, extra, pdfHref, testHref, children }: {
   items: { key: string; name: string; qty: string }[];
   printer: string;
   info: string;
   auto?: boolean;
   extra?: ReactNode;
+  /** The label PDF (Section 8): the ticked stickers as exact 50 × 25 mm pages; "&keys=" is added. */
+  pdfHref?: string;
+  /** One sample label with its outline, to check the printer. */
+  testHref?: string;
   children: ReactNode[];
 }) {
   const [off, setOff] = useState<Set<string>>(new Set());
@@ -34,6 +38,12 @@ export function StickerSheet({ items, printer, info, auto = false, extra, childr
         <button type="button" className="print-btn" disabled={!n} onClick={() => window.print()} data-print-selected>
           Print selected ({n}) · {printer}
         </button>
+        {pdfHref ? (
+          <button type="button" disabled={!n} onClick={() => window.open(`${pdfHref}&keys=${items.filter((i) => !off.has(i.key)).map((i) => i.key).join(",")}`, "_blank", "noopener")} data-pdf-selected>
+            PDF of the selected ({n}) · exact size
+          </button>
+        ) : null}
+        {testHref ? <a href={testHref} target="_blank" rel="noopener" data-test-label>Test label</a> : null}
         {extra}
       </div>
       <div className="sheet">

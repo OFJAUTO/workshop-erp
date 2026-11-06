@@ -13,7 +13,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -2171,6 +2171,64 @@ await section("u", "greeting: title + surname in normal case everywhere, the sav
   check(`u5: the preview picture is a small PNG (${buf.length} bytes, ${buf.readUInt32BE(16)} x ${buf.readUInt32BE(20)})`, r.ok && buf.readUInt32BE(16) === 200 && buf.readUInt32BE(20) === 200 && buf.length < 20000);
   await sql("update public.customers set address_as = null where id = $1", [job.customer_id]);
   await browser.close();
+});
+
+/* ================================================================================================= */
+/* Path v — part labels 50 x 25 mm (6 November 2026, Section 8): the PDF is exactly the label, zero      */
+/* margins, one label a page; one per piece, fewer on request; the test label; every field, no price.  */
+/* ================================================================================================= */
+await section("v", "part labels: exact 50 x 25 mm PDF pages, one per piece, fewer, the test label", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-06-stickers";
+  mkdirSync(proof, { recursive: true });
+  const mupdf = await import("mupdf");
+  const cookie = await cookieHeader("parts");
+  const pdfOf = async (path) => {
+    const res = await fetch(`${base}${path}`, { headers: { cookie } });
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!res.ok || !/pdf/.test(res.headers.get("content-type") ?? "")) return { ok: false, status: res.status, text: buf.toString().slice(0, 120) };
+    const doc = mupdf.Document.openDocument(buf, "application/pdf");
+    const pages = doc.countPages();
+    const b = doc.loadPage(0).getBounds();
+    const text = Array.from({ length: pages }, (_, i) => doc.loadPage(i).toStructuredText().asText().replace(/\s+/g, " ")).join(" | ");
+    return { ok: true, buf, doc, pages, w: b[2] - b[0], h: b[3] - b[1], text };
+  };
+  const mm = (pt) => Math.round((pt / 72) * 25.4 * 10) / 10;
+  // The test label.
+  const t = await pdfOf("/api/pdf/part-labels?test=1");
+  check(`v1: the test label is one page of exactly 50 x 25 mm (${t.ok ? `${mm(t.w)} x ${mm(t.h)} mm, ${t.pages} page` : t.status})`, t.ok && t.pages === 1 && mm(t.w) === 50 && mm(t.h) === 25);
+  if (t.ok) {
+    fs.writeFileSync(`${proof}/sample-label.pdf`, t.buf);
+    fs.writeFileSync(`${proof}/sample-label.png`, t.doc.loadPage(0).toPixmap(mupdf.Matrix.scale(8, 8), mupdf.ColorSpace.DeviceRGB, false, true).asPNG());
+    check("v2: the test label carries every field: job, plate, part with side, make and model, LPO, 1 OF 2, received", ["J-00000", "DUBAI A 12345", "FRONT BRAKE PADS SET · FRONT LEFT", "MERCEDES-BENZ S 580", "LPO-00000-1 · 1 OF 2", "Received"].every((x) => t.text.includes(x)), t.text.slice(0, 160));
+  }
+  // A real car: one part received twice = two labels; fewer on request; no price anywhere.
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  if (!seed?.jobId) throw new Error("seed failed");
+  const part = (await sql("select id, description from public.part_items where job_id = $1 and is_active order by created_at limit 1", [seed.jobId]))[0];
+  if (!part) throw new Error("seed failed: no part");
+  const ownerV = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const poV = (await sql("insert into public.purchase_orders (number, job_id, supplier_name, kind, status, total_cost_aed, created_by, updated_by) values ('E2E-LBL-1', $1, 'E2E LABEL SUPPLIER', 'supplier', 'received', 200, $2, $2) returning id", [seed.jobId, ownerV]))[0];
+  const lineV = poV ? (await sql("insert into public.purchase_order_lines (po_id, part_item_id, description, quantity, unit_cost, received_qty, received_at, created_by, updated_by) values ($1, $2, $3, 2, 100, 2, now(), $4, $4) returning id", [poV.id, part.id, part.description, ownerV]))[0] : null;
+  if (!lineV?.id) throw new Error("seed failed: the LPO line");
+  await sql("update public.part_items set received_qty = 2, quantity = 2, po_id = $2, po_line_id = $3 where id = $1", [part.id, poV.id, lineV.id]);
+  const job = (await sql("select job_number from public.jobs where id = $1", [seed.jobId]))[0];
+  const all = await pdfOf(`/api/pdf/part-labels?job=${seed.jobId}&parts=${part.id}`);
+  check(`v3: two pieces = two labels, each page 50 x 25 mm (${all.ok ? all.pages : all.status})`, all.ok && all.pages === 2 && mm(all.w) === 50 && mm(all.h) === 25);
+  check("v4: the car's label shows its job number, the LPO, 1 OF 2 and 2 OF 2, the day received, and no price", all.ok && all.text.includes(job.job_number) && all.text.includes("E2E-LBL-1 · 1 OF 2") && all.text.includes("2 OF 2") && all.text.includes("Received") && !/AED|100\.00/.test(all.text), all.ok ? all.text.slice(0, 200) : "");
+  if (all.ok) fs.writeFileSync(`${proof}/car-labels.pdf`, all.buf);
+  const fewer = await pdfOf(`/api/pdf/part-labels?job=${seed.jobId}&keys=${part.id}-2`);
+  check("v5: fewer on request: only label 2 of 2", fewer.ok && fewer.pages === 1 && fewer.text.includes("2 OF 2") && !fewer.text.includes("1 OF 2"));
+  const today = await pdfOf("/api/pdf/part-labels?today=1");
+  check("v6: today's labels include the part received today", today.ok && today.text.includes(job.job_number));
+  // The print points.
+  const { browser, page } = await browserFor("parts", { viewport: { width: 1440, height: 900 } });
+  await go(page, `${base}/parts/arrivals`);
+  check("v7: Parts arrivals offers today's labels", (await page.locator("[data-arrivals-labels]").count()) === 1);
+  await go(page, `${base}/parts/labels/${seed.jobId}`);
+  check("v8: the label sheet has the exact-size PDF and the test label", (await page.locator("[data-pdf-selected]").count()) === 1 && (await page.locator("[data-test-label]").count()) === 1);
+  await browser.close();
+  const anon = await fetch(`${base}/api/pdf/part-labels?test=1`);
+  check("v9: nobody signed out gets a label", anon.status === 401);
 });
 
 const failed = summary();

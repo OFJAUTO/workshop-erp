@@ -98,6 +98,7 @@ export default async function StickersSettingsPage({ searchParams }: { searchPar
             </div>
             <div className="flex flex-wrap gap-2">
               <a href="/print/sticker-test?kind=part" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm">Print test part sticker (new tab)</a>
+              <a href="/api/pdf/part-labels?test=1" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm" data-test-label>Test label PDF (with its outline)</a>
               <a href="/print/sticker-test?kind=battery" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm">Print test battery sticker (new tab)</a>
               <a href="/print/sticker-test?kind=service" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm">Print test service sticker (new tab)</a>
             </div>
