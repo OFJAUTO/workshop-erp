@@ -13,7 +13,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -2032,6 +2032,44 @@ await section("r", "supplier payments: exact, less, advance, fee, two invoices, 
   check(`r7: every payment is queued for Zoho as one supplier payment (${queued})`, queued >= 6);
   await browser.close();
   await sql("update public.purchase_orders set is_active = false where supplier_id = $1", [sup.id]);
+  await sql("update public.suppliers set is_active = false where id = $1", [sup.id]);
+});
+
+/* ================================================================================================= */
+/* Path s — Zoho to the fils (6 November 2026, Section 5, LPO-00045-1): a bill posted at 962.85 while */
+/* the supplier's paper says 962.86 is shown red with the difference and "Check again in Zoho".      */
+/* ================================================================================================= */
+await section("s", "Zoho to the fils: a posted bill that differs is red, with Check again", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-06-zoho-fils";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const sup = (await sql("insert into public.suppliers (name, trn, vat_registered, created_by, updated_by) values ('E2E AL TAYER FILS', '100200300400502', true, $1, $1) returning id", [ownerId]))[0];
+  const po = (await sql("insert into public.purchase_orders (number, job_id, supplier_id, supplier_name, kind, status, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_vat_aed, zoho_bill_id, zoho_bill_taxed, created_by, updated_by) values ('E2E-FILS-1', $1, $2, 'E2E AL TAYER FILS', 'supplier', 'received', 963, 'received', 'E2E-11768267', current_date, 962.86, 48.14, 'e2e-bill-fils', true, $3, $3) returning id", [jobId, sup?.id, ownerId]))[0];
+  if (!sup?.id || !po?.id) throw new Error("seed failed: the supplier or the LPO");
+  const stored = { bill: "E2E-11768267", lpo: "E2E-FILS-1", zoho: { net: 962.85, vat: 48.14, total: 1010.99, balance: 1010.99 }, erp: { net: 962.85, charges: 0 }, attached: true };
+  const row = (await sql("insert into public.zoho_outbox (kind, record_id, job_id, status, zoho_id, zoho_result, synced_at) values ('bill', $1, $2, 'synced', 'e2e-bill-fils', $3::jsonb, now()) returning id", [po.id, jobId, JSON.stringify(stored)]))[0];
+  if (!row?.id) throw new Error("seed failed: the outbox row");
+  const { browser, page } = await browserFor("accounts", { viewport: { width: 1440, height: 900 } });
+  await go(page, `${base}/zoho?show=synced#z-${row.id}`);
+  const li = page.locator(`#z-${row.id}`);
+  await li.waitFor({ timeout: 20000 });
+  const differs = ((await li.locator("[data-zoho-differs]").textContent().catch(() => "")) ?? "").trim();
+  check(`s1: the posted bill reads red "Zoho differs: 1,010.99 vs 1,011.00 (−0.01)" (${differs.slice(0, 90)})`, differs.includes("Zoho differs: 1,010.99 vs 1,011.00 (−0.01)"));
+  const green = ((await li.locator("[data-zoho-result]").textContent().catch(() => "")) ?? "");
+  check("s2: its words no longer claim it matches", !/matches the ERP/.test(green));
+  check("s3: accounts can check it again in Zoho", (await li.locator("[data-zoho-recheck]").count()) === 1);
+  await li.screenshot({ path: `${proof}/s-zoho-differs-1440.png` }).catch(() => {});
+  // The same bill once Zoho holds the paper's figures: green, "matches the ERP to the fils".
+  await sql("update public.zoho_outbox set zoho_result = $2::jsonb where id = $1", [row.id, JSON.stringify({ ...stored, zoho: { net: 962.86, vat: 48.14, total: 1011, balance: 1011 }, erp: { net: 962.86, vat: 48.14, total: 1011, charges: 0 } })]);
+  await go(page, `${base}/zoho?show=synced&v=2#z-${row.id}`);
+  await li.waitFor({ timeout: 20000 });
+  check("s4: once Zoho holds 962.86 + 48.14 = 1,011.00 it matches to the fils", (await li.locator("[data-zoho-differs]").count()) === 0 && /matches the ERP to the fils/.test(((await li.locator("[data-zoho-result]").textContent().catch(() => "")) ?? "")));
+  await browser.close();
+  await sql("delete from public.zoho_outbox where id = $1", [row.id]);
+  await sql("update public.purchase_orders set is_active = false where id = $1", [po.id]);
   await sql("update public.suppliers set is_active = false where id = $1", [sup.id]);
 });
 

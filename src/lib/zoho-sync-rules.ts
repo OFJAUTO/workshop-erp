@@ -64,8 +64,55 @@ export function itemsWord(n: number): string {
 
 export const aed = (n: number) => `AED ${(Math.round((Number(n) || 0) * 100) / 100).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+type Figures = { net?: number | null; vat?: number | null; total?: number | null };
+const fils = (n: number) => Math.round(Number((n * 100).toPrecision(12)));
+const plain = (n: number) => (fils(n) / 100).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const signed = (n: number) => `${n < 0 ? "−" : "+"}${plain(Math.abs(n))}`;
+
+/**
+ * THE true check of a posted document (6 November 2026, LPO-00045-1): Zoho's figures against the ERP's, each to the
+ * fils. Null when every figure both sides hold is equal, else "1,010.99 vs 1,011.00 (−0.01)" (the total first, then
+ * the net or the VAT by name).
+ */
+export function figuresDiffWords(zoho: Figures, erp: Figures): string | null {
+  for (const key of ["total", "net", "vat"] as const) {
+    const z = zoho[key];
+    const e = erp[key];
+    if (typeof z !== "number" || typeof e !== "number") continue;
+    if (fils(z) === fils(e)) continue;
+    const label = key === "total" ? "" : key === "net" ? "before VAT " : "VAT ";
+    return `${label}${plain(z)} vs ${plain(e)} (${signed((fils(z) - fils(e)) / 100)})`;
+  }
+  return null;
+}
+
+/** The kinds whose posted document can be checked again and corrected (one pass) by their handler. */
+export const RECHECK_KINDS: string[] = ["bill", "invoice"];
+
+/**
+ * A posted row whose figures differ from the ERP's: the red words, else null. `erpNow` (a bill's figures as the ERP
+ * computes them TODAY) wins over the figures stored when it posted - a bill posted before the fils rule stored the
+ * same wrong figure on both sides.
+ */
+export function postedDiffers(kind: string, result: Record<string, unknown> | null | undefined, erpNow?: Figures | null): string | null {
+  const r = result ?? null;
+  if (!r || r.manual === true || typeof r.skipped === "string" || typeof r.reversed === "string") return null;
+  const z = (r.zoho ?? null) as Figures | null;
+  if (!z) return null;
+  if (kind === "bill") {
+    const zoho = { net: z.net ?? null, vat: typeof z.total === "number" && typeof z.net === "number" ? z.total - z.net : null, total: z.total ?? null };
+    const words = figuresDiffWords(zoho, erpNow ?? ((r.erp ?? {}) as Figures));
+    return words ? `Zoho differs: ${words}` : null;
+  }
+  if (kind === "invoice" || kind === "creditnote" || kind === "vendorcredit") {
+    const words = figuresDiffWords({ total: z.total ?? null, vat: kind === "invoice" ? (z.vat ?? null) : null }, (r.erp ?? {}) as Figures);
+    return words ? `Zoho differs: ${words}` : null;
+  }
+  return null;
+}
+
 /** What Zoho holds for a posted row, in plain words (the figures the worker stored next to the ERP's). */
-export function resultWords(kind: string, result: Record<string, unknown> | null | undefined): string | null {
+export function resultWords(kind: string, result: Record<string, unknown> | null | undefined, erpNow?: Figures | null): string | null {
   const r = result ?? null;
   if (!r) return null;
   if (r.manual === true) return `Done by hand by ${String(r.name ?? "accounts")} on ${formatDate(String(r.at ?? ""))}: ${String(r.note ?? "")}`;
@@ -81,7 +128,7 @@ export function resultWords(kind: string, result: Record<string, unknown> | null
   if (kind === "invoice") {
     const z = r.zoho as { total?: number; vat?: number; balance?: number } | undefined;
     if (!z) return null;
-    return `In Zoho: ${aed(z.total ?? 0)} · VAT ${aed(z.vat ?? 0)} · balance ${aed(z.balance ?? 0)} — matches the ERP to the fils`;
+    return `In Zoho: ${aed(z.total ?? 0)} · VAT ${aed(z.vat ?? 0)} · balance ${aed(z.balance ?? 0)}${postedDiffers(kind, r) ? "" : " — matches the ERP to the fils"}`;
   }
   if (kind === "creditnote") {
     const z = r.zoho as { total?: number } | undefined;
@@ -91,7 +138,8 @@ export function resultWords(kind: string, result: Record<string, unknown> | null
   if (kind === "bill") {
     const z = r.zoho as { net?: number; vat?: number; total?: number; balance?: number } | undefined;
     if (!z) return null;
-    return `Bill in Zoho: ${aed(z.net ?? 0)} + VAT ${aed(z.vat ?? 0)} = ${aed(z.total ?? 0)} · due ${aed(z.balance ?? 0)}${r.attached ? " · scan attached" : ""}${r.price_flags ? ` · ${r.price_flags} price flag(s) in the notes` : ""} — matches the ERP to the fils`;
+    const adj = typeof r.vat_adjustment === "number" && r.vat_adjustment !== 0 ? ` · VAT rounding ${aed(r.vat_adjustment)} as the bill's adjustment` : "";
+    return `Bill in Zoho: ${aed(z.net ?? 0)} + VAT ${aed(z.vat ?? 0)}${adj} = ${aed(z.total ?? 0)} · due ${aed(z.balance ?? 0)}${r.attached ? " · scan attached" : ""}${r.price_flags ? ` · ${r.price_flags} price flag(s) in the notes` : ""}${postedDiffers(kind, r, erpNow) ? "" : " — matches the ERP to the fils"}`;
   }
   if (kind === "supplierpay") {
     return `Paid in Zoho${typeof r.amount === "number" ? `: ${aed(r.amount)}` : ""}${typeof r.applied === "number" ? ` · ${aed(r.applied)} on ${String(r.bills ?? "")} bill(s)` : ""}${typeof r.excess === "number" && r.excess > 0 ? ` · ${aed(r.excess)} kept as the advance` : ""}${typeof r.fee === "number" && r.fee > 0 ? ` · fee ${aed(r.fee)} as an expense` : ""}`;

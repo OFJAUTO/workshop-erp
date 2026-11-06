@@ -23,7 +23,7 @@ export async function retryZohoRow(id: string, formData: FormData) {
   let kind: "message" | "error" = "message";
   let words: string;
   try {
-    const r = await retryOneRow(id);
+    const r = await retryOneRow(id, { recheck: formData.get("recheck") === "1" });
     if (r.error) {
       kind = "error";
       words = r.error;

@@ -16,7 +16,7 @@ check("a missing setting is manual", syncModeOf(undefined) === "manual" && syncM
 check("only the exact word 'automatic' is automatic", syncModeOf("automatic") === "automatic" && syncModeOf("Automatic") === "manual" && syncModeOf(true) === "manual" && syncModeOf("manual") === "manual");
 
 // Words.
-check("every kind has its words, and every kind has a posting rank", ZOHO_KINDS.length === 13 && ZOHO_KINDS.every((k) => KIND_WORDS[k] && typeof POSTING_ORDER[k] === "number"));
+check("every kind has its words, and every kind has a posting rank", ZOHO_KINDS.length === 14 && ZOHO_KINDS.every((k) => KIND_WORDS[k] && typeof POSTING_ORDER[k] === "number"));
 check("kind words read as the sync page always did", kindWord("invoice") === "Tax invoice" && kindWord("billpayment") === "Supplier payment" && kindWord("nonsense") === "Document");
 check("counts in a sentence: one and many", kindCount("invoice", 1) === "1 tax invoice" && kindCount("invoice", 5) === "5 tax invoices" && kindCount("settlement", 2) === "2 card settlements");
 check("items: 1 item / 12 items", itemsWord(1) === "1 item" && itemsWord(12) === "12 items" && itemsWord(0) === "0 items");
@@ -186,6 +186,24 @@ check("a tax-period refusal on a bill links straight to its LPO", reasonHref("Zo
 check("the same reason without a document keeps no link", reasonHref("You can specify Tax Treatment only for transactions within tax period.") === null);
 check("a TRN refusal still goes to the suppliers page", reasonHref("E2e Golden Zone needs its 15-digit TRN", { kind: "bill", recordId: "x" })?.href === "/parts/suppliers?filter=no_trn");
 check("a free waiting row says its turn (manual and automatic)", /Sync to Zoho/.test(waitingTurnWords("manual")) && /five-minute run/.test(waitingTurnWords("automatic")));
+
+// THE true check of a posted document (6 November 2026, LPO-00045-1).
+{
+  const { figuresDiffWords, postedDiffers, RECHECK_KINDS } = R;
+  check("figures equal to the fils = no words", figuresDiffWords({ net: 962.86, vat: 48.14, total: 1011 }, { net: 962.86, vat: 48.14, total: 1011.0 }) === null);
+  const w = figuresDiffWords({ net: 962.85, vat: 48.14, total: 1010.99 }, { net: 962.86, vat: 48.14, total: 1011 });
+  check(`the owner's words "1,010.99 vs 1,011.00 (−0.01)" (${w})`, w === "1,010.99 vs 1,011.00 (−0.01)");
+  check("the VAT named when only the VAT differs", figuresDiffWords({ net: 100, vat: 5.01, total: 105 }, { net: 100, vat: 5, total: 105 }) === "VAT 5.01 vs 5.00 (+0.01)");
+  check("floating sums never fake a difference (0.1 + 0.2)", figuresDiffWords({ total: 0.1 + 0.2 }, { total: 0.3 }) === null);
+  const stored = { zoho: { net: 962.85, vat: 48.14, total: 1010.99, balance: 1010.99 }, erp: { net: 962.85, charges: 0 } };
+  check("a bill posted before the rule looks fine on its stored figures…", postedDiffers("bill", stored) === null);
+  check("…and differs against the ERP's figures today", postedDiffers("bill", stored, { net: 962.86, vat: 48.14, total: 1011 }) === "Zoho differs: 1,010.99 vs 1,011.00 (−0.01)");
+  check("its green words no longer claim a match", !/matches the ERP/.test(resultWords("bill", stored, { net: 962.86, vat: 48.14, total: 1011 }) ?? "") && /matches the ERP to the fils/.test(resultWords("bill", stored) ?? ""));
+  check("an invoice whose VAT differs is named", postedDiffers("invoice", { zoho: { total: 105, vat: 5.01, balance: 0 }, erp: { total: 105, vat: 5 } }) === "Zoho differs: VAT 5.01 vs 5.00 (+0.01)");
+  check("a VAT rounding in the bill's adjustment shows in the words", /VAT rounding AED 0.01 as the bill's adjustment/.test(resultWords("bill", { zoho: { net: 100, vat: 5, total: 105.01, balance: 105.01 }, erp: { net: 100, vat: 5.01, total: 105.01 }, vat_adjustment: 0.01 }) ?? ""));
+  check("a done-by-hand row is never red", postedDiffers("bill", { manual: true, zoho: { total: 1 }, erp: { total: 2 } }) === null);
+  check("bills and invoices can be checked again", RECHECK_KINDS.includes("bill") && RECHECK_KINDS.includes("invoice") && !RECHECK_KINDS.includes("payment"));
+}
 
 console.log(failed ? `${failed} FAILED` : "all passed");
 process.exit(failed ? 1 : 0);

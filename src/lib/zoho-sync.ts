@@ -3,6 +3,7 @@ import { DEFAULT_UNDO_MINUTES, heldForUndo } from "./money-undo";
 import { logAppError } from "@/lib/app-errors";
 import { INVOICE_LINE_SELECT, INVOICE_SELECT, PAYMENT_SELECT, toInvoice, toInvoiceLine, toPayment, type InvoiceLineRow, type InvoiceRow, type PaymentRow } from "@/lib/invoice-data";
 import { round2 } from "@/lib/money";
+import { roundHalfUp } from "@/lib/bank-fees";
 import { pageAll } from "@/lib/page-all";
 import { getSettings, type Settings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -11,7 +12,7 @@ import { positionsWords } from "@/lib/parts-list";
 import { returnCreditOf } from "@/lib/part-endings";
 import { schemaReady } from "@/lib/schema-ready";
 import { isTestEnvironment } from "@/lib/environment";
-import { ACCOUNTS_WAIT_WORDS, CLAIM_FRESH_MS, POSTING_ORDER, RATE_LIMIT_WORDS, doneOutcome, isRateLimitError, resultWords, type RunItem } from "@/lib/zoho-sync-rules";
+import { ACCOUNTS_WAIT_WORDS, CLAIM_FRESH_MS, POSTING_ORDER, RATE_LIMIT_WORDS, doneOutcome, figuresDiffWords, isRateLimitError, resultWords, type RunItem } from "@/lib/zoho-sync-rules";
 
 /**
  * Zoho Books, phase 1 (26 October 2026, docs/zoho-plan.md): customers, tax invoices, payments and deposits post to
@@ -1046,7 +1047,7 @@ export async function ensureVendor(org: string, supplierId: string): Promise<str
 
 /* ----------------------------------------------------------- credit notes ----------------------------------------------------------- */
 
-type ZohoCreditNote = { creditnote_id: string; creditnote_number: string; status: string; total: number; balance: number; customer_id?: string };
+type ZohoCreditNote = { creditnote_id: string; creditnote_number: string; status: string; total: number; balance: number; customer_id?: string; sub_total?: number; tax_total?: number };
 
 async function zohoCreditNoteById(org: string, id: string): Promise<ZohoCreditNote | null> {
   try {
@@ -1092,7 +1093,8 @@ async function syncCreditNoteRow(org: string, accounts: Resolved, invoiceId: str
   const contactId = await ensureContact(org, cn.customer_id);
   const lines = (lineRows ?? []).map((r) => toInvoiceLine(r as Record<string, unknown>));
   const incomeKey: IncomeKey = job?.department === "bodyshop" ? "bodyshop" : "other";
-  const matches = (z: ZohoCreditNote) => near(z.total, cn.total_aed);
+  // THE true check (6 November 2026): the total AND the VAT to the fils (a list answer without the VAT counts by its total)
+  const matches = (z: ZohoCreditNote) => near(z.total, cn.total_aed) && (typeof z.tax_total !== "number" || near(z.tax_total, cn.vat_aed));
 
   let z: ZohoCreditNote | null = cn.zoho_creditnote_id ? await zohoCreditNoteById(org, cn.zoho_creditnote_id) : null;
   if (!z) {
@@ -1258,7 +1260,9 @@ export type BillErpFigures = {
   expectedNet: number;
   partsRate: number;
   taxed: boolean;
-  /** What the bill totals in Zoho (net + 5% when the supplier is VAT-registered). */
+  /** The VAT on the supplier's paper (typed), else 5% of the net; 0 for a supplier that charges none. */
+  vat: number;
+  /** What the bill totals in Zoho: net + that VAT. */
   gross: number;
 };
 
@@ -1287,20 +1291,23 @@ export async function billErpFigures(po: PoRow): Promise<BillErpFigures> {
     check: (l.invoice_check ?? null) as string | null,
   }));
   const charges = (chargeRows ?? []).map((c) => ({ description: String(c.description ?? ""), amount: round2(Number(c.amount_aed) || 0) }));
-  const partsNet = round2(lines.reduce((a, l) => a + l.quantity * l.unit, 0));
-  const chargesSum = round2(charges.reduce((a, c) => a + c.amount, 0));
-  const linesTotal = round2(partsNet + chargesSum);
+  const partsNet = roundHalfUp(lines.reduce((a, l) => a + l.quantity * l.unit, 0));
+  const chargesSum = roundHalfUp(charges.reduce((a, c) => a + c.amount, 0));
+  const linesTotal = roundHalfUp(partsNet + chargesSum);
   const entered = po.supplier_invoice_amount;
-  const useEntered = entered != null && entered > 0 && Math.abs(entered - linesTotal) > 0.05;
-  const expectedNet = useEntered ? round2(entered) : linesTotal;
-  const partsRate = round2(expectedNet - chargesSum);
+  // The before-VAT figure typed from the supplier's paper ALWAYS wins, to the fils (6 November 2026, LPO-00045-1: the
+  // line prices summed to 962.85, the paper said 962.86, and a 5-fils tolerance posted 962.85 to Zoho).
+  const useEntered = entered != null && entered > 0 && Math.abs(entered - linesTotal) > 0.004;
+  const expectedNet = useEntered ? roundHalfUp(entered) : linesTotal;
+  const partsRate = roundHalfUp(expectedNet - chargesSum);
   // A posted bill keeps the standing it was posted with; before that, the supplier's switch decides.
   const taxed = po.zoho_bill_taxed ?? (supRow as { vat_registered?: boolean } | null)?.vat_registered !== false;
-  // The invoice's own typed VAT wins (supplier invoice edit, 5 November 2026): suppliers round differently. Zoho still
-  // computes its own 5% on the bill, so a typed VAT more than a few fils off 5% shows as a named reconciliation difference.
+  // The invoice's own typed VAT wins (supplier invoice edit, 5 November 2026): suppliers round differently. Zoho
+  // computes 5% per line; any fils between that and the paper's VAT ride as the bill's adjustment (`zohoVatOf`).
   const typedVat = (poStatusRow as { supplier_invoice_vat_aed?: number | null } | null)?.supplier_invoice_vat_aed;
-  const gross = taxed ? round2(expectedNet + (typedVat != null ? round2(Number(typedVat)) : round2(expectedNet * 0.05))) : expectedNet;
-  return { lines, charges, chargesSum, linesTotal, useEntered, expectedNet, partsRate, taxed, gross };
+  const vat = taxed ? (typedVat != null ? roundHalfUp(Number(typedVat)) : roundHalfUp(expectedNet * 0.05)) : 0;
+  const gross = roundHalfUp(expectedNet + vat);
+  return { lines, charges, chargesSum, linesTotal, useEntered, expectedNet, partsRate, taxed, vat, gross };
 }
 
 /**
@@ -1308,6 +1315,11 @@ export async function billErpFigures(po: PoRow): Promise<BillErpFigures> {
  * the parts go as one summary line at the invoice's NET figures (Zoho adds the 5%), each courier/freight charge
  * is its own line, the price-differs flags ride in the notes and the scan is attached.
  */
+/** "1,010.99 vs 1,011.00 (−0.01)" with the net or the VAT named when they are what differs. */
+function billDiffWords(z: ZohoBill, net: number, vat: number, total: number): string {
+  return figuresDiffWords({ net: z.sub_total, vat: round2(z.total - z.sub_total), total: z.total }, { net, vat, total }) ?? "the figures differ";
+}
+
 async function syncBillRow(org: string, accounts: Resolved, poId: string): Promise<HandlerOut> {
   const admin = createAdminClient();
   const po = await poForZoho(poId);
@@ -1321,7 +1333,7 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   const vendor = await poVendor(org, po);
   const taxed = await vendorVatRegistered(org, po, vendor);
   const vendorId = vendor.vendorId;
-  const { lines, charges, chargesSum, linesTotal, useEntered, expectedNet, partsRate } = await billErpFigures(po);
+  const { lines, charges, chargesSum, linesTotal, useEntered, expectedNet, partsRate, vat: expectedVat, gross: expectedGross } = await billErpFigures(po);
   if (partsRate < -0.005) throw new ZohoError(`${po.number}: the invoice amount entered (${expectedNet.toFixed(2)}) is less than the courier/freight charges on it (${chargesSum.toFixed(2)}): check the figures on the LPO page.`);
   const purchases = needAccounts(accounts.purchases, accounts.purchasesError);
   const flagged = lines.filter((l) => l.check && l.check !== "match");
@@ -1339,20 +1351,28 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   }
   for (const c of charges) line_items.push({ name: cut(c.description, 100), rate: c.amount, quantity: 1, account_id: purchases.courier, ...(taxed ? { tax_id: accounts.taxId } : {}) });
   if (!line_items.length) throw new ZohoError(`${po.number} has nothing to bill (no lines and no charges).`);
+  // Zoho works out 5% per line; the fils between that and the VAT printed on the supplier's paper ride as the bill's
+  // adjustment, so the bill's TOTAL is the paper's to the fils (THE check below still names a VAT that differs).
+  const zohoVat = taxed ? roundHalfUp(line_items.reduce((a, l) => a + roundHalfUp(Number(l.rate) * 0.05), 0)) : 0;
+  const vatAdjust = roundHalfUp(expectedVat - zohoVat);
+  const adjustment = Math.abs(vatAdjust) > 0.004 && Math.abs(vatAdjust) <= 1 ? { adjustment: vatAdjust, adjustment_description: "VAT rounding as printed on the supplier's invoice" } : {};
+  if (Math.abs(vatAdjust) > 1) throw new ZohoError(`${po.number}: the VAT typed from the supplier's invoice (${expectedVat.toFixed(2)}) is more than AED 1 away from 5% of ${expectedNet.toFixed(2)} (${zohoVat.toFixed(2)}): check the VAT on the LPO page.`);
 
-  const matches = (z: ZohoBill) => near(z.sub_total, expectedNet);
+  // THE true check: Zoho's net, VAT and total each equal the ERP's to the fils (a VAT rounding in the adjustment
+  // counts as the paper's VAT).
+  const matches = (z: ZohoBill) => near(z.sub_total, expectedNet) && near(round2(z.total - z.sub_total), expectedVat) && near(z.total, expectedGross);
   let z: ZohoBill | null = po.zoho_bill_id ? await zohoBillById(org, po.zoho_bill_id) : null;
   if (!z) {
     const j = await zohoFetch<{ bills?: ZohoBill[] }>(`/bills?bill_number=${encodeURIComponent(po.supplier_invoice_number)}&vendor_id=${encodeURIComponent(vendorId)}`, { org });
     const found = j.bills?.find((x) => x.bill_number === po.supplier_invoice_number) ?? null;
     const full = found ? await zohoBillById(org, found.bill_id) : null;
-    if (full && !matches(full)) {
+    if (full && !near(full.sub_total, expectedNet) && !near(full.sub_total, linesTotal)) {
       throw new ZohoError(`A bill numbered ${po.supplier_invoice_number} already exists in Zoho for this supplier with different figures (${full.sub_total.toFixed(2)} there, ${expectedNet.toFixed(2)} here) — another LPO may share the same supplier invoice: the accountant combines them in Zoho by hand.`);
     }
     z = full;
   }
   if (!z) {
-    const body = { vendor_id: vendorId, bill_number: po.supplier_invoice_number, date: po.supplier_invoice_date, reference_number: po.number, line_items, notes, is_inclusive_tax: false, tax_treatment: taxed ? "vat_registered" : "vat_not_registered" };
+    const body = { vendor_id: vendorId, bill_number: po.supplier_invoice_number, date: po.supplier_invoice_date, reference_number: po.number, line_items, notes, is_inclusive_tax: false, tax_treatment: taxed ? "vat_registered" : "vat_not_registered", ...adjustment };
     try {
       const j = await zohoFetch<{ bill?: ZohoBill }>("/bills", { org, method: "POST", body });
       z = j.bill ?? null;
@@ -1365,7 +1385,14 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
     }
     if (!z) throw new ZohoError("Zoho did not return the new bill.");
   }
-  if (!matches(z)) throw new ZohoError(`Totals differ for the bill ${po.supplier_invoice_number} (${po.number}): Zoho has ${z.sub_total.toFixed(2)} before VAT, the ERP has ${expectedNet.toFixed(2)}.`);
+  // One corrective pass on OUR bill (posted before the fils rule, or edited since): the same lines again, unless money
+  // was already paid against it in Zoho (then it is the accountant's, in plain words).
+  if (!matches(z)) {
+    if (z.balance + 0.004 < z.total) throw new ZohoError(`Zoho differs: ${billDiffWords(z, expectedNet, expectedVat, expectedGross)}. The bill ${po.supplier_invoice_number} (${po.number}) is already part paid in Zoho: correct it there by hand, then press "Done by hand".`);
+    await zohoFetch(`/bills/${z.bill_id}`, { org, method: "PUT", body: { vendor_id: vendorId, bill_number: po.supplier_invoice_number, date: po.supplier_invoice_date, reference_number: po.number, line_items, notes, is_inclusive_tax: false, tax_treatment: taxed ? "vat_registered" : "vat_not_registered", adjustment: (adjustment as { adjustment?: number }).adjustment ?? 0, adjustment_description: (adjustment as { adjustment_description?: string }).adjustment_description ?? "" } });
+    z = (await zohoBillById(org, z.bill_id)) ?? z;
+  }
+  if (!matches(z)) throw new ZohoError(`Zoho differs: ${billDiffWords(z, expectedNet, expectedVat, expectedGross)} (the bill ${po.supplier_invoice_number}, ${po.number}).`);
   // The VAT standing: the bill must carry what it was posted with (a re-run never re-judges history by today's
   // switch); a new bill, what the supplier's switch says now.
   const postedTaxed = po.zoho_bill_taxed ?? taxed;
@@ -1406,7 +1433,8 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
       bill: po.supplier_invoice_number,
       lpo: po.number,
       zoho: { net: z.sub_total, vat: z.tax_total, total: z.total, balance: z.balance },
-      erp: { net: expectedNet, charges: chargesSum },
+      erp: { net: expectedNet, vat: expectedVat, total: expectedGross, charges: chargesSum },
+      ...(Math.abs(vatAdjust) > 0.004 ? { vat_adjustment: vatAdjust } : {}),
       attached,
       ...(attachNote ? { note: attachNote } : {}),
       ...(flagged.length ? { price_flags: flagged.length } : {}),

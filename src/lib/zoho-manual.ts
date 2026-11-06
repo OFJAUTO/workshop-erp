@@ -21,6 +21,7 @@ import {
   type ZohoKind,
 } from "@/lib/zoho-sync";
 import {
+  RECHECK_KINDS,
   RUN_CAP_TEST_ROWS,
   RUN_STALE_MS,
   buildPreview,
@@ -405,17 +406,23 @@ export async function finishSyncRun(runId: string | null, how: "done" | "stopped
 }
 
 /** Retry: the ONE red row goes back in the queue and is sent at once — never any other row. */
-export async function retryOneRow(id: string): Promise<{ item: RunItem | null; error: string | null }> {
+export async function retryOneRow(id: string, opts: { recheck?: boolean } = {}): Promise<{ item: RunItem | null; error: string | null }> {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return { item: null, error: "Unknown row." };
   const admin = createAdminClient();
   // A row only a human can settle is never re-run: a document in the REAL book's opening balances, or one the
   // accountant already did by hand in Zoho that turned red again when something was added (with no Zoho id the
   // handler could make a second document). THE rule: retryRefusal.
-  const { data: row } = await admin.from("zoho_outbox").select("status, zoho_result").eq("id", id).maybeSingle();
+  const { data: row } = await admin.from("zoho_outbox").select("status, kind, zoho_result").eq("id", id).maybeSingle();
   if (!row) return { item: null, error: "This row is no longer in the queue." };
   const refused = retryRefusal((row as { zoho_result?: Record<string, unknown> | null }).zoho_result);
   if (refused) return { item: null, error: refused };
   if ((row as { status: string }).status === "failed") await admin.from("zoho_outbox").update({ status: "pending", last_error: null, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", id).eq("status", "failed");
+  // "Check again in Zoho" (6 November 2026): a POSTED bill or invoice whose figures differ goes round once more; its
+  // handler finds the same document by its Zoho id, corrects it (one pass) or fails in plain words. Never a second post.
+  if (opts.recheck) {
+    if ((row as { status: string }).status !== "synced" || !RECHECK_KINDS.includes((row as { kind: string }).kind)) return { item: null, error: "Only a posted bill or tax invoice can be checked again." };
+    await admin.from("zoho_outbox").update({ status: "pending", last_error: null, claimed_at: null, updated_at: new Date().toISOString() }).eq("id", id).eq("status", "synced");
+  }
   const r = await runOutboxRows([id], { deadlineMs: Date.now() + CHUNK_MS, fake: e2eFake() });
   const it = r.items[0] ?? null;
   if (!it) return { item: null, error: null };

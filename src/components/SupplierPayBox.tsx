@@ -2,6 +2,7 @@
 
 import { useActionState, useMemo, useState } from "react";
 import { recordSupplierPaymentAction, type PayState } from "@/app/(app)/parts/supplier-payment-actions";
+import { SupplierProofUpload } from "@/app/(app)/parts/orders/[id]/SupplierProofUpload";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { ChoiceButtons, Field, Input, controlClass } from "@/components/ui";
 import { advanceWords, splitOldestFirst, SUPPLIER_PAY_METHOD_KEYS, SUPPLIER_PAY_METHOD_LABELS } from "@/lib/supplier-payment-rules";
@@ -16,7 +17,7 @@ const fmt = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2,
  * link, and what happens to any excess (an advance with the supplier, or a fee / charge). Advances already held with the
  * supplier are offered for accounts to confirm.
  */
-export function SupplierPayBox({ supplierId, supplierName, invoices, advances, preselect, today }: { supplierId: string | null; supplierName: string; invoices: Inv[]; advances: { paymentId: string; number: string; left: number }[]; preselect?: string | null; today: string }) {
+export function SupplierPayBox({ supplierId, supplierName, invoices, advances, preselect, today, paidFromWords, proofScope }: { supplierId: string | null; supplierName: string; invoices: Inv[]; advances: { paymentId: string; number: string; left: number }[]; preselect?: string | null; today: string; paidFromWords?: string; proofScope?: string | null }) {
   const [state, action] = useActionState<PayState, FormData>(recordSupplierPaymentAction, null);
   const start = preselect ? invoices.filter((i) => i.poId === preselect) : invoices;
   const [ticked, setTicked] = useState<Set<string>>(new Set(start.map((i) => i.poId)));
@@ -84,7 +85,10 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
         </Field>
       </div>
       <Field label="How it was paid">
-        <ChoiceButtons name="method" columns={3} defaultValue="transfer" options={SUPPLIER_PAY_METHOD_KEYS.map((k) => ({ value: k, label: SUPPLIER_PAY_METHOD_LABELS[k] }))} />
+        <div data-pay-method>
+          <ChoiceButtons name="method" columns={3} defaultValue="transfer" options={SUPPLIER_PAY_METHOD_KEYS.map((k) => ({ value: k, label: SUPPLIER_PAY_METHOD_LABELS[k] }))} />
+          {paidFromWords ? <p className="pt-1 text-xs text-muted" data-pay-paid-from>Paid from in Zoho — {paidFromWords}</p> : null}
+        </div>
       </Field>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Reference" optional>
@@ -94,6 +98,12 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
           <Input name="note" />
         </Field>
       </div>
+      {proofScope ? (
+        <div className="flex flex-col gap-1 rounded-control border border-dashed border-line-strong p-3" data-pay-proof-area>
+          <span className="text-xs font-semibold text-muted">Proof (bank slip, card slip, link receipt, cheque copy) – optional now, or add it later</span>
+          <SupplierProofUpload poId={proofScope} inForm />
+        </div>
+      ) : null}
       {excess > 0.004 ? (
         <div className="flex flex-col gap-2 rounded-control border-2 border-amber-bar bg-amber-soft px-3 py-2" data-supplier-pay-excess>
           <span className="text-sm font-bold">AED {fmt(excess)} more than the invoices. What is it?</span>
@@ -108,7 +118,7 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
           label="Record the payment"
           title={`Record AED ${fmt(amount)} paid to ${supplierName}?`}
           lines={[`${ticked.size} invoice${ticked.size === 1 ? "" : "s"} · AED ${fmt(put)}`, excess > 0.004 ? `AED ${fmt(excess)} over the invoices` : short > 0.004 ? `Part paid: AED ${fmt(short)} still owed` : "Settles them in full"]}
-          live={[{ field: "method" }, { label: "ref", field: "reference" }]}
+          live={[{ field: "method" }, { label: "ref", field: "reference" }, ...(proofScope ? [{ field: "proof_path", proof: true }] : [])]}
           confirmLabel="Yes, record it"
           hook="supplier-pay"
           attrs={{ "data-supplier-pay-save": "" }}

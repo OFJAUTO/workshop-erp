@@ -5,6 +5,8 @@ import { dbWords } from "@/lib/app-errors";
 import { requireStaff } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordSupplierPayment } from "@/lib/supplier-payments";
+import { objectExists } from "@/lib/upload-targets/common";
+import { JOB_FILES_BUCKET } from "@/lib/work-data";
 import { tryEnqueueZoho } from "@/lib/zoho-sync";
 
 /**
@@ -43,13 +45,21 @@ export async function recordSupplierPaymentAction(_prev: PayState, formData: For
       amount: num(formData.get("amount")),
       lines,
       excessKind: excessRaw === "advance" || excessRaw === "fee" ? excessRaw : null,
-      proofPath: null,
+      proofPath: /^supplier-payments\/[\w./-]+$/.test(String(formData.get("proof_path") ?? "")) ? String(formData.get("proof_path")) : null,
       note: String(formData.get("note") ?? "").trim().slice(0, 500) || null,
       useAdvances,
     },
     staff,
   );
   if (res.error || !res.id) return { error: res.error ? dbWords({ message: res.error }, "parts/supplier-payment") : "Couldn't save – nothing was recorded." };
+  // A proof that arrived WHILE the payment was being saved (its record step looked at the LPO a moment too early) joins
+  // the payment and the LPOs it settled; one still on its way lands on the LPO by itself when it arrives.
+  const pending = String(formData.get("proof_pending") ?? "").trim();
+  if (!formData.get("proof_path") && /^supplier-payments\/[0-9a-f-]{36}\/[\w-]{1,60}\.[a-z]{2,5}$/i.test(pending) && (await objectExists(JOB_FILES_BUCKET, pending))) {
+    const admin = createAdminClient();
+    await admin.from("supplier_payments").update({ proof_path: pending, updated_by: staff.id }).eq("id", res.id).is("proof_path", null);
+    await admin.from("purchase_orders").update({ supplier_paid_proof_path: pending, supplier_paid_proof_at: new Date().toISOString(), supplier_paid_proof_by: staff.id, updated_by: staff.id }).eq("supplier_payment_id", res.id).is("supplier_paid_proof_path", null);
+  }
   await tryEnqueueZoho("supplierpay", res.id, null, staff.id);
   revalidatePath("/parts/orders", "layout");
   revalidatePath("/supplier-invoices");

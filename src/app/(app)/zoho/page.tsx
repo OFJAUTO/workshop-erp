@@ -5,11 +5,11 @@ import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { wentLiveOf, zohoOpenUrl, zohoWriteOrg, type OutboxRow } from "@/lib/zoho-sync";
+import { billErpFigures, poForZoho, wentLiveOf, zohoOpenUrl, zohoWriteOrg, type OutboxRow } from "@/lib/zoho-sync";
 import { ZOHO_REAL_ORG_ID } from "@/lib/zoho";
 import { outboxDocs } from "@/lib/zoho-docs";
 import { loadRecentRuns, loadRun, pendingNeedsMap, waitingCounts } from "@/lib/zoho-manual";
-import { RUN_STALE_MS, SYNC_MODE_WORDS, kindWord, reasonHref, resultWords, retryRefusal, runWords, syncModeOf, waitingTurnWords, type NeedLine, type PendingRow } from "@/lib/zoho-sync-rules";
+import { RECHECK_KINDS, RUN_STALE_MS, SYNC_MODE_WORDS, kindWord, postedDiffers, reasonHref, resultWords, retryRefusal, runWords, syncModeOf, waitingTurnWords, type NeedLine, type PendingRow } from "@/lib/zoho-sync-rules";
 import { pageAll } from "@/lib/page-all";
 import { backfillZoho, markZohoDoneByHand, retryZohoRow, tickGoLiveReview } from "./actions";
 import { ZohoSyncButton } from "./ZohoSyncButton";
@@ -78,6 +78,22 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
   // Zoho's own figures already).
   const liveRows = rows.filter((r) => r.status !== "synced");
   const docs = new Map([...(await outboxDocs(rows.filter((r) => r.status === "synced"))), ...(await outboxDocs(liveRows, { billFigures: true }))]);
+  // A posted bill is compared with what the ERP computes TODAY (6 November 2026, LPO-00045-1: the figure stored when it
+  // posted was the same wrong one on both sides). Capped, so the page stays quick.
+  const billNow = new Map<string, { net: number; vat: number; total: number }>();
+  await Promise.all(
+    rows
+      .filter((r) => r.status === "synced" && r.kind === "bill")
+      .slice(0, 80)
+      .map(async (r) => {
+        try {
+          const f = await billErpFigures(await poForZoho(r.record_id));
+          billNow.set(r.id, { net: f.expectedNet, vat: f.vat, total: f.gross });
+        } catch {
+          /* the row keeps its stored figures */
+        }
+      }),
+  );
   const [waiting, runs, runView] = await Promise.all([waitingCounts(), loadRecentRuns(5), runParam ? loadRun(runParam) : Promise.resolve(null)]);
   // Why a waiting row waits (Mathew, 3 November 2026): the document it hangs on, with the fix link when that one is red.
   const pendingShown: PendingRow[] = rows.filter((r) => r.status === "pending").map((r) => ({ id: r.id, kind: r.kind, record_id: r.record_id, enqueued_at: r.enqueued_at, last_error: r.last_error, claimed_at: null, name: docs.get(`${r.kind}:${r.record_id}`)?.name ?? null, amount: null }));
@@ -239,7 +255,8 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
           <ul className="divide-y divide-line">
             {filtered.map((r) => {
               const name = docs.get(`${r.kind}:${r.record_id}`)?.name ?? r.record_id.slice(0, 8);
-              const words = resultWords(r.kind, r.zoho_result);
+              const words = resultWords(r.kind, r.zoho_result, billNow.get(r.id));
+              const differs = r.status === "synced" ? postedDiffers(r.kind, r.zoho_result, billNow.get(r.id)) : null;
               return (
                 <li key={r.id} id={`z-${r.id}`} className="py-3 flex flex-col gap-1.5 scroll-mt-24" data-zoho-row={r.status}>
                   <div className="flex flex-wrap items-center gap-2">
@@ -247,7 +264,7 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
                     <Badge tone="outline">{kindWord(r.kind)}</Badge>
                     <span className="font-bold">{name}</span>
                     <span className="flex-1" />
-                    {r.status === "synced" ? <Badge tone="green">Posted ✓</Badge> : r.status === "failed" ? <Badge tone="red">Failed</Badge> : <Badge tone="amber">Waiting</Badge>}
+                    {r.status === "synced" ? (differs ? <Badge tone="red">Posted · differs</Badge> : <Badge tone="green">Posted ✓</Badge>) : r.status === "failed" ? <Badge tone="red">Failed</Badge> : <Badge tone="amber">Waiting</Badge>}
                     {maySync && r.status === "pending" ? <SyncThisButton id={r.id} /> : null}
                   </div>
                   <p className="text-xs text-muted">
@@ -255,7 +272,18 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
                     {r.synced_at ? ` · posted ${formatDateTime(r.synced_at)}` : ""}
                     {r.attempts > 1 ? ` · ${r.attempts} tries` : ""}
                   </p>
-                  {words ? <p className="text-sm font-semibold text-green" data-zoho-result><Words text={words} /></p> : null}
+                  {words ? <p className={`text-sm font-semibold ${differs ? "text-muted" : "text-green"}`} data-zoho-result><Words text={words} /></p> : null}
+                  {differs ? (
+                    <div className="flex flex-wrap items-center gap-2" data-zoho-differs>
+                      <span className="text-sm font-bold text-red"><Words text={differs} /></span>
+                      {maySync && RECHECK_KINDS.includes(r.kind) ? (
+                        <form action={retryZohoRow.bind(null, r.id)}>
+                          <input type="hidden" name="recheck" value="1" />
+                          <Button type="submit" tone="secondary" size="md" data-zoho-recheck>Check again in Zoho</Button>
+                        </form>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {r.last_error && r.status !== "synced" ? (
                     <p className="text-sm text-red font-semibold" data-zoho-reason>
                       <Words text={r.last_error} />

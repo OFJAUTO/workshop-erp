@@ -296,13 +296,14 @@ await section("7e supplier payment method and proof", async () => {
     await go(page, `${base}/parts/orders/${po.id}`);
     check("7e: the pay form asks how it was paid (bank transfer by default) and shows the account each method pays from", (await page.locator("[data-pay-method] input[value=transfer]").isChecked()) && /Paid from in Zoho — Bank transfer: /.test((await page.locator("[data-pay-method]").textContent()) ?? ""));
     await page.locator("[data-pay-method] label", { hasText: "Cash" }).click();
-    await page.locator('[data-pay-form] input[name="reference"]').fill("Receipt 77");
+    // 6 November 2026 (Section 4): the payment box with its amount replaced the one-LPO form; method, paid-from, reference and proof stay.
+    await page.locator('[data-supplier-pay-box] input[name="reference"]').fill("Receipt 77");
     await page.locator("[data-pay-proof]").setInputFiles({ name: "receipt.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n%%EOF\n") });
-    await confirmMoney(page, "supplier-paid");
-    await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
+    await confirmMoney(page, "supplier-pay");
+    await page.locator("[data-supplier-pay-done], [data-supplier-pay-error]").first().waitFor({ timeout: 30000 }).catch(() => null);
     const row = await until(async () => { const r = (await sql("select supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path from public.purchase_orders where id = $1", [po.id]))[0]; return r?.supplier_paid_method === "cash" && r?.supplier_paid_proof_path ? r : null; });
     // 31 October 2026: the proof goes by the send queue and lands on the LPO a moment after "Paid" (waited for above).
-    check("7e: paid by cash, with the reference and the proof stored", row?.supplier_paid_method === "cash" && row?.supplier_paid_reference === "Receipt 77" && /^supplier-payments\//.test(row?.supplier_paid_proof_path ?? ""), JSON.stringify(row));
+    check("7e: paid by cash, with the reference and the proof stored", row?.supplier_paid_method === "cash" && /Receipt 77$/.test(row?.supplier_paid_reference ?? "") && /^supplier-payments\//.test(row?.supplier_paid_proof_path ?? ""), JSON.stringify(row ?? { po: (await sql("select supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path from public.purchase_orders where id = $1", [po.id]))[0], pays: await sql("select method, amount_aed::float8 as a, proof_path from public.supplier_payments where supplier_id = $1", [sup.id]), box: ((await page.locator("[data-supplier-pay-error], [data-supplier-pay-done]").first().textContent().catch(() => "")) ?? "").slice(0, 120) }));
     await park("billpayment", po.id);
     await park("bill", po.id);
     await go(page, `${base}/parts/orders/${po.id}`);
