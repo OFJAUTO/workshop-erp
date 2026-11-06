@@ -58,6 +58,14 @@ node --env-file=.env.local scripts/bootstrap-owner.mjs --email <owner email> --n
 6. Timing report at the end of every batch: how long each section took, plus the total time spent on tests, builds and deploy waits.
 7. TESTS NEVER TOUCH THE LIVE DATABASE (standing rule from 30 October 2026, after test invoices reached Zoho and tests used up real job, customer and estimate numbers). Every test, proof screenshot and layout check runs against the TEST Supabase project (`workshop-erp-test`, about USD 10 a month, approved by the owner) through a test server: `npm run test:server` (production build, port 3102) or `npm run dev:test` (port 3101), both on `.env.test.local` (`ERP_ENV=test`). The live site gets READ-ONLY checks only: `npm run check:live` (pages open with no errors, signed-out visitors sent to sign in, cron refuses without its secret, the database's rules read-only). Nothing is created, changed or deleted on live by a test, ever: no test documents, no sign-ins, no forms, no cron calls with the secret. The guards: the /api/e2e routes refuse unless the server is the test server on a non-live project (`isTestEnvironment` in `src/lib/environment.ts`), `pw-lib` refuses to start without `ERP_ENV=test`, `tests/e2e-cleanup.sql` refuses unless `settings.database_role = 'test'` (live says 'live'), and the Zoho door refuses the REAL organization outright on the test server. Set-up: `npm run test:db:create` (once), `npm run test:db:migrate` (after every new migration, as well as applying it to live), `npm run test:db:copy` (a fresh copy of the live records with customers' names, phones, emails and addresses replaced everywhere, staff PINs 1234; the live connection is read-only for the run).
 
+## Cost rules (standing, from 6 November 2026; the owner's usage limit is spent, every step costs money)
+
+1. Test output goes to a file. Read only the pass/fail summary and the failing parts; never read a full test log into the conversation.
+2. Proof screenshots are saved to `docs/proof/<date>-<section>/` and the owner gets the file list. Look at a screenshot only to check a layout that was changed, at most 2 per section. Never re-open old ones.
+3. No subagents, workflows, Ultracode or parallel agents unless the owner asks. Find code with grep and read only the files, and the parts of files, that are needed.
+4. Never re-run a test that already passed unless the code it covers changed.
+5. After each finished batch, write a short handover (at most 15 lines) to `docs/handover.md`: what is live, what is on WAITING FOR APPLY, what is left in the queue. The owner can then /clear safely between batches.
+
 ## Phases
 
 1. Foundation (done): logins, roles, PINs, tablets, customers, contacts, cars, photos, settings, change log.
