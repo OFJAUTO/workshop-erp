@@ -1,4 +1,5 @@
 import { SupplierAmount } from "@/components/SupplierAmount";
+import { advanceWords } from "@/lib/supplier-payment-rules";
 import { moneyFrom } from "@/lib/supplier-money";
 import Link from "next/link";
 import { Fragment } from "react";
@@ -147,7 +148,7 @@ function PayLinks({ r }: { r: SupplierBalance["invoices"][number] }) {
   );
 }
 
-export function PaymentsTab({ rows, canPay }: { rows: SupplierBalance[]; canPay: boolean }) {
+export function PaymentsTab({ rows, canPay, advances = {} }: { rows: SupplierBalance[]; canPay: boolean; /** "Advance with Gargash AED X" by supplier id or upper-case name (6 November 2026). */ advances?: Record<string, number> }) {
   return (
     <section className="flex flex-col gap-2" data-pa-list="payments">
       {rows.length === 0 ? <Card><p className="text-sm text-muted">No supplier invoices match.</p></Card> : null}
@@ -159,6 +160,7 @@ export function PaymentsTab({ rows, canPay }: { rows: SupplierBalance[]; canPay:
             {b.needsTrn ? <Badge tone="red" data-pa-no-trn>{NO_TRN_WORDS}</Badge> : !b.vatRegistered ? <Badge tone="neutral">Not VAT registered</Badge> : null}
             {b.proofMissingCount ? <Badge tone="red" data-pa-proof-missing>{b.proofMissingCount} paid without proof</Badge> : null}
             {b.terms ? <span className="text-xs text-muted">Terms: {b.terms}</span> : null}
+            {(advances[b.supplierId ?? ""] ?? advances[b.supplier.toUpperCase()]) ? <Badge tone="green" data-pa-advance>{advanceWords(b.supplier, advances[b.supplierId ?? ""] ?? advances[b.supplier.toUpperCase()])}</Badge> : null}
             <span className={`ml-auto whitespace-nowrap text-sm font-extrabold ${b.unpaid > 0 ? "" : "text-green"}`} data-pa-unpaid={b.unpaid.toFixed(2)}>{b.unpaid > 0 ? `Unpaid ${money(b.unpaid)} (${b.unpaidCount})` : "Nothing unpaid ✓"}</span>
           </div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">

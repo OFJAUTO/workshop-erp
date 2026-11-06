@@ -10,6 +10,8 @@ import { supplierChargesVat } from "./supplier-rules";
 
 export type SiPo = {
   id: string;
+  /** What the recorded supplier payments put on this LPO (6 November 2026); a part payment shows as part paid. */
+  paid_aed?: number;
   number: string;
   job_id: string | null;
   supplier_id: string | null;
@@ -153,7 +155,9 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
     const total = r2(beforeVat + vat);
     // Paid LPO by LPO: the paid shares with their VAT, the rest still to pay (all or nothing is exactly the total).
     const paidShares = shares.filter((s) => s.paidAt);
-    const paidAmount = paidShares.length === shares.length ? total : paidShares.length === 0 ? 0 : r2(paidShares.reduce((a, s) => a + s.withVat, 0));
+    // A recorded payment may cover part of an LPO (6 November 2026): what it put on each LPO counts, never more than it owes.
+    const paidOf = (s: InvoiceShare) => (s.paidAt ? s.withVat : Math.min(r2(items.find((p) => p.id === s.poId)?.paid_aed ?? 0), s.withVat));
+    const paidAmount = paidShares.length === shares.length ? total : r2(shares.reduce((a, s) => a + paidOf(s), 0));
     const mine = lines.filter((l) => items.some((p) => p.id === l.po_id));
     const match: InvoiceMatch[] = [];
     if (!mine.length) match.push("not_linked");
@@ -203,7 +207,7 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
       status,
       duplicateOf,
       paid: items.every((p) => !!p.paid_at),
-      partlyPaid: paidShares.length > 0 && paidShares.length < shares.length,
+      partlyPaid: paidAmount > 0.004 && paidAmount < total - 0.004,
       paidAmount,
       unpaidAmount: r2(total - paidAmount),
       paidAt: paidPo?.paid_at ?? null,

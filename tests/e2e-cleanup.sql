@@ -53,6 +53,13 @@ begin
   delete from public.inspection_media where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.inspection_change_requests where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.supplier_invoice_edits where po_id in (select id from public.purchase_orders where job_id = any(job_ids));
+  -- Supplier payments (6 November 2026): their lines on these LPOs, the LPOs' pointer, the test suppliers' payments.
+  if to_regclass('public.supplier_payment_lines') is not null then
+    delete from public.supplier_payment_lines where po_id in (select id from public.purchase_orders where job_id = any(job_ids)) or payment_id in (select id from public.supplier_payments where supplier_name like 'E2E%');
+    update public.purchase_orders set supplier_payment_id = null where job_id = any(job_ids) or supplier_name like 'E2E%';
+    delete from public.zoho_outbox where kind = 'supplierpay' and record_id in (select id from public.supplier_payments where supplier_name like 'E2E%');
+    delete from public.supplier_payments where supplier_name like 'E2E%';
+  end if;
   delete from public.purchase_order_lines where po_id in (select id from public.purchase_orders where job_id = any(job_ids));
   delete from public.price_import_lines where import_id in (select id from public.price_imports where job_id = any(job_ids));
   delete from public.supplier_charges where job_id = any(job_ids);
@@ -121,6 +128,13 @@ begin
   delete from public.inspection_media where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.inspection_change_requests where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.supplier_invoice_edits where po_id in (select id from public.purchase_orders where job_id = any(job_ids));
+  -- Supplier payments (6 November 2026): their lines on these LPOs, the LPOs' pointer, the test suppliers' payments.
+  if to_regclass('public.supplier_payment_lines') is not null then
+    delete from public.supplier_payment_lines where po_id in (select id from public.purchase_orders where job_id = any(job_ids)) or payment_id in (select id from public.supplier_payments where supplier_name like 'E2E%');
+    update public.purchase_orders set supplier_payment_id = null where job_id = any(job_ids) or supplier_name like 'E2E%';
+    delete from public.zoho_outbox where kind = 'supplierpay' and record_id in (select id from public.supplier_payments where supplier_name like 'E2E%');
+    delete from public.supplier_payments where supplier_name like 'E2E%';
+  end if;
   delete from public.purchase_order_lines where po_id in (select id from public.purchase_orders where job_id = any(job_ids));
   delete from public.price_import_lines where import_id in (select id from public.price_imports where job_id = any(job_ids));
   delete from public.supplier_charges where job_id = any(job_ids);

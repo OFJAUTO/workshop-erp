@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { advancesBySupplier } from "@/lib/supplier-payments";
+import { advanceWords } from "@/lib/supplier-payment-rules";
 import { Badge, Button, Card, Empty, Field, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { can, type RoleId } from "@/lib/roles";
@@ -64,6 +66,7 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
   const { data } = await admin.from("suppliers").select(`id, name, trn, vat_registered, phone, email, address, payment_terms, notes, is_active, default_discount_percent, discount_by_type${contactOn ? ", contact_name" : ""}`).order("name");
   const all = (data ?? []) as unknown as Supplier[];
   // THE unpaid figure (the Supplier invoices tab's), keyed by the supplier's id.
+  const advanceOf = await advancesBySupplier();
   const unpaidOf = new Map(unpaidBySupplier(invoiceRows).filter((u) => u.supplierId).map((u) => [u.supplierId as string, u]));
   const listed = show === "all" ? all : all.filter((s) => s.is_active);
   const searched = listed.filter((s) => supplierSearchHit(s, q));
@@ -145,6 +148,7 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
                   <Button type="submit" tone="ghost" size="md">{s.is_active ? "Take off the list" : "Put back on the list"}</Button>
                 </form>
               </details>
+              {(advanceOf.get(s.id) ?? advanceOf.get(s.name.toUpperCase())) ? <span className="inline-flex min-h-11 w-fit items-center rounded-card border border-green bg-green-soft px-3 py-1 text-xs font-bold text-green" data-supplier-advance>{advanceWords(s.name, advanceOf.get(s.id) ?? advanceOf.get(s.name.toUpperCase()) ?? 0)}</span> : null}
               {unpaid ? (
                 <Link href={unpaidHref(s.id)} className="inline-flex min-h-11 w-fit flex-wrap items-center gap-2 rounded-card border border-line-strong px-3 py-1 text-xs font-bold" data-supplier-unpaid={unpaid.total.toFixed(2)}>
                   <span>Unpaid ({unpaid.count})</span>

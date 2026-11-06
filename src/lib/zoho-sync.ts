@@ -72,6 +72,7 @@ export const SUPPLIER_PAY_METHODS = [
   { key: "card", label: "Card" },
   { key: "cash", label: "Cash" },
   { key: "cheque", label: "Cheque" },
+  { key: "link", label: "Payment link" },
 ] as const;
 export type SupplierPayKey = (typeof SUPPLIER_PAY_METHODS)[number]["key"];
 
@@ -119,7 +120,7 @@ export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Reco
     recovery: "Recovery and transport",
   },
   paidFrom: "Bank - AED",
-  paidFromBy: { transfer: "Bank - AED", card: "Company card", cash: "Petty Cash", cheque: "Bank - AED" },
+  paidFromBy: { transfer: "Bank - AED", card: "Company card", cash: "Petty Cash", cheque: "Bank - AED", link: "Bank - AED" },
   bankCharges: "Bank Fees and Charges",
   bankTxnFees: "Bank Fees and Charges",
   advances: "Customer advances",
@@ -357,7 +358,7 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
 
 /* ------------------------------------------------------- the outbox ------------------------------------------------------- */
 
-export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery" | "vendorcredit" | "cnrefund" | "settlement";
+export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery" | "vendorcredit" | "cnrefund" | "settlement" | "supplierpay";
 export type OutboxRow = {
   id: string;
   kind: ZohoKind;
@@ -1418,9 +1419,91 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
  * (bank transfer / card / cash / cheque) from the account the mapping names for it (else the general paid-from),
  * with the proof attached when Zoho takes it.
  */
+/**
+ * A SUPPLIER PAYMENT WITH ITS AMOUNT (6 November 2026, Section 4): ONE vendor payment for the money that left, applied
+ * to each bill it covers; whatever is left over stays in Zoho as the payment's excess (the advance with the supplier).
+ * A fee / charge part posts as an expense. An advance applied later to a new bill is applied to the same vendor
+ * payment. A payment voided in the ERP after it posted is removed from Zoho. Idempotent by the payment's number.
+ */
+async function syncSupplierPayRow(org: string, accounts: Resolved, paymentId: string): Promise<HandlerOut> {
+  const admin = createAdminClient();
+  const { data: pRow } = await admin.from("supplier_payments").select("id, number, supplier_id, supplier_name, paid_on, method, reference, amount_aed, excess_kind, fee_aed, status, zoho_payment_id, zoho_fee_expense_id").eq("id", paymentId).maybeSingle();
+  if (!pRow) return { result: { skipped: "The payment no longer exists in the ERP." } };
+  const pay = pRow as { id: string; number: string; supplier_id: string | null; supplier_name: string; paid_on: string; method: string; reference: string | null; amount_aed: number; excess_kind: string | null; fee_aed: number; status: string; zoho_payment_id: string | null; zoho_fee_expense_id: string | null };
+  if (pay.status === "void") {
+    if (!pay.zoho_payment_id) return { result: { skipped: "Voided in the ERP before it reached Zoho: nothing to post." } };
+    let gone = false;
+    try {
+      await zohoFetch(`/vendorpayments/${encodeURIComponent(pay.zoho_payment_id)}`, { org });
+    } catch (e) {
+      if (e instanceof ZohoError && /not exist|not found|invalid.*payment/i.test(e.message)) gone = true;
+      else throw e;
+    }
+    if (!gone) await zohoFetch(`/vendorpayments/${encodeURIComponent(pay.zoho_payment_id)}`, { org, method: "DELETE" });
+    await admin.from("supplier_payments").update({ zoho_payment_id: null }).eq("id", pay.id);
+    return { zohoId: pay.zoho_payment_id, result: { payment: pay.number, reversed: gone ? "already removed in Zoho" : "removed from Zoho", reversed_at: new Date().toISOString() } };
+  }
+  const gate = await startDateSkip(pay.paid_on, "supplierpay", pay.id);
+  if (gate) return gate;
+  if (!pay.supplier_id) throw new ZohoError(`${pay.number}: the supplier ${pay.supplier_name} is not on the suppliers list, so Zoho has no vendor for it. Add it on Parts > Suppliers, then Retry.`);
+  const { data: lineRows } = await admin.from("supplier_payment_lines").select("po_id, amount_aed, applied_later").eq("payment_id", pay.id).eq("is_active", true);
+  const lines = ((lineRows ?? []) as { po_id: string; amount_aed: number; applied_later: boolean }[]).map((l) => ({ poId: l.po_id, amount: round2(Number(l.amount_aed) || 0), later: !!l.applied_later }));
+  // Every bill first: a payment applies only to bills Zoho already has.
+  const bills: { bill_id: string; amount_applied: number }[] = [];
+  for (const l of lines) {
+    const po = await poForZoho(l.poId);
+    if (!po.zoho_bill_id) {
+      await ensureQueued("bill", po.id, po.job_id);
+      return { wait: `Waiting for the bill of ${po.number} to reach Zoho first.` };
+    }
+    bills.push({ bill_id: po.zoho_bill_id, amount_applied: l.amount });
+  }
+  const fee = round2(Number(pay.fee_aed) || 0);
+  const amount = round2((Number(pay.amount_aed) || 0) - fee);
+  const applied = round2(bills.reduce((a, b) => a + b.amount_applied, 0));
+  const vendorId = await ensureVendor(org, pay.supplier_id);
+  const method = (SUPPLIER_PAY_METHODS.find((m) => m.key === pay.method)?.key ?? "transfer") as SupplierPayKey;
+  const methodError = accounts.paidFromByError?.[method];
+  if (methodError) throw new ZohoError(methodError);
+  const paidThrough = accounts.paidFromBy?.[method] ?? needAccounts(accounts.paidFrom, accounts.paidFromError);
+  let zid = pay.zoho_payment_id;
+  if (!zid) {
+    const j = await zohoFetch<{ vendorpayments?: { payment_id: string; reference_number?: string }[] }>(`/vendorpayments?reference_number=${encodeURIComponent(pay.number)}&vendor_id=${encodeURIComponent(vendorId)}`, { org });
+    zid = j.vendorpayments?.find((x) => x.reference_number === pay.number)?.payment_id ?? null;
+  }
+  if (!zid) {
+    const created = await zohoFetch<{ vendorpayment?: { payment_id: string } }>("/vendorpayments", {
+      org,
+      method: "POST",
+      body: { vendor_id: vendorId, amount, date: pay.paid_on, payment_mode: MODE[method], paid_through_account_id: paidThrough, reference_number: pay.number, description: cut(`${pay.number} · ${pay.supplier_name}${pay.reference ? ` · ${pay.reference}` : ""}`, 200), bills },
+    });
+    zid = created.vendorpayment?.payment_id ?? null;
+    if (!zid) throw new ZohoError("Zoho did not return the new vendor payment.");
+  } else if (lines.some((l) => l.later)) {
+    // An advance used on a later bill: the same vendor payment now applies to it too.
+    await zohoFetch(`/vendorpayments/${encodeURIComponent(zid)}`, { org, method: "PUT", body: { vendor_id: vendorId, amount, date: pay.paid_on, payment_mode: MODE[method], paid_through_account_id: paidThrough, reference_number: pay.number, bills } });
+  }
+  await admin.from("supplier_payments").update({ zoho_payment_id: zid }).eq("id", pay.id);
+  // The fee / charge part: an expense paid from the same account, once.
+  let feeId = pay.zoho_fee_expense_id;
+  if (fee > 0.004 && !feeId) {
+    const feeAccount = needAccounts(accounts.bankCharges, accounts.bankChargesError);
+    const ex = await createExpense(org, { accountId: feeAccount, paidThroughId: paidThrough, date: pay.paid_on, amount: fee, reference: `${pay.number} fee`, description: cut(`Fee / charge on ${pay.number} to ${pay.supplier_name}`, 200) });
+    feeId = ex.expense_id;
+    await admin.from("supplier_payments").update({ zoho_fee_expense_id: feeId }).eq("id", pay.id);
+  }
+  // The true check: what Zoho holds for the payment equals the ERP to the fils.
+  const vp = await zohoFetch<{ vendorpayment?: { amount?: number } }>(`/vendorpayments/${zid}`, { org });
+  const zAmount = round2(Number(vp.vendorpayment?.amount) || 0);
+  if (Math.abs(zAmount - amount) > 0.004) throw new ZohoError(`Zoho differs: ${zAmount.toFixed(2)} vs ${amount.toFixed(2)} (${(zAmount - amount).toFixed(2)}) on ${pay.number}.`);
+  return { zohoId: zid, result: { payment: pay.number, amount, applied, bills: bills.length, excess: round2(amount - applied), fee, method: SUPPLIER_PAY_METHODS.find((m) => m.key === method)?.label ?? method } };
+}
+
 async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string): Promise<HandlerOut> {
   const admin = createAdminClient();
   const po = await poForZoho(poId);
+  const { data: viaPayment } = await admin.from("purchase_orders").select("supplier_payment_id").eq("id", poId).maybeSingle();
+  if ((viaPayment as { supplier_payment_id?: string | null } | null)?.supplier_payment_id) return { result: { skipped: "Paid by a recorded supplier payment: that payment posts it (once)." } };
   if (/^our stock$/i.test(po.supplier_name.trim())) return { result: { skipped: "An Our-stock LPO is internal (our own shelf): no supplier payment." } };
   if (!po.supplier_paid_at && po.zoho_billpayment_id) {
     // "Paid to supplier" reversed in the ERP after it posted (1 November 2026, B3): the vendor payment is deleted
@@ -2081,6 +2164,7 @@ async function processOutboxRow(row: WorkRow, ctx: RunCtx): Promise<RowDone> {
           : row.kind === "creditnote" ? await syncCreditNoteRow(org, accounts, row.record_id)
           : row.kind === "bill" ? await syncBillRow(org, accounts, row.record_id)
           : row.kind === "billpayment" ? await syncBillPaymentRow(org, accounts, row.record_id)
+          : row.kind === "supplierpay" ? await syncSupplierPayRow(org, accounts, row.record_id)
           : row.kind === "commission" ? await syncCommissionRow(org, accounts, row.record_id)
           : row.kind === "recovery" ? await syncRecoveryRow(org, accounts, row.record_id)
           : row.kind === "vendorcredit" ? await syncVendorCreditRow(org, accounts, row.record_id)

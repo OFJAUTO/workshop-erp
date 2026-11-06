@@ -111,6 +111,11 @@ export async function outboxDocs(rows: { kind: ZohoKind; record_id: string; zoho
   } else {
     await each<PoFacts>("purchase_orders", "id, number, kind, supplier_name, supplier_invoice_number, supplier_paid_at, zoho_bill_id, zoho_billpayment_id", poIds, (po) => putPo(po, null));
   }
+  // Supplier payments with their amount (6 November 2026): one payment, its invoices, any advance or fee.
+  await each<{ id: string; number: string; supplier_name: string; amount_aed: number | string; status: string; zoho_payment_id: string | null }>("supplier_payments", "id, number, supplier_name, amount_aed, status, zoho_payment_id", idsOf("supplierpay"), (p) => {
+    const amount = round2(Number(p.amount_aed) || 0);
+    put(`supplierpay:${p.id}`, `${p.number} · ${p.supplier_name} · ${aed(amount)}`, amount, { inZoho: !!p.zoho_payment_id, notForZoho: p.status === "void" ? "the payment was voided in the ERP" : null });
+  });
   await each<{ id: string; number: string; recipient: string; amount_aed: number | string; is_active: boolean; zoho_expense_id: string | null }>("commission_payments", "id, number, recipient, amount_aed, is_active, zoho_expense_id", idsOf("commission"), (v) => {
     const amount = round2(Number(v.amount_aed) || 0);
     put(`commission:${v.id}`, `${v.number} · ${v.recipient} · ${aed(amount)}`, amount, { inZoho: !!v.zoho_expense_id, notForZoho: v.is_active === false ? "the voucher is inactive in the ERP" : null });

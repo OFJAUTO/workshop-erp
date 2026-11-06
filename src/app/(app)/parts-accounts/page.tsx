@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { advancesBySupplier } from "@/lib/supplier-payments";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Button, Card, Input, LinkButton, Notice, PageHeader, Select } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -164,7 +165,7 @@ export default async function PartsAccountsPage({ searchParams }: { searchParams
 
           {tab === "lines" ? <LinesTab rows={filterLines(shared.lines, f, sup)} /> : null}
           {tab === "lpos" ? <LposTab rows={filterLpos(shared.lpos, f, sup)} redDays={base.limits.invoiceRedDays} /> : null}
-          {tab === "payments" ? <PaymentsTab rows={filterBalances(shared.balances, f.quick)} canPay={acts} /> : null}
+          {tab === "payments" ? <PaymentsTab rows={filterBalances(shared.balances, f.quick)} canPay={acts} advances={Object.fromEntries(await advancesBySupplier())} /> : null}
           {tab === "returns" ? <ReturnsTab rows={filterReturns(shared.returns, f, sup)} waitDays={base.limits.creditWaitDays} canDecide={staff.role_id === "owner"} /> : null}
           {tab === "problems" ? <ProblemsTab rows={filterProblems(shared.problems, f, sup)} /> : null}
         </>

@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { SupplierPayBox } from "@/components/SupplierPayBox";
+import { advancesOf, openInvoicesOf, paymentsOnPo, supplierPaymentsReadyNow } from "@/lib/supplier-payments";
+import { SupplierPaymentHistory } from "@/components/SupplierPaymentHistory";
 import { CopyVin } from "@/components/CopyVin";
 import { JobAdvisorTag } from "@/components/JobAdvisorTag";
 import { jobAdvisorOf } from "@/lib/job-advisor";
@@ -189,6 +192,11 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const refusedHere = po.status === "cancelled" && /refused/i.test(String(po.notes ?? ""));
   // The car's advisor next to the job (6 November 2026, Peter): staff only, never on the supplier copy.
   const advisor = po.job_id ? await jobAdvisorOf(po.job_id) : null;
+  // Supplier payments with their amount (6 November 2026): the box replaces "Paid to supplier" once the tables are applied.
+  // eslint-disable-next-line react-hooks/purity -- a server page: the clock is read once per request
+  const todayDubai = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
+  const payHistory = po.kind !== "main" ? await paymentsOnPo(po.id) : [];
+  const payNew = po.kind !== "main" && (await supplierPaymentsReadyNow()) ? { invoices: await openInvoicesOf(po.supplier_id ?? null, po.supplier_name), advances: await advancesOf(po.supplier_id ?? null, po.supplier_name) } : null;
   const { data: replacedBy } = refusedHere && po.superseded_by ? await admin.from("purchase_orders").select("id, number").eq("id", po.superseded_by).maybeSingle() : { data: null };
 
   return (
@@ -464,6 +472,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {!isMain && po.status !== "pending_approval" && po.status !== "cancelled" && (po.supplier_invoice_status !== "none" || invoiceFiles.length > 0 || po.status === "received") ? (
             <Card className="flex flex-col gap-3 scroll-mt-4" id="paid" data-supplier-pay>
               <SectionLabel>{po.job_id ? <>Invoice files &amp; payment</> : "Payment"}</SectionLabel>
+              <SupplierPaymentHistory rows={payHistory} canChange={canPay} />
               {po.job_id ? <InvoiceFiles jobId={po.job_id} poId={po.id} files={invoiceFiles} canEdit={canPay} /> : <p className="text-xs text-muted" data-stock-order-pay>Stock order (no car): the supplier invoice is the one entered when the order was received.</p>}
               {po.supplier_paid_at ? (
                 <div className="flex flex-col gap-2">
@@ -482,7 +491,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                     </span>
                   )}
                 </div>
-                {canPay && undoSecondsLeft(po.supplier_paid_at, undoMinutes) <= 0 ? (
+                {canPay && !payHistory.length && undoSecondsLeft(po.supplier_paid_at, undoMinutes) <= 0 ? (
                   <details data-reverse-paid>
                     <summary className="inline-flex min-h-11 cursor-pointer list-none items-center text-sm font-bold text-red underline underline-offset-4 [&::-webkit-details-marker]:hidden">Reverse this payment</summary>
                     <form action={reverseSupplierPaid.bind(null, po.id)} className="mt-2 flex flex-wrap items-center gap-2">
@@ -495,6 +504,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
               ) : canPay ? (
                 payMissing.length ? (
                   <p className="text-sm font-semibold text-amber-bar" data-pay-blocked>Cannot be marked paid yet: {payMissing.join(", ")} first. No payment without the full invoice on file.</p>
+                ) : payNew ? (
+                  <SupplierPayBox key={payHistory.length} supplierId={po.supplier_id ?? null} supplierName={po.supplier_name} invoices={payNew.invoices} advances={payNew.advances} preselect={po.id} today={todayDubai} />
                 ) : (
                   <form action={markSupplierPaid.bind(null, po.id)} className="flex flex-col gap-3" data-pay-form>
                     <div data-pay-method>

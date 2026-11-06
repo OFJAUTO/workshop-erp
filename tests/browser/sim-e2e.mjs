@@ -13,7 +13,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -1942,6 +1942,97 @@ await section("q", "parts desk edits an estimate's price after sending", async (
   await go(page, `${base}/parts/estimate/${est.id}`);
   check("q4: an accepted estimate's price is locked on the desk", !(await page.locator('[aria-label^="Cost before VAT"]').first().isEnabled().catch(() => false)));
   await browser.close();
+});
+
+/* ================================================================================================= */
+/* Path r — supplier payments with their amount (6 November 2026, Section 4, Mathew): exact, less,     */
+/* more as an advance, more as a fee, one payment across two invoices, an advance used on the next.    */
+/* ================================================================================================= */
+await section("r", "supplier payments: exact, less, advance, fee, two invoices, advance applied", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-06-supplier-payments";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const sup = (await sql("insert into public.suppliers (name, trn, vat_registered, created_by, updated_by) values ('E2E GARGASH PAY', '100200300400501', true, $1, $1) returning id", [ownerId]))[0];
+  if (!sup?.id) throw new Error("seed failed: the supplier");
+  const lpo = async (n, net, date) => (await sql("insert into public.purchase_orders (number, job_id, supplier_id, supplier_name, kind, status, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_path, created_by, updated_by) values ($1, $2, $3, 'E2E GARGASH PAY', 'supplier', 'received', $4, 'received', $5, $6, $4, 'e2e/supplier-invoice.pdf', $7, $7) returning id", [`E2E-PAY-${n}`, jobId, sup.id, net, `GINV-${n}`, date, ownerId]))[0]?.id;
+  const L1 = await lpo(1, 1000, "2026-11-01"); // 1,050.00 incl. VAT
+  const L2 = await lpo(2, 500, "2026-11-02"); // 525.00
+  const L3 = await lpo(3, 200, "2026-11-03"); // 210.00
+  const L4 = await lpo(4, 100, "2026-11-04"); // 105.00
+  const L5 = await lpo(5, 200, "2026-11-05"); // 210.00
+  if (![L1, L2, L3, L4, L5].every(Boolean)) throw new Error("seed failed: the LPOs");
+  const { browser, page } = await browserFor("accounts", { viewport: { width: 1440, height: 900 } });
+  let visit = 0;
+  const pay = async (poId, { amount = null, method = null, tick = [], fee = false, useAdvance = false } = {}) => {
+    await go(page, `${base}/parts/orders/${poId}?v=${++visit}#paid`); // a real load each time (the same address with only a # is not reloaded)
+    const box = page.locator("[data-supplier-pay-box]");
+    await box.waitFor({ timeout: 20000 });
+    await sleep(2000); // the page finishes starting up (a click before that has no handler yet)
+    const before = Number((await sql("select count(*)::int as n from public.supplier_payments where supplier_id = $1", [sup.id]))[0].n);
+    for (const t of tick) await box.locator(`[data-supplier-pay-invoice="${t}"] input[type=checkbox]`).check();
+    if (useAdvance) await box.locator("[data-use-advance]").first().check();
+    if (amount !== null) {
+      const amt = box.locator("[data-supplier-pay-amount]");
+      await amt.click();
+      await amt.evaluate((el) => el.select());
+      await amt.pressSequentially(String(amount), { delay: 40 });
+      await page.keyboard.press("Tab");
+      await sleep(1500); // the box commits the number and the part-paid / excess lines appear before anything is pressed
+    }
+    if (method) await box.locator(`input[name="method"][value="${method}"]`).evaluate((el) => el.click());
+    if (fee) await box.locator('input[name="excess_kind"][value="fee"]').evaluate((el) => el.click());
+    await sleep(500);
+    await box.locator("[data-supplier-pay-save]").click();
+    await page.locator("[data-confirm-yes-money]").click({ timeout: 8000 });
+    const ok = await until(async () => Number((await sql("select count(*)::int as n from public.supplier_payments where supplier_id = $1", [sup.id]))[0].n) > before, 60, 500);
+    // The save's LAST step marks the settled LPOs paid: wait for the box's answer, never for the first row.
+    await box.locator("[data-supplier-pay-done], [data-supplier-pay-error]").first().waitFor({ timeout: 30000 }).catch(() => {});
+    return ok ? "recorded" :((await page.locator("[data-supplier-pay-error]").first().textContent().catch(() => "")) ?? "not recorded").trim();
+  };
+  const paidOn = async (poId) => Number((await sql("select coalesce(sum(l.amount_aed), 0)::float8 as s from public.supplier_payment_lines l join public.supplier_payments p on p.id = l.payment_id where l.po_id = $1 and l.is_active and p.status = 'recorded'", [poId]))[0]?.s ?? 0);
+  const isPaid = async (poId) => !!(await sql("select supplier_paid_at from public.purchase_orders where id = $1", [poId]))[0]?.supplier_paid_at;
+
+  // r1. Exact, by payment link: the amount prefilled is what is due incl. VAT.
+  await go(page, `${base}/parts/orders/${L1}#paid`);
+  const pre = await page.locator("[data-supplier-pay-amount]").inputValue().catch(() => "");
+  check(`r1: the amount is prefilled with what is due incl. VAT (${pre})`, Number(pre) === 1050);
+  await page.locator("[data-supplier-pay-box]").screenshot({ path: `${proof}/r1-payment-box-link-1440.png` });
+  const w1 = await pay(L1, { method: "link" });
+  const p1 = (await sql("select method, amount_aed::float8 as a from public.supplier_payments where supplier_id = $1 order by created_at limit 1", [sup.id]))[0];
+  check(`r1: exact by payment link: recorded and settled ("${w1.slice(0, 80)}")`, p1?.method === "link" && p1.a === 1050 && (await paidOn(L1)) === 1050 && (await isPaid(L1)), JSON.stringify({ p1, paid: await paidOn(L1), isPaid: await isPaid(L1) }));
+  // r2. Less: part paid, the balance stays owed.
+  await pay(L2, { amount: 300 });
+  check("r2: paid less = part paid (AED 300 of 525), the LPO still owed", (await paidOn(L2)) === 300 && !(await isPaid(L2)));
+  // r3. More as an advance: 400 on the 225 left → 175 advance with the supplier.
+  const w3 = await pay(L2, { amount: 400 });
+  const adv = (await sql("select excess_kind, amount_aed::float8 as a from public.supplier_payments where supplier_id = $1 and excess_kind = 'advance'", [sup.id]))[0];
+  check("r3: paid more = an advance with the supplier (default), the LPO settled", adv?.excess_kind === "advance" && (await isPaid(L2)) && (await paidOn(L2)) === 525, JSON.stringify({ w3: w3.slice(0, 160), adv, paid: await paidOn(L2), isPaid: await isPaid(L2), rows: await sql("select amount_aed::float8 as a, excess_kind, fee_aed::float8 as f from public.supplier_payments where supplier_id = $1 order by created_at", [sup.id]) }));
+  await go(page, `${base}/parts/suppliers?q=${encodeURIComponent("E2E GARGASH PAY")}`);
+  const advWords = ((await page.locator("[data-supplier-advance]").first().textContent().catch(() => "")) ?? "").trim();
+  check(`r3: the Suppliers list shows it ("${advWords}")`, /Advance with E2E GARGASH PAY AED 175\.00/.test(advWords));
+  await page.locator(`[data-supplier-row="${sup.id}"]`).screenshot({ path: `${proof}/r3-supplier-advance-1440.png` }).catch(() => {});
+  // r4. More as a fee: 220 on 210 → AED 10 fee.
+  await pay(L3, { amount: 220, fee: true });
+  const fee = (await sql("select fee_aed::float8 as f from public.supplier_payments where supplier_id = $1 and excess_kind = 'fee'", [sup.id]))[0];
+  check("r4: paid more as a fee: AED 10.00 recorded as the fee, the LPO settled", fee?.f === 10 && (await isPaid(L3)));
+  // r5. One payment across two invoices (105 + 210 = 315), oldest first.
+  await pay(L4, { tick: [L5], amount: 315 });
+  check("r5: one payment settles two invoices, oldest first", (await paidOn(L4)) === 105 && (await paidOn(L5)) === 210 && (await isPaid(L4)) && (await isPaid(L5)));
+  // r6. The advance used on the next invoice (525: 175 advance + 350 paid).
+  const L6 = await lpo(6, 500, "2026-11-06");
+  const w6 = await pay(L6, { amount: 350, useAdvance: true });
+  check("r6: the advance is applied to the next invoice and it is settled (175 + 350)", (await paidOn(L6)) === 525 && (await isPaid(L6)), JSON.stringify({ w6: w6.slice(0, 160), paid: await paidOn(L6), isPaid: await isPaid(L6), lines: await sql("select amount_aed::float8 as a, applied_later from public.supplier_payment_lines where po_id = $1", [L6]) }));
+  await go(page, `${base}/parts/suppliers?q=${encodeURIComponent("E2E GARGASH PAY")}`);
+  check("r6: the advance is used up", (await page.locator("[data-supplier-advance]").count()) === 0);
+  // r7. Zoho: each payment waits in the outbox as ONE supplier payment (the manual sync posts it).
+  const queued = (await sql("select count(*)::int as n from public.zoho_outbox where kind = 'supplierpay' and record_id in (select id from public.supplier_payments where supplier_id = $1)", [sup.id]))[0].n;
+  check(`r7: every payment is queued for Zoho as one supplier payment (${queued})`, queued >= 6);
+  await browser.close();
+  await sql("update public.purchase_orders set is_active = false where supplier_id = $1", [sup.id]);
+  await sql("update public.suppliers set is_active = false where id = $1", [sup.id]);
 });
 
 const failed = summary();

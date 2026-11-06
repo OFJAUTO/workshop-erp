@@ -1,4 +1,5 @@
 import "server-only";
+import { paidOnPos } from "./supplier-payments";
 import { logAppError } from "./app-errors";
 import { formatDateTime } from "./format";
 import { notifyRoles } from "./notifications";
@@ -84,6 +85,9 @@ async function readSupplierInvoices(opts: { jobId?: string; poIds?: string[] }):
     query_at: (r.supplier_invoice_query_at as string | null | undefined) ?? null,
   }));
   if (!pos.length) return none();
+  // Part payments (6 November 2026): what the recorded supplier payments put on each LPO.
+  const paidOn = await paidOnPos(pos.map((p) => p.id));
+  for (const p of pos) p.paid_aed = paidOn.get(p.id) ?? 0;
   const jobIds = Array.from(new Set(pos.map((p) => p.job_id).filter((x): x is string => !!x)));
   const supIds = Array.from(new Set(pos.map((p) => p.supplier_id).filter((x): x is string => !!x)));
   // Long id lists in short pieces (an in(...) list travels in the address), each read page by page.
