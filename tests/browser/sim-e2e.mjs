@@ -13,7 +13,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -1753,6 +1753,96 @@ await section("n", "advisor on parts pages: tag, ask and answer, filter, interna
     }
   }
   await sql("update public.purchase_orders set is_active = false where number = 'E2E-LPO-N1'");
+});
+
+/* ================================================================================================= */
+/* Path o — estimate → job is an EXACT copy (6 November 2026): labour, services, a complimentary     */
+/* line, a priced part, a recovery, a package with an item off, a discount and a note, line by line,  */
+/* VAT and total equal, "Approved (from E-…)"; a copy that is not exact shows red and is repaired.     */
+/* ================================================================================================= */
+await section("o", "estimate → job exact copy + the red warning + Add the missing lines", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-06-estimate-carry";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "quote" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const job = (await sql("select customer_id, vehicle_id from public.jobs where id = $1", [jobId]))[0];
+  // Only the estimate's lines may reach the quotation: the seed's own quotation, parts and requests step aside.
+  await sql("update public.quotations set is_active = false where job_id = $1", [jobId]);
+  await sql("update public.part_items set is_active = false where job_id = $1", [jobId]);
+  await sql("update public.part_requests set status = 'unavailable', closed_reason = 'not part of this test' where job_id = $1 and status = 'open'", [jobId]);
+  await sql("update public.gate_ins set arrived_by = 'customer_drove' where job_id = $1", [jobId]);
+  const cookie = await cookieHeader("owner");
+  const makeEstimate = async (number, approve) => {
+    const est = (await sql("insert into public.quotations (kind, number, version, status, customer_id, vehicle_id, discount_kind, discount_value, discount_scope, customer_note, expected_payment_method, vat_percent, validity_days, comp_reason, comp_note, created_by, updated_by) values ('estimate', $1, 1, 'draft', $2, $3, 'aed', 100, 'labour', 'E2E NOTE FOR THE CUSTOMER', 'cash', 5, 7, 'goodwill', 'E2E loyal customer', $4, $4) returning id", [number, job.customer_id, job.vehicle_id, ownerId]))[0];
+    if (!est?.id) throw new Error("seed failed: the estimate");
+    const L = (pos, type, title, extra) => sql(`insert into public.quotation_lines (quotation_id, position, line_type, title, quantity, ${Object.keys(extra).join(", ")}, created_by, updated_by) values ($1, $2, $3, $4, 1, ${Object.keys(extra).map((_, i) => `$${i + 6}`).join(", ")}, $5, $5) returning id`, [est.id, pos, type, title, ownerId, ...Object.values(extra)]);
+    await L(1, "labour", "E2E LABOUR - BRAKE SERVICE", { hours: 2, labour_rate: 400, line_total: 800, team: "mechanical" });
+    await L(2, "package", "E2E WHEEL ALIGNMENT", { unit_price: 300, line_total: 300 });
+    await L(3, "package", "E2E FREE HEALTH CHECK", { unit_price: 0, unit_cost: 50, line_total: 0, price_display: "complimentary" });
+    await L(4, "part", "E2E FRONT BRAKE PADS", { unit_cost: 500, markup_percent: 30, line_total: 650, price_requested_at: new Date().toISOString(), priced_at: new Date().toISOString(), priced_by: ownerId, supplier_text: "E2E SUPPLIER", part_number: "E2E-PADS-1", availability: "in_stock" });
+    await L(5, "recovery", "E2E RECOVERY", { unit_cost: 200, unit_price: 300, markup_percent: 50, line_total: 300, recovery_trips: 1, recovery_provider_kind: "ours" });
+    await L(6, "package", "E2E PPF FRONT PACKAGE", { unit_price: 12000, line_total: 12000, package_key: "e2e-ppf", package_items: JSON.stringify({ items: [{ name: "HOOD", off: false }, { name: "FENDERS", off: true }] }), cut_method: "hand" });
+    const lines = await sql("select id, title from public.quotation_lines where quotation_id = $1 order by position", [est.id]);
+    if (lines.length !== 6) throw new Error(`seed failed: ${lines.length} of 6 estimate lines`);
+    // The app computes the estimate's own totals (a no-change save), as the editor does.
+    await fetch(`${base}/api/quote/save`, { method: "POST", headers: { "content-type": "application/json", cookie }, body: JSON.stringify({ quotationId: est.id, patchLine: { id: lines[0].id, title: lines[0].title } }) });
+    if (approve) await sql("update public.quotations set status = 'approved', approver_name = 'E2E Customer', responded_at = now() - interval '1 day' where id = $1", [est.id]);
+    return est.id;
+  };
+  const lineKey = (l) => [l.line_type, l.title, Number(l.line_total).toFixed(2), l.price_display ?? "", l.team ?? "", l.cut_method ?? "", JSON.stringify(l.package_items ?? null)].join(" | ");
+
+  // o1. An approved estimate: Start quotation → an exact copy, approved from the estimate.
+  const est1 = await makeEstimate("E2E-EST-O1", true);
+  await sql("update public.jobs set estimate_id = $1 where id = $2", [est1, jobId]);
+  {
+    const { browser, page } = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+    await go(page, `${base}/jobs/${jobId}`);
+    await page.getByRole("button", { name: "Start quotation" }).first().click();
+    await page.waitForURL((u) => /\/quote\//.test(u.toString()), { timeout: 60000 }).catch(() => null);
+    await page.screenshot({ path: `${proof}/o1-quote-from-estimate-1440.png` });
+    await browser.close();
+  }
+  const q1 = (await sql("select id, number, status, total_aed::float8 as total, vat_aed::float8 as vat, discount_kind, discount_value::float8 as dv, customer_note, approver_name from public.quotations where job_id = $1 and kind = 'quotation' and is_active and estimate_id = $2 order by created_at desc limit 1", [jobId, est1]))[0];
+  const e1 = (await sql("select total_aed::float8 as total, vat_aed::float8 as vat from public.quotations where id = $1", [est1]))[0];
+  check("o1: Start quotation made the job's quotation from the estimate", !!q1);
+  if (q1) { const why = (await sql("select note from public.quotation_events where quotation_id = $1 and note like 'Not approved from%'", [q1.id]))[0]?.note; if (why) console.log("WHY:", why); }
+  const estLines = await sql("select id, line_type, title, line_total, price_display, team, cut_method, package_items from public.quotation_lines where quotation_id = $1 and is_active and fee_kind is null order by position", [est1]);
+  const qLines = q1 ? await sql("select source_key, line_type, title, line_total, price_display, team, cut_method, package_items from public.quotation_lines where quotation_id = $1 and is_active and fee_kind is null order by position", [q1.id]) : [];
+  const byKey = new Map(qLines.map((l) => [l.source_key, l]));
+  const off = estLines.filter((l) => !byKey.has(l.id) || lineKey(byKey.get(l.id)) !== lineKey(l)).map((l) => `${l.title}: ${byKey.has(l.id) ? lineKey(byKey.get(l.id)) : "MISSING"}`);
+  check(`o1: every line copied exactly - labour, service, complimentary, part, recovery, package (${estLines.length} lines)`, estLines.length === 6 && off.length === 0, off.join(" ; "));
+  check(`o1: the discount and the note travel (${q1?.discount_kind} ${q1?.dv} · ${q1?.customer_note})`, q1?.discount_kind === "aed" && q1?.dv === 100 && q1?.customer_note === "E2E NOTE FOR THE CUSTOMER");
+  check(`o1: VAT and total equal the estimate (${q1?.vat} / ${q1?.total} vs ${e1?.vat} / ${e1?.total})`, !!q1 && !!e1 && e1.total > 0 && Math.abs(q1.total - e1.total) < 0.005 && Math.abs(q1.vat - e1.vat) < 0.005);
+  check(`o1: the customer's acceptance of the estimate counts: Approved (from E2E-EST-O1) by ${q1?.approver_name}`, q1?.status === "approved" && q1?.approver_name === "E2E Customer", q1 ? (await sql("select event_type, note from public.quotation_events where quotation_id = $1 order by created_at", [q1.id])).map((e) => e.event_type + ": " + String(e.note).slice(0, 600)).join(" || ") : "");
+  const ev = q1 ? (await sql("select note from public.quotation_events where quotation_id = $1 and event_type = 'quote_confirmed_from_estimate' limit 1", [q1.id]))[0] : null;
+  check(`o1: the history says so ("${ev?.note?.slice(0, 90) ?? ""}")`, /^Approved \(from E2E-EST-O1\)/.test(ev?.note ?? ""));
+
+  // o2. A copy that is not exact (a line taken off by hand): red on the quotation, then "Add the missing lines".
+  await sql("update public.quotations set is_active = false where job_id = $1 and kind = 'quotation'", [jobId]);
+  await sql("update public.part_items set is_active = false where job_id = $1", [jobId]);
+  const est2 = await makeEstimate("E2E-EST-O2", false);
+  await sql("update public.jobs set estimate_id = $1 where id = $2", [est2, jobId]);
+  {
+    const { browser, page } = await browserFor("owner", { viewport: { width: 800, height: 1280 }, hasTouch: true });
+    await go(page, `${base}/jobs/${jobId}`);
+    await page.getByRole("button", { name: "Start quotation" }).first().click();
+    await page.waitForURL((u) => /\/quote\//.test(u.toString()), { timeout: 60000 }).catch(() => null);
+    const q2 = (await sql("select id from public.quotations where job_id = $1 and kind = 'quotation' and is_active and estimate_id = $2 order by created_at desc limit 1", [jobId, est2]))[0];
+    check("o2: the not-approved estimate's copy stays a draft with no warning", !!q2 && (await page.locator("[data-carry-mismatch]").count()) === 0);
+    await sql("update public.quotation_lines set is_active = false where quotation_id = $1 and title = 'E2E LABOUR - BRAKE SERVICE'", [q2.id]);
+    await go(page, `${base}/jobs/${jobId}/quote/${q2.id}`);
+    const red = ((await page.locator("[data-carry-mismatch]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+    check(`o2: a line missing shows red on the quotation ("${red.slice(0, 110)}")`, /Not an exact copy of E2E-EST-O2/.test(red) && /1 line missing \(E2E LABOUR - BRAKE SERVICE\)/.test(red));
+    await page.locator("[data-carry-mismatch]").screenshot({ path: `${proof}/o2-red-warning-800.png` });
+    await page.locator("[data-carry-add]").click();
+    await page.waitForURL((u) => /message=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
+    check("o2: Add the missing lines puts it back and the warning goes", (await page.locator("[data-carry-mismatch]").count()) === 0 && (await sql("select count(*)::int as n from public.quotation_lines where quotation_id = $1 and is_active and title = 'E2E LABOUR - BRAKE SERVICE'", [q2.id]))[0].n === 1);
+    const t2 = (await sql("select (select total_aed::float8 from public.quotations where id = $1) as q, (select total_aed::float8 from public.quotations where id = $2) as e", [q2.id, est2]))[0];
+    check(`o2: …and the total equals the estimate again (${t2.q} vs ${t2.e})`, Math.abs(t2.q - t2.e) < 0.005);
+    await browser.close();
+  }
 });
 
 const failed = summary();

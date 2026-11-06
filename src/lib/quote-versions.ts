@@ -31,6 +31,14 @@ export const COPY_FIELDS = (l: QuoteLine) => ({
   // Section 9 (3 November 2026): read only once the columns exist (attachPartLineExtras), so before the migration
   // nothing here is sent (undefined keys are left out of the insert).
   ...(l.unit !== undefined ? { unit: l.unit ?? "pc", asked_quantity: l.asked_quantity ?? null, list_price_aed: l.list_price_aed ?? null, supplier_discount_percent: l.supplier_discount_percent ?? null } : {}),
+  // An EXACT copy (6 November 2026, estimate → job): the complimentary flag, the installer hours, the line's department
+  // and an estimate part's own desk fields travel too - each only when it was read, so a missing select never wipes it.
+  ...(l.price_display !== undefined ? { price_display: l.price_display } : {}),
+  ...(l.installer_hours !== undefined ? { installer_hours: l.installer_hours } : {}),
+  ...((l as { team?: string | null }).team !== undefined ? { team: (l as { team?: string | null }).team } : {}),
+  ...(l.supplier_text !== undefined
+    ? { parts_note: l.parts_note ?? null, price_requested_at: l.price_requested_at ?? null, price_requested_by: l.price_requested_by ?? null, priced_at: l.priced_at ?? null, priced_by: l.priced_by ?? null, priced_by_advisor: !!l.priced_by_advisor, price_checked_at: l.price_checked_at ?? null, price_checked_by: l.price_checked_by ?? null, supplier_text: l.supplier_text ?? null, part_number: l.part_number ?? null, availability: l.availability ?? null, delivery_days: l.delivery_days ?? null }
+    : {}),
 });
 
 const REVISABLE = ["sent", "opened", "expired", "declined", "approved", "pending_owner", "urgent_requested"];

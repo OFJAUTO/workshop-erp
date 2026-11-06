@@ -41,6 +41,9 @@ import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 import { loadJobQuotes } from "@/lib/quote-history-data";
 import { compCostWords, compLinesOf, compProblem } from "@/lib/complimentary";
 import { attachPartLineExtras, compCostForBundle } from "@/lib/quote-data";
+import { attachTeams } from "@/lib/line-teams-data";
+import { carryDifferences, carryWarning } from "@/lib/carry-check";
+import { compReady } from "@/lib/schema-ready";
 
 function refresh(jobId: string | null, quotationId?: string) {
   if (jobId) {
@@ -140,7 +143,7 @@ export async function startQuotation(jobId: string) {
     lines = [];
   }
   if (lines.length) {
-    const { error: lineError } = await admin.from("quotation_lines").insert(lines);
+    const lineError = await insertCarriedLines(lines);
     if (lineError) {
       console.error("startQuotation: estimate lines not copied", lineError.message);
       await logQuoteEvent(created!.id, jobId, staff!.id, "quote_started", `The lines of the estimate could not all be copied: ${dbDetail(lineError, "quotes/actions")}`);
@@ -225,6 +228,7 @@ export async function startQuotation(jobId: string) {
     await admin.from("quotation_lines").insert({ quotation_id: created!.id, position: (onIt ?? lines.length) + 1, line_type: "recovery", title: recoveryTitle(rt?.label ?? null, 1), details: null, source_type: "manual", quantity: 1, recovery_trips: 1, recovery_type: rt?.key ?? null, unit_cost: rt ? Number(rt.cost) || 0 : null, unit_price: rt ? Number(rt.price) || 0 : null, recovery_provider_kind: "ours", markup_percent: minMarkup, visible_to_customer: true, created_by: staff!.id, updated_by: staff!.id });
     await refreshQuoteTotals(created!.id, settings, staff!.id);
   }
+  if (job!.estimate_id) await checkCarry(job!.estimate_id, { id: created!.id, number: created!.number }, jobId, staff!, settings);
   refresh(jobId, created!.id);
   redirect(`/jobs/${jobId}/quote/${created!.id}`);
 }
@@ -249,7 +253,7 @@ export async function estimateLineRows(estimateId: string, quotationId: string, 
   const rows: Record<string, unknown>[] = [];
   const now = new Date().toISOString();
   // Section 9 (3 November 2026): the unit, the advisor's asked quantity and the desk's list price and discount travel too.
-  const carried = await attachPartLineExtras(((estLines ?? []) as Record<string, unknown>[]).map(toLine));
+  const carried = await attachTeams(await attachPartLineExtras(((estLines ?? []) as Record<string, unknown>[]).map(toLine)));
   for (const l of carried.filter((x) => !x.fee_kind)) {
     const row: Record<string, unknown> = { quotation_id: quotationId, position: l.position, ...COPY_FIELDS(l), source_type: "estimate", source_key: l.id, part_item_id: null, created_by: by, updated_by: by };
     if (l.line_type !== "part" || l.part_item_id || l.left_off) {
@@ -335,6 +339,98 @@ async function carryEstimateHeader(estimateId: string, to: { id: string; number:
   }
   const { data: estTint } = await admin.from("quotations").select("tint_spec").eq("id", estimateId).maybeSingle();
   if (estTint?.tint_spec) await admin.from("quotations").update({ tint_spec: estTint.tint_spec, updated_by: by }).eq("id", to.id);
+  // An EXACT copy (6 November 2026): every header choice of the estimate, as a new version copies them.
+  const { data: h } = await admin
+    .from("quotations")
+    .select("discount_percent, discount_kind, discount_value, discount_scope, discount_set_by, discount_set_at, customer_note, payment_by_card, expected_payment_method, materials_cost_aed, not_quoted, rounded_total_aed")
+    .eq("id", estimateId)
+    .maybeSingle();
+  if (h) await admin.from("quotations").update({ ...h, updated_by: by }).eq("id", to.id);
+  // Bill-to (a company paying) and the complimentary choice: read apart, so a missing column never stops the rest.
+  const { data: bill } = await admin.from("quotations").select("bill_to").eq("id", estimateId).maybeSingle();
+  if (bill?.bill_to) await admin.from("quotations").update({ bill_to: bill.bill_to, updated_by: by }).eq("id", to.id);
+  if (await compReady()) {
+    const { data: comp } = await admin.from("quotations").select("comp_reason, comp_original_job_id, comp_note, comp_status, comp_decided_by, comp_decided_at, comp_decision_note").eq("id", estimateId).maybeSingle();
+    if (comp?.comp_reason) await admin.from("quotations").update({ ...comp, updated_by: by }).eq("id", to.id);
+  }
+}
+
+/**
+ * THE insert of carried estimate lines (6 November 2026). The rows have different keys (a part line carries its unit, a
+ * labour line none): without defaultToNull:false supabase-js sends NULL for every missing key, the NOT NULL unit refused
+ * the WHOLE batch, and labour and services vanished while the parts came back by their own road (Q-00050, 52, 53, 61).
+ */
+async function insertCarriedLines(rows: Record<string, unknown>[]) {
+  if (!rows.length) return null;
+  const { error } = await createAdminClient().from("quotation_lines").insert(rows, { defaultToNull: false });
+  return error;
+}
+
+/**
+ * THE check after a carry-over (6 November 2026): the job's quotation must equal the estimate line by line, VAT and
+ * total. Not exact → a red warning on the quotation and a bell to the advisor and the owner (never silent). Exact and
+ * the customer approved the estimate → the quotation is approved by that acceptance ("Approved (from E-…)").
+ */
+async function checkCarry(estimateId: string, to: { id: string; number: string }, jobId: string, staff: { id: string; display_name: string }, settings: Awaited<ReturnType<typeof getSettings>>) {
+  const admin = createAdminClient();
+  const d = await carryDifferences(estimateId, to.id);
+  if (!d.est) return;
+  if (!d.exact) {
+    const w = await carryWarning(estimateId, to.id);
+    await logQuoteEvent(to.id, jobId, staff.id, "carry_mismatch", w?.words ?? `Not an exact copy of ${d.est.number}.`);
+    const notice = { type: "estimate_carry_mismatch", title: `${to.number} is not an exact copy of ${d.est.number}`, body: (w?.words ?? "").slice(0, 300), jobId, href: `/jobs/${jobId}/quote/${to.id}` };
+    await notifyStaff(await advisorsInCharge(jobId), notice);
+    await notifyRoles(["owner"], notice);
+    return;
+  }
+  await logQuoteEvent(to.id, jobId, staff.id, "carry_exact", `${to.number} is an exact copy of ${d.est.number}: every line, VAT and the total (AED ${(Number(d.q?.total_aed) || 0).toLocaleString("en-GB", { minimumFractionDigits: 2 })}).`);
+  if (d.est.status !== "approved" || d.q?.status !== "draft") return;
+  const bundle = await loadQuotation(to.id);
+  if (!bundle) return;
+  const { costAsks } = await loadQuoteChecks(jobId);
+  const blockers = await quoteBlockers(bundle, settings, { openRequests: 0, workshopEstimate: null, costAsks });
+  if (blockers.length) {
+    await logQuoteEvent(to.id, jobId, staff.id, "carry_exact", `Not approved from ${d.est.number} yet: ${blockers.map((b) => b.label).join(" · ")}. Confirm it once fixed.`);
+    return;
+  }
+  await admin.from("quotations").update({ token: bundle.quotation.token ?? quoteToken(), sent_to_phone: d.est.sent_to_phone ?? bundle.customer?.phone ?? null, updated_by: staff.id }).eq("id", to.id);
+  const res = await applyCustomerResponse(to.id, { approve: true, name: d.est.approver_name ?? "Customer", by: staff.id, via: "estimate" });
+  if (res.error) return;
+  if (d.est.responded_at) await admin.from("quotations").update({ responded_at: d.est.responded_at }).eq("id", to.id);
+  await logQuoteEvent(to.id, jobId, staff.id, "quote_confirmed_from_estimate", `Approved (from ${d.est.number}): the customer's acceptance${d.est.approver_name ? ` by ${d.est.approver_name}` : ""}${d.est.responded_at ? ` on ${new Date(d.est.responded_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Dubai" })}` : ""} counts. No new approval needed.`);
+}
+
+/** "Add the missing lines from E-…" on a quotation still being prepared (the advisor or the owner). */
+export async function addMissingEstimateLines(quotationId: string) {
+  const bundle = await loadQuotation(quotationId);
+  if (!bundle) redirect("/dashboard");
+  const q = bundle.quotation;
+  const back = `/jobs/${q.job_id}/quote/${quotationId}`;
+  const staff = await mayEdit(q.job_id, q.created_by);
+  if (!staff) redirect(`${back}?error=${encodeURIComponent("Not allowed.")}`);
+  if (!q.estimate_id || q.status !== "draft" || !q.job_id) redirect(`${back}?error=${encodeURIComponent("Only a quotation still being prepared takes lines from its estimate.")}`);
+  const d = await carryDifferences(q.estimate_id, quotationId);
+  const missingIds = new Set(d.missing.map((l) => l.id));
+  const rows = (await estimateLineRows(q.estimate_id, quotationId, staff.id, q.job_id)).filter((r) => missingIds.has(String(r.source_key)));
+  const err = await insertCarriedLines(rows);
+  if (err) redirect(`${back}?error=${encodeURIComponent(dbWords(err, "quotes/add-missing-estimate-lines"))}`);
+  const settings = await getSettings();
+  await refreshQuoteTotals(quotationId, settings, staff.id);
+  await logQuoteEvent(quotationId, q.job_id, staff.id, "carry_fixed", `${rows.length} line${rows.length === 1 ? "" : "s"} added back from ${d.est?.number ?? "the estimate"} by ${staff.display_name}`);
+  refresh(q.job_id, quotationId);
+  redirect(`${back}?message=${encodeURIComponent(`${rows.length} line${rows.length === 1 ? "" : "s"} added from ${d.est?.number ?? "the estimate"}.`)}`);
+}
+
+/** "Leave them off": the advisor checked the differences; the warning goes. */
+export async function acceptCarryDifferences(quotationId: string) {
+  const bundle = await loadQuotation(quotationId);
+  if (!bundle) redirect("/dashboard");
+  const q = bundle.quotation;
+  const staff = await mayEdit(q.job_id, q.created_by);
+  if (!staff) redirect(`/jobs/${q.job_id}/quote/${quotationId}?error=${encodeURIComponent("Not allowed.")}`);
+  await logQuoteEvent(quotationId, q.job_id, staff.id, "carry_ok", `${staff.display_name} checked the differences with the estimate and left them as they are`);
+  refresh(q.job_id, quotationId);
+  redirect(`/jobs/${q.job_id}/quote/${quotationId}`);
 }
 
 /**
@@ -361,11 +457,12 @@ async function quotationsFromCarriedEstimates(job: { id: string; customer_id: st
     // earlier carried estimate or the job card) - the advisor adds it back with "+ Recovery – a different trip".
     const rows = await leaveOutRepeatedRecovery(await estimateLineRows(e.id, q.id, staff.id, job.id), job.id, { id: q.id, number: q.number }, e.id, staff);
     if (rows.length) {
-      const { error: lineError } = await admin.from("quotation_lines").insert(rows);
+      const lineError = await insertCarriedLines(rows);
       if (lineError) await logQuoteEvent(q.id, job.id, staff.id, "quote_started", `The lines of estimate ${e.number} could not all be copied: ${dbDetail(lineError, "quotes/actions")}`);
     }
     await carryEstimateHeader(e.id, { id: q.id, number: q.number }, job.id, staff.id);
     await refreshQuoteTotals(q.id, settings, staff.id);
+    await checkCarry(e.id, { id: q.id, number: q.number }, job.id, staff, settings);
     await logQuoteEvent(q.id, job.id, staff.id, "quote_started", `Additional quotation ${q.number} started by ${staff.display_name} from estimate ${e.number}, carried over at gate-in`);
   }
 }

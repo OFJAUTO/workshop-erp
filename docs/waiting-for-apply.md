@@ -11,9 +11,17 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-| # | Migration | What it does | Backup taken first |
+| # | File | What it does | Backup taken first |
 |---|---|---|---|
-| 1 | `20261207090000_clear_test_data_server_only.sql` (audit C1, CRITICAL) | Takes "Clear test data" away from signed-in logins: today any staff login could empty the database through the API. Only the server runs it afterwards; your Settings button keeps working (it already uses the server's key). | `backups/2026-11-06T12-28-02` (112 tables, 256,319 rows) |
+| 1 | `supabase/data-fixes/2026-11-06-carry-over-bells.sql` (Section 1, data only) | Two bells: Anas (J-00988: Q-00061 is missing 2 lines of E-00062, AED 2,800 – he taps "Add the missing lines") and Adarsh (J-00978: Q-00050 left out 4 free lines of E-00059, approved and invoiced, nothing changed). Changes no quotation. Anas sees the red warning on Q-00061 even without it. | Not needed (bells only); latest backup `backups/2026-11-06T16-12-34` |
+
+## Applied on 6 November 2026, evening
+
+The owner replied "apply" (20:12 Dubai). A fresh backup was taken first: `backups/2026-11-06T16-12-34` (112 tables, 256,781 rows). Before: signed-in logins could run `clear_test_data()`. The file was run with `scripts/db-sql.mjs` and recorded with `scripts/db-record-migration.mjs`. After: signed-in false, anon false, the server's key true. `npm run check:live`: 33 passed, 0 failed (its C1 security check now passes on live).
+
+| # | Migration | What it did on live |
+|---|---|---|
+| 1 | `20261207090000_clear_test_data_server_only.sql` (audit C1, CRITICAL) | Took "Clear test data" away from signed-in logins: only the server runs it. Your Settings button keeps working. |
 
 ## Applied on 6 November 2026, morning
 

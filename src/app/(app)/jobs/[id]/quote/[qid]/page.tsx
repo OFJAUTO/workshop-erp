@@ -24,7 +24,7 @@ import { shortFor } from "@/lib/short-links";
 import { greetingNameOf } from "@/lib/messages";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { confirmEstimateUnchanged, declineQuotation, declineToGateOut, requestRevision, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
+import { acceptCarryDifferences, addMissingEstimateLines, confirmEstimateUnchanged, declineQuotation, declineToGateOut, requestRevision, reviseQuotation, urgentOnlyVersion } from "@/app/(app)/quotes/actions";
 import { QuoteEditor, type PartsWait } from "./QuoteEditor";
 import { loadCatalogue } from "@/lib/parts-catalogue";
 import { loadPricingRows } from "@/lib/parts-pricing";
@@ -44,6 +44,7 @@ import { approvedFeeOf } from "@/lib/inspection-fee-server";
 import { inclusiveSplit } from "@/lib/inspection-fee";
 import { refuseRecord } from "@/lib/refusal";
 import { handbackOf, startersOf, staffNamesOf } from "@/lib/quote-lead";
+import { carryWarning } from "@/lib/carry-check";
 import { HandbackBanner } from "@/components/HandbackBanner";
 import { recoveryProviderList } from "@/lib/recovery-providers";
 import { requestPartsGone, revisionPreview } from "@/lib/quote-versions";
@@ -69,6 +70,9 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   // 1 November 2026 (E-00055): who started it stays in charge; the owner's handback shows at the top while it stands.
   const qLead = (await startersOf([q.number])).get(q.number) ?? q.created_by;
   const [handback, qNames] = await Promise.all([handbackOf(q.id), staffNamesOf([qLead ?? "", ...bundle.versions.map((v) => v.created_by ?? "")])]);
+  // Estimate → job (6 November 2026): a quotation still being prepared that is not an exact copy of its estimate says so in red, never silently.
+  const { data: carryOk } = q.estimate_id && q.status === "draft" ? await createAdminClient().from("quotation_events").select("id").eq("quotation_id", q.id).eq("event_type", "carry_ok").limit(1) : { data: [] as { id: string }[] };
+  const carry = q.estimate_id && q.status === "draft" && !(carryOk ?? []).length ? await carryWarning(q.estimate_id, q.id) : null;
 
   // Any advisor can open, edit and send any quotation; the car keeps its own advisor.
   const isAdvisor = role === "service_advisor";
@@ -286,6 +290,17 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       {q.status === "pending_owner" ? <div data-owner-waiting><Notice tone="info">Waiting for the owner: {q.owner_approval_reason}. The quotation cannot be sent until he approves.</Notice></div> : null}
       {q.owner_approved_at && !approvalStands && q.status === "draft" ? <div data-owner-approval-stale><Notice tone="info">Changed since the owner approved it ({approvalNow.join("; ")}). Sending asks the owner again.</Notice></div> : null}
       {approvalStands && q.status === "draft" ? <div data-owner-approved><Notice tone="success">Approved by {approverName ?? "the owner"}, {formatDateTime(q.owner_approved_at)}. It can be sent.</Notice></div> : null}
+      {carry ? (
+        <div className="flex flex-col gap-2 rounded-control border-2 border-red-bar bg-red-soft p-4" data-carry-mismatch>
+          <p className="text-sm font-bold text-red">{carry.words}</p>
+          {!staff.viewingAs ? (
+            <div className="flex flex-wrap gap-2">
+              {carry.missing ? <form action={addMissingEstimateLines.bind(null, q.id)}><Button type="submit" size="md" data-carry-add>Add the missing lines from the estimate</Button></form> : null}
+              <form action={acceptCarryDifferences.bind(null, q.id)}><Button type="submit" size="md" tone="secondary" data-carry-ok>Leave them as they are</Button></form>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       <HandbackBanner handback={handback} leadName={qLead ? (qNames.get(qLead) ?? null) : null} />
       {oldBanner && !lock.locked ? (
         <div className="rounded-card border border-line-strong bg-[#EDEDEF] px-4 py-3 text-sm font-bold text-[#3F3F46]" data-old-version-banner>
