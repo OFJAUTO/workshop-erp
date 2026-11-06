@@ -135,14 +135,14 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                       {canPay && p.status === "recorded" && p.method === "cheque" && p.cheque_status === "pending" ? (
                         <form action={setChequeStatus.bind(null, p.id)} className="flex gap-1">
                           <Button type="submit" name="status" value="cleared" size="md" tone="secondary">Cleared</Button>
-                          <Button type="submit" name="status" value="bounced" size="md" tone="danger">Bounced</Button>
+                          <ConfirmSubmit label="Bounced" name="status" value="bounced" size="md" tone="danger" title="Mark this cheque as bounced?" lines={[`${p.number} · AED ${Number(p.amount_aed).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`, "The money comes off what the customer has paid, and Zoho is corrected."]} confirmLabel="Yes, it bounced" hook="cheque-bounced" />
                         </form>
                       ) : null}
                       {p.status === "pending_owner" && role === "owner" && !staff.viewingAs ? (
                         <form action={decideOverpaymentAction.bind(null, p.id)} className="flex flex-wrap items-center gap-1">
                           <Input name="note" placeholder="Note (optional)" className="w-48" />
-                          <Button type="submit" name="decision" value="approve" size="md">Approve</Button>
-                          <Button type="submit" name="decision" value="refuse" size="md" tone="secondary">Refuse</Button>
+                          <ConfirmSubmit label="Approve" name="decision" value="approve" size="md" title="Approve this payment above the balance?" lines={[`${p.number} · AED ${Number(p.amount_aed).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`]} live={[{ label: "Note:", field: "note" }]} confirmLabel="Yes, approve" hook="overpay-approve" />
+                          <ConfirmSubmit label="Refuse" name="decision" value="refuse" size="md" tone="secondary" title="Refuse this payment?" lines={[`${p.number} · AED ${Number(p.amount_aed).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`]} live={[{ label: "Note:", field: "note" }]} confirmLabel="Yes, refuse" hook="overpay-refuse" />
                         </form>
                       ) : null}
                       {p.status === "recorded" && canVoid ? (
@@ -150,7 +150,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                           <summary className="cursor-pointer font-semibold text-muted underline underline-offset-4">Void this receipt</summary>
                           <form action={voidPaymentAction.bind(null, p.id)} className="mt-1 flex flex-wrap items-end gap-2">
                             <ReasonChips name="reason" options={reasonsFor(settings, "void_payment")} placeholder="Why (stays on the record)" required className="min-w-64" />
-                            <Button type="submit" size="md" tone="danger">Void</Button>
+                            <ConfirmSubmit label="Void" size="md" tone="danger" title="Void this receipt?" lines={[`${p.number} · AED ${Number(p.amount_aed).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`, "It stays on the record, marked void; the balance goes back up."]} live={[{ label: "Why:", field: "reason" }]} confirmLabel="Yes, void it" hook="void-receipt" />
                           </form>
                         </details>
                       ) : null}

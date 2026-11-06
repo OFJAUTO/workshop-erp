@@ -7,7 +7,7 @@ import { expectedFeeCost, expectedFeeRule, type Settings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { chargeTotalsByJob } from "./supplier-charges";
 import { feeOf, isClearing } from "./card-settlement-rules";
-import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment, type InvoiceRow, type PaymentRow } from "./invoice-data";
+import { INVOICE_SELECT, PAYMENT_SELECT, creditsOnDocs, invoiceBalance, toInvoice, toPayment, type InvoiceRow, type PaymentRow } from "./invoice-data";
 import { LINE_SELECT, toLine, toQuote } from "./quote-data";
 import { hasPackageLine, quoteTotals, type QuoteLine } from "./quotes";
 import { chargeLineCosts, type ChargeItem } from "./charge-items";
@@ -75,6 +75,8 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
   if (!rows.length) return [];
   const invoices = rows.map((r) => ({ invoice: toInvoice(r), job: r.job as { job_number: string; department: string | null; comeback_of: string | null; comeback_cause: string | null; comeback_claim_status: string | null; comeback_claim_amount: number | string | null; vehicle: { plate_number: string | null; plate_code: string | null; plate_emirate: string | null; has_plate: boolean; vin: string | null } | null } | null }));
   const ids = invoices.map((i) => i.invoice.id);
+  // Credit notes come off each invoice's balance (audit H1, 6 November 2026).
+  const creditOn = await creditsOnDocs(ids);
   const jobIds = Array.from(new Set(invoices.map((i) => i.invoice.job_id).filter((x): x is string => !!x)));
   const [{ data: lines }, { data: payments }, { data: sessions }, { data: stock }, { data: pos }, { data: credits }, { data: hiddenRows }, { data: trips }, { data: clockings }, { data: quotes }, { data: comRows }] = await Promise.all([
     admin.from("invoice_lines").select("invoice_id, section, cost_aed, amount_aed, description, quotation_line_id, part_item_id").in("invoice_id", ids).eq("is_active", true),
@@ -192,7 +194,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     else if (jobTrips.some((t) => t.delivered_at && t.price_aed === null)) why.push("the driver's recovery price to come");
     if (pkg?.estimated.length) why.push(`package ${pkg.estimated.join(", ")} estimated until recorded`);
     if (packageLabourEstimated) why.push("installer time not clocked: the package's hours are counted");
-    const bal = invoiceBalance(invoice, pays);
+    const bal = invoiceBalance(invoice, pays, creditOn.get(invoice.id) ?? 0);
     const recheckCost = invoice.job_id ? (rechecks.get(invoice.job_id)?.cost ?? 0) : 0;
     const profit = round2(revenue - partsCost - otherCost - stockCost - labourCost - bankCharges - recoveryCost - commission - materialsCost - recheckCost);
     const ours = job?.comeback_of ? job.comeback_cause === "workmanship" || job.comeback_cause === "faulty_part" : false;

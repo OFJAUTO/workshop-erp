@@ -2,7 +2,7 @@ import { dbWords } from "@/lib/app-errors";
 import "server-only";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { formatDateTime } from "./format";
-import { INVOICE_SELECT, PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment } from "./invoice-data";
+import { INVOICE_SELECT, PAYMENT_SELECT, creditsOnDocs, invoiceBalance, toInvoice, toPayment } from "./invoice-data";
 import { createNgeniusOrder, ngeniusConfigured } from "./ngenius";
 import { notifyStaff } from "./notifications";
 import { createAdminClient } from "./supabase/admin";
@@ -64,7 +64,7 @@ async function balanceOf(invoiceId: string): Promise<{ balance: number; number: 
   if (!inv) return null;
   const invoice = toInvoice(inv as Record<string, unknown>);
   const { data: pays } = await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", invoiceId).eq("is_active", true);
-  const bal = invoiceBalance(invoice, ((pays ?? []) as Record<string, unknown>[]).map(toPayment));
+  const bal = invoiceBalance(invoice, ((pays ?? []) as Record<string, unknown>[]).map(toPayment), (await creditsOnDocs([invoiceId])).get(invoiceId) ?? 0);
   return { balance: bal.balance, number: invoice.number, jobId: invoice.job_id, token: invoice.token, customerId: invoice.customer_id };
 }
 

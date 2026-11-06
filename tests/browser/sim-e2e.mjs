@@ -966,6 +966,7 @@ await section("h", "commission approve then pay", async () => {
     await page.locator('[data-pay-method="transfer"]').click();
     await page.locator('[data-pay-reference]').fill("SIM-TT-1");
     await page.locator("[data-pay-save]").click();
+    await page.locator("[data-confirm-yes-money]").click({ timeout: 8000 });
     await sleep(2500);
     check("h4: moved to Paid — R1/R4", /Paid .*transfer/i.test(((await page.locator("[data-commissions-paid]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ")));
     await shot(page, "h4-paid-actor");

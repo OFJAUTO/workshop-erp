@@ -1,0 +1,11 @@
+# Audit fixes – 6 November 2026 (from docs/audit-4-nov-2026.md, "go for all")
+
+| # | What was wrong | What changed | Proof |
+|---|---|---|---|
+| **C1** critical | Any signed-in login could run "Clear test data" over the API and empty the database. | Only the server may run it (`20261207090000_clear_test_data_server_only.sql`, **WAITING FOR APPLY**). Your Settings button already uses the server's key, so it keeps working. | `test:security` new check "C1: Clear test data cannot be run by a browser session" (test database) |
+| **H1** high | Credit notes were ignored outside the money page: the customer could be asked for the pre-credit amount. | The credit note now comes off the balance in: the customer's invoice page ("Credit note: AED x taken off") and PDF ("Less credit note" → "Balance due"), the receipt ("Invoice total after credit note"), the Pay-now amount, the pay page, the gate-out balance (`jobBalance`), commission readiness, profit and the monthly close. | `npm run test:h1` (3 checks) |
+| **H2** high | One supplier invoice typed while receiving several LPOs landed whole on each. | Already gone: since 4 November receiving no longer takes the invoice; accounts enter it per LPO and the duplicate check flags a repeat. | — |
+| **H3** high | Zoho time zone / date filter on settlement transfers. | Mathew sets both Zoho orgs to Asia/Dubai (2 minutes in Zoho). The code half is NOT done yet: it needs live Zoho calls to prove. | — |
+| **H4** high | The "Monthly stock count" bell rang every hour since 22 October (24 in the last day). | The stock-count marker now saves (the label was missing, so the save always failed). | Next hourly run stops the bell. |
+| **M4** medium | Void receipt, cheque Bounced, overpayment Approve/Refuse and commission Pay had no "are you sure". A double press could pay a commission twice. | All five ask once, naming the receipt and amount. The commission payment is written only while still unpaid. | `test:commission2` 19/19, `test:s3-payreport`, `test:settle` |
+| **M5** medium | Zoho refused the totals correction on a "sent" invoice (red rows, extra calls). | The correction now sends the reason Zoho asks for (the same field the rename call already uses). | Not tested live: OFJ TEST call allowance and your cost rules. |

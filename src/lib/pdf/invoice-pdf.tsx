@@ -92,9 +92,9 @@ function vehicleBox(b: Pick<InvoiceBundle, "vehicle" | "invoice" | "mileage">) {
 }
 
 /** What the status box says at this moment, from the payments: amount due, balance due, paid in full, or cheque pending. */
-export function statusBoxFor(invoice: InvoiceBundle["invoice"], payments: PaymentRow[]): StatusBox {
+export function statusBoxFor(invoice: InvoiceBundle["invoice"], payments: PaymentRow[], credited = 0): StatusBox {
   if (invoice.kind === "credit_note") return { title: "Credit note total", value: invoice.total_aed };
-  const bal = invoiceBalance(invoice, payments);
+  const bal = invoiceBalance(invoice, payments, credited);
   if (bal.state === "paid") return { title: "Paid in full", value: null, note: bal.paidAt ? `Final payment received ${formatDate(bal.paidAt)}` : null };
   if (bal.state === "cheque_pending") return { title: "Cheque pending clearance", value: bal.balance, note: "Counts as unpaid until the cheque clears" };
   if (bal.state === "part_paid") return { title: "Balance due", value: bal.balance, note: bal.pendingAmount ? `Cheque of ${bal.pendingAmount.toFixed(2)} pending clearance` : null };
@@ -131,7 +131,7 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const discountWords = pkgRows.length ? "Package discount" : "Labour discount";
   const discountLabel = pct && Math.abs(pct - Math.round(pct)) < 0.011 ? `${discountWords} (${Math.round(pct)}%)` : discountWords;
   const live = payments.filter((p) => p.status === "recorded");
-  const bal = invoiceBalance(invoice, live);
+  const bal = invoiceBalance(invoice, live, bundle.credited ?? 0);
   const company = companyOf(settings);
   const logo = await loadLogo();
   const isCredit = invoice.kind === "credit_note";
@@ -165,7 +165,8 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
     total: invoice.total_aed,
     taxDocument: invoice.kind === "tax_invoice" || isCredit,
     totalLabel: isCredit ? "Credit total incl. VAT" : "Total incl. VAT",
-    after: paidRows,
+    // A credit note on this invoice is a row after the total, so "Balance due" prints what is really owed (audit H1).
+    after: bundle.credited && !isCredit ? [...paidRows, { label: "Less credit note", value: bundle.credited, kind: "paid" as const }] : paidRows,
     balance: isCredit ? null : bal.balance,
   });
   const note = isCredit

@@ -1,5 +1,5 @@
 import "server-only";
-import { PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment } from "./invoice-data";
+import { PAYMENT_SELECT, creditsOnDocs, invoiceBalance, toInvoice, toPayment } from "./invoice-data";
 import { getSettings } from "./settings";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
@@ -89,6 +89,8 @@ export async function loadCommissions(): Promise<{ pending: CommissionRow[]; rea
   for (const i of (invRaw ?? []) as Record<string, unknown>[]) invByJob.set(i.job_id as string, [...(invByJob.get(i.job_id as string) ?? []), i]);
   const paysByInvoice = new Map<string, Record<string, unknown>[]>();
   for (const p of (paysRaw ?? []) as Record<string, unknown>[]) if (p.invoice_id) paysByInvoice.set(p.invoice_id as string, [...(paysByInvoice.get(p.invoice_id as string) ?? []), p]);
+  // Credit notes come off each invoice's balance (audit H1, 6 November 2026).
+  const creditOn = await creditsOnDocs(((invRaw ?? []) as Record<string, unknown>[]).map((i) => i.id as string));
   const creditByJob = new Map<string, number>();
   for (const c of (cnotes ?? []) as { job_id: string | null }[]) if (c.job_id) creditByJob.set(c.job_id, (creditByJob.get(c.job_id) ?? 0) + 1);
 
@@ -103,7 +105,7 @@ export async function loadCommissions(): Promise<{ pending: CommissionRow[]; rea
       if (invs.length) {
         const inv = toInvoice(invs[0]);
         invoiceNumber = inv.number;
-        const bal = invoiceBalance(inv, (paysByInvoice.get(inv.id) ?? []).map(toPayment));
+        const bal = invoiceBalance(inv, (paysByInvoice.get(inv.id) ?? []).map(toPayment), creditOn.get(inv.id) ?? 0);
         customerPaid = bal.balance <= 0.005;
         why = customerPaid ? "Invoice paid in full" : `${inv.number} still owes AED ${bal.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
       }

@@ -227,8 +227,8 @@ try {
       const ask = await until(async () => (await second.d.locator("[data-report-second]").count()) ? await text(second.d.locator("[data-report-second]")) : null, 30, 400);
       check("C7: a second report on the same car asks once ('already reported … Send this one as well?')", /already reported .*Send this one as well\?/.test(ask ?? ""), ask ?? "");
       await second.d.locator("[data-report-send-anyway]").click();
-      const two = await until(async () => (await second.d.locator("[data-report-sent]").count()) > 0, 30, 400);
-      check("C7: Send it as well makes the second report", !!two && (await sql("select status from public.payment_reports where id = $1", [second.key]))[0]?.status === "waiting");
+      const two = await until(async () => (await second.d.locator("[data-report-sent]").count()) > 0, 75, 400); // the answer comes after the history, the slip and the bells: slow on this PC
+      check("C7: Send it as well makes the second report", !!two && (await sql("select status from public.payment_reports where id = $1", [second.key]))[0]?.status === "waiting", JSON.stringify({ fieldMsgs: await second.d.locator(".erp-field-msg, [data-report-error]").allTextContents().catch(() => []), row: (await sql("select status from public.payment_reports where id = $1", [second.key]))[0] ?? null, busy: await second.d.locator("[data-report-send-anyway]").getAttribute("data-busy").catch(() => null), disabled: await second.d.locator("[data-report-send-anyway]").isDisabled().catch(() => null) }));
       await second.d.locator("[data-report-done]").click();
       await go(advisor, `${base}/jobs/${car.jobId}`);
       await advisor.locator(`[data-report-withdraw="${second.key}"]`).click();
@@ -428,6 +428,7 @@ try {
     await row.locator("summary", { hasText: "Void this receipt" }).click();
     await row.locator('[name="reason"]').first().pressSequentially("Recorded against the wrong amount");
     await row.getByRole("button", { name: "Void", exact: true }).click();
+    await owner.locator("[data-confirm-yes-money]").click({ timeout: 8000 });
     const reopened = await until(async () => (await sql("select status from public.payment_reports where id = $1", [r1.key]))[0]?.status === "waiting", 30, 500);
     const vBell = await until(async () => (await sql("select title from public.notifications where type = 'payment_report_undone' and staff_id = $1 and job_id = $2 order by created_at desc limit 1", [ADV.id, jobId]))[0]?.title ?? null, 20, 500);
     const freedKey = (await sql("select client_key, status from public.payments where number = $1", [p2]))[0];

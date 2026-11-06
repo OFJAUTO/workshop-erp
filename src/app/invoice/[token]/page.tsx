@@ -53,7 +53,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
   if (bundle.invoice.converted_to) bundle = (await loadInvoice(bundle.invoice.converted_to)) ?? bundle;
   const { invoice, payments, customer, vehicle, job } = bundle;
   const live = payments.filter((p) => p.status === "recorded");
-  const bal = invoiceBalance(invoice, live);
+  const bal = invoiceBalance(invoice, live, bundle.credited ?? 0);
   const car = [vehicle?.make?.name, vehicle?.model?.name, vehicle?.model_year].filter(Boolean).join(" ");
   const isProforma = invoice.kind === "proforma";
   const isTax = invoice.kind === "tax_invoice";
@@ -145,6 +145,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
             {invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0)) < -0.004 ? <span className="text-sm font-bold text-green" data-roundoff>Round-off: − {aed(Math.abs(invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0))))}</span> : null}
             {paid && bal.paidAt ? <span className="text-xs text-[#5F6368]">Final payment received {formatDate(bal.paidAt)}</span> : null}
             {!paid && bal.paid ? <span className="text-xs text-[#5F6368]">Received so far {aed(bal.paid)} of {aed(invoice.total_aed)}</span> : null}
+            {bundle.credited ? <span className="text-xs font-bold text-green" data-credit-note-off>Credit note: {aed(bundle.credited)} taken off</span> : null}
           </div>
         ) : (
           <div className="rounded-lg bg-[#F4F4F5] px-4 py-4 flex flex-col gap-1">

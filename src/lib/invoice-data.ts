@@ -198,6 +198,8 @@ export const PAYMENT_STATE_LABELS = { paid: "Paid in full", part_paid: "Part pai
 
 export type InvoiceBundle = {
   invoice: InvoiceRow;
+  /** Issued credit notes on this document, less what was refunded in money (audit H1, 6 November 2026). */
+  credited?: number;
   lines: InvoiceLineRow[];
   payments: PaymentRow[];
   customer: { id: string; full_name: string; company_name: string | null; phone: string; email: string | null; trn: string | null } | null;
@@ -259,6 +261,7 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
 
   return {
     invoice,
+    credited: (await creditsOnDocs([invoice.id])).get(invoice.id) ?? 0,
     estimate,
     billTo,
     validUntil,
@@ -523,6 +526,6 @@ export async function jobBalance(jobId: string) {
   if (!picked) return { invoice: null, balance: 0, needsInvoice, state: needsInvoice ? ("no_invoice" as const) : ("nothing" as const), paid: 0, pending: 0 };
   const invoice = picked;
   const { data: pays } = await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", invoice.id).eq("is_active", true);
-  const bal = invoiceBalance(invoice, ((pays ?? []) as Record<string, unknown>[]).map(toPayment));
+  const bal = invoiceBalance(invoice, ((pays ?? []) as Record<string, unknown>[]).map(toPayment), (await creditsOnDocs([invoice.id])).get(invoice.id) ?? 0);
   return { invoice, balance: bal.balance, needsInvoice, state: bal.state, paid: bal.paid, pending: bal.pendingAmount };
 }

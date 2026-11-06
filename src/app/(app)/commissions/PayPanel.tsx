@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Button, Input } from "@/components/ui";
+import { Input } from "@/components/ui";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 
 type ReadyRow = { quotationId: string; recipient: string; amount: number; label: string; sub: string };
 
@@ -66,7 +67,8 @@ export function PayPanel({ rows, action, today, isOwner }: { rows: ReadyRow[]; a
             <span className="text-xs font-semibold text-muted">Note (optional)</span>
             <Input name="note" placeholder="Anything worth writing down" />
           </label>
-          <Button type="submit" size="lg" data-pay-save>{method === "cash" ? "Record cash payment (voucher follows)" : "Record transfer"}</Button>
+          {/* The one money question before paying (audit M4, 6 November 2026). */}
+          <ConfirmSubmit label={method === "cash" ? "Record cash payment (voucher follows)" : "Record transfer"} title={`Pay AED ${total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}${recipient ? ` to ${recipient}` : ""}?`} lines={[`${ticked.size} commission${ticked.size === 1 ? "" : "s"} · ${method === "cash" ? "cash" : "bank transfer"}`]} confirmLabel="Yes, record it" hook="pay-commission" attrs={{ "data-pay-save": "" }} />
         </div>
       ) : (
         <p className="text-sm text-muted">Tick the commissions to pay. One payment covers one person; ticking someone greys the others out.</p>

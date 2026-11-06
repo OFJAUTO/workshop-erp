@@ -1,7 +1,7 @@
 import "server-only";
 import { round2 } from "./money";
 import { depositState } from "./deposits";
-import { PAYMENT_SELECT, invoiceBalance, toInvoice, toPayment } from "./invoice-data";
+import { PAYMENT_SELECT, creditsOnDocs, invoiceBalance, toInvoice, toPayment } from "./invoice-data";
 import { greetingNameOf } from "./messages";
 import { getSettings, type Settings } from "./settings";
 import { shortFor } from "./short-links";
@@ -158,7 +158,7 @@ export async function payPageData(token: string): Promise<PayPageData | null> {
       const inv = toInvoice(invRaw as Record<string, unknown>);
       number = inv.number;
       const { data: pays } = await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", inv.id).eq("is_active", true);
-      const b = invoiceBalance(inv, ((pays ?? []) as Record<string, unknown>[]).map(toPayment));
+      const b = invoiceBalance(inv, ((pays ?? []) as Record<string, unknown>[]).map(toPayment), (await creditsOnDocs([inv.id])).get(inv.id) ?? 0);
       paid = b.balance <= 0.005;
       if (paid) {
         const { data: pay } = await admin.from("payments").select("id").eq("invoice_id", inv.id).eq("is_active", true).eq("status", "recorded").order("received_at", { ascending: false }).limit(1).maybeSingle();

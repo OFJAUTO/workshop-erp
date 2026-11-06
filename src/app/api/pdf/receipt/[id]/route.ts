@@ -90,7 +90,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     const kind = invoice.invoice.kind;
     forLine = `Payment against ${kind === "proforma" ? "proforma invoice" : kind === "credit_note" ? "credit note" : "invoice"} ${invoice.invoice.number}`;
     docRef = { label: kind === "proforma" ? "Proforma" : kind === "credit_note" ? "Credit note" : "Invoice", value: invoice.invoice.number };
-    if (kind !== "credit_note") summary = summaryOf(kind === "proforma" ? "Proforma total" : "Invoice total", invoice.invoice.total_aed);
+    // A credit note on the invoice comes off its total (audit H1), so total − paid = the balance the customer owes.
+    const credited = invoice.credited ?? 0;
+    if (kind !== "credit_note") summary = summaryOf(kind === "proforma" ? "Proforma total" : credited ? "Invoice total after credit note" : "Invoice total", round2(invoice.invoice.total_aed - credited));
   } else {
     const st = payment.job_id ? await depositState(payment.job_id) : null;
     const qn = st?.quotationNumbers.join(", ") || null;

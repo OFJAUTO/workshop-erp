@@ -124,6 +124,7 @@ await section("4 commission hook", async () => {
     await page.locator(`[data-pay-tick="${q.id}"]`).click();
     await sleep(300);
     await page.locator("[data-pay-save]").click();
+    await page.locator("[data-confirm-yes-money]").click({ timeout: 8000 });
     await page.waitForURL((u) => /voucher=/.test(u.toString()), { timeout: 30000 }).catch(() => null);
     const v = await until(async () => (await sql("select cp.id, cp.number from public.commission_payments cp join public.quotations q on q.commission_payment_id = cp.id where q.id = $1", [q.id]))[0]);
     check("4: the voucher exists", !!v && /^CPV-\d{5}$/.test(v.number), JSON.stringify(v));

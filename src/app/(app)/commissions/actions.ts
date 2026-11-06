@@ -66,7 +66,7 @@ export async function payCommissions(formData: FormData) {
   if (error || !pay) back((error ? dbWords(error, "commissions/actions") : "Could not record the payment."), true);
   const now = new Date().toISOString();
   for (const r of rows) {
-    await admin.from("quotations").update({ commission_paid_at: now, commission_paid_by: staff.id, commission_paid_method: method, commission_paid_note: note, commission_payment_id: pay!.id, updated_by: staff.id }).eq("id", r.quotationId);
+    await admin.from("quotations").update({ commission_paid_at: now, commission_paid_by: staff.id, commission_paid_method: method, commission_paid_note: note, commission_payment_id: pay!.id, updated_by: staff.id }).eq("id", r.quotationId).is("commission_paid_at", null); // a second press never pays twice (audit M4)
     if (r.jobId) await admin.from("job_events").insert({ job_id: r.jobId, event_type: "commission_paid", note: `Commission AED ${r.amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })} to ${r.recipient} paid by ${staff.display_name} (${method === "cash" ? "cash" : `bank transfer${reference ? `, ref ${reference}` : ""}`}) · voucher ${pay!.number}`, created_by: staff.id });
   }
   // Zoho Books phase 2: the paid voucher becomes an expense (the signed proof attaches once uploaded).

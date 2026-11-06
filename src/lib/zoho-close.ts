@@ -1,7 +1,7 @@
 import "server-only";
 import { clearingOpenAt, loadUnsettled } from "@/lib/card-settlements";
 import { payableCommissions } from "@/lib/commissions";
-import { PAYMENT_SELECT, invoiceBalance, toPayment, type PaymentRow } from "@/lib/invoice-data";
+import { PAYMENT_SELECT, creditsOnDocs, invoiceBalance, toPayment, type PaymentRow } from "@/lib/invoice-data";
 import { round2 } from "@/lib/money";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getSettings } from "@/lib/settings";
@@ -91,8 +91,9 @@ export async function loadMonthlyClose(month: string): Promise<CloseData> {
     paysByInvoice.set(p.invoice_id, [...(paysByInvoice.get(p.invoice_id) ?? []), p]);
   }
   const unpaidInvoices: CloseData["unpaidInvoices"] = [];
+  const creditOn = await creditsOnDocs(invoices.map((i) => i.id));
   for (const inv of invoices) {
-    const bal = invoiceBalance({ total_aed: Number(inv.total_aed) }, paysByInvoice.get(inv.id) ?? []);
+    const bal = invoiceBalance({ total_aed: Number(inv.total_aed) }, paysByInvoice.get(inv.id) ?? [], creditOn.get(inv.id) ?? 0);
     if (bal.balance > 0.005) unpaidInvoices.push({ number: inv.number, total: Number(inv.total_aed), balance: bal.balance });
   }
   lines.push({

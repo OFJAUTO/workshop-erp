@@ -806,7 +806,7 @@ async function syncInvoiceRow(org: string, accounts: Resolved, invoiceId: string
     if (Math.abs(fix - roundoff) > 1) {
       throw new ZohoError(`Totals differ for ${inv.number} beyond rounding: Zoho has ${z.total.toFixed(2)} (VAT ${z.tax_total.toFixed(2)}), the ERP has ${inv.total_aed.toFixed(2)} (VAT ${inv.vat_aed.toFixed(2)}).`);
     }
-    await zohoFetch(`/invoices/${z.invoice_id}?ignore_auto_number_generation=true`, { org, method: "PUT", body: { ...body(fix), customer_id: contactId } });
+    await zohoFetch(`/invoices/${z.invoice_id}?ignore_auto_number_generation=true`, { org, method: "PUT", body: { ...body(fix), customer_id: contactId, reason: "OFJ ERP: totals corrected to match the issued invoice" } }); // Zoho refuses a change to a SENT invoice without a reason (audit M5)
     z = await zohoInvoiceById(org, z.invoice_id);
     if (!z || !matches(z)) {
       throw new ZohoError(`Totals differ for ${inv.number}: Zoho has ${z?.total.toFixed(2)} (VAT ${z?.tax_total.toFixed(2)}), the ERP has ${inv.total_aed.toFixed(2)} (VAT ${inv.vat_aed.toFixed(2)}).`);

@@ -556,7 +556,8 @@ async function runHousekeeping(): Promise<Record<string, number>> {
     if (String(settings.stock_count_reminded_for ?? "") !== thisMonth) {
       const { count } = await admin.from("stock_items").select("id", { count: "exact", head: true }).eq("is_active", true);
       if ((count ?? 0) > 0) await notifyRoles(["parts"], { type: "stock_low", title: "Monthly stock count", body: "A new month: count the shelf and type the figures on the stock page.", href: "/parts/stock?count=1" });
-      await admin.from("settings").upsert({ key: "stock_count_reminded_for", value: thisMonth }, { onConflict: "key" });
+      // The label is NOT NULL: an upsert without it fails before it ever reaches the existing row (audit H4: this bell rang every hour from 22 October).
+      await admin.from("settings").upsert({ key: "stock_count_reminded_for", label: "Stock count: the month the reminder was sent", value: thisMonth }, { onConflict: "key" });
       report.stockCount = 1;
     }
   }

@@ -164,6 +164,7 @@ try {
   await det.locator("summary").click();
   await det.locator("textarea, input[name=reason]").first().fill("E2E void check");
   await det.locator("button", { hasText: /^Void$/ }).click();
+  await ob8.page.locator("[data-confirm-yes-money]").click({ timeout: 8000 });
   await ob8.page.waitForURL(/error=/, { timeout: 20000 }).catch(() => null);
   const body8 = decodeURIComponent(ob8.page.url());
   check("8: voiding a settled receipt is refused (undo the settlement first)", /part of the bank settlement STL-\d{5}/.test(body8), body8.slice(-160));
