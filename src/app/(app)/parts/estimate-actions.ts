@@ -9,7 +9,8 @@ import { logQuoteEvent, refreshQuoteTotals } from "@/lib/quote-data";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { aed } from "@/lib/quotes";
+import { aed, lineUnitPrice, markupFromSell } from "@/lib/quotes";
+import { quoteLeadIds } from "@/lib/quote-lead";
 import { flagBelowCost } from "@/lib/below-cost";
 import { NO_PART_NUMBER, cleanPartNumber, daysComplete, isOurStock, partNumberProblem, realPartNumber, rowMissing, rowState, type RowValues } from "@/lib/parts-rows";
 import { costCheckForLine, costCheckValues } from "@/lib/part-cost-history";
@@ -33,6 +34,7 @@ import type { RowSave } from "./actions";
  * desk checks the price or tells the advisor.
  */
 
+const AFTER_SEND = ["sent", "opened", "expired", "declined", "urgent_requested"];
 const PREPARING = ["draft", "pending_owner"];
 
 async function deskStaff() {
@@ -46,7 +48,7 @@ async function estimateLine(quotationId: string, lineId: string) {
   const admin = createAdminClient();
   const [{ data: q }, { data: l }] = await Promise.all([
     admin.from("quotations").select("id, number, kind, status, created_by, is_active, carried_job_id").eq("id", quotationId).maybeSingle(),
-    admin.from("quotation_lines").select("id, quotation_id, title, quantity, unit_cost, line_type, part_item_id, is_active, priced_by_advisor, priced_at, priced_by, price_requested_at, price_requested_by, price_checked_at, supplier_text, part_number, part_type, brand, availability, delivery_days").eq("id", lineId).maybeSingle(),
+    admin.from("quotation_lines").select("id, quotation_id, title, quantity, unit_cost, line_type, markup_percent, markup_mode, markup_aed, unit_price, labour_rate, visible_to_customer, part_item_id, is_active, priced_by_advisor, priced_at, priced_by, price_requested_at, price_requested_by, price_checked_at, supplier_text, part_number, part_type, brand, availability, delivery_days").eq("id", lineId).maybeSingle(),
   ]);
   if (!q || q.kind !== "estimate" || !q.is_active || !l || l.quotation_id !== q.id || !l.is_active || l.line_type !== "part" || l.part_item_id) return null;
   return { q, l };
@@ -74,7 +76,12 @@ export async function saveEstimatePartRow(quotationId: string, row: RowSave): Pr
   const found = row.partId ? await estimateLine(quotationId, row.partId) : null;
   if (!found) return { error: "That part is no longer on the estimate." };
   const { q, l } = found;
-  if (!PREPARING.includes(q.status) || q.carried_job_id) return { error: `${q.number} is already with the customer: the price cannot change here. Use "Price is right" or tell the advisor.` };
+  // Section 3 (6 November 2026, E-00074): the desk may change the price and the supplier after the estimate went to the
+  // customer, until the customer accepts it (its lines lock then) or it becomes a job's quotation.
+  if (q.carried_job_id) return { error: `${q.number} became the job's quotation: change the price on the job's parts page.` };
+  if (q.status === "approved") return { error: `${q.number} was accepted by the customer: its lines are locked. The advisor revises it to pass a new price on.` };
+  if (!PREPARING.includes(q.status) && !AFTER_SEND.includes(q.status)) return { error: `${q.number} cannot change any more.` };
+  const afterSend = AFTER_SEND.includes(q.status);
   const admin = createAdminClient();
   const settings = await getSettings();
   const [unitsReady, lineReady] = await Promise.all([partUnitsReady(), lineCostConfirmReady()]);
@@ -141,7 +148,11 @@ export async function saveEstimatePartRow(quotationId: string, row: RowSave): Pr
   const wasAdvisor = !!l.priced_by_advisor;
   const previous = l.unit_cost === null || l.unit_cost === undefined ? null : Number(l.unit_cost);
   const wasPriced = !!l.priced_at && !wasAdvisor;
+  const sellBefore = lineUnitPrice(l as unknown as Parameters<typeof lineUnitPrice>[0]);
+  const costMoved = previous === null ? cost !== null : cost === null || Math.abs(previous - cost) > 0.005;
+  const keepPrice = afterSend && costMoved && cost !== null && sellBefore > 0 ? markupFromSell({ unit_cost: cost, markup_mode: (l.markup_mode as "percent" | "aed" | null) ?? "percent" } as Parameters<typeof markupFromSell>[0], sellBefore) : {};
   const patch: Record<string, unknown> = {
+    ...keepPrice,
     unit_cost: cost,
     supplier_text: supplier,
     part_number: partNumber,
@@ -181,7 +192,22 @@ export async function saveEstimatePartRow(quotationId: string, row: RowSave): Pr
   if (complete && (!wasPriced || previous === null || Math.abs((previous ?? 0) - (cost ?? 0)) > 0.005)) {
     await logQuoteEvent(q.id, null, staff.id, wasAdvisor && previous !== null && Math.abs(previous - (cost ?? 0)) > 0.005 ? "part_price_replaced" : "part_priced", `${staff.display_name} priced ${title}: AED ${(cost ?? 0).toLocaleString("en-GB")} per ${unit === "l" ? "litre" : unit === "set" ? "set" : "unit"} from ${supplier ?? "?"}${wasAdvisor && previous !== null && Math.abs(previous - (cost ?? 0)) > 0.005 ? ` (the advisor had AED ${previous.toLocaleString("en-GB")})` : ""}`);
   }
-  await refreshQuoteTotals(q.id, settings, staff.id, { reopen: true });
+  // After the send: "Changed by Peter, 6 Nov 14:05: 6,180.00 → 5,900.00 · Al Tayer → Gargash" on the row, and the advisor's bell.
+  const prevSupplier = String(l.supplier_text ?? "").trim() || null;
+  const supplierMoved = (prevSupplier ?? "").toUpperCase() !== (supplier ?? "").toUpperCase();
+  if (afterSend && (costMoved || supplierMoved)) {
+    const fmt = (n: number | null) => (n === null ? "no price" : n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+    const when = new Date().toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Dubai" });
+    const what = [costMoved ? `${fmt(previous)} → ${fmt(cost)}` : null, supplierMoved ? `${prevSupplier ?? "no supplier"} → ${supplier ?? "no supplier"}` : null].filter(Boolean).join(" · ");
+    await logQuoteEvent(q.id, null, staff.id, "desk_price_changed", `Changed by ${staff.display_name}, ${when}: ${title}: ${what}`);
+    await notifyStaff(await quoteLeadIds({ kind: q.kind ?? "estimate", number: q.number, job_id: null, created_by: q.created_by ?? null }), {
+      type: "estimate_price_changed",
+      title: `${q.number}: ${staff.display_name} changed ${title}`,
+      body: `${what}. The customer's price is kept (AED ${fmt(sellBefore)} each); revise the estimate to pass it on.`,
+      href: `/estimates/${q.id}`,
+    });
+  }
+  await refreshQuoteTotals(q.id, settings, staff.id, { reopen: !afterSend });
   // A line this cost puts below its selling price is written down and stops the send (2 November 2026).
   if (cost !== null && (previous === null || Math.abs(previous - cost) > 0.005)) await flagBelowCost(q.id, [l.id], staff.id, `the parts desk priced it at ${aed(cost)} each`);
   revalidatePath(`/parts/estimate/${q.id}`);

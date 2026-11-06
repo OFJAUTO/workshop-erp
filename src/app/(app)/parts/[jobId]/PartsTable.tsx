@@ -104,12 +104,14 @@ export type TableRow = {
   estimate?: { state: EstimatePartState; note: string | null; advisorName: string | null; advisorCost: number | null; advisorSupplier: string | null } | null;
   /** A JOB part the advisor priced himself (Enter price myself, 5 November 2026): who, when, and the desk's "Price is right ✓". */
   advisorPriced?: { name: string | null; at: string | null; checked: boolean } | null;
+  /** "Changed by Peter, 6 Nov 14:05: 6,180.00 → 5,900.00 · Al Tayer → Gargash" (a change after the estimate was sent). */
+  changedWords?: string | null;
 };
 
 type Action = (formData: FormData) => void | Promise<void>;
 type SendAction = (state: FormState, formData: FormData) => Promise<FormState>;
 /** The estimate the table prices (estimate mode): the desk prices the estimate's own part lines, no job yet. */
-type EstimateDesk = { id: string; number: string; preparing: boolean };
+type EstimateDesk = { id: string; number: string; preparing: boolean; /** Sent but not accepted yet (6 November 2026): the desk may still change the price and the supplier. */ editable?: boolean };
 
 /**
  * The columns, sized to their content and starting from the left. The Part column is capped at the width of a
@@ -720,7 +722,7 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
       setTimeout(() => setCopied(false), 1500);
     } catch {}
   };
-  const readOnly = row.unavailable || !canPrice || row.locked || !!row.removed || !!row.refused || pricingLocked || (!!estimate && !estimate.preparing);
+  const readOnly = row.unavailable || !canPrice || row.locked || !!row.removed || !!row.refused || pricingLocked || (!!estimate && !estimate.preparing && !estimate.editable);
   const removeTarget = partId ? { partId } : { requestId: row.requestId };
   const doRemove = (kind: "part" | "request", reason: string) => {
     const fd = new FormData();
@@ -921,6 +923,7 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
         {row.qtyMemory && !readOnly && (Math.abs(row.qtyMemory.qty - qty) > 0.005 || (unitsReady && row.qtyMemory.unit !== unitOf(v.unit))) ? <button type="button" onClick={() => change({ qty: String(row.qtyMemory!.qty), ...(unitsReady ? { unit: row.qtyMemory!.unit } : {}) })} className="shrink-0 h-5 max-w-[60%] truncate rounded-control border border-ink bg-white px-2 text-[10px] font-bold" title="The quantity used last time on the same model (or make). Nothing changes until you tap it." data-qty-memory={`${row.qtyMemory.qty}${row.qtyMemory.unit}`}>{row.qtyMemory.words} · Use</button> : null}
         {row.estimate ? <EstimateLineExtras quotationId={estimate?.id ?? ""} lineId={partId ?? row.key} est={row.estimate} preparing={!!estimate?.preparing} canPrice={canPrice} onChecked={markChecked} /> : null}
         {/* A JOB part the advisor priced himself (Enter price myself, 5 November 2026): the desk's later look, never a hold. */}
+        {row.changedWords ? <span className="inline-flex min-h-5 max-w-full flex-wrap items-center rounded-control border border-amber-bar bg-amber-soft px-2 py-0.5 text-[11px] font-bold text-amber" data-price-changed>{row.changedWords}</span> : null}
         {!row.estimate && row.advisorPriced && partId && state !== "removed" ? <JobAdvisorPrice jobId={jobId} partId={partId} info={row.advisorPriced} cost={num(v.cost_aed)} supplier={v.supplier} canPrice={canPrice} onChecked={markChecked} /> : null}
         {memory && !v.list_price && !v.cost_aed && !readOnly ? <button type="button" onClick={useMemory} className="shrink-0 h-5 max-w-[55%] truncate rounded-control border border-green bg-green-soft px-2 text-[10px] font-bold text-green" title="The last price given for this part number" data-price-memory>Last: AED {memory.net !== null ? memory.net.toFixed(2) : "?"} net{memory.supplier ? ` · ${memory.supplier}` : ""}{memory.job ? ` · ${memory.job}` : ""}{memory.paid ? ` · bought at AED ${memory.paid.cost.toFixed(2)} (${memory.paid.where})` : ""} · Use</button> : null}
         {/* From our stock: the item and its average cost; Change opens the picker again */}

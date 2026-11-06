@@ -13,7 +13,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -1901,6 +1901,47 @@ await section("p", "send / resend quote: the one button in every state", async (
   const sideways = await t.page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   check(`p6: the job card at 800 px never slides sideways (${sideways}px)`, sideways <= 1);
   await t.browser.close();
+});
+
+/* ================================================================================================= */
+/* Path q — the parts desk edits an estimate's price after "sent to the advisor" (6 November 2026,    */
+/* E-00074): until the customer accepts it; the customer's price is kept, the row says who changed     */
+/* what, the advisor's bell rings; an accepted estimate is locked.                                     */
+/* ================================================================================================= */
+await section("q", "parts desk edits an estimate's price after sending", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-06-desk-edit";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "quote" })).json;
+  const job = (await sql("select customer_id, vehicle_id from public.jobs where id = $1", [seed?.jobId]))[0];
+  if (!job) throw new Error("seed failed");
+  const partsId = (await sql("select id from public.staff where role_id = 'parts' and is_active order by created_at limit 1"))[0].id;
+  const advId = (await sql("select id from public.staff where role_id = 'service_advisor' and is_active order by display_name limit 1"))[0].id;
+  const est = (await sql("insert into public.quotations (kind, number, version, status, customer_id, vehicle_id, vat_percent, validity_days, token, sent_at, created_by, updated_by) values ('estimate', 'E2E-EST-Q1', 1, 'sent', $1, $2, 5, 7, $3, now(), $4, $4) returning id", [job.customer_id, job.vehicle_id, `e2eq${Date.now()}`, advId]))[0];
+  if (!est?.id) throw new Error("seed failed: the estimate");
+  await sql("insert into public.quotation_lines (quotation_id, position, line_type, title, quantity, unit_cost, markup_percent, line_total, priced_at, priced_by, price_requested_at, supplier_text, part_number, availability, created_by, updated_by) values ($1, 1, 'part', 'E2E HEADLIGHT LEFT', 1, 6180, 20, 7416, now(), $2, now(), 'E2E AL TAYER', 'LR095838', 'in_stock', $3, $3)", [est.id, partsId, advId]);
+  const m = await mark();
+  const { browser, page } = await browserForId(partsId, { viewport: { width: 1440, height: 900 } });
+  await go(page, `${base}/parts/estimate/${est.id}`);
+  const cost = page.locator('[aria-label^="Cost before VAT"]').first();
+  check("q1: the sent estimate's price can still be changed by the desk", (await cost.count()) === 1 && (await cost.isEnabled()));
+  await cost.evaluate((el) => { el.focus(); el.select(); });
+  await cost.pressSequentially("5900", { delay: 30 });
+  await page.keyboard.press("Tab");
+  const saved = await until(async () => Number((await sql("select unit_cost from public.quotation_lines where quotation_id = $1", [est.id]))[0]?.unit_cost) === 5900, 60, 500);
+  check("q1: the new cost is saved (6,180 → 5,900)", !!saved);
+  const line = (await sql("select line_total::float8 as t, markup_percent::float8 as m from public.quotation_lines where quotation_id = $1", [est.id]))[0];
+  check(`q2: the customer's price is kept (line AED ${line?.t}, markup now ${line?.m}%)`, Math.abs((line?.t ?? 0) - 7416) < 0.01 && Math.abs((line?.m ?? 0) - 20) > 0.5);
+  const ev = (await sql("select note from public.quotation_events where quotation_id = $1 and event_type = 'desk_price_changed' limit 1", [est.id]))[0];
+  check(`q3: the change is written down ("${ev?.note ?? ""}")`, /^Changed by .+: E2E HEADLIGHT LEFT: 6,180\.00 → 5,900\.00$/.test(ev?.note ?? ""));
+  await told("q3", m, null, [{ id: advId, type: "estimate_price_changed", label: "the advisor" }]);
+  await go(page, `${base}/parts/estimate/${est.id}`);
+  check("q3: the row shows who changed what", /Changed by .+: 6,180\.00 → 5,900\.00/.test(((await page.locator("[data-price-changed]").first().textContent().catch(() => "")) ?? "")));
+  await page.screenshot({ path: `${proof}/q-desk-edit-after-send-1440.png` });
+  // q4. Accepted by the customer: the lines lock; the advisor revises it.
+  await sql("update public.quotations set status = 'approved' where id = $1", [est.id]);
+  await go(page, `${base}/parts/estimate/${est.id}`);
+  check("q4: an accepted estimate's price is locked on the desk", !(await page.locator('[aria-label^="Cost before VAT"]').first().isEnabled().catch(() => false)));
+  await browser.close();
 });
 
 const failed = summary();

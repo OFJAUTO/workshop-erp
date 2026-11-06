@@ -78,6 +78,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "parts_changed_after_approval", label: "Parts changed after the customer's approval on your car (revise the quotation if the price should change)", locked: true },
   { type: "hours_missing", label: "Your estimates or quotations count work with no hours (the profit is not reliable until the hours are typed)" },
   { type: "plate_missing", label: "A car of yours in the workshop still has no number plate on record" },
+  { type: "estimate_price_changed", label: "The parts desk changed a price or supplier on your estimate after it was sent", locked: true },
   { type: "estimate_carry_mismatch", label: "A job's quotation is not an exact copy of its estimate", locked: true },
   { type: "advisor_question", label: "Parts (or a colleague) asks you about one of your cars", locked: true },
   { type: "advisor_answer", label: "The advisor answered your question about a car", locked: true },

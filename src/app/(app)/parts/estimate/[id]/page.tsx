@@ -48,7 +48,16 @@ export default async function EstimatePartsDesk({ params }: { params: Promise<{ 
   const types = ((settings.part_types ?? []) as string[]).map((t) => t.toLowerCase());
   // 9.3: the quantity used last time for each part on the same model (this estimate itself never counts).
   const memory = await lastQuantitiesFor(q.vehicle_id, desk.lines.map((l) => ({ key: l.id, name: l.title })), [q.number]);
+  // Section 3 (6 November 2026): sent but not accepted yet, the desk still changes the price and the supplier; each change
+  // shows on its row ("Changed by Peter, 6 Nov 14:05: 6,180.00 → 5,900.00 · Al Tayer → Gargash").
+  const editable = !q.carried_job_id && ["sent", "opened", "expired", "declined", "urgent_requested"].includes(q.status);
+  const { data: changeEvents } = await admin.from("quotation_events").select("note, created_at").eq("quotation_id", q.id).eq("event_type", "desk_price_changed").order("created_at", { ascending: false });
+  const changedOf = (title: string) => {
+    const hit = ((changeEvents ?? []) as { note: string }[]).find((e) => e.note.includes(`: ${title.toUpperCase()}: `));
+    return hit ? hit.note.replace(`: ${title.toUpperCase()}: `, ": ") : null;
+  };
   const rows: TableRow[] = desk.lines.map((l) => ({
+    changedWords: changedOf(l.title),
     key: l.id,
     requestId: null,
     partId: l.id,
@@ -97,7 +106,8 @@ export default async function EstimatePartsDesk({ params }: { params: Promise<{ 
         actions={<LinkButton href="/parts" tone="secondary" size="lg">Parts</LinkButton>}
       />
       {q.carried_job_id ? <Notice tone="info">The car has arrived: these parts are on the job now and are priced there.</Notice> : null}
-      {!desk.preparing && !q.carried_job_id ? <Notice tone="info">{q.number} is {QUOTE_STATUS_LABELS[q.status as keyof typeof QUOTE_STATUS_LABELS]?.toLowerCase() ?? q.status}{q.sent_at ? ` (sent ${formatDateTime(q.sent_at)})` : ""}: prices are not changed here any more. Check the advisor&apos;s prices, or tell him a price is different.</Notice> : null}
+      {editable ? <Notice tone="info">{q.number} was sent to the customer{q.sent_at ? ` (${formatDateTime(q.sent_at)})` : ""}. You can still change a price or the supplier: the customer&apos;s price stays as it is and the advisor is told, to revise it if needed.</Notice> : null}
+      {!desk.preparing && !q.carried_job_id && !editable ? <Notice tone="info">{q.number} is {QUOTE_STATUS_LABELS[q.status as keyof typeof QUOTE_STATUS_LABELS]?.toLowerCase() ?? q.status}{q.sent_at ? ` (sent ${formatDateTime(q.sent_at)})` : ""}: prices are not changed here any more. Check the advisor&apos;s prices, or tell him a price is different.</Notice> : null}
       <Card id="pricing" className="flex flex-col gap-3 overflow-visible" data-desk-estimate={q.number}>
         <SectionLabel right={[toPrice ? `${toPrice} to price` : null, toCheck ? `${toCheck} to check` : null].filter(Boolean).join(" · ") || "all priced"}>Parts on this estimate</SectionLabel>
         {rows.length === 0 ? (
@@ -106,7 +116,7 @@ export default async function EstimatePartsDesk({ params }: { params: Promise<{ 
           <PartsTable
             jobId=""
             vatSupplierNames={await vatChargingSupplierNames()}
-            estimate={{ id: q.id, number: q.number, preparing: desk.preparing }}
+            estimate={{ id: q.id, number: q.number, preparing: desk.preparing, editable }}
             rows={rows}
             suppliers={suppliers}
             types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]}
