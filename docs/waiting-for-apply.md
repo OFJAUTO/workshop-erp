@@ -11,7 +11,9 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Nothing is waiting.
+| # | Migration | What it does | Backup taken first |
+|---|---|---|---|
+| 1 | `20261207090000_clear_test_data_server_only.sql` (audit C1, CRITICAL) | Takes "Clear test data" away from signed-in logins: today any staff login could empty the database through the API. Only the server runs it afterwards; your Settings button keeps working (it already uses the server's key). | `backups/2026-11-06T12-28-02` (112 tables, 256,319 rows) |
 
 ## Applied on 6 November 2026, morning
 
