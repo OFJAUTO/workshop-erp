@@ -162,7 +162,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const supabase = await createClient();
   const { data: vehicle } = await supabase
     .from("vehicles")
-    .select("id, customer_id, is_active, has_plate, photo_path, model_year, last_mileage, make:vehicle_makes(name), customer:customers(is_vip, vip_note)")
+    .select("id, customer_id, is_active, has_plate, photo_path, model_year, last_mileage, make:vehicle_makes(name)")
     .eq("id", vehicleId)
     .maybeSingle();
   if (!vehicle || !vehicle.is_active) return { error: "Car not found.", values };
@@ -328,10 +328,13 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   }
 
   // VIP is a customer mark; the gate-in switch sets it and the change is logged with who and when.
-  const cust = vehicle.customer as unknown as { is_vip: boolean; vip_note: string | null } | null;
+  // Section 9 (6 November 2026): customer rows are read and written with the server's key after this action's own
+  // permission check; a gate-in login itself is not allowed to read customers (the database refuses it).
+  const { data: custRow } = vehicle.customer_id ? await createAdminClient().from("customers").select("is_vip, vip_note").eq("id", vehicle.customer_id).maybeSingle() : { data: null };
+  const cust = custRow as { is_vip: boolean; vip_note: string | null } | null;
   const wasVip = cust?.is_vip ?? false;
   if (vipOn !== wasVip || (vipOn && vipNote && vipNote !== cust?.vip_note)) {
-    await supabase.from("customers").update({ is_vip: vipOn, vip_note: vipOn ? vipNote ?? cust?.vip_note ?? null : cust?.vip_note ?? null }).eq("id", vehicle.customer_id);
+    await createAdminClient().from("customers").update({ is_vip: vipOn, vip_note: vipOn ? vipNote ?? cust?.vip_note ?? null : cust?.vip_note ?? null, updated_by: staff.id }).eq("id", vehicle.customer_id);
     if (vipOn !== wasVip) {
       await supabase.from("job_events").insert({ job_id: job.id, event_type: "vip_change", note: `VIP switched ${vipOn ? "on" : "off"} at gate-in`, created_by: staff.id });
     }
@@ -523,14 +526,16 @@ export async function createCustomerAndVehicle(_state: FormState, formData: Form
     const { data: appt } = await supabase.from("appointments").select("customer_id").eq("id", appointmentId).maybeSingle();
     if (appt) {
       customer = { id: appt.customer_id };
-      await supabase.from("customers").update({ email: blankToNull(d.email) ?? undefined, trn: blankToNull(d.trn) ?? undefined }).eq("id", appt.customer_id);
+      await createAdminClient().from("customers").update({ email: blankToNull(d.email) ?? undefined, trn: blankToNull(d.trn) ?? undefined, updated_by: staff.id }).eq("id", appt.customer_id);
     }
   }
   const { data: newCustomer, error: cError } = customer
     ? { data: customer, error: null }
-    : await supabase
+    : await createAdminClient()
     .from("customers")
     .insert({
+      created_by: staff.id,
+      updated_by: staff.id,
       customer_type: d.trn ? "company" : "individual",
       full_name: d.full_name,
       company_name: d.trn ? d.full_name : null,

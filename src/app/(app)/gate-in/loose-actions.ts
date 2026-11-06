@@ -11,7 +11,6 @@ import { GATE_IN_BUCKET } from "@/lib/media";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { ensureQrLink } from "@/lib/stickers";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
 import { knownWordsUp } from "@/lib/text-case";
 import { getSettings } from "@/lib/settings";
 
@@ -57,20 +56,19 @@ export async function createLooseGateIn(_state: FormState, formData: FormData): 
   const department = get("department") === "bodyshop" ? "bodyshop" : "mechanical";
   const priority = ["high", "normal", "low"].includes(get("priority")) ? get("priority") : "normal";
 
-  const supabase = await createClient();
   const admin = createAdminClient();
 
   // Customer: an existing one, or a new one from the name and phone.
   let customerId = get("customer_id");
   if (customerId) {
-    const { data: c } = await supabase.from("customers").select("id").eq("id", customerId).maybeSingle();
+    const { data: c } = await admin.from("customers").select("id").eq("id", customerId).maybeSingle();
     if (!c) return { error: "Customer not found. Search again.", values };
   } else {
     const name = get("new_name");
     const phone = get("new_phone");
     if (name.length < 2) return { error: "Enter the customer's name.", values };
     if (phone.length < 7) return { error: "Enter the customer's phone number.", values };
-    const { data: created, error } = await supabase.from("customers").insert({ customer_type: "individual", full_name: name, phone: normalisePhone(phone) }).select("id").single();
+    const { data: created, error } = await admin.from("customers").insert({ customer_type: "individual", full_name: name, phone: normalisePhone(phone), created_by: staff.id, updated_by: staff.id }).select("id").single();
     if (error || !created) return { error: (error ? dbWords(error, "gate-in/loose-actions") : "Could not save the customer."), values };
     customerId = created.id;
   }

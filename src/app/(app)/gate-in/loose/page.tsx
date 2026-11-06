@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Badge, Button, Card, Input, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { ITEM_TYPES } from "@/lib/loose-items";
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createLooseGateIn } from "../loose-actions";
 import { LooseItemsForm } from "./LooseItemsForm";
 
@@ -14,10 +14,9 @@ type CustomerRow = { id: string; full_name: string; company_name: string | null;
 export default async function LooseGateInPage({ searchParams }: { searchParams: Promise<{ q?: string; customer?: string; new?: string }> }) {
   await requirePermission("gateIn");
   const { q = "", customer: customerId, new: isNew } = await searchParams;
-  const supabase = await createClient();
   let chosen: CustomerRow | null = null;
   if (customerId) {
-    const { data } = await supabase.from("customers").select("id, full_name, company_name, phone, is_vip").eq("id", customerId).maybeSingle();
+    const { data } = await createAdminClient().from("customers").select("id, full_name, company_name, phone, is_vip").eq("id", customerId).maybeSingle();
     chosen = (data as CustomerRow | null) ?? null;
   }
   let results: CustomerRow[] = [];
@@ -27,7 +26,7 @@ export default async function LooseGateInPage({ searchParams }: { searchParams: 
     const digits = term.replace(/[^\d]/g, "");
     const parts = [`full_name.ilike.${like}`, `company_name.ilike.${like}`, `customer_number.ilike.${like}`];
     if (digits.length >= 3) parts.push(`phone.ilike.%${digits}%`);
-    const { data } = await supabase.from("customers").select("id, full_name, company_name, phone, is_vip").eq("is_active", true).or(parts.join(",")).order("full_name").limit(12);
+    const { data } = await createAdminClient().from("customers").select("id, full_name, company_name, phone, is_vip").eq("is_active", true).or(parts.join(",")).order("full_name").limit(12);
     results = (data ?? []) as CustomerRow[];
   }
   const showForm = !!chosen || isNew === "1";

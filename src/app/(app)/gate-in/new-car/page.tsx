@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { gateInCustomer } from "@/lib/gate-in-search";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import type { VehicleMakeRow, VehicleModelRow } from "@/lib/types";
 import { createCustomerAndVehicle } from "../actions";
@@ -15,7 +16,7 @@ export default async function NewCarForGateInPage({ searchParams }: { searchPara
   const existing = customerId ? await gateInCustomer(customerId) : null;
   if (customerId && !existing) notFound();
   const { data: appointment } = appointmentId
-    ? await supabase.from("appointments").select("id, customer:customers(full_name, phone, email, trn)").eq("id", appointmentId).maybeSingle()
+    ? await createAdminClient().from("appointments").select("id, customer:customers(full_name, phone, email, trn)").eq("id", appointmentId).maybeSingle()
     : { data: null };
   const apptCustomer = (appointment?.customer as unknown as { full_name: string; phone: string; email: string | null; trn: string | null } | null) ?? null;
   const initialValues: Record<string, string> = appointment && apptCustomer ? { appointment_id: appointment.id, full_name: apptCustomer.full_name, phone: apptCustomer.phone, email: apptCustomer.email ?? "", trn: apptCustomer.trn ?? "" } : {};

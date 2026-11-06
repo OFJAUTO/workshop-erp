@@ -1,0 +1,9 @@
+OK   1a: a gate-in login (Deepak) reads no customer details, money or money settings
+OK   1b: the database refuses a gate-in login's writes to money, quotations, parts, settings, staff and other customers
+OK   2a: every page but the gate-in ones sends the gate-in login away
+OK   2b: customer, search, money documents and exports answer not allowed
+OK   2c: the car's gate-in record shows no money (no AED amount)
+OK   2d: the gate-in page shows the car pictures (0 on the page)
+
+6 passed, 0 failed
+cleanup: DELETE 0 | SET

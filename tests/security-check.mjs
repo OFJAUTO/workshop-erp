@@ -161,6 +161,37 @@ for (const [path, label] of PROBES) {
   }
 }
 
+// 8. The gate-in login (6 November 2026, Section 9): its own database access reads no customer, contact, check-in link or
+//    money setting (the gate-in screens read those through the server key). Probed with a real gate-in person inside a
+//    rolled-back transaction; nothing is written. Until 20261207130000_gate_in_role_lockdown.sql is applied it says so.
+{
+  const ruleOn = Number((await q("select count(*)::int as n from pg_policies where schemaname = 'public' and policyname = 'customers_no_gate_in'"))[0]?.n ?? 0) > 0;
+  const person = (await q("select id, display_name from public.staff where role_id = 'gate_in' and is_active order by display_name limit 1"))[0];
+  if (!ruleOn) console.log("WAIT the gate-in lockdown (20261207130000) is on WAITING FOR APPLY: not probed yet");
+  else if (!person) console.log("SKIP no active gate-in person to probe");
+  else {
+    const seen = [];
+    await client.query("begin");
+    try {
+      await client.query("set local role authenticated");
+      await client.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: person.id, role: "authenticated" })]);
+      for (const [label, sqlText] of [["customers", "select count(*)::int as n from public.customers"], ["customer_contacts", "select count(*)::int as n from public.customer_contacts"], ["approval_requests", "select count(*)::int as n from public.approval_requests"], ["payments", "select count(*)::int as n from public.payments"], ["invoices", "select count(*)::int as n from public.invoices"], ["quotations", "select count(*)::int as n from public.quotations"], ["money settings", "select count(*)::int as n from public.settings where key ~* '(price|cost|rate|aed|profit|margin|markup|discount|commission|bonus|target|charge|fee|salary)'"]]) {
+        await client.query("savepoint p");
+        try {
+          const n = Number((await client.query(sqlText)).rows[0].n);
+          if (n > 0) seen.push(`${label} (${n})`);
+          await client.query("release savepoint p");
+        } catch {
+          await client.query("rollback to savepoint p");
+        }
+      }
+    } finally {
+      await client.query("rollback");
+    }
+    check(`the gate-in login (${person.display_name}) reads no customer, check-in link, money or money setting`, seen.length === 0, seen.join(", "));
+  }
+}
+
 await client.end();
 console.log(failed ? `\n${failed} security check(s) FAILED` : "\nAll security checks passed.");
 process.exit(failed ? 1 : 0);

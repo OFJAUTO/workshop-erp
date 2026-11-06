@@ -19,6 +19,8 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   const staff = await getCurrentStaff();
   if (!staff) return NextResponse.json({ error: "Sign in first." }, { status: 403 });
+  // Section 9 (6 November 2026): the gate-in login finds cars on the gate-in page only.
+  if (staff.role_id === "gate_in") return NextResponse.json({ error: "Not allowed." }, { status: 403 });
   const q = String(request.nextUrl.searchParams.get("q") ?? "").trim();
   if (q.length < 2) return NextResponse.json({ hits: [] });
   const admin = createAdminClient();

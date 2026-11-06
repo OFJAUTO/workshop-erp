@@ -16,7 +16,6 @@ import { describeMileage } from "@/lib/mileage";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { signJobFiles } from "@/lib/work-data";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ApprovalSendControl } from "../SendControls";
 import { feeBoundsFor, feeInputOf } from "@/lib/inspection-fee-server";
@@ -41,8 +40,9 @@ export default async function GateInDetailsPage({ params }: { params: Promise<{ 
   const { id } = await params;
   const role = staff.role_id as RoleId;
   if (!can(role, "viewJobs") && !can(role, "sendCheckInLink")) redirect("/");
-  const supabase = await createClient();
-  const [card, settings] = await Promise.all([loadJobCard(supabase, id), getSettings()]);
+  // Section 9 (6 November 2026): read through the server key (a gate-in login may not read check-in rows itself); the
+  // card still hides customer details from anyone without "viewCustomers".
+  const [card, settings] = await Promise.all([loadJobCard(createAdminClient(), id), getSettings()]);
   if (!card) notFound();
   if (card.job.status === "booked") redirect(`/bodyshop/${id}`);
   const { job, vehicle, customer, customerPublic, gateIn, requests, media, mediaUrls, approvals, gateOut } = card;

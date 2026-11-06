@@ -154,6 +154,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       {staff.login_type === "pin" && !staff.actingAs && device?.kind !== "personal" ? <IdleLock seconds={Number(settings.tablet_idle_lock_seconds) || 120} /> : null}
       <Shell
         searchCustomers={can(role, "viewCustomers")}
+        search={role !== "gate_in"}
         nav={nav}
         user={{ id: staff.id, name: staff.display_name, role: ROLE_LABELS[role], photoUrl }}
         sounds={{ tone: String(settings.notification_tone || "marimba"), ownerTone: String(settings.notification_tone_owner || "chord"), remindMinutes: Number(settings.notification_remind_minutes) || 2 }}

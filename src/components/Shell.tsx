@@ -16,6 +16,7 @@ import { MobileTopBar } from "./MobileTopBar";
 export function Shell({
   nav = [],
   searchCustomers = true,
+  search = true,
   user,
   footer,
   viewingAs = null,
@@ -26,6 +27,8 @@ export function Shell({
   nav?: NavEntry[];
   /** May this person find a car by its customer? (the search box's words) */
   searchCustomers?: boolean;
+  /** The top search box at all (Section 9: never for the gate-in login, which has its own gate-in search). */
+  search?: boolean;
   user?: { id: string; name: string; role: string; photoUrl: string | null };
   footer?: ReactNode;
   /** The workshop's notification sounds from Settings. */
@@ -63,6 +66,7 @@ export function Shell({
       <MobileTopBar
         nav={nav}
         searchCustomers={searchCustomers}
+        search={search}
         account={
           user ? (
             <div className="flex flex-col gap-2" data-menu-account>

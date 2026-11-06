@@ -35,12 +35,15 @@ export default async function NewGateInPage({ searchParams }: { searchParams: Pr
   const { data } = await supabase
     .from("vehicles")
     .select(
-      "kind, id, customer_id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, mileage_unit, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name), customer:customers(id, full_name, company_name, phone, is_vip, vip_note)",
+      "kind, id, customer_id, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make_id, model_id, variant, model_year, colour, fuel_type, last_mileage, mileage_unit, notes, is_active, created_at, updated_at, make:vehicle_makes(name), model:vehicle_models(name)",
     )
     .eq("id", vehicleId)
     .maybeSingle();
   if (!data) notFound();
-  const v = data as unknown as Row;
+  // Section 9 (6 November 2026): the customer through the server's key, name and mobile only (a gate-in login itself
+  // is not allowed to read customers).
+  const { data: owner } = (data as { customer_id: string | null }).customer_id ? await createAdminClient().from("customers").select("id, full_name, company_name, phone, is_vip, vip_note").eq("id", (data as { customer_id: string }).customer_id).maybeSingle() : { data: null };
+  const v = { ...(data as unknown as Row), customer: (owner as Row["customer"]) ?? null };
 
   const { data: history } = await supabase
     .from("jobs")

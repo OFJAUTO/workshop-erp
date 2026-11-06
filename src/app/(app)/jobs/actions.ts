@@ -423,9 +423,13 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
   // expired – ask OFJ for a new one", so only the newest link works for the same check-in.
   const { data: olds } = await createAdminClient().from("approval_requests").update({ status: "cancelled", updated_by: staff.id }).eq("job_id", jobId).eq("kind", "job_card").in("status", ["created", "sent", "opened"]).select("id");
   if (olds?.length) await logEvent(supabase, jobId, staff.id, { event_type: "approval_created", note: `${olds.length} earlier check-in link${olds.length === 1 ? "" : "s"} expired (a new one is being sent)` });
-  const { data: created, error } = await supabase
+  // Section 9 (6 November 2026): check-in rows through the server key after the permission check above (a gate-in
+  // login may not read them itself); who made it stays on the row.
+  const { data: created, error } = await createAdminClient()
     .from("approval_requests")
     .insert({
+      created_by: staff.id,
+      updated_by: staff.id,
       job_id: jobId,
       kind: "job_card",
       token,
@@ -458,12 +462,13 @@ export async function sendApproval(jobId: string, _state: FormState, formData: F
 export async function markApprovalSent(jobId: string, requestId: string, method: "whatsapp" | "copy" | "tablet") {
   const staff = await requirePermission("sendCheckInLink");
   const supabase = await createClient();
-  const { data: req } = await supabase.from("approval_requests").select("id, status, sent_at, sent_to_name, sent_to_phone").eq("id", requestId).eq("job_id", jobId).maybeSingle();
+  const admin = createAdminClient();
+  const { data: req } = await admin.from("approval_requests").select("id, status, sent_at, sent_to_name, sent_to_phone").eq("id", requestId).eq("job_id", jobId).maybeSingle();
   if (!req) return;
   if (!req.sent_at) {
-    await supabase
+    await admin
       .from("approval_requests")
-      .update({ sent_at: new Date().toISOString(), sent_method: method, status: req.status === "created" ? "sent" : req.status })
+      .update({ sent_at: new Date().toISOString(), sent_method: method, status: req.status === "created" ? "sent" : req.status, updated_by: staff.id })
       .eq("id", requestId);
     await logEvent(supabase, jobId, staff.id, {
       event_type: "approval_sent",
