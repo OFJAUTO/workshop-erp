@@ -55,7 +55,7 @@ check("bank transfer details with copy buttons", /IBAN/.test((await p2.locator("
 await p2.locator("[data-pay-workshop] summary").click();
 check("pay at the workshop with the address and hours", /Al Quoz/i.test((await p2.locator("[data-pay-workshop]").textContent()) ?? "") && /Monday to Saturday/.test((await p2.locator("[data-pay-workshop]").textContent()) ?? ""));
 const html = await p2.content();
-check("the preview carries the OFJ square logo, not the gateway", /og:title[^>]*OFJ Automotive · Payment|OFJ Automotive · Payment/.test(html) && /preview-square\.jpg/.test(html));
+check("the preview carries the OFJ square logo, not the gateway", /og:title[^>]*OFJ Automotive · Payment|OFJ Automotive · Payment/.test(html) && /og\/ofj-logo-200\.png/.test(html));
 await p2.screenshot({ path: `${shots}/pay-page.png`, fullPage: true });
 
 // Replacing the link later keeps the SAME /p/ address.

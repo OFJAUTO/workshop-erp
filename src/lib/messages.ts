@@ -32,16 +32,50 @@ export function cleanCompanyName(name: string | null | undefined): string {
   return s.replace(/\s{2,}/g, " ").trim();
 }
 
+const TITLES: Record<string, string> = { dr: "Dr", mr: "Mr", mrs: "Mrs", ms: "Ms", miss: "Miss", eng: "Eng", engr: "Eng", prof: "Prof", capt: "Capt", sheikh: "Sheikh", shaikh: "Sheikh", sh: "Sheikh", "h.e": "H.E.", he: "H.E.", sir: "Sir" };
+const SURNAME_PARTICLES = new Set(["al", "el", "van", "von", "de", "da", "di"]);
+
+/** A person's name in normal case for a message: "DHIA YAHYA" → "Dhia Yahya" (a mixed word like "McLaren" is kept). */
+export function personNameCase(name: string): string {
+  return name
+    .trim()
+    .split(/\s+/)
+    .map((w) => (/\p{Ll}/u.test(w) ? w : w.toLowerCase().replace(/(^|[-'])(\p{L})/gu, (_, b: string, l: string) => `${b}${l.toUpperCase()}`)))
+    .join(" ");
+}
+
 /**
- * Who a message greets: a person by their name; a company by its saved contact person when there is one, else the
- * company name without the legal ending ("Dear Al Noor General Trading,").
+ * How a message addresses a person when nobody saved a way (6 November 2026, Section 7): the title and the surname in
+ * normal case ("DR DHIA YAHYA DHIA AL DIN JAFFAR" → "Dr Jaffar", "Ahmed Al Mansouri" with "Mr" → "Mr Al Mansouri");
+ * without a title, the first name ("Dhia") - a title is never guessed. Never the whole legal name in capitals.
  */
-export function greetingNameOf(customer: { full_name?: string | null; company_name?: string | null } | null | undefined): string {
+export function personAddressAs(fullName: string | null | undefined): string {
+  const words = String(fullName ?? "").trim().replace(/\s+/g, " ").split(" ").filter(Boolean);
+  if (!words.length) return "";
+  const key = words[0].toLowerCase().replace(/\.$/, "");
+  const title = TITLES[key];
+  const rest = title ? words.slice(1) : words;
+  if (!rest.length) return title ?? personNameCase(words.join(" "));
+  if (!title) return personNameCase(rest[0]);
+  const last = rest[rest.length - 1];
+  const before = rest.length >= 2 ? rest[rest.length - 2] : null;
+  const surname = before && SURNAME_PARTICLES.has(before.toLowerCase()) ? `${before} ${last}` : last;
+  return `${title} ${personNameCase(surname)}`;
+}
+
+/**
+ * THE greeting of every customer message (6 November 2026, Section 7): the "How to address" saved on the customer
+ * when there is one; a person by title and surname in normal case (`personAddressAs`); a company by its saved contact
+ * person when there is one, else the company name without the legal ending ("Dear Al Noor General Trading,").
+ */
+export function greetingNameOf(customer: { full_name?: string | null; company_name?: string | null; address_as?: string | null } | null | undefined): string {
+  const saved = String(customer?.address_as ?? "").trim();
+  if (saved) return saved;
   const company = cleanCompanyName(customer?.company_name);
   const person = String(customer?.full_name ?? "").trim();
-  if (company && person && !sameName(person, company)) return person;
+  if (company && person && !sameName(person, company)) return personAddressAs(person);
   if (company) return company.replace(LEGAL_ENDING, "").trim() || company;
-  return person || "Customer";
+  return personAddressAs(person) || "Customer";
 }
 
 /** The customer's name for the body of a message (not the greeting): the company kept whole, only tidied. */

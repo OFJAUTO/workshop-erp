@@ -8,12 +8,15 @@ export function CustomerForm({
   initialValues,
   mode,
   isOwner = false,
+  addressAs = false,
 }: {
   action: FormAction;
   initialValues?: Record<string, string>;
   mode: "create" | "edit";
   /** Only the owner sees and sets the credit terms. */
   isOwner?: boolean;
+  /** The "How to address" box (6 November 2026, Section 7) once its column exists. */
+  addressAs?: boolean;
 }) {
   return (
     <ActionForm action={action} initialValues={initialValues}>
@@ -38,6 +41,11 @@ export function CustomerForm({
             <Field label="Company name" hint="Only for companies.">
               <Input name="company_name" defaultValue={v.company_name} textCase="title" />
             </Field>
+            {addressAs ? (
+              <Field label="How to address in messages" optional hint={'"Dear …," on every WhatsApp, e.g. Dr Jaffar. Empty: the title and surname, else the first name.'}>
+                <Input name="address_as" defaultValue={v.address_as} maxLength={80} placeholder="Dr Jaffar" data-address-as />
+              </Field>
+            ) : null}
             <Field label="Phone (WhatsApp)">
               <Input name="phone" type="tel" inputMode="tel" defaultValue={v.phone} required placeholder="+971 50 123 4567" />
             </Field>

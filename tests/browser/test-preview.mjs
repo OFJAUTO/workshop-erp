@@ -27,8 +27,8 @@ for (const [path, title] of CASES) {
   const html = await r.text();
   check(`/${path} answers 200`, r.status === 200, String(r.status));
   check(`/${path} og:title "${title}"`, html.includes(`og:title" content="OFJ Automotive – ${title}"`));
-  check(`/${path} og:image is the square logo`, html.includes('og:image" content="https://erp.ofjauto.com/og/ofj-square-600.png"'));
-  check(`/${path} og:url + 600px image`, html.includes(`og:url" content="https://erp.ofjauto.com/${path}"`) && html.includes('og:image:width" content="600"'));
+  check(`/${path} og:image is the square logo`, html.includes('og:image" content="https://erp.ofjauto.com/og/ofj-logo-200.png"'));
+  check(`/${path} og:url + the small 200px image`, html.includes(`og:url" content="https://erp.ofjauto.com/${path}"`) && html.includes('og:image:width" content="200"'));
   check(`/${path} answers HEAD with 200`, (await fetch(`${base}/${path}`, { method: 'HEAD', headers: { 'user-agent': UA }, redirect: 'manual' })).status === 200);
   check(`/${path} redirects the human`, html.includes('http-equiv="refresh"') && html.includes("location.replace"));
   check(`/${path} no customer data`, !/testtoken\d<|Stage |AED /.test(html.replace(/url=[^"]+"/g, "").replace(/replace\([^)]+\)/g, "")));
@@ -38,7 +38,7 @@ for (const [path, title] of CASES) {
   check("a map pin stays a plain 302 to Google Maps", r.status === 302 && String(r.headers.get("location")).startsWith("https://maps.app.goo.gl/"), `${r.status} ${r.headers.get("location")}`);
 }
 {
-  const r = await fetch(`${base}/og/ofj-square-600.png`);
+  const r = await fetch(`${base}/og/ofj-logo-200.png`);
   const bytes = (await r.arrayBuffer()).byteLength;
   check("the square logo is public, image/png, under 100 KB", r.status === 200 && String(r.headers.get("content-type")).includes("image/png") && bytes < 100 * 1024, `${r.status} ${bytes} bytes`);
 }

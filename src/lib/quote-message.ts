@@ -15,10 +15,10 @@ export async function quoteMessageFor(quotationId: string, advisorName: string):
   const admin = createAdminClient();
   const { data: q } = await admin
     .from("quotations")
-    .select("kind, version, token, sent_to_phone, customer:customers(full_name, company_name, phone, greeting_name), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))")
+    .select("kind, version, token, sent_to_phone, customer:customers(full_name, company_name, phone, address_as), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))")
     .eq("id", quotationId)
     .maybeSingle();
-  // greeting_name may not exist yet (Section 7): read again without it.
+  // address_as ("How to address") may not exist yet (Section 7, waiting for apply): read again without it.
   const row = q ?? (await admin.from("quotations").select("kind, version, token, sent_to_phone, customer:customers(full_name, company_name, phone), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", quotationId).maybeSingle()).data;
   if (!row) return null;
   const settings = await getSettings();

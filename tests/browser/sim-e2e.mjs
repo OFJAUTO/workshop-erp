@@ -13,7 +13,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -2126,6 +2126,50 @@ await section("t", "jobs list: newest first, filters with x of N, remembered, re
   await page.locator("[data-job-list-controls]").waitFor({ timeout: 15000 });
   check("t5: on a tablet every control is there", (await page.locator("[data-job-sort]").count()) === 5 && (await page.locator("[data-job-when]").count()) === 3 && (await page.locator("[data-job-filter]").count()) === 3);
   await page.screenshot({ path: `${proof}/t5-tablet-800.png` });
+  await browser.close();
+});
+
+/* ================================================================================================= */
+/* Path u — one greeting for every customer message (6 November 2026, Section 7): the job card's        */
+/* messages and the quotation both say "Dear Dr Jaffar," (never the legal name in capitals); a saved    */
+/* "How to address" wins everywhere. Plus the one small preview picture.                                */
+/* ================================================================================================= */
+await section("u", "greeting: title + surname in normal case everywhere, the saved way wins; the small preview", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-06-greeting";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "quote" })).json;
+  if (!seed?.jobId) throw new Error("seed failed");
+  const job = (await sql("select customer_id, (select id from public.quotations where job_id = $1 order by created_at desc limit 1) as qid from public.jobs where id = $1", [seed.jobId]))[0];
+  await sql("update public.customers set full_name = 'DR DHIA YAHYA DHIA AL DIN JAFFAR', company_name = null, customer_type = 'individual' where id = $1", [job.customer_id]);
+  const { browser, page } = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  await go(page, `${base}/jobs/${seed.jobId}`);
+  const card = await page.content();
+  check("u1: the job card's messages greet \"Dear Dr Jaffar,\"", card.includes("Dear Dr Jaffar,") && !card.includes("Dear DR DHIA") && !card.includes("Dear DHIA"));
+  if (job.qid) {
+    await go(page, `${base}/jobs/${seed.jobId}/quote/${job.qid}`);
+    const quote = await page.content();
+    check("u2: the quotation message greets the same way", quote.includes("Dear Dr Jaffar,") && !quote.includes("Dear DR DHIA"));
+  } else check("u2: the stage seed has a quotation", false);
+  // The saved "How to address" (once its column exists: applied on the TEST database).
+  await go(page, `${base}/customers/${job.customer_id}/edit`);
+  const box = page.locator("[data-address-as]");
+  if (await box.count()) {
+    await box.fill("Dr Dhia");
+    await page.locator("[data-address-as]").screenshot({ path: `${proof}/u-how-to-address-1440.png` }).catch(() => {});
+    await box.evaluate((el) => el.form.requestSubmit()); // the customer form itself, never the Sign out form
+    await until(async () => (await sql("select address_as from public.customers where id = $1", [job.customer_id]))[0]?.address_as === "Dr Dhia", 40, 500);
+    await go(page, `${base}/jobs/${seed.jobId}`);
+    check("u3: the saved way wins on the job card", (await page.content()).includes("Dear Dr Dhia,"));
+    if (job.qid) {
+      await go(page, `${base}/jobs/${seed.jobId}/quote/${job.qid}`);
+      check("u4: and on the quotation", (await page.content()).includes("Dear Dr Dhia,"));
+    }
+  } else check("u3: the How to address box (needs 20261207120000 on this database)", false);
+  // The one small preview picture on a customer link.
+  const r = await fetch(`${base}/og/ofj-logo-200.png`);
+  const buf = Buffer.from(await r.arrayBuffer());
+  check(`u5: the preview picture is a small PNG (${buf.length} bytes, ${buf.readUInt32BE(16)} x ${buf.readUInt32BE(20)})`, r.ok && buf.readUInt32BE(16) === 200 && buf.readUInt32BE(20) === 200 && buf.length < 20000);
+  await sql("update public.customers set address_as = null where id = $1", [job.customer_id]);
   await browser.close();
 });
 

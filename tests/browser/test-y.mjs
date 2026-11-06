@@ -532,7 +532,7 @@ if (want("J")) {
   await sql("update public.part_requests set status = 'done' where job_id = $1", [jobId]);
   await sql("update public.jobs set parts_pricing_done_at = now() where id = $1", [jobId]);
   // A company customer with a saved person: the greeting prefers the person; the company keeps its cleaned name.
-  await sql("update public.customers set full_name = 'E2e Ahmed', company_name = 'E2e Luxe Rental L.l.c', customer_type = 'company' where id = (select customer_id from public.jobs where id = $1)", [jobId]);
+  await sql("update public.customers set full_name = 'MR E2E AHMED', company_name = 'E2e Luxe Rental L.l.c', customer_type = 'company' where id = (select customer_id from public.jobs where id = $1)", [jobId]);
   const tpl = (await sql("select value from public.settings where key = 'whatsapp_quote_template'"))[0]?.value ?? "";
   check("J: the stored quotation template is tidy (Dear [name], bold car)", /Dear \[name\],/.test(tpl) && /\*\[make model\]\*/.test(tpl), String(tpl).slice(0, 80));
   // The real send, on a phone-width screen.
@@ -557,13 +557,14 @@ if (want("J")) {
   await page.getByRole("button", { name: /^Send quotation$/ }).first().click();
   await until(async () => ((await page.locator("[role='dialog'] textarea").count()) ? 1 : null), 30, 400);
   const msg = (await page.locator("[role='dialog'] textarea").inputValue().catch(() => "")) ?? "";
-  check("J: the message greets the saved person, not the company", /^Dear E2e Ahmed,/im.test(msg), msg.slice(0, 60));
+  check("J: the message greets the saved person by title and surname in normal case, not the company", /^Dear Mr Ahmed,/m.test(msg), msg.slice(0, 60));
   check("J: the message carries the short /q link, never the long address", /erp\.ofjauto\.com\/q\/[A-Za-z0-9]{4,}/.test(msg) && !msg.includes("/quote/"), msg.slice(-80));
   check("J: the message is the tidy template (bold car, signed OFJ)", /\*.+\*/.test(msg) && /OFJ Automotive\s*$/.test(msg), msg.slice(0, 120));
   const quoteUrl = `https://erp.ofjauto.com/quote/${token}`;
   const qCode = (await sql("select code from public.short_links where url = $1", [quoteUrl]))[0]?.code;
   const r1 = qCode ? await fetch(`${base}/q/${qCode}`, { redirect: "manual" }) : null;
-  check("J: /q/<code> redirects to the full quotation link", !!r1 && [301, 302, 307, 308].includes(r1.status) && (r1.headers.get("location") ?? "") === quoteUrl, `${r1?.status} ${r1?.headers.get("location")}`);
+  const body1 = r1 ? await r1.text() : "";
+  check("J: /q/<code> answers its preview page and forwards to the full quotation link", !!r1 && r1.status === 200 && body1.includes(`url=${quoteUrl}`), `${r1?.status}`);
   await browser.close();
   // The delivery: the driver's message in the agreed format, both links short, the copy buttons, the "on its way" window.
   const driveTok = `e2e-drive-${Date.now()}`;
@@ -580,12 +581,13 @@ if (want("J")) {
   check("J: the pin stays a plain Google Maps link; the driver button is a short /d link", /maps\.app\.goo\.gl\/e2eTest123/.test(html) && /erp\.ofjauto\.com\/d\/[A-Za-z0-9]{4,}/.test(html));
   const dCode = (await sql("select code from public.short_links where kind = 'drive' and url like $1", [`%/drive/${driveTok}`]))[0]?.code;
   const r2 = dCode ? await fetch(`${base}/d/${dCode}`, { redirect: "manual" }) : null;
-  check("J: /d/<code> opens the driver's one-button page", !!r2 && [301, 302, 307, 308].includes(r2.status) && (r2.headers.get("location") ?? "").endsWith(`/drive/${driveTok}`), `${r2?.status} ${r2?.headers.get("location")}`);
+  const body2 = r2 ? await r2.text() : "";
+  check("J: /d/<code> answers its preview page and forwards to the driver's one-button page", !!r2 && r2.status === 200 && body2.includes(`/drive/${driveTok}`), `${r2?.status}`);
   check("J: a Copy button sits next to Send to driver", (await p2.locator("[data-delivery-panel] [data-copy-text]").count()) >= 1);
   await p2.locator("[data-car-loaded]").click();
   await until(async () => ((await p2.locator("[data-on-way-text]").count()) ? 1 : null), 20, 400);
   const onWay = (await p2.locator("[data-on-way-text]").inputValue().catch(() => "")) ?? "";
-  check("J: the 'on its way' message greets the person, bolds the truck and spaces the driver's mobile", /^Dear E2e Ahmed,/m.test(onWay) && onWay.includes("*Recovery truck:*") && onWay.includes("+971 52 956 2232"), onWay.slice(0, 140));
+  check("J: the 'on its way' message greets the person, bolds the truck and spaces the driver's mobile", /^Dear Mr Ahmed,/m.test(onWay) && onWay.includes("*Recovery truck:*") && onWay.includes("+971 52 956 2232"), onWay.slice(0, 140));
   check("J: the on-its-way window has its own Copy button", (await p2.locator("[data-on-way-dialog] [data-copy-text]").count()) === 1);
   await b2.close();
   // The owner edits the wording in Settings.

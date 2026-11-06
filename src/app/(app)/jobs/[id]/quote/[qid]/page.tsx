@@ -1,4 +1,5 @@
 import { compJobChoices } from "@/lib/quote-data";
+import { withAddressAs } from "@/lib/customer-address";
 import { QuoteSendButton } from "@/components/QuoteSendButton";
 import { sendStateOf } from "@/lib/quote-send-state";
 import { lastResendWords } from "@/lib/quote-message";
@@ -166,7 +167,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   // A revised quotation goes out with its own message ("has been updated").
   const template = (q.version > 1 ? settings.whatsapp_quote_revised_template : settings.whatsapp_quote_template)
-    .replaceAll("[name]", greetingNameOf(customer))
+    .replaceAll("[name]", greetingNameOf(await withAddressAs(customer)))
     .replaceAll("[make model]", [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "))
     .replaceAll("[plate]", vehicle ? formatPlate(vehicle) : "")
     .replaceAll("[advisor]", staff.display_name);

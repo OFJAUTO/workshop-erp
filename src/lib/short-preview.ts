@@ -1,6 +1,7 @@
 import "server-only";
 import { PRODUCTION_SITE_URL } from "./site";
 import { urlOfCode } from "./short-links";
+import { PREVIEW_IMAGE } from "./customer-pages";
 
 /**
  * What a short link answers. WhatsApp's robot never follows a redirect, so every short link we send
@@ -10,7 +11,7 @@ import { urlOfCode } from "./short-links";
  */
 
 const DESCRIPTION = "O F J AUTOMOTIVE WORKS L.L.C · Al Quoz, Dubai";
-const IMAGE = `${PRODUCTION_SITE_URL}/og/ofj-square-600.png`;
+const IMAGE = PREVIEW_IMAGE.url;
 
 function titleFor(prefix: string, url: string): string {
   if (prefix === "q") return "OFJ Automotive – Your quotation";
@@ -48,8 +49,8 @@ export async function shortLinkResponse(code: string, prefix: "q" | "i" | "r" | 
 <meta property="og:url" content="${canonical}">
 <meta property="og:image" content="${IMAGE}">
 <meta property="og:image:secure_url" content="${IMAGE}">
-<meta property="og:image:width" content="600">
-<meta property="og:image:height" content="600">
+<meta property="og:image:width" content="${PREVIEW_IMAGE.width}">
+<meta property="og:image:height" content="${PREVIEW_IMAGE.height}">
 <meta property="og:image:type" content="image/png">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="OFJ Automotive">

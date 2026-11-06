@@ -7,6 +7,7 @@ import { z } from "zod";
 import { formValues, type FormState } from "@/lib/form-state";
 import { requirePermission } from "@/lib/auth";
 import { blankToNull, normalisePhone } from "@/lib/format";
+import { schemaReady } from "@/lib/schema-ready";
 import { createClient } from "@/lib/supabase/server";
 
 const customerSchema = z
@@ -67,6 +68,13 @@ function toRow(d: z.infer<typeof customerSchema>) {
   };
 }
 
+/** "How to address in messages" (Section 7): saved only once its column exists and the box was on the form. */
+async function addressAsOf(formData: FormData) {
+  if (!formData.has("address_as") || !(await schemaReady("customers", "address_as"))) return {};
+  const v = String(formData.get("address_as") ?? "").trim().replace(/\s+/g, " ").slice(0, 80);
+  return { address_as: v || null };
+}
+
 /** Credit terms come from the owner's choice only; anyone else's form has no such box and leaves them as they are. */
 function creditTermsOf(formData: FormData, staff: { id: string; role_id: string }) {
   if (staff.role_id !== "owner" || !formData.has("credit_terms_days")) return {};
@@ -81,7 +89,7 @@ export async function createCustomer(_state: FormState, formData: FormData): Pro
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
 
   const supabase = await createClient();
-  const { data, error } = await supabase.from("customers").insert({ ...toRow(parsed.data), ...creditTermsOf(formData, staff) }).select("id").single();
+  const { data, error } = await supabase.from("customers").insert({ ...toRow(parsed.data), ...creditTermsOf(formData, staff), ...(await addressAsOf(formData)) }).select("id").single();
   if (error || !data) return { error: (error ? dbWords(error, "customers/actions") : "Could not save."), values };
 
   revalidatePath("/customers");
@@ -95,7 +103,7 @@ export async function updateCustomer(id: string, _state: FormState, formData: Fo
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
 
   const supabase = await createClient();
-  const { error } = await supabase.from("customers").update({ ...toRow(parsed.data), ...creditTermsOf(formData, staff) }).eq("id", id);
+  const { error } = await supabase.from("customers").update({ ...toRow(parsed.data), ...creditTermsOf(formData, staff), ...(await addressAsOf(formData)) }).eq("id", id);
   if (error) return { error: dbWords(error, "customers/actions"), values };
 
   revalidatePath("/customers");

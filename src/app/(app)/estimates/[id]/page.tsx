@@ -1,4 +1,5 @@
 import { compJobChoices } from "@/lib/quote-data";
+import { withAddressAs } from "@/lib/customer-address";
 import { QuoteSendButton } from "@/components/QuoteSendButton";
 import { sendStateOf } from "@/lib/quote-send-state";
 import { lastResendWords } from "@/lib/quote-message";
@@ -76,7 +77,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
   const services = await loadServices(staff.id);
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   const template = settings.whatsapp_estimate_template
-    .replaceAll("[name]", greetingNameOf(customer))
+    .replaceAll("[name]", greetingNameOf(await withAddressAs(customer)))
     .replaceAll("[make model]", [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "))
     .replaceAll("[plate]", vehicle ? formatPlate(vehicle) : "")
     .replaceAll("[advisor]", staff.display_name);
