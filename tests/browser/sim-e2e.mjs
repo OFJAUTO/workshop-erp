@@ -13,7 +13,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -2071,6 +2071,62 @@ await section("s", "Zoho to the fils: a posted bill that differs is red, with Ch
   await sql("delete from public.zoho_outbox where id = $1", [row.id]);
   await sql("update public.purchase_orders set is_active = false where id = $1", [po.id]);
   await sql("update public.suppliers set is_active = false where id = $1", [sup.id]);
+});
+
+/* ================================================================================================= */
+/* Path t — the jobs list (6 November 2026, Section 6): newest opened first, Last 7 days + an advisor  */
+/* reading "x of N", the choice remembered, the recently viewed strip. Owner (sees every open job).    */
+/* ================================================================================================= */
+await section("t", "jobs list: newest first, filters with x of N, remembered, recently viewed", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-06-jobs-sorting";
+  mkdirSync(proof, { recursive: true });
+  const seedT = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  // The test copy's cars are older than a week: the fresh test car gets an advisor, so "Last 7 days" + that advisor shows it.
+  const advT = (await sql("select id from public.staff where role_id = 'service_advisor' and is_active order by display_name limit 1"))[0]?.id;
+  if (seedT?.jobId && advT) await sql("update public.jobs set advisor_id = $2 where id = $1", [seedT.jobId, advT]);
+  const { browser, page } = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  await go(page, `${base}/jobs?reset=1`);
+  await page.locator("[data-job-list]").waitFor({ timeout: 20000 });
+  const shownIds = await page.locator("[data-job-list] a[href^='/jobs/']").evaluateAll((as) => [...new Set(as.map((a) => a.getAttribute("href").split("/")[2]))]);
+  const dbIds = (await sql("select id from public.jobs where is_open order by coalesce(gated_in_at, created_at) desc limit 8")).map((r) => r.id);
+  check(`t1: newest opened first by default (first ${Math.min(8, shownIds.length)} match the database)`, shownIds.slice(0, 8).join(",") === dbIds.slice(0, shownIds.slice(0, 8).length).join(","), JSON.stringify({ shown: shownIds.slice(0, 4), db: dbIds.slice(0, 4) }));
+  const total = Number((await sql("select count(*)::int as n from public.jobs where is_open"))[0].n);
+  check(`t1: the header reads "${total} jobs"`, ((await page.locator("[data-job-list-shown]").textContent()) ?? "").trim() === `${total} job${total === 1 ? "" : "s"}`);
+  await page.screenshot({ path: `${proof}/t1-newest-first-1440.png` });
+  // Last 7 days, then an advisor from the list.
+  await page.locator('[data-job-when="7d"]').click();
+  await page.waitForURL(/when=7d/, { timeout: 20000 });
+  const advisorOpt = await page.locator("[data-job-list-advisor] option").evaluateAll((os) => os.map((o) => ({ v: o.value, t: o.textContent })).filter((o) => o.v));
+  const busiest = (await sql("select advisor_id::text as id from public.jobs where is_open and advisor_id is not null and coalesce(gated_in_at, created_at) >= now() - interval '7 days' group by advisor_id order by count(*) desc limit 1"))[0]?.id;
+  const pick = advisorOpt.find((o) => o.v === busiest) ?? advisorOpt[0];
+  if (pick) {
+    await page.locator("[data-job-list-advisor]").selectOption(pick.v);
+    await page.waitForURL(/advisor=/, { timeout: 20000 });
+    await page.locator("[data-job-list]").or(page.getByText("No job matches these filters")).first().waitFor({ timeout: 20000 });
+    const want = Number((await sql("select count(*)::int as n from public.jobs where is_open and advisor_id = $1 and coalesce(gated_in_at, created_at) >= now() - interval '7 days'", [pick.v]))[0].n);
+    const words = ((await page.locator("[data-job-list-shown]").textContent()) ?? "").trim();
+    check(`t2: Last 7 days + advisor ${pick.t} reads "${words}"`, words === `${want} of ${total}`, `want ${want} of ${total}`);
+    await page.screenshot({ path: `${proof}/t2-last7-advisor-1440.png` });
+    // Remembered: the bare address brings the same choice back.
+    await go(page, `${base}/jobs`);
+    await page.locator("[data-job-list-shown]").waitFor({ timeout: 20000 });
+    check("t3: the choice is remembered for this person", ((await page.locator("[data-job-list-shown]").textContent()) ?? "").trim() === words && (await page.locator('[data-job-when="7d"][class*="bg-ink"]').count()) === 1);
+  } else check("t2: an advisor to filter by (none on open jobs in the test copy)", false);
+  // Recently viewed: open one job card, then back to the list.
+  if (shownIds[0]) {
+    await go(page, `${base}/jobs/${shownIds[0]}`);
+    await page.waitForTimeout(1500);
+    await go(page, `${base}/jobs?reset=1`);
+    await page.locator("[data-recent-jobs]").waitFor({ timeout: 15000 }).catch(() => {});
+    check("t4: the job just opened is first in Recently viewed", (await page.locator("[data-recent-job]").first().getAttribute("data-recent-job").catch(() => null)) === shownIds[0]);
+  }
+  // A tablet width: the controls wrap, nothing hidden.
+  await page.setViewportSize({ width: 800, height: 1280 });
+  await go(page, `${base}/jobs?reset=1`);
+  await page.locator("[data-job-list-controls]").waitFor({ timeout: 15000 });
+  check("t5: on a tablet every control is there", (await page.locator("[data-job-sort]").count()) === 5 && (await page.locator("[data-job-when]").count()) === 3 && (await page.locator("[data-job-filter]").count()) === 3);
+  await page.screenshot({ path: `${proof}/t5-tablet-800.png` });
+  await browser.close();
 });
 
 const failed = summary();

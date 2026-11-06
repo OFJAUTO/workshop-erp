@@ -1,4 +1,5 @@
 import { compCostOf, loadCompJobs, reworkByOriginal } from "@/lib/comp-data";
+import { RecentJobMark } from "@/components/RecentJobs";
 import { lastResendWords } from "@/lib/quote-message";
 import { DamageSection } from "@/components/DamageSection";
 import { DamageFoundAfter } from "@/components/DamageFoundAfter";
@@ -484,6 +485,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   return (
     <>
       {/* Section 10: inbound_scans is live and the net is 20 s, so a scan report appears on the job card by itself. */}
+      <RecentJobMark staffId={staff.id} job={{ id, n: job.job_number, p: formatPlate(vehicle), t: vehicleTitle(vehicle) }} />
       <LiveRefresh tables={["jobs", "gate_in_media", "gate_ins", "approval_requests", "inspections", "road_tests", "move_requests", "inbound_scans", "payments", "invoices", ...(reportsOn ? ["payment_reports"] : [])]} jobId={id} />
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
