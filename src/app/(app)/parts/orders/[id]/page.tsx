@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { CopyVin } from "@/components/CopyVin";
+import { JobAdvisorTag } from "@/components/JobAdvisorTag";
+import { jobAdvisorOf } from "@/lib/job-advisor";
 import { PositionsLine } from "@/components/PositionsLine";
 import { approvedQuotations } from "@/lib/quote-data";
 import { notFound } from "next/navigation";
@@ -185,6 +187,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const afterApproval = isMain && po.status === "pending_approval" && po.job_id ? await loadPartsChanges(po.job_id) : null;
   // A refused LPO is not a dead end: this page says so, and names the version that replaced it once Parts resend.
   const refusedHere = po.status === "cancelled" && /refused/i.test(String(po.notes ?? ""));
+  // The car's advisor next to the job (6 November 2026, Peter): staff only, never on the supplier copy.
+  const advisor = po.job_id ? await jobAdvisorOf(po.job_id) : null;
   const { data: replacedBy } = refusedHere && po.superseded_by ? await admin.from("purchase_orders").select("id, number").eq("id", po.superseded_by).maybeSingle() : { data: null };
 
   return (
@@ -195,6 +199,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           <span className="flex flex-wrap items-center gap-2">
             <span>{v ? `${formatPlate(v)} · ${[v.make?.name, v.model?.name].filter(Boolean).join(" ")}` : ""}</span>
             <span>· {job?.job_number}</span>
+            {po.job_id && advisor ? <JobAdvisorTag jobId={po.job_id} jobWords={`${job?.job_number ?? ""}${v ? ` · ${formatPlate(v)}` : ""}`} advisor={advisor} canAsk={!staff.viewingAs} /> : null}
             <Badge tone={po.status === "pending_approval" ? "amber" : po.status === "received" ? "green" : po.status === "cancelled" ? "neutral" : "ink"}>{isMain && po.status === "approved" ? "Approved" : PO_STATUS_LABELS[po.status]}</Badge>
             {po.supplier_invoice_status === "to_follow" ? <Badge tone="amber">Invoice missing</Badge> : null}
             {po.supplier_paid_at ? <Badge tone="green">Paid to supplier</Badge> : null}

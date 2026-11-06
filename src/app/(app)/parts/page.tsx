@@ -1,4 +1,6 @@
 import { formatDate } from "@/lib/format";
+import { JobAdvisorTag } from "@/components/JobAdvisorTag";
+import { jobAdvisorsFor } from "@/lib/job-advisor";
 import { estimateTaskWords, loadEstimatesToPrice } from "@/lib/estimate-parts-data";
 import { seesCustomers } from "@/lib/customer-data";
 import { partsWithNoHome } from "@/lib/handover";
@@ -42,13 +44,13 @@ type JobInfo = { id: string; job_number: string; is_open: boolean; status: strin
 type AllJob = { id: string; job_number: string; status: string; is_open: boolean; gated_in_at: string; gated_out_at: string | null; parts_pricing_done_at: string | null; parts_pricing_reopened_at: string | null; vehicle: { kind?: string | null; photo_path?: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null; customer: { full_name: string; company_name: string | null } | null };
 const ALL_JOB_SELECT = "id, job_number, status, is_open, gated_in_at, gated_out_at, parts_pricing_done_at, parts_pricing_reopened_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name)";
 
-export default async function PartsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; q?: string }> }) {
+export default async function PartsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; q?: string; advisor?: string }> }) {
   const staff = await requirePermission("priceParts");
   // 30 October 2026: estimates whose parts were sent to the desk (or priced by the advisor, to check). The car is not here yet.
   const estimatesToPrice = await loadEstimatesToPrice();
   // Customers are for the owner, advisors and accounts only (29 October 2026): Parts find a car by plate, job number or VIN.
   const seesCust = seesCustomers(staff.role_id);
-  const { message, error, q: rawQ } = await searchParams;
+  const { message, error, q: rawQ, advisor: rawAdvisor } = await searchParams;
   const q = String(rawQ ?? "").trim().slice(0, 60);
   const admin = createAdminClient();
   const settings = await getSettings();
@@ -105,6 +107,15 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
     const { data: extraJobs } = await admin.from("jobs").select("id, job_number, is_open, status, parts_pricing_done_at, parts_pricing_reopened_at, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name)").in("id", Array.from(new Set(extraJobIds)));
     for (const j of ((extraJobs ?? []) as unknown as JobInfo[]).filter((j) => j.is_open)) jobs.set(j.id, j);
   }
+  // The car's advisor on every line (6 November 2026, Peter) and the Advisor filter: All / Adarsh / … Internal only.
+  const advisorOf = await jobAdvisorsFor(Array.from(jobs.keys()));
+  const advisorFilter = String(rawAdvisor ?? "").trim();
+  const advisorNames = new Map<string, string>();
+  for (const a of advisorOf.values()) if (a.advisorId && a.advisorName) advisorNames.set(a.advisorId, a.advisorName);
+  if (advisorFilter) for (const id of Array.from(jobs.keys())) if (advisorOf.get(id)?.advisorId !== advisorFilter) jobs.delete(id);
+  const orderNowShown = advisorFilter ? orderNowPos.filter((po) => !!po.job_id && jobs.has(po.job_id)) : orderNowPos;
+  const pendingShown = advisorFilter ? pendingPos.filter((po) => !!po.job_id && jobs.has(po.job_id)) : pendingPos;
+  const estimatesShown = advisorFilter ? estimatesToPrice.filter((e) => e.advisorId === advisorFilter) : estimatesToPrice;
 
   const jobLine = (id: string) => {
     const j = jobs.get(id);
@@ -163,7 +174,20 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
       found = (data ?? []) as unknown as AllJob[];
     }
   }
+  const advisorOfCars = await jobAdvisorsFor([...allCars, ...found].map((j) => j.id));
+  for (const [k, a] of advisorOfCars) {
+    advisorOf.set(k, a);
+    if (a.advisorId && a.advisorName) advisorNames.set(a.advisorId, a.advisorName);
+  }
+  const allShown = advisorFilter ? allCars.filter((j) => advisorOf.get(j.id)?.advisorId === advisorFilter) : allCars;
+  const foundShown = advisorFilter ? found.filter((j) => advisorOf.get(j.id)?.advisorId === advisorFilter) : found;
   const pics = await signCarPictures([...allCars, ...found].map((j) => j.vehicle?.photo_path));
+  const tagOf = (jobId: string) => {
+    const a = advisorOf.get(jobId);
+    const j = jobs.get(jobId) ?? allCars.find((x) => x.id === jobId) ?? found.find((x) => x.id === jobId);
+    const plate = j?.vehicle ? formatPlate(j.vehicle as Parameters<typeof formatPlate>[0]) : "";
+    return a ? <JobAdvisorTag jobId={jobId} jobWords={`${j?.job_number ?? ""}${plate ? ` · ${plate}` : ""}`} advisor={a} canAsk={!staff.viewingAs} /> : null;
+  };
   const carRow = (j: AllJob) => {
     const steps = partsSteps({ jobStatus: j.status, pricingDoneAt: j.parts_pricing_done_at, pricingReopenedAt: j.parts_pricing_reopened_at, parts: parts.filter((p) => p.job_id === j.id).map((p) => stepPartOf(p as unknown as Parameters<typeof stepPartOf>[0], ctxOf(j.id, j.status))) });
     const allDone = steps.every((s) => s.state === "done");
@@ -180,6 +204,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           <PartsSteps size="dots" steps={steps} />
           <span className={`ml-auto text-xs font-semibold ${allDone && !gone ? "text-green" : "text-muted"}`}>{gone ? `Gated out${j.gated_out_at ? ` ${formatDate(j.gated_out_at)}` : ""}` : allDone ? "All parts handed over" : (STATUS_LABELS[j.status as JobStatus] ?? j.status)}</span>
         </Link>
+        {tagOf(j.id)}
         <Link href={`/jobs/${j.id}/inspection`} className="inline-flex min-h-9 items-center text-xs font-semibold underline underline-offset-4" data-view-inspection={j.id}>
           View inspection
         </Link>
@@ -208,19 +233,37 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
       <form method="get" className="flex flex-wrap items-center gap-2" data-parts-search-form>
         <Input name="q" defaultValue={q} placeholder={seesCust ? "Find a car: plate, job number, VIN or customer (gone-out cars too)" : "Find a car: plate, job number or VIN (gone-out cars too)"} aria-label="Find a car" className="min-w-64 flex-1" data-parts-search />
         <Button type="submit" size="md" tone="secondary">Search</Button>
-        {q ? <LinkButton href="/parts" tone="ghost" size="md">Clear</LinkButton> : null}
+        {advisorFilter ? <input type="hidden" name="advisor" value={advisorFilter} /> : null}
+        {q ? <LinkButton href={advisorFilter ? `/parts?advisor=${advisorFilter}` : "/parts"} tone="ghost" size="md">Clear</LinkButton> : null}
       </form>
+      {advisorNames.size ? (
+        <nav className="flex flex-wrap items-center gap-2" aria-label="Advisor filter" data-advisor-filter-bar>
+          <span className="text-sm font-bold">Advisor:</span>
+          {[["", "All"] as [string, string], ...Array.from(advisorNames.entries()).sort((a, b) => a[1].localeCompare(b[1]))].map(([id, name]) => {
+            const on = advisorFilter === id;
+            const params = new URLSearchParams();
+            if (q) params.set("q", q);
+            if (id) params.set("advisor", id);
+            const query = params.toString();
+            return (
+              <Link key={id || "all"} href={`/parts${query ? `?${query}` : ""}`} aria-current={on ? "true" : undefined} className={`inline-flex min-h-9 items-center rounded-full border px-3 text-sm font-semibold ${on ? "border-ink bg-ink text-white" : "border-line bg-white"}`} data-advisor-filter={id || "all"}>
+                {name}
+              </Link>
+            );
+          })}
+        </nav>
+      ) : null}
       {q ? (
         <section className="flex flex-col gap-2" data-search-results>
-          <SectionLabel right={`${found.length}`}>Cars matching &quot;{q}&quot;</SectionLabel>
-          {found.length === 0 ? <p className="text-sm text-muted">No car found. Try the plate number, the job number, the VIN or the customer&apos;s name.</p> : found.map(carRow)}
+          <SectionLabel right={`${foundShown.length}`}>Cars matching &quot;{q}&quot;</SectionLabel>
+          {foundShown.length === 0 ? <p className="text-sm text-muted">No car found. Try the plate number, the job number, the VIN or the customer&apos;s name.</p> : foundShown.map(carRow)}
         </section>
       ) : null}
 
-      {orderNowPos.length ? (
+      {orderNowShown.length ? (
         <section className="flex flex-col gap-3" data-order-now-section>
-          <SectionLabel right={`${orderNowPos.length}`}>Order now <span className="cursor-help font-normal text-muted" title={`Approved: send each supplier LPO (Copy, PDF or Email) and press Ordered. Amber past ${amberMin} working minutes, red past ${redMin} - the owner is told once.`}>ⓘ</span></SectionLabel>
-          {orderNowPos.map((po) => {
+          <SectionLabel right={`${orderNowShown.length}`}>Order now <span className="cursor-help font-normal text-muted" title={`Approved: send each supplier LPO (Copy, PDF or Email) and press Ordered. Amber past ${amberMin} working minutes, red past ${redMin} - the owner is told once.`}>ⓘ</span></SectionLabel>
+          {orderNowShown.map((po) => {
             const lines = onLines.get(po.id) ?? [];
             const j = po.job_id ? jobs.get(po.job_id) : undefined;
             const mins = po.approved_at ? workingMinutesSince(po.approved_at, wt) : 0;
@@ -231,6 +274,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
                   <span className={`text-base font-extrabold ${mins >= redMin ? "text-red" : ""}`}>ORDER NOW</span>
                   {j ? <span className="font-bold uppercase">{j.vehicle ? formatPlate(j.vehicle) : j.job_number}</span> : <span className="font-bold">Stock order</span>}
                   {j ? <span className="uppercase">{[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")}</span> : null}
+                  {po.job_id ? tagOf(po.job_id) : null}
                   <span className="text-muted">· {po.supplier_name} · {lines.length} part{lines.length === 1 ? "" : "s"}</span>
                   <span className={`ml-auto text-xs font-bold ${mins >= redMin ? "text-red" : mins >= amberMin ? "text-amber-bar" : "text-muted"}`} data-order-wait>Approved{po.approved_by ? ` by ${approverName.get(po.approved_by) ?? ""}` : ""}{po.approved_at ? ` ${formatDayTime(po.approved_at)}` : ""} · waiting {formatWait(mins, wt)}</span>
                 </span>
@@ -241,10 +285,10 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
         </section>
       ) : null}
 
-      {estimatesToPrice.length ? (
-        <section className="flex flex-col gap-3" data-estimates-to-price={estimatesToPrice.length}>
-          <SectionLabel right={`${estimatesToPrice.length}`}>Estimates to price <span className="cursor-help font-normal text-muted" title="An advisor's estimate before the car arrives: price each part he named. A price the advisor typed himself is marked Priced by advisor: check it.">ⓘ</span></SectionLabel>
-          {estimatesToPrice.map((e) => (
+      {estimatesShown.length ? (
+        <section className="flex flex-col gap-3" data-estimates-to-price={estimatesShown.length}>
+          <SectionLabel right={`${estimatesShown.length}`}>Estimates to price <span className="cursor-help font-normal text-muted" title="An advisor's estimate before the car arrives: price each part he named. A price the advisor typed himself is marked Priced by advisor: check it.">ⓘ</span></SectionLabel>
+          {estimatesShown.map((e) => (
             <Card key={e.id} className={`flex flex-wrap items-center justify-between gap-3 ${e.toPrice ? "!border-amber-bar" : ""}`} data-estimate-to-price={e.number}>
               <span className="flex min-w-0 flex-col gap-0.5">
                 <Link href={`/parts/estimate/${e.id}`} className="font-extrabold hover:underline underline-offset-4">ESTIMATE {e.number} – car not here yet</Link>
@@ -262,7 +306,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           <SectionLabel right={`${toSendJobs.length}`}>Priced – send to the advisor <span className="cursor-help font-normal text-muted" title="Every part on these cars is priced, but Pricing done – send to advisor was not pressed: the advisor does not know yet.">ⓘ</span></SectionLabel>
           {toSendJobs.map((jobId) => (
             <Card key={jobId} className="flex flex-wrap items-center gap-3 !border-ink" data-to-send-car={jobId}>
-              <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}#pricing`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{dotsOf(jobId)}</span>
+              <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}#pricing`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{tagOf(jobId)}{dotsOf(jobId)}</span>
               <span className="text-sm font-semibold text-amber">{jobs.get(jobId)?.parts_pricing_reopened_at && jobs.get(jobId)?.parts_pricing_done_at ? "Changed since you sent it" : "Ready to send – the advisor does not know yet"}</span>
               <LinkButton href={`/parts/${jobId}#pricing`} size="md" className="ml-auto" data-to-send-open>Send to advisor</LinkButton>
             </Card>
@@ -280,7 +324,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           return (
             <Card key={jobId} className={`flex flex-col gap-1 ${t.tone === "red" ? "!border-red-bar" : t.tone === "amber" ? "!border-amber-bar" : ""}`} data-to-price-car={jobId}>
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{dotsOf(jobId)}<CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
+                <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{tagOf(jobId)}{dotsOf(jobId)}<CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
                 <span className="flex items-center gap-2"><Badge tone={t.tone === "neutral" ? "outline" : t.tone}>waiting {formatWait(t.min, wt)}</Badge><LinkButton href={`/parts/${jobId}`} size="md">Price the parts</LinkButton></span>
               </div>
               {rows.length ? <details>
@@ -299,7 +343,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
             <summary className="min-h-10 cursor-pointer text-sm font-bold">Waiting for a price · {waitingPrice.length}</summary>
             {byJob(waitingPrice).map((jobId) => (
               <div key={jobId} className="flex flex-col gap-1 border-t border-line py-2">
-                <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{dotsOf(jobId)}</span>
+                <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{tagOf(jobId)}{dotsOf(jobId)}</span>
                 <ul className="text-sm divide-y divide-line">
                   {waitingPrice.filter((p) => p.job_id === jobId).map((p) => (
                     <li key={p.id} className="py-1.5">{p.description}{realPartNumber(p.part_number) ? <span className="text-muted"> · {realPartNumber(p.part_number)}</span> : null} · × {p.confirmed_quantity ?? p.quantity}</li>
@@ -321,7 +365,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           const supplierSet = Array.from(new Set(items.map((p) => (p.supplier ?? "").trim()).filter(Boolean)));
           return (
             <Card key={jobId} className="flex flex-wrap items-center gap-3">
-              <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}#lpo`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{dotsOf(jobId)}<CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
+              <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}#lpo`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{tagOf(jobId)}{dotsOf(jobId)}<CopyVin vin={jobs.get(jobId)?.vehicle?.vin} /></span>
               <span className="text-sm text-muted">{items.length} part{items.length === 1 ? "" : "s"} · {supplierSet.length ? `${supplierSet.length} supplier${supplierSet.length === 1 ? "" : "s"}` : "no supplier yet"} · AED {total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span>
               <LinkButton href={`/parts/${jobId}#lpo`} size="md" className="ml-auto">Send LPO for approval</LinkButton>
             </Card>
@@ -330,15 +374,16 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
       </section>
       ) : null}
 
-      {pendingPos.length ? (
+      {pendingShown.length ? (
         <section className="flex flex-col gap-3" data-pending-approval-section>
-          <SectionLabel right={`${pendingPos.length}`}>Waiting for owner approval <span className="cursor-help font-normal text-muted" title="Sent for approval; the owner or the head accountant approve with one tap on the LPO page.">ⓘ</span></SectionLabel>
-          {pendingPos.map((po) => {
+          <SectionLabel right={`${pendingShown.length}`}>Waiting for owner approval <span className="cursor-help font-normal text-muted" title="Sent for approval; the owner or the head accountant approve with one tap on the LPO page.">ⓘ</span></SectionLabel>
+          {pendingShown.map((po) => {
             const j = po.job_id ? jobs.get(po.job_id) : undefined;
             return (
               <Card key={po.id} className="flex flex-wrap items-center gap-3">
                 <span className="font-extrabold">{po.number}</span>
                 {j ? <span className="uppercase">{j.vehicle ? formatPlate(j.vehicle) : j.job_number}</span> : <span>Stock order</span>}
+                {po.job_id ? tagOf(po.job_id) : null}
                 <span className="text-sm text-muted">{po.kind === "main" ? "every supplier" : po.supplier_name} · AED {po.total_cost_aed.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span>
                 <LinkButton href={`/parts/orders/${po.id}`} size="md" tone="secondary" className="ml-auto">Open the LPO</LinkButton>
               </Card>
@@ -385,7 +430,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           <SectionLabel right={`${toIssue.length}`}>Received, to hand over <span className="cursor-help font-normal text-muted" title="At the desk: mark them ready; the technician receives them on his tablet with his PIN.">ⓘ</span></SectionLabel>
           {byJob(toIssue).map((jobId) => (
             <Card key={jobId} className="flex flex-wrap items-center gap-3">
-              <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/handover/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{dotsOf(jobId)}</span>
+              <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/handover/${jobId}`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{tagOf(jobId)}{dotsOf(jobId)}</span>
               <span className="text-sm text-muted">{toIssue.filter((p) => p.job_id === jobId).length} part{toIssue.filter((p) => p.job_id === jobId).length === 1 ? "" : "s"} ready</span>
               <LinkButton href={`/parts/handover/${jobId}`} size="md" className="ml-auto">Hand over</LinkButton>
             </Card>
@@ -394,9 +439,9 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
       ) : null}
 
       <details data-all-cars-fold>
-        <summary className="min-h-11 cursor-pointer text-sm font-extrabold uppercase tracking-[0.08em]" data-all-cars-summary>All cars ({allCars.length})</summary>
+        <summary className="min-h-11 cursor-pointer text-sm font-extrabold uppercase tracking-[0.08em]" data-all-cars-summary>All cars ({allShown.length})</summary>
         <section className="flex flex-col gap-2 pt-2" data-all-cars>
-          {allCars.length === 0 ? <p className="text-sm text-muted">No open car has parts yet.</p> : allCars.map(carRow)}
+          {allShown.length === 0 ? <p className="text-sm text-muted">No open car has parts yet.</p> : allShown.map(carRow)}
         </section>
       </details>
     </>

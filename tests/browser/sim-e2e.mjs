@@ -5,14 +5,15 @@
 // Paths: a mechanical + supplier parts + deposit + pay-link · b stock parts + cash · c declined → fee →
 // gate-out · d revision after approval · e bodyshop PPF sign-off → handover · f mixed quotation ·
 // g recovery delivery · h commission approve → pay · i enter price myself (estimate + job quotation) · j parts changed after approval → resend for approval · k revise at the top + hours missing · l supplier amounts with VAT ·
-// m no-plate car → gate-in asks → plate added (duplicate refused first) → every page shows it.
+// m no-plate car → gate-in asks → plate added (duplicate refused first) → every page shows it ·
+// n advisor on parts pages (tag, ask/answer through the bells, the Advisor filter, never on supplier copies).
 import fs, { mkdirSync } from "node:fs";
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -1638,6 +1639,119 @@ await section("m", "no-plate car → gate-in asks → plate added → shown ever
   check(`m4: Cars → Edit title carries the plate ("${title}")`, /^Edit car · .+ · DUBAI GG 44555$/.test(title));
   await shot(o.page, "m4-edit-title-plate");
   await o.browser.close();
+});
+
+/* ================================================================================================= */
+/* Path n — advisor on parts pages (6 November 2026, Peter): "Advisor: X (quotation by Y)" on every   */
+/* parts screen, ask → the advisor's bell → answer → the asker's bell, the Advisor filter, and never  */
+/* on the supplier copy text, the supplier PDF or the supplier's link.                                */
+/* ================================================================================================= */
+await section("n", "advisor on parts pages: tag, ask and answer, filter, internal only", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-06-advisor-parts";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const partsId = (await sql("select id from public.staff where role_id = 'parts' and is_active order by created_at limit 1"))[0].id;
+  const starter = (await sql("select q.created_by as id, s.display_name as name from public.quotations q join public.staff s on s.id = q.created_by where q.job_id = $1 order by q.version limit 1", [jobId]))[0];
+  const adv = (await sql("select id, display_name as name from public.staff where role_id = 'service_advisor' and is_active and id <> $1 order by display_name limit 1", [starter?.id ?? "00000000-0000-4000-8000-000000000000"]))[0];
+  const other = (await sql("select id from public.staff where role_id = 'service_advisor' and is_active and id <> $1 order by display_name limit 1", [adv.id]))[0];
+  await sql("update public.jobs set advisor_id = $1 where id = $2", [adv.id, jobId]);
+  const part = (await sql("select id, description from public.part_items where job_id = $1 and is_active order by created_at limit 1", [jobId]))[0];
+  const po = (await sql("insert into public.purchase_orders (number, job_id, supplier_name, kind, status, total_cost_aed, created_by, updated_by) values ('E2E-LPO-N1', $1, 'E2E ADVISOR TEST SUPPLIER', 'supplier', 'approved', 100, $2, $2) returning id, verify_token", [jobId, partsId]))[0];
+  await sql("insert into public.purchase_order_lines (po_id, position, part_item_id, description, quantity, unit_cost, created_by, updated_by) values ($1, 1, $2, $3, 1, 100, $4, $4)", [po.id, part.id, part.description, partsId]);
+  if (!(await sql("select id from public.purchase_order_lines where po_id = $1", [po.id])).length) throw new Error("seed failed: the LPO line was not created");
+  const names = [adv.name, starter?.name].filter(Boolean);
+
+  // n1. The job's parts page at both sizes: bold "Advisor: X" next to the job, "(quotation by Y)" when someone else made it.
+  for (const [w, h] of [[1440, 900], [800, 1280]]) {
+    const { browser, page } = await browserForId(partsId, { viewport: { width: w, height: h }, ...(w < 1000 ? { hasTouch: true } : {}) });
+    await go(page, `${base}/parts/${jobId}`);
+    const tag = ((await page.locator(`[data-job-advisor="${jobId}"]`).first().textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+    check(`n1 @${w}: the parts page names the advisor ("${tag}")`, tag.includes(`Advisor: ${adv.name}`));
+    if (starter?.name && starter.id !== adv.id) check(`n1 @${w}: …and who made the quotation`, tag.includes(`(quotation by ${starter.name})`));
+    const sideways = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    check(`n1 @${w}: no sideways scroll (${sideways}px)`, sideways <= 1);
+    await page.screenshot({ path: `${proof}/n1-parts-page-${w}.png` });
+    if (w === 1440) {
+      // n2. Copy for the supplier: the text that goes to the supplier carries no advisor name.
+      await page.evaluate(() => { window.__copied = []; navigator.clipboard.writeText = async (t) => { window.__copied.push(t); }; });
+      const copyBtn = page.locator("[data-supplier-lpo] [data-lpo-copy]").first();
+      if (await copyBtn.count()) {
+        await copyBtn.click();
+        const copied = await page.evaluate(() => (window.__copied ?? []).join("\n"));
+        const hasPart = copied.toLowerCase().includes(String(part.description).toLowerCase());
+        check("n2: the supplier copy text has the part but no advisor name", hasPart && !names.some((n) => copied.includes(n)), copied.slice(0, 120));
+      } else check("n2: the supplier LPO card is on the parts page", false);
+      // n3. Ask the advisor about the part.
+      const m = await mark();
+      await page.locator(`[data-job-advisor="${jobId}"] [data-advisor-ask-open]`).first().click();
+      await page.locator("[data-advisor-ask-part]").selectOption(part.id);
+      await page.locator("[data-advisor-ask-text]").fill("Genuine or aftermarket for this one?");
+      await page.screenshot({ path: `${proof}/n3-ask-window-1440.png` });
+      await page.locator("[data-advisor-ask-send]").click();
+      await page.locator("[data-advisor-ask-sent]").waitFor({ timeout: 15000 }).catch(() => null);
+      check("n3: the answer shows in the window: sent to the advisor", /Sent to/.test(((await page.locator("[data-advisor-ask-sent]").textContent().catch(() => "")) ?? "")));
+      await told("n3", m, jobId, [{ id: adv.id, type: "advisor_question", label: "the advisor" }]);
+    }
+    await browser.close();
+  }
+  const q = (await sql("select id, note from public.job_events where job_id = $1 and event_type = 'advisor_question' order by id desc limit 1", [jobId]))[0];
+  check(`n3: the question names the part ("${q?.note ?? ""}")`, !!q && q.note.toLowerCase().includes(String(part.description).toLowerCase()));
+  const bell = (await sql("select href from public.notifications where staff_id = $1 and type = 'advisor_question' and job_id = $2 order by id desc limit 1", [adv.id, jobId]))[0];
+  check("n3: the advisor's bell opens the question", bell?.href === `/ask/${q?.id}`);
+
+  // n4. The advisor answers from the bell's page; the answer rings the asker's bell.
+  {
+    const m = await mark();
+    const { browser, page } = await browserForId(adv.id, { viewport: { width: 800, height: 1280 }, hasTouch: true });
+    await go(page, `${base}/ask/${q.id}`);
+    await page.locator("[data-ask-answer-text]").fill("Genuine please – the customer asked for it.");
+    await page.locator("[data-ask-answer-send]").click();
+    await page.locator("[data-ask-answer]").first().waitFor({ timeout: 15000 }).catch(() => null);
+    check("n4: the answer shows on the page", /Genuine please/.test(((await page.locator("[data-ask-answer]").first().textContent().catch(() => "")) ?? "")));
+    await page.screenshot({ path: `${proof}/n4-advisor-answers-800.png`, fullPage: true });
+    await browser.close();
+    await told("n4", m, jobId, [{ id: partsId, type: "advisor_answer", label: "the asker (Parts)" }]);
+  }
+  {
+    const { browser, page } = await browserForId(partsId, { viewport: { width: 1440, height: 900 } });
+    await go(page, `${base}/ask/${q.id}`);
+    check("n4: Parts read the answer on the same page", /Genuine please/.test(((await page.locator("[data-ask-answer]").first().textContent().catch(() => "")) ?? "")));
+    // n5. The Advisor filter on the parts desk.
+    await go(page, `${base}/parts?advisor=${adv.id}`);
+    check("n5: the desk has the Advisor filter", (await page.locator("[data-advisor-filter-bar] [data-advisor-filter]").count()) >= 2);
+    check("n5: filtered on the advisor, the car is listed with the tag", (await page.locator(`[data-job-advisor="${jobId}"]`).count()) >= 1);
+    if (other) {
+      await go(page, `${base}/parts?advisor=${other.id}`);
+      check("n5: filtered on another advisor, the car is not listed", (await page.locator(`[data-job-advisor="${jobId}"]`).count()) === 0);
+    }
+    // n6. The LPO page names the advisor; the supplier's PDF and link do not.
+    await go(page, `${base}/parts/orders/${po.id}`);
+    check("n6: the LPO page names the advisor", ((await page.locator(`[data-job-advisor="${jobId}"]`).first().textContent().catch(() => "")) ?? "").includes(adv.name));
+    await browser.close();
+  }
+  {
+    const { browser, page } = await browserForId(partsId, { viewport: { width: 800, height: 1280 }, hasTouch: true });
+    await go(page, `${base}/parts?advisor=${adv.id}`);
+    const sideways = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    check(`n5 @800: the filtered desk never slides sideways (${sideways}px)`, sideways <= 1);
+    await page.screenshot({ path: `${proof}/n5-desk-filter-800.png` });
+    await browser.close();
+  }
+  {
+    const mupdf = await import("mupdf");
+    const res = await fetch(`${base}/api/pdf/po/${po.id}`, { headers: { cookie: await cookieHeader("owner") } });
+    const doc = mupdf.Document.openDocument(Buffer.from(await res.arrayBuffer()), "application/pdf");
+    let pdfText = "";
+    for (let i = 0; i < doc.countPages(); i++) pdfText += doc.loadPage(i).toStructuredText().asText();
+    check("n6: the supplier copy PDF has no advisor name", pdfText.length > 50 && !names.some((n) => pdfText.includes(n)), `${pdfText.length} chars`);
+    if (po.verify_token) {
+      const pub = await (await fetch(`${base}/lpo/${po.verify_token}`)).text();
+      check("n6: the supplier's LPO link has no advisor name", !names.some((n) => pub.includes(n)));
+    }
+  }
+  await sql("update public.purchase_orders set is_active = false where number = 'E2E-LPO-N1'");
 });
 
 const failed = summary();

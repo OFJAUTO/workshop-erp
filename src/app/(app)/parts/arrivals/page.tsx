@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { CopyText } from "@/components/CopyText";
+import { JobAdvisorTag } from "@/components/JobAdvisorTag";
+import { jobAdvisorsFor } from "@/lib/job-advisor";
 import { Badge, Button, Card, Input, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { ReasonChips } from "@/components/ReasonChips";
@@ -38,7 +40,7 @@ type Row = {
  * advisor is told. Workshop stock orders show too, marked Stock.
  */
 export default async function ArrivalsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; week?: string; supplier?: string; special?: string }> }) {
-  await requirePermission("priceParts");
+  const staff = await requirePermission("priceParts");
   const { message, error, week: weekParam, supplier: supplierParam, special: specialParam } = await searchParams;
   const week = weekParam === "next" ? "next" : "this";
   const admin = createAdminClient();
@@ -62,6 +64,8 @@ export default async function ArrivalsPage({ searchParams }: { searchParams: Pro
     admin.from("suppliers").select("name, phone").eq("is_active", true),
   ]);
   const jobs = new Map(((jobRows ?? []) as unknown as { id: string; job_number: string; is_open: boolean; vehicle: Parameters<typeof formatPlate>[0] | null }[]).filter((j) => j.is_open).map((j) => [j.id, j]));
+  // The car's advisor on each line (6 November 2026, Peter): tap to ask. Never in the supplier chase message.
+  const advisorOf = await jobAdvisorsFor(Array.from(jobs.keys()));
   const poNumber = new Map(((poRows ?? []) as { id: string; number: string }[]).map((p) => [p.id, p.number]));
   const phoneOf = new Map(((supplierRows ?? []) as { name: string; phone: string | null }[]).map((s) => [s.name.toLowerCase(), s.phone]));
 
@@ -104,6 +108,7 @@ export default async function ArrivalsPage({ searchParams }: { searchParams: Pro
         {r.special ? <Badge tone="amber">Special order</Badge> : null}
         {r.supplier ? <span className="text-muted">{r.supplier}</span> : null}
         {r.jobId ? <Link href={`/parts/${r.jobId}`} className="font-semibold underline underline-offset-4">{r.plate} · {r.jobNumber}</Link> : null}
+        {r.jobId && advisorOf.get(r.jobId) ? <JobAdvisorTag jobId={r.jobId} jobWords={`${r.jobNumber} · ${r.plate ?? ""}`} advisor={advisorOf.get(r.jobId)!} canAsk={!staff.viewingAs} /> : null}
         {r.lpo ? <span className="text-xs text-muted">{r.lpo}</span> : null}
         <span className={`ml-auto text-xs font-bold ${red ? "text-red" : "text-muted"}`}>{red ? `Expected ${formatDate(r.expected)}, not here` : formatDate(r.expected)}</span>
         {red ? chase(r) : null}

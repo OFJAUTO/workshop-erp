@@ -152,6 +152,11 @@ export async function runPopups() {
   else notReached.push("Enter price myself: the job part with no price did not show (database change not applied here?)");
   /* ---- The Parts desk ---- */
   const pUrl = `/parts/${quote.jobId}`;
+  // Ask the advisor (6 November 2026): the centre window from the bold advisor name next to the job.
+  await sql("update public.jobs set advisor_id = (select id from public.staff where role_id = 'service_advisor' and is_active order by display_name limit 1) where id = $1", [quote.jobId]);
+  await goto(p, pUrl);
+  if (await p.locator("[data-advisor-ask-open]").count()) await check(p, "Ask the advisor", "[data-advisor-ask-window] [role=dialog]", () => click(p, "[data-advisor-ask-open]"), findings, shots);
+  else notReached.push("Ask the advisor: the advisor's name did not show on the parts page");
   await goto(p, pUrl);
   await check(p, "Part menu", "[data-part-menu]", () => click(p, 'button[aria-label="More for this part"]'), findings, shots);
   await goto(p, pUrl);

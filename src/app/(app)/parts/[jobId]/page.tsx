@@ -4,6 +4,8 @@ import { ReceivePanel } from "./ReceivePanel";
 import { PAST_QUOTE, partsSteps, stepPartOf } from "@/lib/parts-steps";
 import { loadPartsChanges } from "@/lib/parts-changes-data";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
+import { JobAdvisorTag } from "@/components/JobAdvisorTag";
+import { jobAdvisorOf } from "@/lib/job-advisor";
 import Link from "next/link";
 import { CopyVin } from "@/components/CopyVin";
 import { notFound } from "next/navigation";
@@ -249,6 +251,9 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   // Lines still being priced (not removed, refused or unavailable): "Send LPO for approval" names them first.
   const unfinishedNames = rows.filter((r) => !r.removed && !r.refused && !r.unavailable && rowState(r.values, { waitingApproval: r.waitingApproval }) === "not_finished").map((r) => r.name.toUpperCase());
   const car = [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
+  // The car's advisor, in bold next to the job (6 November 2026, Peter); tap to ask. Internal only.
+  const advisor = await jobAdvisorOf(jobId);
+  const askParts = parts.filter((p) => p.is_active !== false).map((p) => ({ id: p.id, name: String(p.description ?? "") }));
   // Pricing done locks the rows until Edit; after the customer's approval the ordered rows are locked on their own.
   const pricingLocked = !inPlanning && !!job.parts_pricing_done_at && !job.parts_pricing_reopened_at;
   // The five steps across the top (one rule with the parts desk and the job card), and the parts still to receive.
@@ -270,6 +275,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
             <span>{car} · {job.job_number}</span>
+            <JobAdvisorTag jobId={jobId} jobWords={`${job.job_number}${v ? ` · ${formatPlate(v)}` : ""}`} advisor={advisor} parts={askParts} canAsk={!staff.viewingAs} />
             <VinCopy vin={v?.vin ?? null} />
             {dangers.length ? <Badge tone="red">Dangerous to drive</Badge> : null}
           </span>

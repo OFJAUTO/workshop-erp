@@ -1,5 +1,7 @@
 import { notFound } from "next/navigation";
 import { Badge, Button, Card, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { JobAdvisorTag } from "@/components/JobAdvisorTag";
+import { jobAdvisorsFor } from "@/lib/job-advisor";
 import { requireStaff } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
@@ -41,6 +43,8 @@ export default async function DiscountApprovalsPage({ searchParams }: { searchPa
   const rows = (data ?? []) as unknown as Row[];
   const pending = rows.filter((r) => r.discount_approval_status === "pending");
   const decided = rows.filter((r) => r.discount_approval_status !== "pending").slice(0, 20);
+  // The car's advisor next to each line waiting (6 November 2026, Peter).
+  const advisorOf = await jobAdvisorsFor(pending.map((r) => r.job_id));
   const limit = Number(settings.supplier_discount_approval_above_percent ?? 70);
   const line = (r: Row) => `${r.job?.job_number ?? ""}${r.job?.vehicle ? ` · ${formatPlate(r.job.vehicle)}` : ""}`;
   return (
@@ -59,6 +63,7 @@ export default async function DiscountApprovalsPage({ searchParams }: { searchPa
                   {realPartNumber(r.part_number) ? <span className="text-muted">{realPartNumber(r.part_number)}</span> : null}
                   <Badge tone="amber">{r.discount_percent}% from {r.supplier ?? "no supplier"}</Badge>
                   <span className="text-muted">List AED {money(r.list_price_aed)} · net AED {money(r.cost_aed)} · {line(r)}</span>
+                  {advisorOf.get(r.job_id) ? <JobAdvisorTag jobId={r.job_id} jobWords={line(r)} advisor={advisorOf.get(r.job_id)!} canAsk={!staff.viewingAs} /> : null}
                   <LinkButton href={`/parts/${r.job_id}`} tone="secondary" size="md">Parts page</LinkButton>
                 </div>
                 <form action={decideDiscountApproval.bind(null, r.id)} className="flex flex-wrap items-center gap-2">
