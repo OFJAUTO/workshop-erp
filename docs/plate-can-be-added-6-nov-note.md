@@ -65,6 +65,7 @@
 
 - `npm run test:unit`: `plate-rules` (every emirate, letter and number codes, limits, plain refusals, the stored fields, plate change, old-plate entries, titles) and `db-words` (the AL TAMIMI text, the shared sentence, our sentences kept, plain words untouched).
 - `npm run test:plate`: the AL TAMIMI case saving DUBAI DD 23864; ABU DHABI 16 94155; a plate change with the remark; the old plate searchable; the duplicate → merge; the gate-in "genuinely no plate" reason; the database refusing, with staff seeing plain words and the owner seeing the raw text.
+- Found and fixed on the way: after a refused save, the "No number plate" tick jumped back to how it was when the page opened while the plate was still typed below (React resets the form after every answer). Both plate ticks now keep their state (`KeptCheckbox`). `npm run test:plate` has 36 checks.
 - `test:sim` path **m**: a car with no plate → the gate-in asks → a duplicate plate refused in plain words with the typing kept → the real plate saved → the job card and the edit title show it.
 
 ## Assumptions

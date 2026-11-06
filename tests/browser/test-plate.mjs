@@ -155,6 +155,16 @@ try {
   await g.page.locator('input[name="requests"]:visible').first().pressSequentially("Check the brakes please");
   await sleep(400);
   await g.page.locator("[data-gatein-no-plate]").evaluate((el) => el.click());
+  // Ticked but no reason picked: refused in plain words, and the tick STAYS ticked after the refusal (React's reset).
+  await g.page.getByText("Save and continue to photos and video").click();
+  // The form's own "to fix" bar names the missing reason before anything is sent (the server refuses it too, as a backstop).
+  const refusedE = /Pick why the car genuinely has no plate|Why is there no plate\?: missing/;
+  await until(async () => refusedE.test(((await g.page.textContent("body").catch(() => "")) ?? "")));
+  await g.page.screenshot({ path: shot("e-reason-refusal"), fullPage: true });
+  check("E1: ticked without a reason is refused in plain words, naming the reason", refusedE.test(((await g.page.textContent("body").catch(() => "")) ?? "")));
+  check("E1: …and nothing was gated in", (await sql("select count(*)::int as n from public.jobs where vehicle_id = $1", [CAR_C]))[0].n === 0);
+  check("E1: …and the tick is still ticked after the refusal", await g.page.locator("[data-gatein-no-plate]").isChecked());
+  await sleep(5200); // FormGuard swallows a second tap within five seconds
   await g.page.locator('input[name="gi_no_plate_reason"][value*="New car"]').evaluate((el) => el.click());
   await g.page.screenshot({ path: shot("e-no-plate-reason"), fullPage: true });
   await g.page.getByText("Save and continue to photos and video").click();
@@ -183,12 +193,15 @@ try {
   };
   await raise("23514", 'new row for relation "vehicles" violates check constraint "vehicles_plate_rules"');
   const known = await trySave();
+  check("F1: after the refusal 'No number plate' stays UNticked, as typed (the plate is still in the boxes)", !(await f.page.locator("[data-no-plate]").isChecked()) && (await f.page.locator("[data-plate-number]").inputValue()) === "31337");
   check(`F1: the old AL TAMIMI refusal now reads as plain advice ("${known}")`, /Untick “No number plate”/.test(known) && !/vehicles_plate_rules|violates|relation/.test(known));
+  await f.page.locator("div[role=alert].bg-red-soft").first().evaluate((el) => el.scrollIntoView({ block: "center" })).catch(() => null);
   await f.page.screenshot({ path: shot("f-plain-advice") });
   await raise("23502", 'null value in column "e2e_column" of relation "vehicles" violates not-null constraint');
   const since = new Date().toISOString();
   const unknown = await trySave();
   check(`F2: any other database refusal reads as the ONE shared sentence ("${unknown}")`, unknown === "Couldn't save – nothing was recorded. Try again or tell the owner.");
+  await f.page.locator("div[role=alert].bg-red-soft").first().evaluate((el) => el.scrollIntoView({ block: "center" })).catch(() => null);
   await f.page.screenshot({ path: shot("f-shared-sentence") });
   const logged = await until(async () => (await sql("select place, message from public.app_errors where at >= $1 and message like '%e2e_column%' limit 1", [since]))[0]);
   check("F3: the raw words are logged for the owner", !!logged && /e2e_column/.test(logged.message), JSON.stringify(logged));

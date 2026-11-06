@@ -1,5 +1,6 @@
 "use client";
 
+import { KeptCheckbox } from "@/components/KeptCheckbox";
 import { useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { Button, ChoiceButtons, Field, Input, Select, Textarea } from "@/components/ui";
@@ -101,7 +102,7 @@ function Fields({
       <div className="rounded-card border border-line p-4 flex flex-col gap-4">
         <span className="text-sm font-bold">Number plate</span>
         <label className="flex items-center gap-3 min-h-11 cursor-pointer">
-          <input type="checkbox" name="no_plate" checked={noPlate} onChange={(e) => setNoPlate(e.target.checked)} className="h-5 w-5 accent-ink" data-no-plate />
+          <KeptCheckbox name="no_plate" checked={noPlate} onChange={(e) => setNoPlate(e.target.checked)} className="h-5 w-5 accent-ink" data-no-plate />
           <span className="text-sm font-semibold">No number plate</span>
           <span className="text-xs text-muted">Typing a plate below unticks this by itself.</span>
         </label>

@@ -1,5 +1,6 @@
 "use client";
 
+import { KeptCheckbox } from "@/components/KeptCheckbox";
 import { JOB_DEPARTMENTS } from "@/lib/inspection";
 
 import { useState } from "react";
@@ -133,7 +134,7 @@ export function GateInForm({
                 </Field>
               ) : null}
               <label className="flex items-center gap-3 min-h-11 cursor-pointer">
-                <input type="checkbox" name="gi_no_plate" checked={giNoPlate} onChange={(e) => setGiNoPlate(e.target.checked)} className="h-5 w-5 accent-ink" data-gatein-no-plate />
+                <KeptCheckbox name="gi_no_plate" checked={giNoPlate} onChange={(e) => setGiNoPlate(e.target.checked)} className="h-5 w-5 accent-ink" data-gatein-no-plate />
                 <span className="text-sm font-semibold">Genuinely no plate (new car, export, test plate)</span>
               </label>
               {giNoPlate ? (
