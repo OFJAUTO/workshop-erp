@@ -25,7 +25,11 @@ setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2
 /* ---- R3: who was told since a mark ---- */
 const mark = async () => Number((await sql("select coalesce(max(id), 0) as m from public.notifications"))[0]?.m ?? 0);
 async function told(step, m, jobId, wants) {
-  const rows = await sql("select n.type, s.display_name as who, s.role_id as role, s.id as staff_id from public.notifications n join public.staff s on s.id = n.staff_id where n.id > $1 and (n.job_id = $2 or n.job_id is null) order by n.id", [m, jobId]);
+  // A notice may be written just after the answer (after()): wait up to 10 s for every wanted one before judging.
+  const read = () => sql("select n.type, s.display_name as who, s.role_id as role, s.id as staff_id from public.notifications n join public.staff s on s.id = n.staff_id where n.id > $1 and (n.job_id = $2 or n.job_id is null) order by n.id", [m, jobId]);
+  const ok = (rows) => wants.every((w) => rows.some((r) => (w.role ? r.role === w.role : true) && (w.id ? r.staff_id === w.id : true) && (w.type ? r.type === w.type : true)));
+  let rows = await read();
+  for (let i = 0; i < 20 && !ok(rows); i++) { await sleep(500); rows = await read(); }
   const got = rows.map((r) => `${r.type}→${r.who}`).join(", ") || "nobody";
   for (const w of wants) check(`${step} — R3 ${w.label} told`, rows.some((r) => (w.role ? r.role === w.role : true) && (w.id ? r.staff_id === w.id : true) && (w.type ? r.type === w.type : true)), got);
 }
@@ -75,8 +79,24 @@ async function priceAllParts(jobId, partsId, availValue, pathKey) {
     await sleep(1500);
   }
   await sleep(3000);
+  // Every row must have SAVED before Pricing done (a part's save takes ~10 s from this PC to the TEST database; a
+  // page closed while a row still says "Saving…" loses the price).
+  await page.waitForFunction(() => !/Saving/.test(document.querySelector("main")?.innerText ?? ""), null, { timeout: 90000 }).catch(() => null);
+  // Since 2 November the cost check asks "Real price?" when a cost is far below what the same part was bought for
+  // (an earlier path bought the seed part dearer): Parts answer it, as a person would.
+  for (let k = 0; k < 4; k++) {
+    const yes = page.locator("[data-cost-confirm]");
+    if (!(await yes.count())) break;
+    await yes.first().click().catch(() => null);
+    await sleep(2500);
+  }
   const done = page.locator("[data-pricing-done], button:has-text('Pricing done')").first();
-  if (await done.count()) { await done.click(); await sleep(2500); }
+  if (await done.count()) {
+    await done.click();
+    // The send is a server step: wait for its answer (the bar's "sent" line), never a fixed pause.
+    await page.locator("[data-pricing-sent], [data-pricing-locked]").first().waitFor({ timeout: 30000 }).catch(() => null);
+    await sleep(1000);
+  }
   const left = (await sql("select count(*)::int as n from public.part_requests r where r.job_id = $1 and r.is_active and r.status not in ('rejected', 'unavailable') and not exists (select 1 from public.part_items i where i.part_request_id = r.id and i.is_active)", [jobId]))[0]?.n ?? 0;
   check(`${pathKey}: every request priced — R1`, left === 0, `unpriced ${left} of ${n}`);
   await shot(page, `${pathKey}-pricing-actor`);
@@ -120,7 +140,9 @@ async function advisorSendQuote(jobId, advisorId, pathKey) {
   if (!(await sendBtn.count())) await shot(page, `${pathKey}-complete-stuck`);
   const comp = (await sql("select completed_at from public.quotations where id = $1", [quotationId]))[0]?.completed_at;
   const diag = `completed_at ${comp ?? "null"} · ` + (((await page.locator("[data-receive-panel], main").first().innerText().catch(() => "")) ?? "").replace(/\s+/g, " ").match(/BEFORE SENDING(.{0,200})/)?.[0] ?? "no blocker box");
-  check(`${pathKey}: Send after Complete (R5)`, (await sendBtn.count()) >= 1, diag);
+  const partsDiag = (await sendBtn.count()) ? "" : ` · parts ${JSON.stringify(await sql("select p.description, p.supplier, p.cost_aed, p.availability, p.priced_at is not null as priced, p.part_request_id is not null as has_req from public.part_items p where p.job_id = $1 and p.is_active", [jobId]))} · reqs ${JSON.stringify(await sql("select r.status, r.description from public.part_requests r where r.job_id = $1 and r.is_active", [jobId]))}`;
+  if (partsDiag) console.log(`DIAG ${pathKey}${partsDiag}`);
+  check(`${pathKey}: Send after Complete (R5)`, (await sendBtn.count()) >= 1, diag + partsDiag);
   if (await sendBtn.count()) {
     await sendBtn.click();
     await page.locator("[role='dialog']").getByRole("button", { name: /^AED |Copy/ }).first().waitFor({ timeout: 20000 }).catch(() => null);
@@ -968,7 +990,9 @@ await section("h", "commission approve then pay", async () => {
     await page.locator("[data-pay-save]").click();
     await page.locator("[data-confirm-yes-money]").click({ timeout: 8000 });
     await sleep(2500);
-    check("h4: moved to Paid — R1/R4", /Paid .*transfer/i.test(((await page.locator("[data-commissions-paid]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ")));
+    const paidText = async () => ((await page.locator("[data-commissions-paid]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+    for (let i = 0; i < 10 && !/Paid .*transfer/i.test(await paidText()); i++) await sleep(1000);
+    check("h4: moved to Paid — R1/R4", /Paid .*transfer/i.test(await paidText()), `${(await paidText()).slice(0, 140)} · ${page.url().slice(-120)} · paid_at ${(await sql("select commission_paid_at from public.quotations where id = $1", [q.id]))[0]?.commission_paid_at ?? "null"}`);
     await shot(page, "h4-paid-actor");
     await browser.close();
   }
