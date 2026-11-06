@@ -10,7 +10,7 @@ import { PAYMENT_SELECT, buildInvoiceDraft, loadInvoice, nextDocumentNumber, toP
 import { newToken } from "@/lib/media";
 import { round2 } from "@/lib/money";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
-import { addAuthCode, decideOverpayment, settleJob, undoPayment, verifyPayment, voidPayment, type Actor, tellDepositCovered } from "@/lib/payments";
+import { addAuthCode, settleJob, undoPayment, verifyPayment, voidPayment, type Actor, tellDepositCovered } from "@/lib/payments";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { validateGatewayUrl } from "@/lib/pay-page";
@@ -245,16 +245,6 @@ export async function verifyPaymentAction(paymentId: string, formData: FormData)
   redirect(`${to}${to.includes("?") ? "&" : "?"}${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Verified.")}`);
 }
 
-/** The owner approves or refuses a payment above the balance. */
-export async function decideOverpaymentAction(paymentId: string, formData: FormData) {
-  const staff = await requirePermission("moveJobs");
-  const approve = String(formData.get("decision") ?? "") === "approve";
-  const r = await decideOverpayment(paymentId, actorOf(staff), approve, blankToNull(formData.get("note")));
-  const { data: p } = await createAdminClient().from("payments").select("job_id, invoice_id").eq("id", paymentId).maybeSingle();
-  refresh(p?.job_id ?? null, p?.invoice_id ?? undefined);
-  const back = p?.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices";
-  redirect(`${back}?${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.message ?? "Done.")}`);
-}
 
 /** The owner or accounts paste the bank's payment link; the customer's invoice page shows "Pay now". */
 export async function setPaymentLink(invoiceId: string, formData: FormData) {

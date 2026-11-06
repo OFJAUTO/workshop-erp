@@ -1,4 +1,5 @@
 import { dbWords, dbDetail } from "@/lib/app-errors";
+import { advanceSplit } from "./estimate-money-rules";
 import { noChargeJob } from "./comp-data";
 import { chargesToInvoice, markChargesInvoiced } from "./charges";
 import { chargeNet } from "./charge-rules";
@@ -198,8 +199,7 @@ export async function createDepositInvoice(jobId: string, paymentId: string, amo
   const vatPercent = Number((settings as unknown as Record<string, unknown>).vat_percent) || 5;
   const total = round2(amount);
   if (!(total > 0)) return { error: "No amount." };
-  const taxable = round2(total / (1 + vatPercent / 100));
-  const vat = round2(total - taxable);
+  const { taxable, vat } = advanceSplit(total, vatPercent); // the one VAT split (audit M1)
   const [{ data: customer }, { data: vehicle }] = await Promise.all([
     admin.from("customers").select("full_name, company_name, phone, email, trn").eq("id", job.customer_id).maybeSingle(),
     admin.from("vehicles").select("kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)").eq("id", job.vehicle_id).maybeSingle(),

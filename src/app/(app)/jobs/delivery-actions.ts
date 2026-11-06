@@ -128,6 +128,10 @@ export async function createPickupTrip(formData: FormData) {
     driverPhone = d.phone;
     truckPlate = d.truck_plate;
   }
+  // Audit M14 (6 November 2026): a trip never ends up with no distance - the pin, or the one-way km typed by hand.
+  const typedKm = Number(String(formData.get("km") ?? "").replace(/[^\d.]/g, ""));
+  const hasKm = Number.isFinite(typedKm) && typedKm > 0 && typedKm <= 2000;
+  if (!url && !hasKm) redirect(`${back}?error=${encodeURIComponent("Paste the map pin, or type the one-way distance in km.")}`);
   const trip = await createTrip({
     jobId, kind, company, driverId, driverName, driverPhone, truckPlate,
     locationUrl: url, locationDetails: blankToNull(formData.get("location_details")),
@@ -135,6 +139,7 @@ export async function createPickupTrip(formData: FormData) {
   });
   if (!trip) redirect(`${back}?error=${encodeURIComponent("The trip could not be saved.")}`);
   if (recoveryKind) await admin.from("recovery_trips").update({ recovery_kind: recoveryKind, updated_by: staff.id }).eq("id", trip.id);
+  if (hasKm && trip.road_km == null) await admin.from("recovery_trips").update({ road_km: Math.round(typedKm * 10) / 10, km_source: "manual", km_error: null, updated_by: staff.id }).eq("id", trip.id);
   // 30 October 2026: the person the driver calls (the customer before the car has a job, or the pick-up contact).
   const contactName = blankToNull(formData.get("contact_name"));
   const contactPhone = blankToNull(formData.get("contact_phone"));

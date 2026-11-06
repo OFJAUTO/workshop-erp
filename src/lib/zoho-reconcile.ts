@@ -1,4 +1,5 @@
 import "server-only";
+import { rowsOnDay, shiftDay } from "@/lib/zoho-sync-rules";
 import { clearingOpenAt } from "@/lib/card-settlements";
 import { logAppError } from "@/lib/app-errors";
 import { round2 } from "@/lib/money";
@@ -175,9 +176,14 @@ export async function compareDay(org: string, day: string): Promise<{ status: "g
   const clearingIds = await zohoClearingAccounts(org);
   if ("error" in clearingIds) settleNote = `The clearing accounts could not be read in Zoho: ${clearingIds.error}`;
   else {
+    // Audit H3 (6 November 2026): Zoho's `date=` filter on bank transactions drifts around midnight with the org's own
+    // clock (STL-00006, posted for 3 Nov, was listed under 2 Nov), so a day is read with its neighbours and each
+    // transfer counts on ITS OWN date - the date the sync posted it with.
     for (const id of [clearingIds.card, clearingIds.link]) {
-      const rows = await zohoList(org, `/banktransactions?account_id=${encodeURIComponent(id)}`, "banktransactions", day);
-      zSettle.push(...rows.filter((r) => String(r.transaction_type ?? "") === "transfer_fund" && String(r.reference_number ?? "").startsWith("STL-")));
+      for (const d of [shiftDay(day, -1), day, shiftDay(day, 1)]) {
+        const rows = await zohoList(org, `/banktransactions?account_id=${encodeURIComponent(id)}`, "banktransactions", d);
+        zSettle.push(...rowsOnDay(rows, day).filter((r) => String(r.transaction_type ?? "") === "transfer_fund" && String(r.reference_number ?? "").startsWith("STL-")));
+      }
     }
     zSettle = zSettle.filter((r, i, all) => all.findIndex((x) => x.transaction_id === r.transaction_id) === i);
   }

@@ -4,10 +4,10 @@ import { pendingChargeNote } from "@/lib/charge-rules";
 import { getCurrentStaff } from "@/lib/auth";
 import { seesCustomers } from "@/lib/customer-data";
 import { arrivedWords, customerName } from "@/lib/customer-view";
-import { jobBalance } from "@/lib/invoice-data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { customerCredit } from "@/lib/customer-money";
+import { customerCredit, jobMoneyMany } from "@/lib/customer-money";
+import { getSettings } from "@/lib/settings";
 import { loadEstimateMoneyRows } from "@/lib/estimate-money";
 import { can, type RoleId } from "@/lib/roles";
 
@@ -61,12 +61,12 @@ export async function GET(request: NextRequest) {
   }
   const allJobs = ((jobs ?? []) as unknown as { id: string; job_number: string; gated_in_at: string | null; is_open: boolean; vehicle: Vehicle | null }[]);
   const previous = allJobs.filter((j) => j.id !== job?.id);
-  // Open balance: what is still owed on this customer's invoices (the jobs with an invoice out).
+  // Open balance (audit M8, 6 November 2026): THE money of every job of this customer with a live proforma or tax
+  // invoice (`jobMoneyMany`: credit notes off, cleared money only), the same figures the customer page and the money list show.
+  const money = await jobMoneyMany(allJobs.map((x) => x.id), await getSettings());
   let openBalance = 0;
-  for (const j of allJobs.filter((x) => totalOf.has(x.id) || x.is_open).slice(0, 12)) {
-    const b = await jobBalance(j.id);
-    if (b.invoice && b.balance > 0.005) openBalance += b.balance;
-  }
+  for (const m of money.values()) if (m.live && (m.balance ?? 0) > 0.005) openBalance += m.balance ?? 0;
+  openBalance = Math.round(openBalance * 100) / 100;
   const name = customerName({ full_name: c.full_name as string | null, company_name: c.company_name as string | null });
   const approver = (approval as { data: { sent_to_name: string | null; sent_to_phone: string | null; approver_name: string | null } | null }).data;
   const approverName = approver?.approver_name?.trim() || approver?.sent_to_name?.trim() || null;

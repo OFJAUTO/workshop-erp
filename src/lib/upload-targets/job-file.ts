@@ -28,6 +28,19 @@ function kindAllowed(roleId: string | null, kind: string, caption?: unknown): bo
 }
 
 /**
+ * The bill of an early charge (a recovery company's or fuel receipt) on the job card's Charges section: the advisors
+ * attach it there (6 November 2026 - the 4 November "supplier invoices by accounts only" rule is about the LPOs'
+ * invoices, and had also refused these). True only when the file's reference IS a charge line.
+ */
+async function chargeBillAllowed(roleId: string | null, body: UploadBody): Promise<boolean> {
+  if (kindOf(body) !== "supplier_invoice" || roleId !== "service_advisor") return false;
+  const refId = body.refId ? String(body.refId) : "";
+  if (!isUuid(refId)) return false;
+  const { data } = await createAdminClient().from("charge_lines").select("id").eq("id", refId).maybeSingle();
+  return !!data;
+}
+
+/**
  * Files on a job after the inspection: work and bodyshop photos, payment proofs, supplier invoices, the gate-out km photo,
  * handover photos, the QC post-scan. Any signed-in member of staff (not viewing as someone else) on an existing job; a
  * team leader only bodyshop photos. Bucket job-files.
@@ -42,7 +55,7 @@ export const jobFileTarget: TargetSpec = {
     const staff = await getCurrentStaff();
     if (!staff) return refuse("Signed out. Sign in again and it will send.", false, 401);
     if (staff.viewingAs) return refuse("You are viewing as someone else: files can't be added.", true);
-    if (!kindAllowed(staff.role_id, kindOf(body), body.caption)) return refuse(NOT_ALLOWED, true);
+    if (!kindAllowed(staff.role_id, kindOf(body), body.caption) && !(await chargeBillAllowed(staff.role_id, body))) return refuse(NOT_ALLOWED, true);
     const there = await jobExists(jobId);
     if (there === null) return checkLater();
     if (!there) return refuse("This car's record no longer exists.", true, 404);
@@ -53,7 +66,7 @@ export const jobFileTarget: TargetSpec = {
     if (!JOB_FILE_KINDS.includes(kindOf(body))) return refuse("That kind of file is not accepted here.", true, 400);
     const actor = await grantActor(grant);
     if (isRefusal(actor)) return actor;
-    if (!actor.staffId || !kindAllowed(actor.roleId, kindOf(body), body.caption)) return refuse(NOT_ALLOWED, true);
+    if (!actor.staffId || (!kindAllowed(actor.roleId, kindOf(body), body.caption) && !(await chargeBillAllowed(actor.roleId ?? null, body)))) return refuse(NOT_ALLOWED, true);
     // A section tablet's PIN permit opens only what its PIN step was for: the bodyshop photo.
     if (grant.via === "pin" && kindOf(body) !== "bodyshop_photo") return refuse(NOT_ALLOWED, true);
     const there = await jobExists(jobId);

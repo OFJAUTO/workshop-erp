@@ -1,4 +1,5 @@
 import "server-only";
+import { feeOpts } from "./profit";
 import { dubaiDate } from "./jobs";
 import { round2 } from "./money";
 import { notifyManagers, notifyRoles } from "./notifications";
@@ -87,9 +88,13 @@ export async function buildJobSummary(jobId: string, settings: Settings): Promis
     let otherCost = 0;
     let partsCostQuoted = 0;
     let estimate = 0;
+    // Audit M7 (6 November 2026): the bank fee from THE one rule (the way the customer is expected to pay), the same
+    // figure the editor and the owner's profit use - never the old stored maximum.
+    const { data: methods } = await createAdminClient().from("quotations").select("id, expected_payment_method").in("id", quotes.map((q) => q.id));
+    const methodOf = new Map(((methods ?? []) as { id: string; expected_payment_method: string | null }[]).map((m) => [m.id, m.expected_payment_method]));
     for (const q of quotes) {
       const qls = all.filter((l) => l.quotation_id === q.id && !isUnchosen(l));
-      const t = quoteTotals(qls, { discount_percent: q.discount_percent, vat_percent: q.vat_percent }, { technicianCostRate: rate, bankChargePercent: Number(settings.bank_charge_fee_percent) || 0 });
+      const t = quoteTotals(qls, { discount_percent: q.discount_percent, vat_percent: q.vat_percent }, { technicianCostRate: rate, ...feeOpts(settings, methodOf.get(q.id)) });
       quoted += t.profit;
       estimate += t.labourEstimateHours;
       revenue += t.net;

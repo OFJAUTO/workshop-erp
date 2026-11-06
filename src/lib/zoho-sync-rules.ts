@@ -611,3 +611,17 @@ export function reconRunWords(days: { day: string; status: string }[]): string |
 export function manualCronWords(w: { total: number; red: number; stuck?: number }): string {
   return `Manual: ${w.total ? `${itemsWord(w.total)} waiting for Sync to Zoho` : "nothing waiting"}${w.stuck ? ` · ${w.stuck} waiting on something else` : ""}${w.red ? ` · ${w.red} red` : ""}`;
 }
+
+/* ------------------------------------------------------- the reconciliation's days ------------------------------------------------------- */
+
+/** The day before or after a yyyy-mm-dd day. */
+export function shiftDay(day: string, by: number): string {
+  const d = new Date(`${day}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + by);
+  return d.toISOString().slice(0, 10);
+}
+
+/** The rows whose own `date` is the day (Zoho's list filter can drift a day around midnight). */
+export function rowsOnDay<T extends Record<string, unknown>>(rows: T[], day: string): T[] {
+  return rows.filter((r) => String(r.date ?? "").slice(0, 10) === day);
+}

@@ -69,9 +69,12 @@ export function partialOf(kind: "percent" | "aed", value: number, total: number)
 
 /** VAT taken OUT of an advance amount, landing the total exactly (the VAT row takes the rounding). */
 export function advanceSplit(amount: number, vatPercent: number): { taxable: number; vat: number; total: number } {
-  const total = r2(amount);
-  const taxable = r2(total / (1 + vatPercent / 100));
-  return { taxable, vat: r2(total - taxable), total };
+  // THE one VAT-out-of-a-total rule (audit M1, 6 November 2026): every deposit, advance and charge proforma splits its
+  // amount here, half up to the fils (never floating-point down), and the VAT is what is left, so the parts add up.
+  const fils = (n: number) => Math.round(Number((n * 100).toPrecision(12)));
+  const total = fils(amount) / 100;
+  const taxable = fils(total / (1 + (Number(vatPercent) || 0) / 100)) / 100;
+  return { taxable, vat: (fils(total) - fils(taxable)) / 100, total };
 }
 
 /** The one line on an advance tax invoice ("VAT included in that amount"). */

@@ -1219,12 +1219,6 @@ export function recoveryTitle(typeLabel: string | null | undefined, trips: numbe
   return `Recovery${typeLabel ? `, ${typeLabel.toLowerCase()}` : ""}, ${way}`;
 }
 
-/** Whole-dirham totals to offer when sending: the nearest ten below (the default) and above. */
-export function roundingChoices(total: number): { down: number; up: number } {
-  const down = Math.floor(total / 10) * 10;
-  const up = Math.ceil(total / 10) * 10;
-  return { down: down > 0 ? down : Math.round(total), up: up === down ? down + 10 : up };
-}
 
 /** How long the work takes once approved: the latest part delivery, then the labour in working days. */
 export function estimatedDaysAfterApproval(lines: QuoteLine[], parts: PartItem[], today: string, wt: WorkingTime): number {
@@ -1332,15 +1326,6 @@ export function addWorkingDays(from: string, days: number, wt: WorkingTime): str
   return d.toISOString().slice(0, 10);
 }
 
-/** Suggested promised date: the latest part delivery (or today) plus the working days the labour needs. */
-export function suggestPromisedDate(lines: QuoteLine[], parts: PartItem[], today: string, wt: WorkingTime): { date: string; latestDelivery: string | null; labourDays: number } {
-  const hours = lines.filter((l) => l.is_active && l.line_type === "labour").reduce((a, l) => a + (l.hours ?? 0), 0);
-  const dayHours = wt.closeHour > wt.openHour ? wt.closeHour - wt.openHour : 8;
-  const labourDays = Math.max(hours > 0 ? 1 : 0, Math.ceil(hours / dayHours));
-  const latest = latestDelivery(lines, parts);
-  const start = latest && latest > today ? latest : today;
-  return { date: addWorkingDays(start, labourDays, wt), latestDelivery: latest, labourDays };
-}
 
 /** The plain-word state of a job's quotation for the stage card, the Next step panel and the dashboard. */
 export type QuoteSummary = {

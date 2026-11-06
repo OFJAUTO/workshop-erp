@@ -101,7 +101,7 @@ export async function workshopPin(settings: { workshop_location_pin?: unknown })
  * The error says why when it fails; the Recovery page then asks for the kilometres by hand.
  */
 export async function tripRoadKmDetail(trip: { kind: string; lat: number | null; lng: number | null }, home: LatLng | null): Promise<RoadResult> {
-  if (trip.lat === null || trip.lng === null) return { km: null, error: "The customer pin has no coordinates" };
+  if (trip.lat === null || trip.lng === null) return { km: null, error: "No map pin with coordinates: type the one-way km by hand" };
   if (!home) return { km: null, error: "The workshop's own pin is not set in Settings" };
   const pin = { lat: trip.lat, lng: trip.lng };
   return trip.kind === "pickup" ? roadKmDetail(pin, home) : roadKmDetail(home, pin);

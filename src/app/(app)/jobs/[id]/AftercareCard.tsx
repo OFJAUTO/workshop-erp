@@ -1,5 +1,6 @@
 "use client";
 
+import { MessageSendButton } from "@/components/MessageSendButton";
 import { useState } from "react";
 import { Button, Input, Textarea } from "@/components/ui";
 import { CopyText } from "@/components/CopyText";
@@ -8,13 +9,13 @@ import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
 type Action = (formData: FormData) => void | Promise<void>;
 
 /** The advisor's ready WhatsApp message for the 10-day check, one tap to send. */
-export function AftercareMessage({ template, date, phoneDigits }: { template: string; date: string; phoneDigits: string }) {
+export function AftercareMessage({ template, date, phoneDigits, jobId }: { template: string; date: string; phoneDigits: string; jobId?: string }) {
   const message = template.replaceAll("[date]", date);
   return (
     <div className="flex flex-wrap items-center gap-2" data-aftercare-message>
       <p className="w-full text-sm text-muted">{message}</p>
       {phoneDigits ? (
-        <a href={`https://wa.me/${phoneDigits}?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white" data-aftercare-send>Send on WhatsApp</a>
+        <MessageSendButton label="Send on WhatsApp" title="The 10-day check" message={message} phoneDigits={phoneDigits} what="10-day check message" target={{ jobId: jobId ?? null }} hook="aftercare-send" />
       ) : null}
       <CopyText text={message} label="Copy the message" />
     </div>

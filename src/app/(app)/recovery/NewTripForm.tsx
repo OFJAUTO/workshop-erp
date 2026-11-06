@@ -76,6 +76,7 @@ export function NewTripForm({ ourDriver, companies, action }: { ourDriver: Drive
       ) : null}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <label className="flex flex-col gap-1 text-xs font-semibold text-muted">{kind === "pickup" ? "Pick-up pin" : "Delivery pin"}<Input name="location_url" placeholder="Paste the map link" data-pin-box /></label>
+        <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Distance one way, km (only when there is no pin)<Input name="km" inputMode="decimal" placeholder="e.g. 18" data-trip-km /></label>
         <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Location details<Input name="location_details" placeholder="Villa 23, gate 2" textCase="sentence" /></label>
         <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Date<Input type="date" name="date" defaultValue={today} /></label>
         <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Job number (optional)<Input name="job_number" placeholder="J-00123" textCase="upper" /></label>

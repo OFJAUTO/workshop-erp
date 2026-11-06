@@ -579,7 +579,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {aftercare.done_at ? <Badge tone="green">Done ✓ {formatDate(aftercare.done_at)}</Badge> : aftercare.overdue ? <Badge tone="red" data-aftercare-overdue>10-day check not done</Badge> : <Badge tone="neutral">Due {formatDate(aftercare.due_date)}</Badge>}
           </div>
           {!aftercare.done_at && (role === "owner" || role === "service_advisor") ? (
-            <AftercareMessage template={aftercareReminder ?? String(settings.whatsapp_aftercare_template ?? "")} date={formatDate(aftercare.due_date)} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} />
+            <AftercareMessage jobId={id} template={aftercareReminder ?? String(settings.whatsapp_aftercare_template ?? "")} date={formatDate(aftercare.due_date)} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} />
           ) : null}
           {!aftercare.done_at && maySignAftercare(bodyshopScopeOf(staff)) ? (
             <AftercareSignoff action={signOffAftercare.bind(null, id)} points={[...AFTERCARE_POINTS]} jobId={id} />

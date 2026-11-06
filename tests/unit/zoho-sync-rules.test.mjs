@@ -205,5 +205,13 @@ check("a free waiting row says its turn (manual and automatic)", /Sync to Zoho/.
   check("bills and invoices can be checked again", RECHECK_KINDS.includes("bill") && RECHECK_KINDS.includes("invoice") && !RECHECK_KINDS.includes("payment"));
 }
 
+// Audit H3: a settlement transfer counts on its own date, whatever day Zoho's filter listed it under.
+{
+  const { rowsOnDay, shiftDay } = R;
+  check("the day before and after (across a month end)", shiftDay("2026-11-01", -1) === "2026-10-31" && shiftDay("2026-11-30", 1) === "2026-12-01");
+  const rows = [{ date: "2026-11-03", reference_number: "STL-00006" }, { date: "2026-11-02", reference_number: "STL-00005" }, { date: "2026-11-03T00:00:00+0400" }];
+  check("STL-00006 listed under 2 Nov still counts on 3 Nov", rowsOnDay(rows, "2026-11-03").length === 2 && rowsOnDay(rows, "2026-11-02").length === 1);
+}
+
 console.log(failed ? `${failed} FAILED` : "all passed");
 process.exit(failed ? 1 : 0);

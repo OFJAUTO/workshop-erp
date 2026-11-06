@@ -302,7 +302,7 @@ export async function dailyProfit(settings: Settings, date = dubaiDate()): Promi
 }
 
 /** The bank fee options for quoteTotals from the way the customer is expected to pay (the one rule, without VAT). */
-function feeOpts(settings: Settings, method: unknown): { bankChargePercent: number; bankChargeFixed: number } {
+export function feeOpts(settings: Settings, method: unknown): { bankChargePercent: number; bankChargeFixed: number } {
   const rule = expectedFeeRule(settings, typeof method === "string" ? method : null);
   return { bankChargePercent: rule.msfPercent, bankChargeFixed: rule.txnFee };
 }

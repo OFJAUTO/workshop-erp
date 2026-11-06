@@ -14,7 +14,7 @@ import { ReasonChips } from "@/components/ReasonChips";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
-import { decideOverpaymentAction, issueCreditNote, recordCnRefund, recordPayment, requestCreditNote, setChequeStatus, setPaymentLink, undoPaymentAction, verifyPaymentAction, voidPaymentAction } from "../actions";
+import { issueCreditNote, recordCnRefund, recordPayment, requestCreditNote, setChequeStatus, setPaymentLink, undoPaymentAction, verifyPaymentAction, voidPaymentAction } from "../actions";
 import { UndoButton } from "@/components/UndoButton";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { DEFAULT_UNDO_MINUTES } from "@/lib/money-undo";
@@ -136,13 +136,6 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                         <form action={setChequeStatus.bind(null, p.id)} className="flex gap-1">
                           <Button type="submit" name="status" value="cleared" size="md" tone="secondary">Cleared</Button>
                           <ConfirmSubmit label="Bounced" name="status" value="bounced" size="md" tone="danger" title="Mark this cheque as bounced?" lines={[`${p.number} · AED ${Number(p.amount_aed).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`, "The money comes off what the customer has paid, and Zoho is corrected."]} confirmLabel="Yes, it bounced" hook="cheque-bounced" />
-                        </form>
-                      ) : null}
-                      {p.status === "pending_owner" && role === "owner" && !staff.viewingAs ? (
-                        <form action={decideOverpaymentAction.bind(null, p.id)} className="flex flex-wrap items-center gap-1">
-                          <Input name="note" placeholder="Note (optional)" className="w-48" />
-                          <ConfirmSubmit label="Approve" name="decision" value="approve" size="md" title="Approve this payment above the balance?" lines={[`${p.number} · AED ${Number(p.amount_aed).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`]} live={[{ label: "Note:", field: "note" }]} confirmLabel="Yes, approve" hook="overpay-approve" />
-                          <ConfirmSubmit label="Refuse" name="decision" value="refuse" size="md" tone="secondary" title="Refuse this payment?" lines={[`${p.number} · AED ${Number(p.amount_aed).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`]} live={[{ label: "Note:", field: "note" }]} confirmLabel="Yes, refuse" hook="overpay-refuse" />
                         </form>
                       ) : null}
                       {p.status === "recorded" && canVoid ? (

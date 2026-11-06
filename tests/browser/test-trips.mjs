@@ -28,6 +28,8 @@ await page.locator("[data-side-ours]").click();
 await page.waitForTimeout(500);
 await page.locator('input[name="job_number"]').fill(jobNumber);
 await page.locator('input[name="location_details"]').fill("E2E pick-up from the customer's villa");
+// Audit M14 (6 November 2026): no pin = the one-way distance by hand, so the trip never has no distance.
+await page.locator("[data-trip-km]").fill("18");
 await page.locator("[data-save-trip]").click();
 await page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 25000 }).catch(() => null);
 await page.waitForTimeout(1500);

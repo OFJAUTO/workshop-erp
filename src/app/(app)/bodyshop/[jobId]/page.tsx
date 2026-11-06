@@ -1,4 +1,5 @@
 import { VinCopy } from "@/components/VinCopy";
+import { advanceSplit } from "@/lib/estimate-money-rules";
 import { cutMethodsForJobs } from "@/lib/ppf-cut-data";
 import Link from "next/link";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
@@ -535,18 +536,22 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
           bodyshopLabourBySection(jobId, settings),
           admin.from("recovery_trips").select("price_aed").eq("job_id", jobId).eq("is_active", true),
         ]);
-        const income = Number(q?.subtotal_aed) || Math.round(((Number(q?.total_aed) || 0) / (1 + (Number(q?.vat_percent) || 5) / 100)) * 100) / 100;
+        // Audit M6 (6 November 2026): the price AFTER the discount, without VAT (the one VAT split), and the car's parts.
+        const income = advanceSplit(Number(q?.total_aed) || 0, Number(q?.vat_percent) || 5).taxable;
+        const { data: partRows } = await admin.from("part_items").select("cost_aed, final_cost_aed, quantity, confirmed_quantity, removed_at, disposition").eq("job_id", jobId).eq("is_active", true);
+        const partsCost = Math.round(((partRows ?? []) as { cost_aed: number | null; final_cost_aed: number | null; quantity: number; confirmed_quantity: number | null; removed_at: string | null; disposition: string | null }[]).filter((p) => !p.removed_at && !p.disposition).reduce((a, p) => a + (Number(p.final_cost_aed ?? p.cost_aed) || 0) * (Number(p.confirmed_quantity ?? p.quantity) || 1), 0) * 100) / 100;
         const otherMaterials = Number(q?.materials_cost_aed) || 0;
         const recovery = (tripRows ?? []).reduce((a, t) => a + (Number(t.price_aed) || 0), 0);
         const labourCost = sections.reduce((a, s) => a + s.cost, 0);
-        const real = Math.round((income - film.film - film.tint - film.ceramic - otherMaterials - share - labourCost - recovery) * 100) / 100;
+        const real = Math.round((income - film.film - film.tint - film.ceramic - otherMaterials - share - labourCost - recovery - partsCost) * 100) / 100;
         const row = (label: string, v: number, minus = true) => (
           <div className="flex items-center justify-between text-sm"><span className="text-muted">{label}</span><span className="font-semibold">{minus && v ? "−" : ""}{aed(v)}</span></div>
         );
         return (
           <Card className="flex flex-col gap-2" data-real-profit>
             <SectionLabel>Real profit of this car (owner only)</SectionLabel>
-            {row("Package price (before VAT)", income, false)}
+            {row("Price after discount (before VAT)", income, false)}
+            {partsCost ? row("Parts", partsCost) : null}
             {row(`Film${film.metres ? ` (${film.metres} m)` : ""}`, film.film)}
             {row("Tint", film.tint)}
             {row("Ceramic", film.ceramic)}

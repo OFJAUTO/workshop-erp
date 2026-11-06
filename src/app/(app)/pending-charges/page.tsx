@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { MessageSendButton } from "@/components/MessageSendButton";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { notFound } from "next/navigation";
 import { ChargeLinesEditor } from "@/components/ChargeLinesEditor";
@@ -135,7 +136,7 @@ async function OpenEntry({ e, staffRole, viewingAs, remindDays }: { e: EntryView
       <p className="text-sm" data-pc-money>Total AED <b>{money(e.total)}</b> with VAT · paid AED {money(e.paid)} · balance <b>AED {money(e.balance)}</b>{e.status === "pending" && pendingDays(e.created_at) >= remindDays ? <span className="font-bold text-red"> · pending {pendingDays(e.created_at)} days</span> : null}</p>
       {e.status === "pending" ? (
         <div className="flex flex-wrap items-start gap-3">
-          {link ? <a href={`https://wa.me/${(e.phone ?? "").replace(/[^\d]/g, "")}?text=${encodeURIComponent(msg ?? "")}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white" data-pc-send>Send the proforma (WhatsApp)</a> : null}
+          {link && msg ? <MessageSendButton label="Send the proforma (WhatsApp)" title="Send the proforma" message={msg} phoneDigits={(e.phone ?? "").replace(/[^\d]/g, "")} what={`Pending charge proforma${e.proformaNumber ? ` ${e.proformaNumber}` : ""}`} target={{ table: "charge_entries", recordId: e.id }} hook="pc-send" /> : null}
           {msg ? <CopyText text={msg} label="Copy message" /> : null}
           {accounts ? <RecordPaymentButton customerId={e.customer_id} vehicleId={e.vehicle_id ?? undefined} label="Record payment" /> : null}
           {accounts && pro && proformaId ? <RoundOff docWords="proforma" baseTotal={pro.baseTotal} baseNet={pro.net} rounding={pro.rounding} appliedTotal={pro.total} vatPercent={5} isOwner={staffRole === "owner"} limits={limits} approvedCap={null} refuseOverLimit apply={roundInvoice.bind(null, proformaId)} /> : null}

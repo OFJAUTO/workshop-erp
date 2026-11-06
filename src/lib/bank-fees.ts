@@ -96,10 +96,3 @@ export function feeRuleWords(rule: FeeRule | null | undefined): string {
   return parts.join(" + ");
 }
 
-/** Which method a terminal ID on a bank report belongs to, by the IDs in Settings (null when unknown). */
-export function methodOfTerminal(fees: BankFees, terminalId: string | null | undefined): "card" | "link" | null {
-  const t = String(terminalId ?? "").trim().toUpperCase();
-  if (!t) return null;
-  for (const m of VAT_METHODS) if (fees[m]?.terminals.includes(t)) return m;
-  return null;
-}

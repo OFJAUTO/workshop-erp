@@ -101,7 +101,6 @@ async function recordDeposit(staff: Awaited<ReturnType<typeof requirePermission>
     revalidatePath("/dashboard");
     return { ok: true, number: r.number ?? "", paymentId: r.paymentId, overBy: 0, receiptMessage: "", phoneDigits: "", pdfHref: `/api/pdf/receipt/${r.paymentId}` };
   }
-  if (r.pendingOwner) return { error: "The amount is above the job's balance: it went to the owner for approval." };
   const paymentId = r.paymentId;
   const number = r.number ?? "";
   const overBy = round2(Math.max(0, amount - Math.max(0, before.required - before.received)));

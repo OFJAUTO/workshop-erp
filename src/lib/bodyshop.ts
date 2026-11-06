@@ -1,4 +1,5 @@
 import { dbWords } from "@/lib/app-errors";
+import { advanceSplit } from "./estimate-money-rules";
 import { getSettings } from "@/lib/settings";
 import { ppfByCutMethod } from "./ppf-cut-data";
 import { workingTimeOf } from "@/lib/jobs";
@@ -230,8 +231,8 @@ export async function requestDeposit(jobId: string, amount: number, actor: Actor
   }
   const [{ data: customer }] = await Promise.all([admin.from("customers").select("full_name, company_name, phone, email, trn").eq("id", job.customer_id).maybeSingle()]);
   const v = job.vehicle;
-  const net = round2(amount / 1.05);
-  const vat = round2(amount - net);
+  // The one VAT split (audit M1): the VAT setting, never a hard-coded 1.05.
+  const { taxable: net, vat } = advanceSplit(amount, Number((settings as unknown as Record<string, unknown>).vat_percent) || 5);
   const number = await nextDocumentNumber("proforma", settings);
   const token = newToken();
   const { data: inv, error } = await admin.from("invoices").insert({ number, kind: "proforma", job_id: jobId, customer_id: job.customer_id, vehicle_id: job.vehicle_id, token, labour_mode: "itemised", subtotal_aed: net, discount_aed: 0, taxable_aed: net, vat_aed: vat, total_aed: amount, agreed_total_aed: null, warranty_credit_aed: 0, discount_note: null, deposit_for_quotation_id: q.id, issue_reason: "Deposit", prepared_by: actor.id, issued_by: actor.id, customer_snapshot: customer ?? null, vehicle_snapshot: v ? { title: [v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" "), variant: null, plate: formatPlate(v), vin: v.vin } : null, created_by: actor.id, updated_by: actor.id }).select("id, number, token").single();
