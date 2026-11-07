@@ -11,14 +11,20 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-| # | File | What it does | Backup taken first |
-|---|---|---|---|
-| 6 | `20261207150000_function_search_path.sql` (audit L4, hardening) | Gives the 33 database functions without one a fixed search path (Supabase advisor warning). No behaviour change; on TEST the whole-job simulation ran with it on. | `backups/2026-11-06T18-59-52` |
-| 5 | `20261207140000_quote_lines_fk.sql` (audit L1, data tidy-up) | Removes the one quotation line on live whose quotation does not exist (MAIN BATTERY AGM 95AH, AED 210, 22 Oct; no screen can reach it). Nothing else changes. | `backups/2026-11-06T18-59-52` |
-| 4 | `20261207130000_gate_in_role_lockdown.sql` (Section 9, gate-in check, SECURITY) | The gate-in login's own database access can no longer read customers, contacts, check-in links or money settings, nor change another customer. Today it can (found by the new gate-in role check). The gate-in screens already read these through the server, so nothing on screen changes; proven on TEST with the rule on (gate-in, check-in resend, plate and roles suites: 224 checks green). | `backups/2026-11-06T18-59-52` (112 tables, 256,814 rows) |
-| 3 | `20261207120000_customer_address_as.sql` (Section 7, greeting) | One column on customers: "How to address in messages" (e.g. Dr Jaffar), edited on the customer form. Until it is applied the box is hidden and every message uses the built-in rule (title + surname, else the first name, in normal case), which is already live. | `backups/2026-11-06T18-35-58` (112 tables, 256,810 rows) |
-| 2 | `20261207110000_supplier_payments.sql` (Section 4, supplier payments) | Two server-only tables (payments with their amount, method incl. payment link, any advance or fee; and how each is spread over invoices), `purchase_orders.supplier_payment_id`, and the Zoho kind `supplierpay`. Until it is applied the old one-LPO "Paid to supplier" stays and the new box is hidden. | `backups/2026-11-06T16-59-40` (112 tables, 256,790 rows) |
-| 1 | `supabase/data-fixes/2026-11-06-carry-over-bells.sql` (Section 1, data only) | Two bells: Anas (J-00988: Q-00061 is missing 2 lines of E-00062, AED 2,800 – he taps "Add the missing lines") and Adarsh (J-00978: Q-00050 left out 4 free lines of E-00059, approved and invoiced, nothing changed). Changes no quotation. Anas sees the red warning on Q-00061 even without it. | Not needed (bells only); latest backup `backups/2026-11-06T16-12-34` |
+Nothing.
+
+## Applied on 7 November 2026, morning
+
+The owner replied "apply" (08:30 Dubai). A fresh backup was taken first: `backups/2026-11-07T04-32-38` (112 tables, 257,296 rows). The live state each file touches was read before and after. The five migrations were run with `scripts/db-sql.mjs` and recorded with `scripts/db-record-migration.mjs`, in order, without an error. `npm run check:live`: 33 passed, 0 failed; the security check's new gate-in probe passes on live.
+
+| # | File | What it did on live |
+|---|---|---|
+| 1 | `supabase/data-fixes/2026-11-06-carry-over-bells.sql` (data only) | Only Adarsh's bell was sent (J-00978: Q-00050 left out 4 free lines of E-00059, for information). Anas's bell was NOT sent: Q-00061 already has the missing lines (added since yesterday), so it would have been stale. |
+| 2 | `20261207110000_supplier_payments.sql` | The supplier payment tables, `purchase_orders.supplier_payment_id` and the Zoho kind. The new payment box (method, amount, several invoices, advance or fee, proof) is on for the owner and accounts. |
+| 3 | `20261207120000_customer_address_as.sql` | `customers.address_as`. The "How to address in messages" box is on the customer form. |
+| 4 | `20261207130000_gate_in_role_lockdown.sql` (SECURITY) | The four restrictive policies: a gate-in login's own database access now reads and writes no customer, contact or check-in link, and reads no money setting. |
+| 5 | `20261207140000_quote_lines_fk.sql` | Removed the one orphaned quotation line (MAIN BATTERY AGM 95AH, AED 210): 1,499 lines → 1,498. |
+| 6 | `20261207150000_function_search_path.sql` | 33 functions now have a fixed search path (0 left without). |
 
 ## Applied on 6 November 2026, evening
 
