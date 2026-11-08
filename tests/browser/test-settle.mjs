@@ -41,6 +41,9 @@ const p2 = await pay(2500, 56.5, yesterday, inv.id);
 const { browser, page } = await browserFor("accounts", { viewport: { width: 1366, height: 1100 } });
 try {
   await go(page, `${base}/card-settlements?method=card`);
+  // 8 November 2026: the settlement date starts EMPTY (never today by itself) and sits next to Record.
+  check("2b: the settlement date starts empty and Record stays off until it is picked", (await page.locator("[data-settle-date]").inputValue()) === "" && (await page.locator("[data-settle-save]").isDisabled()));
+  await page.locator("[data-settle-date]").fill(new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10));
   await page.waitForSelector("[data-settlement-form]", { timeout: 30000 });
   check("3: both test payments are listed", (await page.locator(`[data-settle-row="${p1.number}"]`).count()) === 1 && (await page.locator(`[data-settle-row="${p2.number}"]`).count()) === 1);
   check("3: payments received before the settlement day come pre-ticked", await page.locator(`[data-settle-tick="${p1.number}"]`).isChecked() && await page.locator(`[data-settle-tick="${p2.number}"]`).isChecked());

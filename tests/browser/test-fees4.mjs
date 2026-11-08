@@ -22,6 +22,7 @@ const [pay] = await sql("insert into public.payments (job_id, invoice_id, custom
 const { browser, page } = await browserForId(MATHEW, { viewport: { width: 1366, height: 1000 } });
 try {
   await go(page, `${base}/card-settlements?method=card`);
+  await page.locator("[data-settle-date]").fill(new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10));
   await page.waitForSelector("[data-settlement-form]", { timeout: 30000 });
   // Never settle a real payment: only this test's own stays ticked.
   for (const box of await page.locator("[data-settle-tick]").all()) {

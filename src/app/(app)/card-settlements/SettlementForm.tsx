@@ -3,6 +3,7 @@
 import { useActionState, useMemo, useState } from "react";
 import { Button, Input, Notice } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
+import { MoneyDate } from "@/components/MoneyDate";
 import { feesFor, type FeeRule } from "@/lib/bank-fees";
 import { checkFigures, CLEARING_LABEL, preTicked, receivedAfter, splitFigures, vatOnFees, type ClearingMethod } from "@/lib/card-settlement-rules";
 import { initialFormState, type FormState } from "@/lib/form-state";
@@ -29,7 +30,8 @@ const num = (t: string) => {
 export function SettlementForm({ rows, today, initialMethod, canSave, rules, action }: { rows: SettleRow[]; today: string; initialMethod: ClearingMethod; canSave: boolean; rules: Record<ClearingMethod, FeeRule>; action: (s: FormState, f: FormData) => Promise<FormState> }) {
   const [state, formAction, pending] = useActionState(action, initialFormState);
   const [method, setMethod] = useState<ClearingMethod>(initialMethod);
-  const [settledOn, setSettledOn] = useState(today);
+  // No default (8 November 2026, Mathew): the day the money reached the bank is picked every time.
+  const [settledOn, setSettledOn] = useState("");
   const [net, setNet] = useState("");
   const [msf, setMsf] = useState("");
   const [txn, setTxn] = useState("");
@@ -50,12 +52,17 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
     setNote("");
     setOverride(false);
     setPicked(null);
+    setSettledOn("");
   }
   const rule = rules[method];
   const mine = useMemo(() => rows.filter((r) => r.method === method), [rows, method]);
-  const ticked = useMemo(() => picked ?? new Set(mine.filter((r) => preTicked(r.receivedAt, settledOn)).map((r) => r.id)), [picked, mine, settledOn]);
+  const ticked = useMemo(() => picked ?? new Set(settledOn ? mine.filter((r) => preTicked(r.receivedAt, settledOn)).map((r) => r.id) : []), [picked, mine, settledOn]);
+  const isAfter = (iso: string) => !!settledOn && receivedAfter(iso, settledOn);
   // A payment taken after the settlement day can never be in it: shown greyed out, never counted.
-  const tickedRows = mine.filter((r) => ticked.has(r.id) && !receivedAfter(r.receivedAt, settledOn));
+  const tickedRows = mine.filter((r) => ticked.has(r.id) && !isAfter(r.receivedAt));
+  // Never earlier than the newest payment it covers (the Dubai day it was received).
+  const earliest = tickedRows.reduce<string | null>((a, r) => { const d = new Date(Date.parse(r.receivedAt) + 4 * 3600000).toISOString().slice(0, 10); return !a || d > a ? d : a; }, null);
+  const dateOk = !!settledOn && settledOn <= today && (!earliest || settledOn >= earliest);
   const gross = Math.round(tickedRows.reduce((a, r) => a + r.amount, 0) * 100) / 100;
   // The estimate of what the bank will keep, in its own parts (the placeholders).
   const est = tickedRows.reduce((a, r) => { const f = r.est ?? feesFor(r.amount, rule); return { msf: a.msf + f.msf, txn: a.txn + f.txn, vat: a.vat + f.vat }; }, { msf: 0, txn: 0, vat: 0 });
@@ -70,7 +77,7 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
   const shares = check.ok || (differs && override) ? splitFigures(tickedRows.map((r) => ({ id: r.id, amount: r.amount })), { msf: msfNum, txn: txnNum, vat: vatNum }) : new Map<string, { msf: number; txn: number; vat: number }>();
   const ask = state.values?.ask === "1" && !!state.error;
   const noteOk = note.trim().length >= 5;
-  const canRecord = canSave && !pending && tickedRows.length > 0 && netNum !== null && (check.ok || (differs && override && noteOk));
+  const canRecord = canSave && !pending && dateOk && tickedRows.length > 0 && netNum !== null && (check.ok || (differs && override && noteOk));
 
   const toggle = (id: string) => {
     const next = new Set(ticked);
@@ -96,16 +103,12 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
           ))}
         </div>
         <input type="hidden" name="method" value={method} />
-        <label className="flex flex-col gap-1">
-          <span className="text-xs font-semibold text-muted">Settlement date (money in the bank)</span>
-          <Input name="settled_on" type="date" value={settledOn} max={today} onChange={(e) => { setSettledOn(e.target.value); setPicked(null); }} required className="w-44" data-settle-date />
-        </label>
       </div>
 
       {mine.length ? (
         <ul className="divide-y divide-line rounded-card border border-line bg-white" data-settle-list>
           {mine.map((r) => {
-            const after = receivedAfter(r.receivedAt, settledOn);
+            const after = isAfter(r.receivedAt);
             const on = ticked.has(r.id) && !after;
             const share = shares.get(r.id);
             const e = r.est ?? feesFor(r.amount, rule);
@@ -152,6 +155,7 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
               <span className="text-xs font-semibold uppercase text-muted">Note</span>
               <Input name="note" value={note} onChange={(e) => setNote(e.target.value)} data-settle-note />
             </label>
+            <MoneyDate name="settled_on" label="In bank on (money in the bank)" value={settledOn} onChange={(v) => { setSettledOn(v); setPicked(null); }} max={today} min={earliest} minWords="the newest ticked payment" hook="data-settle-date" />
             <ConfirmSubmit
               label={pending ? "Saving…" : ask ? "Yes, the figures are right – record it" : differs && override ? "Save anyway" : "Record the settlement"}
               disabled={!canRecord || pending}

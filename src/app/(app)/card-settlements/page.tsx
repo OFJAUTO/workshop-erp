@@ -75,7 +75,7 @@ export default async function CardSettlementsPage({ searchParams }: { searchPara
               <li key={h.id} className={`flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 ${h.active ? "" : "text-muted"}`} data-settle-history-row={h.number}>
                 <span className={`font-bold ${h.active ? "" : "line-through"}`}>{h.number}</span>
                 {!h.active ? <Badge tone="red">Undone</Badge> : null}
-                <span>{formatDate(`${h.settledOn}T12:00:00+04:00`)}</span>
+                <span data-settle-history-dates>In bank {formatDate(`${h.settledOn}T12:00:00+04:00`)} · recorded {formatDate(h.createdAt)}{h.createdByName ? ` by ${h.createdByName.split(" ")[0]}` : ""}</span>
                 <Badge tone="neutral">{CLEARING_LABEL[h.method]}</Badge>
                 <span className="text-muted">{h.count} payment{h.count === 1 ? "" : "s"} · {aed(h.gross)} ticked · {aed(h.received)} received</span>
                 <span className="font-semibold" data-settle-history-fees>{h.msf !== null ? `MSF ${aed(h.msf)} + fee ${aed(h.txn ?? 0)} + VAT ${aed(h.vat ?? 0)}` : `fee ${aed(h.fee)}`} ({h.gross > 0 ? ((h.fee / h.gross) * 100).toFixed(2) : "0.00"}%)</span>

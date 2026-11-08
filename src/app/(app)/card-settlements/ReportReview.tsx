@@ -9,6 +9,7 @@ import { realAuthCode } from "@/lib/auth-code";
 import { reloadIfStale } from "@/lib/app-version";
 import type { LineMatch, ParsedReport } from "@/lib/settlement-report";
 import { confirmSuggestionAction } from "./actions";
+import { MoneyDate } from "@/components/MoneyDate";
 
 export type ReviewPaymentOption = { id: string; number: string; method: string; amount: number; receivedDay: string; authCode: string | null; codeMissing?: boolean; settledIn?: string | null; plate: string };
 
@@ -187,10 +188,7 @@ export function ReportReview({ reportId, report, matches, payments, today, recor
         state.success ? <div data-report-done><Notice tone="success">{state.success}</Notice></div> : <Notice tone="info">This report was recorded.</Notice>
       ) : (
         <div className="flex flex-wrap items-end gap-3 rounded-card border-2 border-ink bg-white p-3" data-report-record-box>
-          <label className="flex flex-col gap-1">
-            <span className="text-xs font-semibold text-muted">Settlement date (money in the bank)</span>
-            <Input name="settled_on" type="date" defaultValue={h.date && h.date <= today ? h.date : today} max={today} required className="w-44" data-report-date />
-          </label>
+          <MoneyDate name="settled_on" label="In bank on (money in the bank)" defaultValue={h.date && h.date <= today ? h.date : ""} max={today} hook="data-report-date" />
           <label className="flex min-w-48 flex-1 flex-col gap-1">
             <span className="text-xs font-semibold text-muted">Statement reference</span>
             <Input name="statement_ref" placeholder="As on the bank statement" data-report-ref />

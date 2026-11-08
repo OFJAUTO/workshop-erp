@@ -6,6 +6,7 @@ import { SupplierProofUpload } from "@/app/(app)/parts/orders/[id]/SupplierProof
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { ChoiceButtons, Field, Input, controlClass } from "@/components/ui";
 import { advanceWords, splitOldestFirst, SUPPLIER_PAY_METHOD_KEYS, SUPPLIER_PAY_METHOD_LABELS } from "@/lib/supplier-payment-rules";
+import { MoneyDate } from "@/components/MoneyDate";
 
 type Inv = { poId: string; label: string; date: string | null; due: number; gross: number; paid: number };
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -80,9 +81,7 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
           {/* A plain box (not the shared delayed number box): the spread, the excess and part-paid lines follow every key. */}
           <input name="amount" value={amountText} onChange={(e) => { setAmountText(e.target.value.replace(/[^0-9.,]/g, "")); setManual({}); }} inputMode="decimal" required className={controlClass} data-spell="" data-supplier-pay-amount />
         </Field>
-        <Field label="Paid on">
-          <Input name="paid_on" type="date" defaultValue={today} required data-supplier-pay-date />
-        </Field>
+        <MoneyDate name="paid_on" label="Paid on" defaultValue={today} max={today} hook="data-supplier-pay-date" />
       </div>
       <Field label="How it was paid">
         <div data-pay-method>

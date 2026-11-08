@@ -65,6 +65,7 @@ try {
   const ab = await browserFor("accounts", { viewport: { width: 1366, height: 1000 } });
   try {
     await go(ab.page, `${base}/card-settlements?method=card`);
+    await ab.page.locator("[data-settle-date]").fill(new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10)).catch(() => null);
     await ab.page.waitForSelector(`[data-settle-row="${p3.number}"]`, { timeout: 30000 });
     for (const box of await ab.page.locator("[data-settle-tick]").all()) {
       const no = await box.getAttribute("data-settle-tick");
