@@ -33,6 +33,8 @@ import { realPartNumber } from "@/lib/parts-rows";
 import { pricesToFix } from "@/lib/part-cost-history";
 import { PricesToFix } from "./PricesToFix";
 import { pricingTodoOf } from "@/lib/pricing-done";
+import { JobTechnicianTag } from "@/components/JobTechnicianTag";
+import { jobTechniciansFor, type CarTechnicians } from "@/lib/job-technician";
 
 export const dynamic = "force-dynamic";
 
@@ -44,13 +46,13 @@ type JobInfo = { id: string; job_number: string; is_open: boolean; status: strin
 type AllJob = { id: string; job_number: string; status: string; is_open: boolean; gated_in_at: string; gated_out_at: string | null; parts_pricing_done_at: string | null; parts_pricing_reopened_at: string | null; vehicle: { kind?: string | null; photo_path?: string | null; has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null; customer: { full_name: string; company_name: string | null } | null };
 const ALL_JOB_SELECT = "id, job_number, status, is_open, gated_in_at, gated_out_at, parts_pricing_done_at, parts_pricing_reopened_at, vehicle:vehicles(kind, photo_path, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name)), customer:customers(full_name, company_name)";
 
-export default async function PartsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; q?: string; advisor?: string }> }) {
+export default async function PartsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; q?: string; advisor?: string; tech?: string }> }) {
   const staff = await requirePermission("priceParts");
   // 30 October 2026: estimates whose parts were sent to the desk (or priced by the advisor, to check). The car is not here yet.
   const estimatesToPrice = await loadEstimatesToPrice();
   // Customers are for the owner, advisors and accounts only (29 October 2026): Parts find a car by plate, job number or VIN.
   const seesCust = seesCustomers(staff.role_id);
-  const { message, error, q: rawQ, advisor: rawAdvisor } = await searchParams;
+  const { message, error, q: rawQ, advisor: rawAdvisor, tech: rawTech } = await searchParams;
   const q = String(rawQ ?? "").trim().slice(0, 60);
   const admin = createAdminClient();
   const settings = await getSettings();
@@ -112,10 +114,16 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   const advisorFilter = String(rawAdvisor ?? "").trim();
   const advisorNames = new Map<string, string>();
   for (const a of advisorOf.values()) if (a.advisorId && a.advisorName) advisorNames.set(a.advisorId, a.advisorName);
+  // The technician on every line and the Technician filter (8 November 2026, Peter). Internal only.
+  const techOf = await jobTechniciansFor(Array.from(jobs.keys()));
+  const techFilter = String(rawTech ?? "").trim();
+  const techNames = new Map<string, string>();
+  const onCar = (t: CarTechnicians | undefined, id: string) => !!t && [...t.mechanical, ...t.bodyshop].some((x) => x.id === id);
   if (advisorFilter) for (const id of Array.from(jobs.keys())) if (advisorOf.get(id)?.advisorId !== advisorFilter) jobs.delete(id);
-  const orderNowShown = advisorFilter ? orderNowPos.filter((po) => !!po.job_id && jobs.has(po.job_id)) : orderNowPos;
-  const pendingShown = advisorFilter ? pendingPos.filter((po) => !!po.job_id && jobs.has(po.job_id)) : pendingPos;
-  const estimatesShown = advisorFilter ? estimatesToPrice.filter((e) => e.advisorId === advisorFilter) : estimatesToPrice;
+  if (techFilter) for (const id of Array.from(jobs.keys())) if (!onCar(techOf.get(id), techFilter)) jobs.delete(id);
+  const orderNowShown = advisorFilter || techFilter ? orderNowPos.filter((po) => !!po.job_id && jobs.has(po.job_id)) : orderNowPos;
+  const pendingShown = advisorFilter || techFilter ? pendingPos.filter((po) => !!po.job_id && jobs.has(po.job_id)) : pendingPos;
+  const estimatesShown = techFilter ? [] : advisorFilter ? estimatesToPrice.filter((e) => e.advisorId === advisorFilter) : estimatesToPrice;
 
   const jobLine = (id: string) => {
     const j = jobs.get(id);
@@ -179,14 +187,21 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
     advisorOf.set(k, a);
     if (a.advisorId && a.advisorName) advisorNames.set(a.advisorId, a.advisorName);
   }
-  const allShown = advisorFilter ? allCars.filter((j) => advisorOf.get(j.id)?.advisorId === advisorFilter) : allCars;
-  const foundShown = advisorFilter ? found.filter((j) => advisorOf.get(j.id)?.advisorId === advisorFilter) : found;
+  for (const [k, t] of await jobTechniciansFor([...allCars, ...found].map((j) => j.id))) techOf.set(k, t);
+  for (const t of techOf.values()) for (const x of [...t.mechanical, ...t.bodyshop]) if (x.name) techNames.set(x.id, x.name);
+  const allShown = allCars.filter((j) => (!advisorFilter || advisorOf.get(j.id)?.advisorId === advisorFilter) && (!techFilter || onCar(techOf.get(j.id), techFilter)));
+  const foundShown = found.filter((j) => (!advisorFilter || advisorOf.get(j.id)?.advisorId === advisorFilter) && (!techFilter || onCar(techOf.get(j.id), techFilter)));
   const pics = await signCarPictures([...allCars, ...found].map((j) => j.vehicle?.photo_path));
   const tagOf = (jobId: string) => {
     const a = advisorOf.get(jobId);
     const j = jobs.get(jobId) ?? allCars.find((x) => x.id === jobId) ?? found.find((x) => x.id === jobId);
     const plate = j?.vehicle ? formatPlate(j.vehicle as Parameters<typeof formatPlate>[0]) : "";
-    return a ? <JobAdvisorTag jobId={jobId} jobWords={`${j?.job_number ?? ""}${plate ? ` · ${plate}` : ""}`} advisor={a} canAsk={!staff.viewingAs} /> : null;
+    return (
+      <>
+        {a ? <JobAdvisorTag jobId={jobId} jobWords={`${j?.job_number ?? ""}${plate ? ` · ${plate}` : ""}`} advisor={a} canAsk={!staff.viewingAs} /> : null}
+        <JobTechnicianTag jobId={jobId} technicians={techOf.get(jobId)} />
+      </>
+    );
   };
   const carRow = (j: AllJob) => {
     const steps = partsSteps({ jobStatus: j.status, pricingDoneAt: j.parts_pricing_done_at, pricingReopenedAt: j.parts_pricing_reopened_at, parts: parts.filter((p) => p.job_id === j.id).map((p) => stepPartOf(p as unknown as Parameters<typeof stepPartOf>[0], ctxOf(j.id, j.status))) });
@@ -236,6 +251,23 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
         {advisorFilter ? <input type="hidden" name="advisor" value={advisorFilter} /> : null}
         {q ? <LinkButton href={advisorFilter ? `/parts?advisor=${advisorFilter}` : "/parts"} tone="ghost" size="md">Clear</LinkButton> : null}
       </form>
+      {techNames.size ? (
+        <nav className="flex flex-wrap items-center gap-2" aria-label="Technician filter" data-tech-filter-bar>
+          <span className="text-sm font-bold">Technician:</span>
+          {[["", "All"] as [string, string], ...Array.from(techNames.entries()).sort((a, b) => a[1].localeCompare(b[1]))].map(([id, name]) => {
+            const params = new URLSearchParams();
+            if (q) params.set("q", q);
+            if (advisorFilter) params.set("advisor", advisorFilter);
+            if (id) params.set("tech", id);
+            const query = params.toString();
+            return (
+              <Link key={id || "all"} href={`/parts${query ? `?${query}` : ""}`} aria-current={techFilter === id ? "true" : undefined} className={`inline-flex min-h-9 items-center rounded-full border px-3 text-sm font-semibold ${techFilter === id ? "border-ink bg-ink text-white" : "border-line bg-white"}`} data-tech-filter={id || "all"}>
+                {name}
+              </Link>
+            );
+          })}
+        </nav>
+      ) : null}
       {advisorNames.size ? (
         <nav className="flex flex-wrap items-center gap-2" aria-label="Advisor filter" data-advisor-filter-bar>
           <span className="text-sm font-bold">Advisor:</span>

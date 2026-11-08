@@ -12,7 +12,8 @@ import { blankToNull } from "@/lib/format";
 import { notifyManagers, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { JOB_BRIEF_SELECT, PART_FULL_SELECT, PO_LINE_SELECT, PO_SELECT, newLabelCode, toPartFull, toPo, toPoLine, type JobBrief, type PoLineRow, type PurchaseOrderRow } from "@/lib/parts-data";
 import { recordStockMovement } from "@/lib/stock";
-import { lpoProblemWords, lpoProblemsFor, refusePoLine, splitMainLpo } from "@/lib/lpo";
+import { finishMainIfDone, lpoApproverIds, lpoProblemWords, lpoProblemsFor, mainSupplierStates, refusePoLine, splitMainLpo } from "@/lib/lpo";
+import { lpoSelectRows } from "@/lib/lpo-select-data";
 import { verifyPin } from "@/lib/pin";
 import { round2 } from "@/lib/money";
 import { can, type RoleId } from "@/lib/roles";
@@ -75,6 +76,7 @@ export async function refusePoLineAction(poId: string, lineId: string, formData:
   if (reason.length < 3) redirect(`${back}?error=${encodeURIComponent("Write why the line is refused.")}`);
   const { data: po } = await createAdminClient().from("purchase_orders").select("job_id").eq("id", poId).maybeSingle();
   const r = await refusePoLine(poId, lineId, reason, staff);
+  if (!r.error && !r.cancelled) await finishMainIfDone(poId, staff);
   refresh(po?.job_id ?? null, poId);
   if (r.error) redirect(`${back}?error=${encodeURIComponent(r.error)}`);
   redirect(`${back}?message=${encodeURIComponent(`${r.part} refused \u2713 \u2014 Parts have been told to add a replacement.${r.cancelled ? ` Every line refused: ${r.number} is cancelled.` : " The rest of the LPO still waits for your approval."}`)}`);
@@ -94,6 +96,28 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
   const decision = String(formData.get("decision") ?? "");
   const note = blankToNull(formData.get("note"));
   const job = await jobBrief(po.job_id);
+  // APPROVE EACH SUPPLIER SEPARATELY (8 November 2026, LPO-00059): one supplier of a main LPO request at a time.
+  const supplierPick = po.kind === "main" ? blankToNull(formData.get("supplier")) : null;
+  const waitingOfSupplier = async () => {
+    const { data: ls } = await admin.from("purchase_order_lines").select("id, part_item_id").eq("po_id", poId).eq("is_active", true);
+    const ids = (ls ?? []).map((l) => l.part_item_id as string | null).filter((x): x is string => !!x);
+    const { data: ps } = ids.length ? await admin.from("part_items").select("id, supplier, po_id").in("id", ids) : { data: [] };
+    const mine = new Set((ps ?? []).filter((x) => x.po_id === poId && ((String(x.supplier ?? "").trim() || "Supplier to confirm").toLowerCase() === String(supplierPick).trim().toLowerCase())).map((x) => x.id as string));
+    return (ls ?? []).filter((l) => l.part_item_id && mine.has(l.part_item_id as string)).map((l) => ({ lineId: l.id as string, partId: l.part_item_id as string }));
+  };
+  if (supplierPick && decision === "refuse") {
+    const reason = String(formData.get("reason") ?? "").trim().slice(0, 300);
+    if (reason.length < 3) redirect(`${back}?error=${encodeURIComponent(`Write why ${supplierPick} is refused.`)}`);
+    const mine = await waitingOfSupplier();
+    if (!mine.length) redirect(`${back}?error=${encodeURIComponent(`${supplierPick} has nothing waiting on ${po.number}.`)}`);
+    for (const l of mine) {
+      const r = await refusePoLine(poId, l.lineId, `${supplierPick} refused: ${reason}`, staff);
+      if (r.error) redirect(`${back}?error=${encodeURIComponent(r.error)}`);
+    }
+    await finishMainIfDone(poId, staff);
+    refresh(po.job_id, poId);
+    redirect(`${back}?message=${encodeURIComponent(`${supplierPick} refused ✓ — its ${mine.length} part${mine.length === 1 ? " is" : "s are"} back with Parts with your reason; a replacement joins this request.`)}#lpo-group-done`);
+  }
   if (decision === "refuse") {
     await admin.from("purchase_orders").update({ status: "cancelled", notes: [po.notes, note ? `Refused: ${note}` : "Refused"].filter(Boolean).join("\n"), updated_by: staff.id }).eq("id", poId);
     await admin.from("part_items").update({ po_id: null, po_line_id: null, updated_by: staff.id }).eq("po_id", poId);
@@ -131,8 +155,30 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
   // A real cost before anything is ordered (2.2): an LPO raised before the rule (LPO-00038) is checked here too.
   if (po.job_id) {
     const { data: lineParts } = await admin.from("purchase_order_lines").select("part_item_id").eq("po_id", poId).eq("is_active", true);
-    const problems = await lpoProblemsFor(po.job_id, (lineParts ?? []).map((l) => l.part_item_id as string | null).filter((x): x is string => !!x));
+    const only = supplierPick ? new Set((await waitingOfSupplier()).map((l) => l.partId)) : null;
+    const problems = await lpoProblemsFor(po.job_id, (lineParts ?? []).map((l) => l.part_item_id as string | null).filter((x): x is string => !!x && (!only || only.has(x))));
+    // Section 3's blocks (8 November 2026): a repeated part number or an unfinished line stops that supplier too.
+    const sel = await lpoSelectRows(po.job_id);
+    const repeatedHere = (lineParts ?? []).map((l) => l.part_item_id as string | null).filter((x): x is string => !!x && (!only || only.has(x)) && sel.repeated.has(x));
+    if (repeatedHere.length) redirect(`${back}?error=${encodeURIComponent(`Not approved: ${sel.repeated.get(repeatedHere[0])}.`)}`);
     if (problems.size) redirect(`${back}?error=${encodeURIComponent(lpoProblemWords(problems, true))}`);
+  }
+  if (supplierPick) {
+    const mine = await waitingOfSupplier();
+    if (!mine.length) redirect(`${back}?error=${encodeURIComponent(`${supplierPick} has nothing waiting on ${po.number}.`)}`);
+    const at = new Date().toISOString();
+    const { created } = await splitMainLpo(poId, staff, { only: supplierPick, approver: { id: staff.id, at, overrideBy: override?.by ?? null, overrideReason: override?.reason ?? null } });
+    for (const c of created) revalidatePath(`/parts/orders/${c.id}`);
+    if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_approved", note: `${po.number}: ${supplierPick} approved by ${staff.display_name}${override ? ` (override: ${override.reason})` : ""} → ${created.map((c) => c.number).join(", ")}`, created_by: staff.id });
+    await notifyRoles(["parts"], { type: "po_decided", title: `ORDER NOW · ${job?.job_number ?? po.number} · ${supplierPick}`, body: `${supplierPick} approved by ${staff.display_name} on ${po.number}: ${created.map((c) => c.number).join(", ")}. Send it (Copy, PDF or Email) and press Ordered.`, jobId: po.job_id, href: `/parts/${po.job_id}#lpos` });
+    const done = await finishMainIfDone(poId, staff);
+    if (!done) {
+      const states = await mainSupplierStates(poId);
+      const waiting = states.filter((x) => x.state !== "approved");
+      if (waiting.length) await notifyStaff(await lpoApproverIds(), { type: "po_approval", title: `${po.number}: ${waiting.length} supplier${waiting.length === 1 ? "" : "s"} still waiting`, body: `${job?.job_number ?? ""} · ${waiting.map((x) => `${x.supplier} (${x.state === "refused" ? "refused, replacement to come" : "waiting"})`).join(", ")}. ${states.length - waiting.length} of ${states.length} approved.`, jobId: po.job_id, href: back });
+    }
+    refresh(po.job_id, poId);
+    redirect(`${back}?message=${encodeURIComponent(`${supplierPick} approved ✓ — ${created.map((c) => c.number).join(", ")} is ready to send.${done ? " Every supplier of the request is decided." : " The other suppliers still wait."}`)}`);
   }
   await admin.from("purchase_orders").update({ status: "approved", approved_by: staff.id, approved_at: new Date().toISOString(), deposit_override_by: override?.by ?? null, deposit_override_reason: override?.reason ?? null, updated_by: staff.id }).eq("id", poId);
   if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_approved", note: `${po.number} approved by ${staff.display_name}${override ? ` (deposit override: ${override.reason})` : ""}`, created_by: staff.id });

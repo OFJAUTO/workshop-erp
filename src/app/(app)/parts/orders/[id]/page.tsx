@@ -15,7 +15,8 @@ import { requirePermission } from "@/lib/auth";
 import { endedLinesOf } from "@/lib/part-endings-server";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
-import { loadJobLpos, lpoDiff, lpoProblemsFor, refusalReasonOf, refusalsReady } from "@/lib/lpo";
+import { loadJobLpos, lpoDiff, lpoProblemsFor, mainSupplierStates, refusalReasonOf, refusalsReady } from "@/lib/lpo";
+import { lpoSelectRows } from "@/lib/lpo-select-data";
 import { lpoProblemAdvice } from "@/lib/part-cost-check";
 import { invoiceEditReady, invoiceHref, invoiceVatReady, loadInvoiceEdits } from "@/lib/supplier-invoices";
 import { approvedVsInvoiced } from "@/lib/supplier-invoice-rows";
@@ -41,13 +42,16 @@ import { InvoiceFiles } from "./InvoiceFiles";
 import { emailSupplierLpo, markSupplierOrdered, setPartExpectedDate } from "../../lpo-actions";
 import { gmailConfigured } from "@/lib/gmail";
 import { SupplierLpoCard } from "../../SupplierLpoCard";
-import { DecideForm, ReceiveForm, SupplierInvoiceForm } from "./PoForms";
+import { DecideForm, ReceiveForm, SupplierDecide, SupplierInvoiceForm } from "./PoForms";
 import { LpoSendControl } from "./LpoSendControl";
 import { getSiteUrl } from "@/lib/site";
 
 import { SupplierAmount } from "@/components/SupplierAmount";
 import { addSupplierMoney, originalNetOf, supplierMoney, supplierMoneyText } from "@/lib/supplier-money";
 import { supplierChargesVat } from "@/lib/supplier-rules";
+import { JobTechnicianTag } from "@/components/JobTechnicianTag";
+import { jobTechniciansFor } from "@/lib/job-technician";
+import { openReturnsOnPo } from "@/lib/purchase-returns";
 
 export const dynamic = "force-dynamic";
 
@@ -118,14 +122,23 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const supplierEmailOf = new Map<string, string | null>(((lpos?.suppliers ?? []).length ? (await admin.from("suppliers").select("id, email").in("id", (lpos?.suppliers ?? []).map((s) => s.po.supplier_id).filter((x): x is string => !!x))).data ?? [] : []).map((s) => [s.id as string, (s.email as string | null) ?? null]));
   const supplierDigits = (bundle.supplier?.phone ?? "").replace(/[^\d]/g, "");
   const sendable = !isMain && po.status !== "pending_approval" && po.status !== "cancelled" && !!po.verify_token;
-  const children = (lpos?.suppliers ?? []).filter((s) => s.po.parent_id === po.id);
+  // A later request continues the car's first LPO family, so its supplier LPOs are found by their parts too.
+  const mainPartIds = new Set(lines.map((l) => l.part_item_id).filter(Boolean));
+  const children = (lpos?.suppliers ?? []).filter((s) => s.po.parent_id === po.id || s.lines.some((l) => mainPartIds.has(l.part_item_id)));
+  // Approve each supplier separately (8 November 2026): while the request waits, only the suppliers still waiting are
+  // listed under "Parts by supplier"; the approved ones are their own LPO cards above.
+  const pendingMain = isMain && po.status === "pending_approval";
+  const onMainIds = new Set(parts.map((p) => p.id));
+  const groupLines = pendingMain ? lines.filter((l) => onMainIds.has(l.part_item_id)) : lines;
+  const supplierStates = pendingMain ? await mainSupplierStates(po.id) : [];
+  const repeatedPn = pendingMain && po.job_id ? (await lpoSelectRows(po.job_id)).repeated : new Map<string, string>();
   // Each line's unit (pieces, litres, sets) for the cards' "× 8 L" and the supplier copy.
   const unitOfPart = await partUnitsOf([...children.flatMap((s) => s.lines.map((l) => l.part_item_id)), ...bundle.lines.map((l) => l.part_item_id ?? "")]);
   // The main LPO while it waits: the lines grouped by supplier (the parts still point at it), a subtotal each.
   const groups = (() => {
     const m = new Map<string, typeof lines>();
-    for (const l of lines) {
-      const sup = (parts.find((p) => p.id === l.part_item_id)?.supplier ?? "").trim() || "Supplier";
+    for (const l of groupLines) {
+      const sup = (parts.find((p) => p.id === l.part_item_id)?.supplier ?? "").trim() || "Supplier to confirm";
       m.set(sup, [...(m.get(sup) ?? []), l]);
     }
     const chargesOf = (s: string) => bundle.charges.filter((c) => c.supplier_name.trim().toLowerCase() === s.toLowerCase());
@@ -192,6 +205,9 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const refusedHere = po.status === "cancelled" && /refused/i.test(String(po.notes ?? ""));
   // The car's advisor next to the job (6 November 2026, Peter): staff only, never on the supplier copy.
   const advisor = po.job_id ? await jobAdvisorOf(po.job_id) : null;
+  // Purchase returns on this LPO (8 November 2026): the invoice check warns while an invoice may still charge them.
+  const returnsHere = !isMain ? await openReturnsOnPo(po.id) : [];
+  const technicians = po.job_id ? ((await jobTechniciansFor([po.job_id])).get(po.job_id) ?? null) : null;
   // Supplier payments with their amount (6 November 2026): the box replaces "Paid to supplier" once the tables are applied.
   // eslint-disable-next-line react-hooks/purity -- a server page: the clock is read once per request
   const todayDubai = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
@@ -208,6 +224,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             <span>{v ? `${formatPlate(v)} · ${[v.make?.name, v.model?.name].filter(Boolean).join(" ")}` : ""}</span>
             <span>· {job?.job_number}</span>
             {po.job_id && advisor ? <JobAdvisorTag jobId={po.job_id} jobWords={`${job?.job_number ?? ""}${v ? ` · ${formatPlate(v)}` : ""}`} advisor={advisor} canAsk={!staff.viewingAs} /> : null}
+            {po.job_id ? <JobTechnicianTag jobId={po.job_id} technicians={technicians} /> : null}
             <Badge tone={po.status === "pending_approval" ? "amber" : po.status === "received" ? "green" : po.status === "cancelled" ? "neutral" : "ink"}>{isMain && po.status === "approved" ? "Approved" : PO_STATUS_LABELS[po.status]}</Badge>
             {po.supplier_invoice_status === "to_follow" ? <Badge tone="amber">Invoice missing</Badge> : null}
             {po.supplier_paid_at ? <Badge tone="green">Paid to supplier</Badge> : null}
@@ -235,7 +252,12 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           <Notice tone="error">{po.supplier_name} is ticked VAT registered but has no TRN: its bill cannot go to Zoho Books. Type the 15-digit TRN on <Link href="/parts/suppliers" className="font-bold underline underline-offset-4">Parts &gt; Suppliers</Link> (or untick VAT registered); the bill then goes back in the queue and is sent with the next Sync to Zoho.</Notice>
         </div>
       ) : null}
-      {po.status === "pending_approval" ? <Notice tone="info">{isMain ? "Waiting for the owner or the head accountant. One Approve covers every supplier; one LPO per supplier is made at approval." : "Waiting for the owner or the head accountant. The PDF cannot be downloaded or sent before approval."}</Notice> : null}
+      {returnsHere.length ? (
+        <div data-pr-invoice-warning>
+          <Notice tone="info">{returnsHere.map((r) => `${r.number}: ${r.description.toUpperCase()} × ${r.quantity} ${r.status === "credited" || r.status === "refunded" ? `went back (${r.status === "credited" ? `credit note ${r.creditNumber ?? ""}` : "refunded"})` : "is going back"}`).join(" · ")}. {po.supplier_invoice_status === "received" ? "Check the supplier's invoice: a returned part must be credited, never paid twice." : "When the supplier's invoice arrives, check it does not still charge the returned part (or that the credit note covers it)."} <Link href="/parts/returns" className="font-bold underline">Purchase returns</Link></Notice>
+        </div>
+      ) : null}
+      {po.status === "pending_approval" ? <Notice tone="info">{isMain ? "Waiting for the owner or the head accountant. Approve each supplier on its own (its LPO is made at once), or Approve all." : "Waiting for the owner or the head accountant. The PDF cannot be downloaded or sent before approval."}</Notice> : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-4">
@@ -248,7 +270,10 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             </section>
           ) : null}
 
-          {isMain && !children.length ? (
+          {pendingMain && supplierStates.length ? (
+            <p className="text-base font-bold" data-supplier-states>{supplierStates.filter((x) => x.state === "approved").length} of {supplierStates.length} supplier{supplierStates.length === 1 ? "" : "s"} approved · {supplierStates.filter((x) => x.state === "waiting").length} waiting{supplierStates.some((x) => x.state === "refused") ? ` · ${supplierStates.filter((x) => x.state === "refused").length} refused (replacement to come)` : ""}</p>
+          ) : null}
+          {isMain && (pendingMain ? groups.length > 0 : !children.length) ? (
             <Card className="flex flex-col gap-3" data-main-lpo>
               <SectionLabel right={`${groups.length} supplier${groups.length === 1 ? "" : "s"}`}>Parts by supplier</SectionLabel>
               {groups.map((g) => (
@@ -283,6 +308,11 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                     ))}
                   </ul>
                   <div className="flex items-center justify-between gap-2 rounded-control bg-chip px-3 py-1.5 text-sm"><span className="text-muted">Subtotal · {g.supplier}</span><span data-lpo-subtotal><SupplierAmount money={groupMoney(g)} cancelled={cancelled} size="sm" /></span></div>
+                  {pendingMain && canApprove && (groups.length > 1 || supplierStates.length > 1) ? (() => {
+                    const blockedLine = g.lines.find((l) => lineProblems.get(l.part_item_id) || repeatedPn.get(l.part_item_id));
+                    const blocked = blockedLine ? (repeatedPn.get(blockedLine.part_item_id) ?? `${blockedLine.description.toUpperCase()}: not a real price yet`) : null;
+                    return <SupplierDecide action={decidePurchaseOrder.bind(null, po.id)} supplier={g.supplier} amount={supplierMoneyText(groupMoney(g))} blocked={blocked} depositShort={depositShort} isOwner={role === "owner"} reasons={reasonsFor(settings, "deposit_override")} />;
+                  })() : null}
                 </div>
               ))}
               <div className="flex items-center justify-between gap-2 border-t border-line pt-2 text-base"><span className="font-bold">{cancelled ? "Grand total (cancelled, not counted)" : "Grand total"}</span><span data-lpo-grand-total><SupplierAmount money={grandMoney} cancelled={cancelled} /></span></div>

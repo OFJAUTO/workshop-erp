@@ -51,3 +51,32 @@ export async function jobAdvisorsFor(jobIds: string[]): Promise<Map<string, JobA
 export async function jobAdvisorOf(jobId: string): Promise<JobAdvisor> {
   return (await jobAdvisorsFor([jobId])).get(jobId) ?? NONE;
 }
+
+/**
+ * A job with NO advisor gets the advisor who made its quotation, else its estimate (8 November 2026, J-00989:
+ * "Advisor: not set yet (quotation by Adarsh)"). Only a service advisor is ever set; a job that has an advisor is never
+ * touched. Called when a quotation is started and when a car arrives with a carried estimate. Returns who was set.
+ */
+export async function fillMissingAdvisor(jobId: string): Promise<string | null> {
+  const admin = createAdminClient();
+  const { data: job } = await admin.from("jobs").select("id, advisor_id, estimate_id").eq("id", jobId).maybeSingle();
+  if (!job || job.advisor_id) return null;
+  const { data: qs } = await admin.from("quotations").select("number, created_at").eq("job_id", jobId).eq("is_active", true).order("created_at", { ascending: false }).limit(1);
+  const numbers: string[] = [];
+  if (qs?.[0]?.number) numbers.push(String(qs[0].number));
+  if (job.estimate_id) {
+    const { data: est } = await admin.from("quotations").select("number").eq("id", job.estimate_id).maybeSingle();
+    if (est?.number) numbers.push(String(est.number));
+  }
+  if (!numbers.length) return null;
+  const starters = await startersOf(numbers);
+  const candidates = numbers.map((n) => starters.get(n)).filter((x): x is string => !!x);
+  if (!candidates.length) return null;
+  const { data: people } = await admin.from("staff").select("id, role_id, is_active").in("id", candidates);
+  const pick = candidates.find((c) => (people ?? []).some((p) => p.id === c && p.role_id === "service_advisor" && p.is_active));
+  if (!pick) return null;
+  const { data: done } = await admin.from("jobs").update({ advisor_id: pick, updated_by: pick }).eq("id", jobId).is("advisor_id", null).select("id");
+  if (!(done ?? []).length) return null;
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "advisor_set", note: "Advisor set from the quotation or estimate (the job had none)", created_by: pick });
+  return pick;
+}

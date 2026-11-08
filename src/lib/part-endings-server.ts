@@ -301,6 +301,8 @@ export async function endOrderedPart(jobId: string, partId: string, input: EndIn
       if (error) throw error;
     });
     if (state === "returned") await after("zoho vendor credit", () => tryEnqueueZoho("vendorcredit", p.id, jobId, actor.id));
+    // Purchase returns (8 November 2026): the PR- record and its return note for the supplier.
+    if (state === "return_pending" || state === "returned") await after("purchase return", async () => { const { openPurchaseReturn } = await import("./purchase-returns"); await openPurchaseReturn(p.id, reason, actor); });
     // A tax invoice already out keeps the part's cost (it is never changed from here): the owner corrects it.
     let taxWords = "";
     if (taxLines.length) {

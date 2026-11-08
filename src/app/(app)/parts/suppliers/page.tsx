@@ -13,6 +13,7 @@ import { SupplierAmount } from "@/components/SupplierAmount";
 import { moneyFrom } from "@/lib/supplier-money";
 import { addSupplier, applySupplierDiscount, setSupplierActive, updateSupplier } from "./actions";
 import { getSettings } from "@/lib/settings";
+import { creditExpectedBySupplier, returnCreditsToUse } from "@/lib/purchase-returns";
 
 export const dynamic = "force-dynamic";
 
@@ -67,6 +68,9 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
   const all = (data ?? []) as unknown as Supplier[];
   // THE unpaid figure (the Supplier invoices tab's), keyed by the supplier's id.
   const advanceOf = await advancesBySupplier();
+  // Purchase returns (8 November 2026): what each supplier should credit us, kept APART from the balance until the
+  // credit note or refund is recorded; and credits on invoices already paid (money they owe us).
+  const [expectedOf, creditsToUse] = await Promise.all([creditExpectedBySupplier(), returnCreditsToUse()]);
   const unpaidOf = new Map(unpaidBySupplier(invoiceRows).filter((u) => u.supplierId).map((u) => [u.supplierId as string, u]));
   const listed = show === "all" ? all : all.filter((s) => s.is_active);
   const searched = listed.filter((s) => supplierSearchHit(s, q));
@@ -149,6 +153,8 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
                 </form>
               </details>
               {(advanceOf.get(s.id) ?? advanceOf.get(s.name.toUpperCase())) ? <span className="inline-flex min-h-11 w-fit items-center rounded-card border border-green bg-green-soft px-3 py-1 text-xs font-bold text-green" data-supplier-advance>{advanceWords(s.name, advanceOf.get(s.id) ?? advanceOf.get(s.name.toUpperCase()) ?? 0)}</span> : null}
+              {(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase())) ? <Link href="/parts/returns?tab=credit" className="inline-flex min-h-11 w-fit items-center rounded-card border border-amber-bar bg-amber-soft px-3 py-1 text-xs font-bold text-amber" data-supplier-credit-expected={(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase()))!.amount.toFixed(2)}>Credit expected from {s.name} AED {(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase()))!.amount.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · not in the balance yet</Link> : null}
+              {(creditsToUse.get(s.id) ?? creditsToUse.get(s.name.toUpperCase())) ? <span className="inline-flex min-h-11 w-fit items-center rounded-card border border-green bg-green-soft px-3 py-1 text-xs font-bold text-green" data-supplier-credit-to-use>Credit to use AED {(creditsToUse.get(s.id) ?? creditsToUse.get(s.name.toUpperCase()))!.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (returns on paid invoices)</span> : null}
               {unpaid ? (
                 <Link href={unpaidHref(s.id)} className="inline-flex min-h-11 w-fit flex-wrap items-center gap-2 rounded-card border border-line-strong px-3 py-1 text-xs font-bold" data-supplier-unpaid={unpaid.total.toFixed(2)}>
                   <span>Unpaid ({unpaid.count})</span>

@@ -16,6 +16,8 @@ import { formatPlate } from "@/lib/types";
 import { dispositionAction, exchangePartAction, markPartsReadyAction, notNeededAction, returnToParts } from "../../handover-actions";
 import { ReadyForm, ReturnForm, type DeskPart } from "./HandoverForm";
 import { EndingForm, EndingResultHost, PartActions, PartStateBadge } from "./PartActions";
+import { JobTechnicianTag } from "@/components/JobTechnicianTag";
+import { jobTechniciansFor, technicianNames } from "@/lib/job-technician";
 
 export const dynamic = "force-dynamic";
 
@@ -60,13 +62,19 @@ export default async function HandoverPage({ params, searchParams }: { params: P
   const inspBundle = await loadInspection(jobId);
   const dangers = inspBundle ? inspectionDangerous(inspBundle) : [];
   const back = `/parts/handover/${jobId}`;
+  // The technician on the car, by name (8 November 2026, J-00492): "Ready – waiting for Keno · 26 h".
+  const technicians = (await jobTechniciansFor([jobId])).get(jobId) ?? null;
+  const waitFor = technicianNames(technicians);
+  // eslint-disable-next-line react-hooks/purity -- a server page: the clock is read once per request
+  const nowMs = Date.now();
+  const readyHours = (id: string) => { const at = toHandParts.find((x) => x.id === id)?.ready_for_handover_at; return at ? Math.max(0, Math.floor((nowMs - Date.parse(at)) / 3600000)) : 0; };
 
   return (
     <>
       <LiveRefresh tables={["part_handovers", "part_items"]} jobId={jobId} />
       {/* An ending's result and the message for the supplier open in a window here: the card that was tapped leaves the list (3 November 2026). */}
       <EndingResultHost />
-      <PageHeader title={`Hand over · ${plate}`} subtitle={<span className="flex flex-wrap items-center gap-2"><span>{[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · {j.job_number}</span>{dangers.length ? <Badge tone="red">Dangerous to drive</Badge> : null}</span>} actions={<><CopyVin vin={j.vehicle?.vin} /><LinkButton href={`/parts/trail/${jobId}`} tone="secondary" size="lg">Parts trail</LinkButton><LinkButton href={`/parts/${jobId}`} tone="secondary" size="lg">Parts page</LinkButton>{can(role, "viewJobs") ? <LinkButton href={`/jobs/${jobId}`} tone="secondary" size="lg">Job card</LinkButton> : null}</>} />
+      <PageHeader title={`Hand over · ${plate}`} subtitle={<span className="flex flex-wrap items-center gap-2"><span>{[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · {j.job_number}</span>{dangers.length ? <Badge tone="red">Dangerous to drive</Badge> : null}<JobTechnicianTag jobId={jobId} technicians={technicians} /></span>} actions={<><CopyVin vin={j.vehicle?.vin} /><LinkButton href={`/parts/trail/${jobId}`} tone="secondary" size="lg">Parts trail</LinkButton><LinkButton href={`/parts/${jobId}`} tone="secondary" size="lg">Parts page</LinkButton>{can(role, "viewJobs") ? <LinkButton href={`/jobs/${jobId}`} tone="secondary" size="lg">Job card</LinkButton> : null}</>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
 
@@ -78,7 +86,7 @@ export default async function HandoverPage({ params, searchParams }: { params: P
             {toHand.filter((p) => p.readyAt).map((p) => (
               <li key={p.id} className="flex items-center gap-2 rounded-control border border-amber-bar bg-white px-2 py-2" data-ready-part={p.id}>
                 <span className="font-semibold">{p.description}</span><span className="text-muted">× {p.quantity}</span>
-                <span className="ml-auto text-xs font-semibold text-amber">Ready · waiting for the technician, {p.readyAt}</span>
+                <span className="ml-auto text-xs font-semibold text-amber" data-ready-waiting>Ready – waiting for {waitFor || "a technician (none on the car)"} · {readyHours(p.id)} h <span className="font-normal text-muted">({p.readyAt})</span></span>
               </li>
             ))}
           </ul>

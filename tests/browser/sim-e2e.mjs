@@ -13,7 +13,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -2403,6 +2403,95 @@ await section("x", "approve each supplier separately in one LPO request", async 
     await p.screenshot({ path: `${shots}/x9-child-lpo-one-supplier.png` });
   }
   await owner.browser.close();
+});
+
+/* ================================================================================================= */
+/* Path y — PURCHASE RETURNS (8 November 2026, Section 8): a delivered part goes back (PR- note, the    */
+/* return note PDF), Sent back with who took it, "Credit expected" apart from the balance, accounts     */
+/* record the credit note (the supplier balance moves only now); a second part is refused → our stock.  */
+/* ================================================================================================= */
+await section("y", "purchase returns: note, sent back, credit expected, credit received, refused", async () => {
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed.jobId;
+  const partsId = (await sql("select id from public.staff where role_id = 'parts' and is_active order by created_at limit 1"))[0].id;
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const SUP = "E2E RETURN SUPPLIER Y";
+  await sql("insert into public.suppliers (name, trn, vat_registered, created_by, updated_by) select $1, '100200300400597', true, $2, $2 where not exists (select 1 from public.suppliers where name ilike $1)", [SUP, partsId]);
+  const sup = (await sql("select id::text as id from public.suppliers where name ilike $1", [SUP]))[0];
+  await sql("update public.part_requests set status = 'unavailable', closed_reason = 'not needed (test)' where job_id = $1 and status = 'open'", [jobId]);
+  await sql("update public.part_items set is_active = false where job_id = $1", [jobId]);
+  const PO = "22222222-0000-4000-8000-00000000e9f1", PA = "22222222-0000-4000-8000-00000000e9f2", PB = "22222222-0000-4000-8000-00000000e9f3", LA = "22222222-0000-4000-8000-00000000e9f4", LB = "22222222-0000-4000-8000-00000000e9f5";
+  await sql("insert into public.part_items (id, job_id, description, part_number, quantity, confirmed_quantity, cost_aed, supplier, availability, confirm_status, part_type, priced_at, priced_by, order_status, received_qty, created_by, updated_by) values ($1, $3, 'E2E ENGINE MOUNT Y', 'E2E-EM-Y', 1, 1, 400, $4, 'to_order', 'confirmed', 'genuine', now(), $5, 'received', 1, $5, $5), ($2, $3, 'E2E WRONG SENSOR Y', 'E2E-WS-Y', 1, 1, 150, $4, 'to_order', 'confirmed', 'genuine', now(), $5, 'received', 1, $5, $5)", [PA, PB, jobId, SUP, partsId]);
+  await sql("insert into public.purchase_orders (id, number, job_id, kind, supplier_id, supplier_name, status, total_cost_aed, ordered_at, ordered_by, approved_at, approved_by, received_at, supplier_invoice_status, supplier_invoice_number, created_by, updated_by) values ($1, 'LPO-E2E-Y-1', $2, 'supplier', $3, $4, 'received', 550, now(), $5, now(), $6, now(), 'received', 'INV-SUP-777', $5, $5)", [PO, jobId, sup.id, SUP, partsId, ownerId]);
+  await sql("insert into public.purchase_order_lines (id, po_id, part_item_id, position, description, part_number, quantity, unit_cost, received_qty, received_at, created_by, updated_by) values ($1, $3, $4, 1, 'E2E ENGINE MOUNT Y', 'E2E-EM-Y', 1, 400, 1, now(), $6, $6), ($2, $3, $5, 2, 'E2E WRONG SENSOR Y', 'E2E-WS-Y', 1, 150, 1, now(), $6, $6)", [LA, LB, PO, PA, PB, partsId]);
+  await sql("update public.part_items set po_id = $2, po_line_id = $3 where id = $1", [PA, PO, LA]);
+  await sql("update public.part_items set po_id = $2, po_line_id = $3 where id = $1", [PB, PO, LB]);
+  const desk = await browserForId(partsId, { viewport: { width: 1440, height: 900 } });
+  const returnPart = async (name) => {
+    await go(desk.page, `${base}/parts/${jobId}`);
+    const row = desk.page.locator("[data-row-key]").filter({ has: desk.page.locator("[data-part-name]", { hasText: new RegExp(name, "i") }) }).first();
+    await row.locator("button[aria-label='More for this part']").click();
+    await desk.page.getByRole("button", { name: /Remove: not needed \(ordered: choose its ending\)/ }).click();
+    const dlg = desk.page.locator("[data-end-dialog]");
+    await dlg.waitFor({ timeout: 10000 });
+    await dlg.locator("[data-end-option='return']").click();
+    await dlg.locator("input[name='reason']").pressSequentially("Wrong part", { delay: 10 });
+    await dlg.locator("[data-end-save]").click();
+    await desk.page.locator("[data-end-done], [data-end-error]").first().waitFor({ timeout: 30000 }).catch(() => null);
+  };
+  await returnPart("E2E ENGINE MOUNT Y");
+  let pr = null;
+  for (let i = 0; i < 15 && !pr; i++) { await sleep(1000); pr = (await sql("select id::text as id, number, status, quantity::float as qty, supplier_invoice_number from public.purchase_returns where part_item_id = $1", [PA]))[0]; }
+  check(`y1: Return to supplier opens a PR- record (${pr?.number}, ${pr?.status}, their invoice ${pr?.supplier_invoice_number})`, /^PR-\d{5}$/.test(pr?.number ?? "") && pr?.status === "requested" && pr?.supplier_invoice_number === "INV-SUP-777");
+  if (!pr) throw new Error("y1: no purchase return");
+  const cookie = await cookieHeader(partsId);
+  const pdf = await fetch(`${base}/api/pdf/return-note/${pr.id}`, { headers: { cookie } });
+  const pdfBytes = Buffer.from(await pdf.arrayBuffer());
+  fs.writeFileSync(`${shots}/y1-return-note.pdf`, pdfBytes);
+  check(`y2: the return note PDF opens (${pdf.status}, ${pdfBytes.length} bytes)`, pdf.status === 200 && pdfBytes.slice(0, 4).toString() === "%PDF");
+  await go(desk.page, `${base}/parts/returns?tab=to_go`);
+  check("y3: Purchase returns lists it under Waiting to go back", (await desk.page.locator(`[data-return-row="${pr.number}"]`).count()) === 1);
+  await desk.page.locator(`[data-return-row="${pr.number}"] [data-return-open="sent"]`).click();
+  await desk.page.locator(`[data-return-row="${pr.number}"] [data-return-sent-with]`).fill("Ravi (our driver)");
+  await desk.page.locator(`[data-return-row="${pr.number}"] [data-return-sent-save]`).click();
+  await desk.page.locator(`[data-return-row="${pr.number}"] [data-return-done], [data-return-row="${pr.number}"] [data-return-error]`).first().waitFor({ timeout: 30000 }).catch(() => null);
+  const sent = (await sql("select status, sent_with from public.purchase_returns where id = $1", [pr.id]))[0];
+  const bell = (await sql("select count(*)::int as n from public.notifications n join public.staff s on s.id = n.staff_id where s.role_id = 'accounts' and n.type = 'purchase_return' and n.title ilike $1", [`%${pr.number}%`]))[0].n;
+  check(`y4: sent back with who took it (${sent?.status}, ${sent?.sent_with}); accounts got a bell (${bell})`, sent?.status === "sent" && bell > 0);
+  // y5. Credit expected is shown apart from the balance; the LPO still owes its full amount.
+  const acc = await browserFor("accounts", { viewport: { width: 1440, height: 900 } });
+  await go(acc.page, `${base}/parts/suppliers?q=${encodeURIComponent("E2E RETURN")}`);
+  const exp = await acc.page.locator("[data-supplier-credit-expected]").first().getAttribute("data-supplier-credit-expected").catch(() => null);
+  check(`y5: the supplier shows "Credit expected" AED 420.00 incl. VAT, apart from the balance (${exp})`, exp === "420.00");
+  await acc.page.screenshot({ path: `${shots}/y5-supplier-credit-expected.png` });
+  // y6. Accounts record the credit note: the return is done, the part's ending is "returned".
+  await go(acc.page, `${base}/parts/returns?tab=credit`);
+  await acc.page.screenshot({ path: `${shots}/y6-purchase-returns-list.png`, fullPage: true });
+  const rowA = acc.page.locator(`[data-return-row="${pr.number}"]`);
+  await rowA.locator("[data-return-open='credit']").click();
+  await rowA.locator("[data-return-cn-number]").fill("CN-SUP-55");
+  await rowA.locator("[data-return-cn-date]").fill(new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10));
+  await rowA.locator("[data-return-cn-net]").fill("400");
+  await rowA.locator("[data-return-cn-vat]").fill("20");
+  await rowA.locator("[data-return-cn-save]").click();
+  await rowA.locator("[data-return-done], [data-return-error]").first().waitFor({ timeout: 30000 }).catch(() => null);
+  const credited = (await sql("select r.status, p.disposition from public.purchase_returns r join public.part_items p on p.id = r.part_item_id where r.id = $1", [pr.id]))[0];
+  check(`y6: credit note recorded (${credited?.status}); the part's ending is returned (${credited?.disposition})`, credited?.status === "credited" && credited?.disposition === "returned");
+  await acc.browser.close();
+  // y7. The second part is refused by the supplier: back to our stock at its cost.
+  await returnPart("E2E WRONG SENSOR Y");
+  let pr2 = null;
+  for (let i = 0; i < 15 && !pr2; i++) { await sleep(1000); pr2 = (await sql("select id::text as id, number from public.purchase_returns where part_item_id = $1", [PB]))[0]; }
+  if (!pr2) throw new Error("y7: no second return");
+  await go(desk.page, `${base}/parts/returns?tab=to_go`);
+  const rowB = desk.page.locator(`[data-return-row="${pr2.number}"]`);
+  await rowB.locator("[data-return-open='refused']").click();
+  await rowB.locator("[data-return-refused-note]").fill("Supplier says it was fitted");
+  await rowB.locator("[data-return-refused-save]").click();
+  await rowB.locator("[data-return-done], [data-return-error]").first().waitFor({ timeout: 30000 }).catch(() => null);
+  const refused = (await sql("select r.status, r.refused_action, p.disposition from public.purchase_returns r join public.part_items p on p.id = r.part_item_id where r.id = $1", [pr2.id]))[0];
+  check(`y7: refused by the supplier → back to our stock (${refused?.status}, ${refused?.refused_action}, part ${refused?.disposition})`, refused?.status === "refused" && refused?.refused_action === "stock" && refused?.disposition === "stock");
+  await desk.browser.close();
 });
 
 const failed = summary();

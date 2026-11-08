@@ -46,6 +46,7 @@ import { carryDifferences, carryWarning } from "@/lib/carry-check";
 import { quoteMessageFor } from "@/lib/quote-message";
 import { FINISHED_STATUSES } from "@/lib/quote-send-state";
 import { compReady } from "@/lib/schema-ready";
+import { fillMissingAdvisor } from "@/lib/job-advisor";
 
 function refresh(jobId: string | null, quotationId?: string) {
   if (jobId) {
@@ -134,6 +135,8 @@ export async function startQuotation(jobId: string) {
     .select("id, number")
     .single();
   if (error || !created) err((error ? dbWords(error, "quotes/actions") : "Could not start the quotation."));
+  // A job with no advisor takes the advisor who made its quotation or estimate (8 November 2026).
+  await fillMissingAdvisor(jobId).catch(() => null);
 
   let lines: Record<string, unknown>[] = [];
   if (job!.estimate_id) {

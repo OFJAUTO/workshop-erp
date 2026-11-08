@@ -55,6 +55,9 @@ begin
   delete from public.inspection_media where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.inspection_change_requests where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.supplier_invoice_edits where po_id in (select id from public.purchase_orders where job_id = any(job_ids));
+  if to_regclass('public.purchase_returns') is not null then
+    delete from public.purchase_returns where job_id = any(job_ids) or supplier_name ilike 'e2e %' or part_item_id in (select id from public.part_items where job_id = any(job_ids));
+  end if;
   -- Supplier payments (6 November 2026): their lines on these LPOs, the LPOs' pointer, the test suppliers' payments.
   if to_regclass('public.supplier_payment_lines') is not null then
     delete from public.supplier_payment_lines where po_id in (select id from public.purchase_orders where job_id = any(job_ids)) or payment_id in (select id from public.supplier_payments where supplier_name like 'E2E%');
@@ -132,6 +135,9 @@ begin
   delete from public.inspection_media where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.inspection_change_requests where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.supplier_invoice_edits where po_id in (select id from public.purchase_orders where job_id = any(job_ids));
+  if to_regclass('public.purchase_returns') is not null then
+    delete from public.purchase_returns where job_id = any(job_ids) or supplier_name ilike 'e2e %' or part_item_id in (select id from public.part_items where job_id = any(job_ids));
+  end if;
   -- Supplier payments (6 November 2026): their lines on these LPOs, the LPOs' pointer, the test suppliers' payments.
   if to_regclass('public.supplier_payment_lines') is not null then
     delete from public.supplier_payment_lines where po_id in (select id from public.purchase_orders where job_id = any(job_ids)) or payment_id in (select id from public.supplier_payments where supplier_name like 'E2E%');
@@ -225,6 +231,7 @@ set session_replication_role = default;
 set session_replication_role = replica;
 delete from public.stock_movements where stock_item_id in (select id from public.stock_items where name ilike 'e2e %') or po_id in (select id from public.purchase_orders where supplier_name ilike 'e2e %');
 delete from public.supplier_invoice_edits where po_id in (select id from public.purchase_orders where supplier_name ilike 'e2e %');
+do $$ begin if to_regclass('public.purchase_returns') is not null then delete from public.purchase_returns where supplier_name ilike 'e2e %'; end if; end $$;
 delete from public.purchase_order_lines where po_id in (select id from public.purchase_orders where supplier_name ilike 'e2e %');
 delete from public.notifications where href like '/parts/orders/%' and href in (select '/parts/orders/' || id::text from public.purchase_orders where supplier_name ilike 'e2e %');
 delete from public.purchase_orders where supplier_name ilike 'e2e %';

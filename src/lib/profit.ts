@@ -97,6 +97,8 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     jobIds.length ? admin.from("quotations").select("job_id, commission_aed, commission_status, version, created_at, commission_to, commission_paid_at").in("job_id", jobIds).eq("kind", "quotation").eq("is_active", true).not("commission_to", "is", null) : Promise.resolve({ data: [] }),
   ]);
   const chargeTotals = await chargeTotalsByJob(jobIds);
+  // Purchase returns (8 November 2026): a restocking fee or a refused part written off to the job costs the job.
+  const returnCosts = await (await import("./purchase-returns")).returnCostsForJobs(jobIds).catch(() => new Map<string, number>());
   // 3 November 2026 (section 8): the car's recovery, fuel and other charges - on the job card or on a quotation - each
   // counted ONCE by THE cost rule (charge-items.ts), never again through an invoice line or a hidden quotation line.
   const chargeMap = await loadChargeItemsMany(jobIds);
@@ -147,7 +149,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     // The suppliers' own charges on the job's parts (courier, freight) are an internal cost too.
     const inspectionOnly = isInspectionOnly(invoice.job_id, ls);
     // A declined car keeps its charges' costs (a recovery paid to an outside company is real): they come from the rule.
-    const otherCost = round2((inspectionOnly ? 0 : ls.filter((l) => l.section !== "parts" && !(jc && isChargeLine(l))).reduce((a, l) => a + Number(l.cost_aed), 0)) + hiddenCost + (invoice.job_id ? chargeTotals.get(invoice.job_id) ?? 0 : 0) + (jc?.costs.other ?? 0));
+    const otherCost = round2((inspectionOnly ? 0 : ls.filter((l) => l.section !== "parts" && !(jc && isChargeLine(l))).reduce((a, l) => a + Number(l.cost_aed), 0)) + hiddenCost + (invoice.job_id ? chargeTotals.get(invoice.job_id) ?? 0 : 0) + (jc?.costs.other ?? 0) + (invoice.job_id ? returnCosts.get(invoice.job_id) ?? 0 : 0));
     // The recovery cost: THE rule - the drivers' and companies' prices once the car has trips (trip for trip), each
     // recovery charge's cost (the bill, else its estimate) until then. A job-less invoice (a pending charge) has none.
     const jobTrips = ((trips ?? []) as { job_id: string; price_aed: number | string | null; delivered_at: string | null; status: string }[]).filter((t) => t.job_id === invoice.job_id);

@@ -358,6 +358,11 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
       await logAppError("gate-in: move estimate money", err, { staffId: staff.id, jobId: job.id });
     }
   }
+  // A car arriving with no advisor takes the advisor who made its estimate (8 November 2026).
+  if (job?.id) {
+    const { fillMissingAdvisor } = await import("@/lib/job-advisor");
+    await fillMissingAdvisor(job.id).catch(() => null);
+  }
   if (comebackJob) {
     await supabase.from("job_events").insert({ job_id: job.id, event_type: "comeback", note: `Comeback of ${comebackJob.job_number}, marked at gate-in by ${staff.display_name}. High priority.`, created_by: staff.id });
     await supabase.from("job_events").insert({ job_id: comebackJob.id, event_type: "comeback", note: `The car came back on ${job.job_number} (gate-in by ${staff.display_name})`, created_by: staff.id });

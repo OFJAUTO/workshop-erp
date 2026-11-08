@@ -428,6 +428,40 @@ async function runHousekeeping(): Promise<Record<string, number>> {
     }
   }
 
+  // 21b. Technician on parts pages (8 November 2026, J-00492): a part ready at the desk for 4 WORKING hours and still
+  // not collected tells the workshop manager (once per car and batch). The 2-hour reminder above stays.
+  {
+    const wt4 = workingTimeOf(settings);
+    const { data: ready4 } = await admin.from("part_items").select("id, job_id, description, ready_for_handover_at").eq("is_active", true).neq("issue_status", "confirmed").not("ready_for_handover_at", "is", null).lt("ready_for_handover_at", new Date(Date.now() - 4 * 3600000).toISOString());
+    const late4 = new Map<string, { names: string[]; since: string }>();
+    for (const r of ready4 ?? []) {
+      if (workingHoursBetween(r.ready_for_handover_at as string, new Date(), wt4) < 4) continue;
+      const g = late4.get(r.job_id as string) ?? { names: [], since: r.ready_for_handover_at as string };
+      g.names.push(String(r.description).toUpperCase());
+      if ((r.ready_for_handover_at as string) < g.since) g.since = r.ready_for_handover_at as string;
+      late4.set(r.job_id as string, g);
+    }
+    let told4 = 0;
+    for (const [jobId, g] of late4) {
+      const { data: already } = await admin.from("notifications").select("id").eq("job_id", jobId).eq("type", "handover").ilike("title", "Not collected after 4 working hours%").gte("created_at", g.since).limit(1);
+      if ((already ?? []).length) continue;
+      const { data: job } = await admin.from("jobs").select("id, job_number, is_open, department").eq("id", jobId).maybeSingle();
+      if (!job?.is_open) continue;
+      const { data: techRows } = await admin.from("job_technicians").select("staff_id").eq("job_id", jobId).eq("is_active", true).is("done_at", null).is("left_at", null);
+      const { data: techNames } = (techRows ?? []).length ? await admin.from("staff").select("display_name").in("id", (techRows ?? []).map((t) => t.staff_id as string)) : { data: [] as { display_name: string }[] };
+      const who = (techNames ?? []).map((t) => t.display_name as string).join(", ");
+      await notifyManagers((job.department as string | null) ?? null, { type: "handover", title: `Not collected after 4 working hours: ${g.names.length} part${g.names.length === 1 ? "" : "s"} for ${job.job_number}`, body: `${g.names.join(", ")} ${g.names.length === 1 ? "is" : "are"} ready at the parts desk${who ? `, waiting for ${who}` : " and no technician is on the car"}.`, jobId, href: `/parts/handover/${jobId}` });
+      told4++;
+    }
+    report.partsNotCollected = told4;
+  }
+
+  // 21c. Purchase returns sent back a week ago with no credit note or refund recorded: one bell to accounts each.
+  {
+    const { remindCreditsDue } = await import("@/lib/purchase-returns");
+    report.returnCreditReminders = await remindCreditsDue().catch(() => 0);
+  }
+
   // 22. Trips still without a road distance: worked out again every hour on the server (where the
   // GOOGLE_MAPS_API_KEY lives), and the reason stored on the trip when Google still cannot say.
   {

@@ -15,6 +15,9 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 |---|---|---|---|
 | 1 | `scripts/photo-sizes-backfill.mjs --apply` (Section 2, storage only, no database change) | Adds the 400 px and 1600 px copies of every EXISTING photo under `_sizes/` in the same bucket. Never changes or deletes an original. New photos get their sizes by themselves since push f3c07b2. | 1,330 photos (750 gate-in, 421 inspection, 93 job files, 66 car pictures) = 2,660 new files, about 0.21 GB extra (165 KB per photo, measured on 12 samples). Read-only count: `docs/proof/2026-11-08-s2/backfill-count-live.txt`. |
 | 2 | `supabase/data-fixes/2026-11-08-lpo-check-bells.sql` (Section 3, bells only) | Three bells to the parts desk: J-00990 (124AA on two parts, on LPO-00062), J-00016 (30 parts at AED 1.00), J-00343 (one part at AED 1.00). Nothing else changes. | 3 bells × each active parts login |
+| 3 | `supabase/data-fixes/2026-11-08-missing-advisors.sql` (Section 4) | Five open jobs with no advisor get the service advisor who made their quotation or estimate: J-00343, J-00470, J-00492, J-00974 → Adarsh; J-00992 → Anas. Only where advisor is empty. | 5 jobs, 5 history lines |
+| 4 | `supabase/data-fixes/2026-11-08-link-fee-worst-case.sql` (Section 9) | The payment-link fee setting 1.75% → 2.25% (+ AED 1 + VAT as now). Only the setting; nothing recorded changes. Open jobs' profit estimates go down by AED 737.38 in all (list in `docs/8-nov-batch-note.md`). | 1 setting |
+| 5 | `supabase/migrations/20261209090000_purchase_returns.sql` (Section 8) | The server-only `purchase_returns` table (PR- numbers). Purchase returns switch on by themselves. Take a backup first. | new table, no existing rows touched |
 
 Before #1: no backup is needed (it only adds files); run it, then the count again (it should say 0 without sizes).
 

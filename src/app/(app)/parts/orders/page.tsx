@@ -10,6 +10,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { SupplierAmount } from "@/components/SupplierAmount";
 import { lpoAmounts } from "@/lib/supplier-vat";
+import { mainSupplierStates } from "@/lib/lpo";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +64,8 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
   const numberOf = new Map(all.map((p) => [p.id, p.number]));
   // A main LPO shows while it waits or when refused; once approved its supplier LPOs carry the state.
   const visible = all.filter((p) => p.kind !== "main" || p.status === "pending_approval" || p.status === "cancelled");
+  // Approve each supplier separately (8 November 2026): a waiting request shows each supplier's own state.
+  const supplierStatesOf = new Map(await Promise.all(visible.filter((p) => p.kind === "main" && p.status === "pending_approval").map(async (p) => [p.id, await mainSupplierStates(p.id)] as const)));
   const needle = q.trim().toLowerCase();
   const carLine = (po: PurchaseOrderRow) => {
     const j = po.job_id ? jobOf.get(po.job_id) : null;
@@ -167,6 +170,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
                     <span className="font-semibold">{p.supplier_name}</span>
                     {c ? <span className="text-sm text-muted">{c.plate} · {c.car} · {c.job}</span> : p.kind === "stock" ? <span className="text-sm text-muted">for the shelf</span> : null}
                     <Badge tone={tone(p)}>{PO_STATUS_LABELS[p.status]}</Badge>
+                    {supplierStatesOf.get(p.id)?.length ? <span className="text-xs font-semibold" data-lpo-row-suppliers>{supplierStatesOf.get(p.id)!.map((x) => `${x.supplier} ${x.state === "approved" ? "✓" : x.state === "refused" ? "refused" : "waiting"}`).join(" · ")}</span> : null}
                     {late && p.status !== "cancelled" ? <Badge tone="red">{late} line{late === 1 ? "" : "s"} late</Badge> : null}
                     {p.supplier_invoice_status === "to_follow" ? <Badge tone={invoiceAge >= redDays ? "red" : "amber"}>Invoice missing · {invoiceAge} day{invoiceAge === 1 ? "" : "s"}</Badge> : null}
                     {mismatch ? <Badge tone="red">{mismatch} price{mismatch === 1 ? "" : "s"} to check</Badge> : null}

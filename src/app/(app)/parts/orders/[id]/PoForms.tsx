@@ -121,3 +121,31 @@ export function DecideForm({ action, depositShort, isOwner, reasons = [], summar
     </form>
   );
 }
+
+/**
+ * APPROVE EACH SUPPLIER SEPARATELY (8 November 2026, LPO-00059): under each supplier's block of a main LPO request,
+ * "Approve <supplier> (AED x incl. VAT)" makes that supplier's own LPO at once, "Refuse <supplier>" (reason
+ * compulsory) sends its parts back to the parts desk. A blocked line (no real price, a repeated part number) keeps
+ * Approve off for that supplier only. A missing deposit takes the owner's reason, as for Approve all.
+ */
+export function SupplierDecide({ action, supplier, amount, blocked, depositShort, isOwner, reasons = [] }: { action: (formData: FormData) => void; supplier: string; amount: string; blocked: string | null; depositShort: string | null; isOwner: boolean; reasons?: string[] }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-control border border-line bg-white px-3 py-2" data-supplier-decide={supplier}>
+      {blocked ? <p className="text-xs font-bold text-red" data-supplier-blocked>{blocked}</p> : null}
+      <form action={action} className="flex flex-col gap-2">
+        <input type="hidden" name="supplier" value={supplier} />
+        {depositShort && isOwner ? <ReasonChips name="override_reason" rows={2} options={reasons} placeholder="Reason to approve without the deposit (logged)" /> : null}
+        <ConfirmSubmit label={`Approve ${supplier} (${amount})`} title={`Approve ${supplier}?`} lines={[`${supplier} · ${amount}`, "its own LPO is made now and can be sent", "the other suppliers keep waiting"]} live={depositShort && isOwner ? [{ label: "reason:", field: "override_reason" }] : []} confirmLabel={`Yes, approve ${supplier}`} name="decision" value="approve" size="md" disabled={!!blocked || (!!depositShort && !isOwner)} hook="lpo-approve-supplier" />
+      </form>
+      <details data-supplier-refuse={supplier}>
+        <summary className="inline-flex min-h-9 cursor-pointer list-none items-center text-xs font-bold text-red underline underline-offset-4 [&::-webkit-details-marker]:hidden">Refuse {supplier}</summary>
+        <form action={action} className="mt-1 flex flex-wrap items-center gap-2">
+          <input type="hidden" name="supplier" value={supplier} />
+          <input type="hidden" name="decision" value="refuse" />
+          <Input name="reason" required minLength={3} placeholder={`Why is ${supplier} refused?`} className="min-w-[14rem] flex-1" textCase="sentence" aria-label={`Why ${supplier} is refused`} data-supplier-refuse-reason />
+          <Button type="submit" size="md" tone="danger" data-supplier-refuse-send>Refuse {supplier}</Button>
+        </form>
+      </details>
+    </div>
+  );
+}

@@ -75,7 +75,9 @@ export async function markPartsReady(jobId: string, actor: Actor, partIds: strin
   const body = ready.map((p) => `${p.description} × ${p.received_qty || Number(p.confirmed_quantity ?? p.quantity) || 1}`).join(", ");
   const techIds = techs.filter((t) => !t.done_at).map((t) => t.staff_id);
   if (techIds.length) await notifyStaff(techIds, { type: "handover", title, body: `${body}. Tick them on your tablet and enter your PIN when you pick them up.`, jobId, href: `/my-jobs/${jobId}` });
-  await notifyManagers(job.department ?? null, { type: "handover", title: `${ready.length} part${ready.length === 1 ? "" : "s"} ready at the desk · ${plate}${car ? ` (${car})` : ""}`, body: techIds.length ? body : `${body}. No technician on the car yet.`, jobId, href: `/jobs/${jobId}/work` });
+  // The workshop manager hears it at once only when no technician is on the car (8 November 2026); otherwise after 4
+  // working hours not collected (housekeeping step 21b).
+  if (!techIds.length) await notifyManagers(job.department ?? null, { type: "handover", title: `${ready.length} part${ready.length === 1 ? "" : "s"} ready at the desk · ${plate}${car ? ` (${car})` : ""}`, body: techIds.length ? body : `${body}. No technician on the car yet.`, jobId, href: `/jobs/${jobId}/work` });
   await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_ready", note: `${actor.display_name} marked ${ready.length} part${ready.length === 1 ? "" : "s"} ready for handover: ${ready.map((p) => p.description).join(", ")}`, created_by: actor.id });
   return { ok: true, readyCount: ready.length, message: techIds.length ? "The technician has been told." : "Marked ready. No technician is on the car yet; the workshop manager has been told." };
 }

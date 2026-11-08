@@ -12,6 +12,8 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { changeExpectedDate } from "./actions";
+import { JobTechnicianTag } from "@/components/JobTechnicianTag";
+import { jobTechniciansFor } from "@/lib/job-technician";
 
 export const dynamic = "force-dynamic";
 
@@ -66,6 +68,7 @@ export default async function ArrivalsPage({ searchParams }: { searchParams: Pro
   const jobs = new Map(((jobRows ?? []) as unknown as { id: string; job_number: string; is_open: boolean; vehicle: Parameters<typeof formatPlate>[0] | null }[]).filter((j) => j.is_open).map((j) => [j.id, j]));
   // The car's advisor on each line (6 November 2026, Peter): tap to ask. Never in the supplier chase message.
   const advisorOf = await jobAdvisorsFor(Array.from(jobs.keys()));
+  const techOf = await jobTechniciansFor(Array.from(jobs.keys()));
   const poNumber = new Map(((poRows ?? []) as { id: string; number: string }[]).map((p) => [p.id, p.number]));
   const phoneOf = new Map(((supplierRows ?? []) as { name: string; phone: string | null }[]).map((s) => [s.name.toLowerCase(), s.phone]));
 
@@ -109,6 +112,7 @@ export default async function ArrivalsPage({ searchParams }: { searchParams: Pro
         {r.supplier ? <span className="text-muted">{r.supplier}</span> : null}
         {r.jobId ? <Link href={`/parts/${r.jobId}`} className="font-semibold underline underline-offset-4">{r.plate} · {r.jobNumber}</Link> : null}
         {r.jobId && advisorOf.get(r.jobId) ? <JobAdvisorTag jobId={r.jobId} jobWords={`${r.jobNumber} · ${r.plate ?? ""}`} advisor={advisorOf.get(r.jobId)!} canAsk={!staff.viewingAs} /> : null}
+        {r.jobId ? <JobTechnicianTag jobId={r.jobId} technicians={techOf.get(r.jobId)} /> : null}
         {r.lpo ? <span className="text-xs text-muted">{r.lpo}</span> : null}
         <span className={`ml-auto text-xs font-bold ${red ? "text-red" : "text-muted"}`}>{red ? `Expected ${formatDate(r.expected)}, not here` : formatDate(r.expected)}</span>
         {red ? chase(r) : null}
