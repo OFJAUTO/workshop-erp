@@ -11,6 +11,7 @@ import { bodyshopScopeOf, mayEnterProduct } from "@/lib/team-scope";
 import { recordCeramicUsage } from "@/lib/film";
 import { objectExists } from "@/lib/upload-targets/common";
 import { JOB_FILES_BUCKET } from "@/lib/work-data";
+import { photoSizesLater } from "@/lib/photo-sizes";
 
 const BODYSHOP_DEPTS = ["bodyshop", "paint", "ppf_tint", "detailing"];
 
@@ -69,6 +70,7 @@ export async function filmUsageAction(jobId: string, formData: FormData) {
     photoPath = `film/${jobId}/${Date.now()}.jpg`;
     const { error } = await admin.storage.from("job-files").upload(photoPath, Buffer.from(await photo.arrayBuffer()), { contentType: photo.type || "image/jpeg", upsert: true });
     if (error) photoPath = null;
+    else photoSizesLater("job-files", photoPath, photo.type || "image/jpeg");
   }
   const r = await recordFilmUsage(jobId, rollId, metres, photoPath, staff!.id);
   revalidatePath(back);

@@ -8,6 +8,7 @@ import type { Settings } from "./settings";
 import { getSiteUrl } from "./site";
 import { createAdminClient } from "./supabase/admin";
 import { isUuid } from "./uuid";
+import { photoSizesLater } from "./photo-sizes";
 
 export type FormPaymentOutcome = PaymentResult & { jobId: string | null; invoiceId: string | null };
 
@@ -99,6 +100,7 @@ export async function paymentFromForm(staff: { id: string; display_name: string;
     const ext = proofFile.type.includes("png") ? "png" : proofFile.type.includes("webp") ? "webp" : proofFile.type.includes("pdf") ? "pdf" : "jpg";
     const path = `payments/${r.paymentId}.${ext}`;
     const { error: upErr } = await admin.storage.from("job-files").upload(path, Buffer.from(await proofFile.arrayBuffer()), { contentType: proofFile.type || "image/jpeg", upsert: true });
+    if (!upErr) photoSizesLater("job-files", path, proofFile.type || "image/jpeg");
     if (!upErr) await admin.from("payments").update({ proof_path: path, updated_by: staff.id }).eq("id", r.paymentId);
   }
   // A part payment: the Pay now order (if any) is remade for what is left.

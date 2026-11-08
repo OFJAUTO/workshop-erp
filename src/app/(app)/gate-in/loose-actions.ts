@@ -13,6 +13,7 @@ import { ensureQrLink } from "@/lib/stickers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { knownWordsUp } from "@/lib/text-case";
 import { getSettings } from "@/lib/settings";
+import { photoSizesLater } from "@/lib/photo-sizes";
 
 type ItemInput = { row: number; item_type: string; description: string | null; quantity: number; notes: string | null; photo: File | null };
 
@@ -100,6 +101,7 @@ export async function createLooseGateIn(_state: FormState, formData: FormData): 
     if (it.photo) {
       const path = `${job.id}/items/${row.id}-${Date.now()}.jpg`;
       const { error: upError } = await admin.storage.from(GATE_IN_BUCKET).upload(path, it.photo, { contentType: it.photo.type, upsert: false });
+      if (!upError) photoSizesLater(GATE_IN_BUCKET, path, it.photo.type);
       if (!upError) await admin.from("gate_in_media").insert({ job_id: job.id, kind: "item_photo", item_id: row.id, storage_path: path, uploaded_by: staff.id, created_by: staff.id, updated_by: staff.id });
     }
   }

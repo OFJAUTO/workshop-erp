@@ -10,6 +10,7 @@ import { PRODUCTION_SITE_URL } from "./site";
 import { notifyRoles, notifyStaff } from "./notifications";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
+import { photoSizesLater } from "./photo-sizes";
 
 export const TRIP_SELECT = "id, job_id, kind, company, driver_id, driver_name, driver_phone, truck_plate, location_url, location_details, lat, lng, scheduled_date, scheduled_slot, token, sent_at, loaded_at, delivered_at, photo_path, price_aed, price_at, status, decided_by, decided_at, query_note, marked_by, reminded_at, is_active, created_at, created_by, road_km, km_source, km_error, recovery_kind, paid_month, original_price_aed, price_history, contact_name, contact_phone";
 
@@ -243,6 +244,7 @@ async function tripPhoto(trip: TripRow, step: "loaded" | "final", input: TripPho
   const path = `${tripPhotoPrefix(trip.id, step)}${Date.now()}.${ext}`;
   const { error: upErr } = await admin.storage.from("job-files").upload(path, input.bytes, { contentType: input.contentType || "image/jpeg", upsert: false });
   if (upErr) return { error: "The photo could not be saved. Try again.", code: "photo" };
+  photoSizesLater("job-files", path, input.contentType || "image/jpeg");
   return { path };
 }
 

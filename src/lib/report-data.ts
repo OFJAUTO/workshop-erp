@@ -4,7 +4,7 @@ import { loadBodyState } from "./bodyshop-findings";
 import { ROAD_TEST_SECTION_KEY, inspectionLimitsOf, type ChecklistSection } from "./inspection";
 import { INSPECTION_BUCKET, type InspectionBundle } from "./inspection-data";
 import { vehicleTitle, type JobCard } from "./job-data";
-import { thumbsFor } from "./media-urls";
+import { photoSizesFor } from "./photo-sizes";
 import { buildReportLayout, type ReportLayout } from "./report-layout";
 import { reportVideos, videoLabel } from "./report-videos";
 import { roadTestSummary, type RoadTestRow } from "./road-test";
@@ -18,7 +18,7 @@ import { contactNameOf } from "./messages";
  * with their labels ("Front brake pads – Bad"). Photos carry a small picture for the page and the sharp address for
  * the viewer and the PDF.
  */
-export type ReportPhoto = { id: string; url: string; thumb: string | null };
+export type ReportPhoto = { id: string; url: string; thumb: string | null; medium?: string | null };
 export type ReportVideoItem = { id: string; url: string; poster: string | null; duration_s: number | null; label: string };
 export type ReportPlace = { label: string; photos: ReportPhoto[]; videos: ReportVideoItem[] };
 export type ReportHead = {
@@ -80,7 +80,8 @@ export async function loadReportData(card: JobCard, bundle: InspectionBundle, ro
     managerNote: insp.manager_note,
   });
 
-  const thumbs = opts.thumbs ? await thumbsFor(INSPECTION_BUCKET, shown.filter((x) => x.kind === "photo").map((x) => x.storage_path), 480) : new Map<string, string>();
+  const photoPaths = shown.filter((x) => x.kind === "photo").map((x) => x.storage_path);
+  const { thumb: thumbs, medium: mediums } = opts.thumbs ? await photoSizesFor(INSPECTION_BUCKET, photoPaths) : { thumb: new Map<string, string>(), medium: new Map<string, string>() };
   const videoById = new Map(reportVideos(bundle).map((v) => [v.id, v]));
   const media: Record<string, ReportPlace> = {};
   for (const x of shown) {
@@ -88,7 +89,7 @@ export async function loadReportData(card: JobCard, bundle: InspectionBundle, ro
     const place = (media[key] ??= { label: videoLabel(bundle, key), photos: [], videos: [] });
     const url = bundle.mediaUrls[x.storage_path];
     if (!url) continue;
-    if (x.kind === "photo") place.photos.push({ id: x.id, url, thumb: thumbs.get(x.storage_path) ?? null });
+    if (x.kind === "photo") place.photos.push({ id: x.id, url, thumb: thumbs.get(x.storage_path) ?? null, medium: mediums.get(x.storage_path) ?? null });
     else place.videos.push({ id: x.id, url, poster: x.poster_path ? (bundle.mediaUrls[x.poster_path] ?? null) : null, duration_s: x.duration_s, label: videoById.get(x.id)?.label ?? place.label });
   }
   const placed = new Set(layout.placedKeys);

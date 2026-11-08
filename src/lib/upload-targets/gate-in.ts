@@ -9,6 +9,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { authoriseUpload } from "@/lib/upload-auth";
 import type { UploadGrant } from "@/lib/upload-grant";
 import { NOT_ALLOWED, checkLater, grantActor, isRefusal, refuse, rowExists, signedView, type Actor, type RegisterContext, type TargetSpec, type UploadBody } from "./common";
+import { photoSizesLater } from "../photo-sizes";
 
 const KINDS = ["video", "video_exterior", "video_interior", "dashboard_photo", "keys_photo", "keys_photo_front", "keys_photo_back", "damage_photo", "gate_out_photo", "wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr", "car_picture"];
 
@@ -149,5 +150,8 @@ async function copyCarPicture(jobId: string, path: string, takenAt: string) {
     const { data: file } = await admin.storage.from(GATE_IN_BUCKET).download(path);
     copyError = file ? (await admin.storage.from("vehicle-photos").upload(dest, Buffer.from(await file.arrayBuffer()), { contentType: file.type || "image/jpeg", upsert: false })).error : copyError;
   }
-  if (!copyError) await admin.from("vehicles").update({ photo_path: dest }).eq("id", job.vehicle_id);
+  if (!copyError) {
+    await admin.from("vehicles").update({ photo_path: dest }).eq("id", job.vehicle_id);
+    photoSizesLater("vehicle-photos", dest, "image/jpeg");
+  }
 }

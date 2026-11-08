@@ -78,7 +78,19 @@ try {
   check("1 the approval page shows the four photos as viewer thumbnails", n === 4, String(n));
   const smallSrc = await thumbs.first().locator("img").getAttribute("src");
   const sharpSrc = await thumbs.first().getAttribute("data-viewer-src");
-  check("2 the page loads a small picture (resized by Supabase), the viewer opens the sharp one", /\/render\/image\//.test(smallSrc ?? "") && /\/object\/sign\//.test(sharpSrc ?? ""), `${(smallSrc ?? "").slice(0, 90)} | ${(sharpSrc ?? "").slice(0, 90)}`);
+  // 8 Nov 2026: never a Supabase image transformation; the PRE-MADE 400 px copy on the page, the 1600 px copy in the
+  // viewer, the original as the download. The sizes are made just after each upload, so allow a few reloads.
+  let small = smallSrc;
+  let medium = await thumbs.first().getAttribute("data-viewer-medium");
+  for (let i = 0; i < 8 && !/_sizes\/.*\.w400\.jpg/.test(small ?? ""); i++) {
+    await p.waitForTimeout(2000);
+    await go(p, `${base}/approve/${token}`);
+    small = await thumbs.first().locator("img").getAttribute("src");
+    medium = await thumbs.first().getAttribute("data-viewer-medium");
+  }
+  const allSrc = await p.locator("img").evaluateAll((els) => els.map((e) => e.getAttribute("src") ?? ""));
+  check("2 no picture on the page is a Supabase image transformation", !allSrc.some((x) => /\/render\/image\//.test(x)), String(allSrc.filter((x) => /render/.test(x)).length));
+  check("2b the page shows the pre-made thumbnail, the viewer the medium copy, the original stays the download", /_sizes\/.*\.w400\.jpg/.test(small ?? "") && /_sizes\/.*\.w1600\.jpg/.test(medium ?? "") && /\/object\/sign\//.test(sharpSrc ?? "") && !/_sizes/.test(sharpSrc ?? ""), `${(small ?? "").slice(0, 120)} | ${(medium ?? "").slice(0, 60)}`);
   const widthBefore = await p.evaluate(() => window.visualViewport?.scale ?? 1);
   await thumbs.nth(1).tap();
   const lb = p.locator("[data-lightbox]");

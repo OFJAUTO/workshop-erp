@@ -17,7 +17,9 @@ function pageSlides(): { slides: LightboxSlide[]; els: HTMLElement[] } {
   const els = Array.from(document.querySelectorAll<HTMLElement>("[data-viewer-item]"));
   const slides = els.map((el, i) => ({
     key: el.dataset.viewerKey || `${i}`,
-    url: el.dataset.viewerSrc ?? "",
+    // The viewer shows the pre-made medium copy (8 Nov 2026) when there is one; the original stays for "download".
+    url: el.dataset.viewerMedium || el.dataset.viewerSrc || "",
+    original: el.dataset.viewerMedium ? el.dataset.viewerSrc || null : null,
     thumb: el.dataset.viewerThumb || null,
     label: el.dataset.viewerLabel || "Photo",
     detail: el.dataset.viewerDetail || undefined,
@@ -53,7 +55,7 @@ export function ViewerHost() {
  * A thumbnail that opens the viewer: `src` is the sharp address, `thumb` the small one shown on the page (also drawn
  * first in the viewer), `label` the item's name ("FRONT BRAKE PADS – 3 MM").
  */
-export function ViewerThumb({ src, thumb = null, kind = "image", label, detail, poster = null, viewerKey, className = "", children, onOpen, ...rest }: { src: string; thumb?: string | null; kind?: "image" | "video"; label: string; detail?: string | null; poster?: string | null; viewerKey?: string; className?: string; children: React.ReactNode; /** Replaces the plain open (e.g. a video that renews its address first). */ onOpen?: (el: HTMLElement) => void } & Record<`data-${string}`, string | number | boolean | undefined>) {
+export function ViewerThumb({ src, medium = null, thumb = null, kind = "image", label, detail, poster = null, viewerKey, className = "", children, onOpen, ...rest }: { src: string; /** The 1600 px pre-made copy the viewer shows (the original `src` is then the download). */ medium?: string | null; thumb?: string | null; kind?: "image" | "video"; label: string; detail?: string | null; poster?: string | null; viewerKey?: string; className?: string; children: React.ReactNode; /** Replaces the plain open (e.g. a video that renews its address first). */ onOpen?: (el: HTMLElement) => void } & Record<`data-${string}`, string | number | boolean | undefined>) {
   return (
     <button
       type="button"
@@ -63,6 +65,7 @@ export function ViewerThumb({ src, thumb = null, kind = "image", label, detail, 
       data-viewer-item
       data-viewer-key={viewerKey}
       data-viewer-src={src}
+      data-viewer-medium={medium ?? ""}
       data-viewer-thumb={thumb ?? ""}
       data-viewer-kind={kind}
       data-viewer-label={label}

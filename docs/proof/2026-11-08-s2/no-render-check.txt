@@ -1,0 +1,4 @@
+OK   no /render/image/ request on 8 pages (/dashboard, /jobs, /jobs/ffe67e9a-2c40-46fa-a379-d96f54c281d3, /jobs/f9941083-2ee6-40fe-b31b-1e713d836b25, /jobs/ffe67e9a-2c40-46fa-a379-d96f54c281d3/gate-in, /jobs/f9941083-2ee6-40fe-b31b-1e713d836b25/gate-in, /gate-in, /vehicles)
+OK   the pages still load their Supabase photos (8 image requests)
+
+2 passed, 0 failed

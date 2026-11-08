@@ -1,0 +1,12 @@
+COUNT ONLY (read-only) on uhqcmqudszguqosnjadx
+(node:37276) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///C:/Users/user/Desktop/workshop%20ERP/src/lib/photo-size-rules.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to \\?\C:\Users\user\Desktop\workshop ERP\package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  gate-in-media: 750 photos, 750 without sizes (360.3 MB of originals)
+  inspection-media: 421 photos, 421 without sizes (271.1 MB of originals)
+  job-files: 93 photos, 93 without sizes (5.8 MB of originals)
+  vehicle-photos: 66 photos, 66 without sizes (9.1 MB of originals)
+  parts-diagrams: 0 photos, 0 without sizes (0.0 MB of originals)
+TOTAL: 1330 photos, 1330 without sizes, 0.63 GB of originals.
+ESTIMATE from 12 sample photos: about 165 KB added per photo (50% of the original), so about 0.21 GB extra storage for 1330 files x 2 sizes.

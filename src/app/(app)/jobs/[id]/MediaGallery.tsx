@@ -115,7 +115,7 @@ function Thumb({
     <figure className="relative flex flex-col gap-1 min-w-0">
       {onRemove ? <RemoveX onRemove={onRemove} label={caption} /> : null}
       {slide ? (
-        <ViewerThumb src={slide.url} thumb={slide.thumb} label={slide.label} detail={caption} viewerKey={slide.key} className={`block w-full ${aspect} rounded-card overflow-hidden bg-chip focus-visible:ring-2 focus-visible:ring-ink/40`}>
+        <ViewerThumb src={slide.original ?? slide.url} medium={slide.original ? slide.url : null} thumb={slide.thumb} label={slide.label} detail={caption} viewerKey={slide.key} className={`block w-full ${aspect} rounded-card overflow-hidden bg-chip focus-visible:ring-2 focus-visible:ring-ink/40`}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={slide.thumb ?? slide.url} alt={caption} className="h-full w-full object-cover" loading="lazy" />
         </ViewerThumb>
@@ -136,6 +136,7 @@ export function MediaGallery({
   media,
   urls,
   thumbs = {},
+  mediums = {},
   carPictureUrl,
   damageNote,
   compact = false,
@@ -148,6 +149,8 @@ export function MediaGallery({
   urls: Record<string, string>;
   /** Small pictures for the page (the viewer opens the sharp `urls`); missing ones fall back to the sharp address. */
   thumbs?: Record<string, string>;
+  /** The 1600 px pre-made copies for the viewer (8 Nov 2026); the original stays the download. */
+  mediums?: Record<string, string>;
   carPictureUrl?: string | null;
   damageNote?: string | null;
   compact?: boolean;
@@ -187,13 +190,13 @@ export function MediaGallery({
 
   // Every picture and video opens THE page-wide viewer (PhotoViewer): swiping runs through the whole page in order.
   let count = 0;
-  function add(key: string, url: string | undefined, label: string, detail?: string, kind: "image" | "video" = "image", thumb?: string): Slide | null {
+  function add(key: string, url: string | undefined, label: string, detail?: string, kind: "image" | "video" = "image", thumb?: string, medium?: string): Slide | null {
     if (!url) return null;
     count++;
-    return { key, url, thumb: thumb ?? null, label, detail, kind };
+    return medium && medium !== url ? { key, url: medium, original: url, thumb: thumb ?? null, label, detail, kind } : { key, url, thumb: thumb ?? null, label, detail, kind };
   }
   const carSlide = carPictureUrl ? add("car", carPictureUrl, "Car picture") : null;
-  const rowSlide = (p: GateInMediaRow) => add(p.id, urls[p.storage_path], KIND_LABEL[p.kind], captionFor(p, compact), "image", thumbs[p.storage_path]);
+  const rowSlide = (p: GateInMediaRow) => add(p.id, urls[p.storage_path], KIND_LABEL[p.kind], captionFor(p, compact), "image", thumbs[p.storage_path], mediums[p.storage_path]);
   const dashboardSlides = dashboard.map(rowSlide);
   const keysSlides = keys.map(rowSlide);
   const wheelSlides = wheels.map(rowSlide);

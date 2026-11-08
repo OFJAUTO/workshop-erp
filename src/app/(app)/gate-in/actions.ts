@@ -25,6 +25,7 @@ import { SAVE_FAILED, logAppError, dbWords, dbDetail } from "@/lib/app-errors";
 import { checkPlateInput, friendlyVehicleError, plateFieldsOf } from "@/lib/plate-rules";
 import { vehicleWords } from "@/lib/vehicle-merge";
 import { OPEN_ESTIMATE_STATUSES } from "@/lib/quote-history";
+import { photoSizesLater } from "@/lib/photo-sizes";
 
 /* ---------------------------------------------------------------------------
    Car picture upload (shared)
@@ -38,6 +39,7 @@ async function saveCarPicture(vehicleId: string, file: FormDataEntryValue | null
   const supabase = await createClient();
   const { error: upError } = await supabase.storage.from("vehicle-photos").upload(path, file, { contentType: file.type, upsert: false });
   if (upError) return "Picture upload failed: " + dbDetail(upError, "gate-in/actions");
+  photoSizesLater("vehicle-photos", path, file.type);
   const { error } = await supabase.from("vehicles").update({ photo_path: path }).eq("id", vehicleId);
   if (error) return dbWords(error, "gate-in/actions");
   return null;

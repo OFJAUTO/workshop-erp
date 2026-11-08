@@ -7,6 +7,7 @@ import { verifyPin } from "@/lib/pin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { mintGrant } from "@/lib/upload-grant";
 import { JOB_FILES_BUCKET } from "@/lib/work-data";
+import { photoSizesLater } from "@/lib/photo-sizes";
 
 export const dynamic = "force-dynamic";
 
@@ -60,6 +61,7 @@ export async function POST(request: NextRequest) {
       const path = `${jobId}/bodyshop/tint-fitted-${Date.now()}.${type === "image/png" ? "png" : "jpg"}`;
       const up = await admin.storage.from(JOB_FILES_BUCKET).upload(path, Buffer.from(await file.arrayBuffer()), { contentType: type, upsert: false });
       if (up.error) return NextResponse.json({ error: "The photo did not upload. Try again." }, { status: 500 });
+      photoSizesLater(JOB_FILES_BUCKET, path, type);
       const { error: rowError } = await admin.from("job_files").insert({ job_id: jobId, kind: "bodyshop_photo", ref_id: stageId, storage_path: path, content_type: type, caption: TINT_CAPTION, uploaded_by: staffId, created_by: staffId, updated_by: staffId });
       if (rowError) return NextResponse.json({ error: "The photo was not saved. Try again." }, { status: 500 });
       await admin.from("job_events").insert({ job_id: jobId, event_type: "tint_photo", note: `Tint fitted: photo taken by ${person.display_name} on the PPF tablet`, created_by: staffId });

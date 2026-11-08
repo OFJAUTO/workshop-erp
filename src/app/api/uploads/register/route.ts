@@ -1,6 +1,7 @@
 import { answer, contentTypeOf, readBody, refusal, scopeIdOf, senderOf } from "@/lib/upload-door";
 import { targetOf } from "@/lib/upload-targets";
 import { isRefusal, objectExists, refuse, takenAtOf } from "@/lib/upload-targets/common";
+import { photoSizesLater } from "@/lib/photo-sizes";
 
 export const dynamic = "force-dynamic";
 
@@ -25,5 +26,8 @@ export async function POST(request: Request) {
   if (!(await objectExists(spec.bucket, path))) return refusal(refuse("The file has not fully arrived yet. It will be sent again.", false, 409));
   const done = await spec.register({ scopeId, path, actor, body, takenAt: new Date(takenAtOf(body.takenAt)).toISOString(), contentType });
   if (isRefusal(done)) return refusal(done);
+  // The two pre-made sizes (8 November 2026), after the answer: lists use the thumbnail, the viewer the medium copy.
+  photoSizesLater(spec.bucket, path, contentType);
+  if (typeof body.posterPath === "string" && body.posterPath) photoSizesLater(spec.bucket, body.posterPath, "image/jpeg");
   return answer(done);
 }

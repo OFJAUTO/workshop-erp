@@ -14,6 +14,7 @@ import { mergeVehicles, vehicleWords } from "@/lib/vehicle-merge";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { FUEL_TYPES } from "@/lib/types";
+import { photoSizesLater } from "@/lib/photo-sizes";
 
 const vehicleSchema = z
   .object({
@@ -296,6 +297,7 @@ export async function addVehiclePhoto(id: string, _state: FormState, formData: F
     .from("vehicle-photos")
     .upload(path, file, { contentType: file.type, upsert: false });
   if (upError) return { error: "Upload failed: " + dbDetail(upError, "vehicles/actions") };
+  photoSizesLater("vehicle-photos", path, file.type);
 
   const { error } = await supabase
     .from("vehicle_photos")
@@ -320,6 +322,7 @@ export async function setVehicleProfilePhoto(id: string, _state: FormState, form
     .from("vehicle-photos")
     .upload(path, file, { contentType: file.type, upsert: false });
   if (upError) return { error: "Upload failed: " + dbDetail(upError, "vehicles/actions") };
+  photoSizesLater("vehicle-photos", path, file.type);
 
   const { error } = await supabase.from("vehicles").update({ photo_path: path }).eq("id", id);
   if (error) return { error: await plainDbError(error.message, "vehicle-photo", { id }) };

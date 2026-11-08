@@ -13,7 +13,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { MediaGallery } from "@/app/(app)/jobs/[id]/MediaGallery";
 import { CustomerVideos } from "@/components/CustomerVideos";
-import { thumbsFor } from "@/lib/media-urls";
+import { photoSizesFor } from "@/lib/photo-sizes";
 import { GATE_IN_BUCKET } from "@/lib/media";
 import { DamageSection } from "@/components/DamageSection";
 import { DAMAGE_CONFIRM_EN, DAMAGE_WORDS_AR, damageCountWords } from "@/lib/damage";
@@ -78,7 +78,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
   // eslint-disable-next-line react-hooks/purity
   const signedAt = Date.now();
   // Small pictures for the page; the viewer opens the sharp ones (videos keep their own tiles).
-  const photoThumbs = await thumbsFor(GATE_IN_BUCKET, media.filter((m) => !String(m.kind).startsWith("video")).map((m) => m.storage_path));
+  const { thumb: photoThumbs, medium: photoMediums } = await photoSizesFor(GATE_IN_BUCKET, media.filter((m) => !String(m.kind).startsWith("video")).map((m) => m.storage_path));
   // Section 4 (30 October 2026): the damage already on the car, with each panel's photos, above the approval box.
   const damage = await loadCarDamage(job.id, { media, urls: mediaUrls });
   const hasDamage = damage.items.length > 0 || damage.loose.length > 0;
@@ -190,7 +190,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
         <h2 className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368] border-b-2 border-[#111113] pb-1.5">Check-in videos and photos</h2>
         <div className="py-1 flex flex-col gap-4">
           <CustomerVideos token={token} initial={videoRows} expected={videoRows.some((v) => v.kind === "video") ? ["video"] : ["video_exterior", "video_interior"]} complete={videosComplete} signedAt={signedAt} />
-          <MediaGallery media={media} urls={Object.fromEntries(mediaUrls)} thumbs={Object.fromEntries(photoThumbs)} stacked hideVideos damageElsewhere />
+          <MediaGallery media={media} urls={Object.fromEntries(mediaUrls)} thumbs={Object.fromEntries(photoThumbs)} mediums={Object.fromEntries(photoMediums)} stacked hideVideos damageElsewhere />
         </div>
         {dirty ? <p className="text-xs font-semibold">Vehicle received dirty; existing scratches and marks may not be visible in the video.</p> : null}
         {gateIn.dash_cam ? <p className="text-xs font-semibold">Dash cam fitted: it will be disconnected as per the terms and conditions.</p> : null}

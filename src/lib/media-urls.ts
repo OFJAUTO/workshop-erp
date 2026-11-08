@@ -1,22 +1,12 @@
 import "server-only";
-import { createAdminClient } from "./supabase/admin";
+import { photoUrls } from "./photo-sizes";
+import { sizeForWidth } from "./photo-size-rules";
 
 /**
- * Small pictures for a page (29 October 2026, section 7): Supabase resizes a stored photo on the fly, so a page loads
- * a thumbnail of a few dozen KB while the viewer opens the sharp original. `width` is in pixels: 480 for a grid
- * thumbnail, 960 for a picture across a phone screen. A path that cannot be signed is simply missing (the page then
- * shows the sharp address).
+ * Small pictures for a page. Since 8 November 2026 these are the PRE-MADE sizes (src/lib/photo-sizes.ts), never a
+ * Supabase image transformation (Pro includes only 100 a month). `width` picks the size: up to 480 px the 400 px
+ * thumbnail, above it the 1600 px medium copy. A photo with no pre-made size yet gets its original address.
  */
 export async function thumbsFor(bucket: string, paths: (string | null | undefined)[], width = 480, ttl = 3600): Promise<Map<string, string>> {
-  const out = new Map<string, string>();
-  const unique = Array.from(new Set(paths.filter((p): p is string => !!p)));
-  if (!unique.length) return out;
-  const admin = createAdminClient();
-  await Promise.all(
-    unique.map(async (p) => {
-      const { data } = await admin.storage.from(bucket).createSignedUrl(p, ttl, { transform: { width, quality: 70 } });
-      if (data?.signedUrl) out.set(p, data.signedUrl);
-    }),
-  );
-  return out;
+  return photoUrls(bucket, paths, sizeForWidth(width), ttl);
 }

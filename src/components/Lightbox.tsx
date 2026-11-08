@@ -14,6 +14,8 @@ export type LightboxSlide = {
   /** A video plays inside the viewer (muted to start); the default is a photo. */
   kind?: "image" | "video";
   poster?: string | null;
+  /** The untouched original (when `url` is the pre-made medium copy): offered as "Original" to download. */
+  original?: string | null;
 };
 
 const MAX_ZOOM = 4;
@@ -178,6 +180,9 @@ export function Lightbox({ slides, index, onClose, onMove }: { slides: LightboxS
           {slide.detail ? <span className="text-xs text-white/70">{slide.detail}</span> : null}
         </div>
         <div className="flex shrink-0 items-center gap-3">
+          {slide.original && slide.kind !== "video" ? (
+            <a href={slide.original} target="_blank" rel="noreferrer" download className="inline-flex min-h-11 items-center rounded-full bg-white/15 px-3 text-xs font-bold hover:bg-white/30" data-lightbox-original>Original</a>
+          ) : null}
           <span className="text-sm font-bold text-white/80" data-lightbox-count>{index + 1} / {slides.length}</span>
           <button type="button" onClick={close} className="min-h-11 min-w-11 rounded-full bg-white/15 text-lg font-bold hover:bg-white/30" aria-label="Close" data-lightbox-close>✕</button>
         </div>

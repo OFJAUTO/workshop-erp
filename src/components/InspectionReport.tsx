@@ -45,7 +45,7 @@ function Media({ keys, data, section, refreshUrl, signedAt }: { keys: string[]; 
         <div className="grid grid-cols-3 sm:grid-cols-4 gap-2" data-report-photos>
           {places.flatMap((p) =>
             p.photos.map((ph) => (
-              <ViewerThumb key={ph.id} src={ph.url} thumb={ph.thumb} label={p.label} detail={section} viewerKey={ph.id} className="block aspect-square w-full overflow-hidden rounded-lg bg-[#F4F4F5]" data-report-photo={ph.id}>
+              <ViewerThumb key={ph.id} src={ph.url} medium={ph.medium ?? null} thumb={ph.thumb} label={p.label} detail={section} viewerKey={ph.id} className="block aspect-square w-full overflow-hidden rounded-lg bg-[#F4F4F5]" data-report-photo={ph.id}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={ph.thumb ?? ph.url} alt={p.label} loading="lazy" className="h-full w-full object-cover" />
               </ViewerThumb>
