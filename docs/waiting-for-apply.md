@@ -11,14 +11,18 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-**Login security upgrade (passkeys), 7 November 2026.** Built and tested on the TEST project (64 checks, `npm run test:passkeys`). NOT pushed yet: the owner asked to see it first. Backup taken when listed: `backups/2026-11-07T19-58-11` (114 tables, 259,380 rows). On the owner's OK, in this order:
+Nothing.
 
-| # | What | What it does on live |
+## Applied on 8 November 2026, morning (passkeys)
+
+The owner replied "go" and "apply". Pushed as 7fdac30 (live as dpl_2co4gWSHFc4Qeg52akMuSiLVtUik). A fresh backup was taken first: `backups/2026-11-08T05-47-43` (114 tables, 259,566 rows). `20261208090000_passkeys.sql` was run with `scripts/db-sql.mjs` and recorded with `scripts/db-record-migration.mjs` without an error. Read-only check after: the four tables exist with RLS on, no policies, and no select for anon or authenticated; `passkeys_rollout` = "owner". The live Supabase Auth settings were changed through the Management API: password_min_length 6 → 10, required characters none → small + capital + number, leaked-password protection off → on (Supabase's own `passkey_enabled` stays false). `npm run check:live`: 33 passed, 0 failed; the live sign-in page shows "Sign in with passkey".
+
+| # | What | What it did on live |
 |---|---|---|
-| 1 | Push the code | Dormant until #2: the sign-in page, PIN and password screens behave as today except the new password rule on the two password screens. |
-| 2 | `20261208090000_passkeys.sql` | The four server-only tables (`staff_passkeys`, `passkey_challenges`, `sign_in_events`, `sign_in_changes`) and the setting `passkeys_rollout = owner`. From here passkeys are ON FOR THE OWNER ONLY; every sign-in and change is logged. |
-| 3 | Supabase Auth settings (Management API, not a file) | Password at least 10 characters, small letter + capital + number, leaked-password protection ON. Existing passwords keep working (proven on TEST). |
-| 4 | The owner tries his own phone from an office PC | Then switches Team › Sign-ins › "Everyone in the passkey roles". |
+| 1 | Code (7fdac30) | The passkey sign-in, My sign-in, the owner's Sign-ins page and the new password screens. |
+| 2 | `20261208090000_passkeys.sql` | Passkeys ON FOR THE OWNER ONLY; every sign-in and change logged. |
+| 3 | Supabase Auth settings | The 10-character rule and leaked-password protection. Existing passwords keep working. |
+| 4 | Next, the owner | Tries his phone from an office PC, then Team › Sign-ins › "Everyone in the passkey roles" › Save. |
 
 ## Applied on 7 November 2026, morning
 
