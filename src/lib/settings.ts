@@ -88,7 +88,8 @@ const DEFAULTS = {
   supplier_lpo_email_text: "Dear [supplier],\n\nPlease find attached our purchase order [number]. Kindly confirm availability and the delivery date.\n\nThank you,\nOFJ Automotive, Parts",
   /** The bank's fee per method (29 October 2026, src/lib/bank-fees.ts): MSF % BEFORE VAT, a fixed fee per transaction, VAT on both. */
   bank_charge_card_percent: 2.15,
-  bank_charge_link_percent: 1.75,
+  // 8 November 2026: the WORST CASE until Network International confirms the rate (STL-00012 took 2.25% + AED 1 + VAT).
+  bank_charge_link_percent: 2.25,
   bank_charge_cash_percent: 0,
   bank_charge_cheque_percent: 0,
   bank_charge_transfer_percent: 0,
