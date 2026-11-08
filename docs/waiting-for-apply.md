@@ -11,7 +11,14 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Nothing.
+**Login security upgrade (passkeys), 7 November 2026.** Built and tested on the TEST project (64 checks, `npm run test:passkeys`). NOT pushed yet: the owner asked to see it first. Backup taken when listed: `backups/2026-11-07T19-58-11` (114 tables, 259,380 rows). On the owner's OK, in this order:
+
+| # | What | What it does on live |
+|---|---|---|
+| 1 | Push the code | Dormant until #2: the sign-in page, PIN and password screens behave as today except the new password rule on the two password screens. |
+| 2 | `20261208090000_passkeys.sql` | The four server-only tables (`staff_passkeys`, `passkey_challenges`, `sign_in_events`, `sign_in_changes`) and the setting `passkeys_rollout = owner`. From here passkeys are ON FOR THE OWNER ONLY; every sign-in and change is logged. |
+| 3 | Supabase Auth settings (Management API, not a file) | Password at least 10 characters, small letter + capital + number, leaked-password protection ON. Existing passwords keep working (proven on TEST). |
+| 4 | The owner tries his own phone from an office PC | Then switches Team › Sign-ins › "Everyone in the passkey roles". |
 
 ## Applied on 7 November 2026, morning
 

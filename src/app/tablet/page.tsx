@@ -6,6 +6,8 @@ import { getCurrentDevice } from "@/lib/devices";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DEPARTMENT_LABELS, type DepartmentId } from "@/lib/roles";
 import { PinLogin, type TabletPerson } from "./PinLogin";
+import { passkeyPerson } from "@/lib/passkey-rules";
+import { passkeyCounts, passkeyRollout, passkeyRp, passkeysReady } from "@/lib/passkey-server";
 
 export const dynamic = "force-dynamic";
 
@@ -36,7 +38,7 @@ export default async function TabletPage() {
   const admin = createAdminClient();
   const { data: rows } = await admin
     .from("staff")
-    .select("id, display_name, full_name, department_id, photo_path")
+    .select("id, display_name, full_name, role_id, team, department_id, photo_path")
     .eq("is_active", true)
     .in("login_type", ["pin", "both"])
     .order("department_id")
@@ -52,8 +54,13 @@ export default async function TabletPage() {
   // A red dot on a photo: that person has something waiting.
   const { data: unreadRows } = await admin.from("notifications").select("staff_id").is("read_at", null).in("staff_id", scoped.map((r) => r.id));
   const unread = new Set((unreadRows ?? []).map((n) => n.staff_id as string));
+  // Passkey users with a phone set up sign in with it here too (their PIN no longer opens the ERP).
+  const pkOn = !!passkeyRp() && (await passkeysReady());
+  const rollout = pkOn ? await passkeyRollout() : "owner";
+  const phones = pkOn ? await passkeyCounts(scoped.filter((r) => passkeyPerson(r, rollout)).map((r) => r.id)).catch(() => new Map<string, number>()) : new Map<string, number>();
   const people: TabletPerson[] = scoped.map((r) => ({
     unread: unread.has(r.id),
+    passkey: (phones.get(r.id) ?? 0) > 0,
     id: r.id,
     display_name: r.display_name,
     full_name: r.full_name,

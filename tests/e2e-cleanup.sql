@@ -178,6 +178,24 @@ delete from public.notifications where type in ('owner_report') and job_id is nu
 set session_replication_role = default;
 select count(*) as left_over_services from public.services where name ilike 'e2e %';
 
+-- Passkey tests (7 November 2026): the virtual test passkeys (named "E2E …"), every sign-in row of a test person or
+-- made by the test browser (its user agent carries "ERP-E2E"), and the bells about them. Runs before the test people
+-- are removed below. Guarded so the file still runs before the passkey tables exist.
+set session_replication_role = replica;
+do $$
+declare sids uuid[];
+begin
+  if to_regclass('public.staff_passkeys') is not null then
+    select coalesce(array_agg(id), '{}') into sids from public.staff where display_name ilike 'E2e %';
+    delete from public.sign_in_events where user_agent ilike '%ERP-E2E%' or staff_id = any(sids) or passkey_id in (select id from public.staff_passkeys where name ilike 'E2E %');
+    delete from public.sign_in_changes where user_agent ilike '%ERP-E2E%' or staff_id = any(sids) or by_staff_id = any(sids) or passkey_id in (select id from public.staff_passkeys where name ilike 'E2E %');
+    delete from public.staff_passkeys where name ilike 'E2E %' or staff_id = any(sids);
+    delete from public.passkey_challenges where created_at < now() - interval '1 hour' or staff_id = any(sids);
+    delete from public.notifications where type in ('passkey_added', 'passkey_removed', 'password_backup_sign_in') and title ilike '%E2e %';
+  end if;
+end $$;
+set session_replication_role = default;
+
 -- The bodyshop seed's people (team leaders and an installer made for the tests) and their logins.
 set session_replication_role = replica;
 do $$
@@ -239,3 +257,4 @@ set session_replication_role = replica;
 delete from public.advisor_bonus_periods where rows::text ilike '%E2E%';
 delete from public.advisor_bonus_overrides where invoice_id::text like '22222222%';
 set session_replication_role = default;
+

@@ -14,6 +14,7 @@ import { issueSetupToken } from "@/lib/setup-links";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { blankToNull, normalisePhone } from "@/lib/format";
+import { logSignInChange } from "@/lib/passkey-server";
 
 const PIN_EMAIL_DOMAIN = process.env.PIN_EMAIL_DOMAIN ?? "tablet.ofjauto.com";
 
@@ -87,8 +88,8 @@ export async function createStaff(_state: FormState, formData: FormData): Promis
     user_metadata: { full_name: d.full_name },
   });
   if (createError || !created.user) {
-    const msg = createError?.message ?? "Could not create the login.";
-    return { error: msg.includes("already") ? "A login with that email already exists." : msg, values };
+    const msg = createError?.message ?? "";
+    return { error: msg.includes("already") ? "A login with that email already exists." : createError ? dbWords(createError, "team/actions") : "Could not create the login.", values };
   }
   const id = created.user.id;
 
@@ -229,6 +230,7 @@ export async function resetPin(id: string, _state: FormState, formData: FormData
     })
     .eq("staff_id", id);
   if (error) return { error: dbWords(error, "team/actions") };
+  await logSignInChange({ staffId: id, kind: "pin_reset", by: owner.id });
 
   revalidatePath(`/team/${id}`);
   return { success: "Temporary PIN saved. The person chooses their own PIN the first time they log in with it." };
@@ -247,6 +249,7 @@ export async function createSetupLink(id: string) {
   } catch {
     redirect(`/team/${id}?error=` + encodeURIComponent("Could not create the link."));
   }
+  await logSignInChange({ staffId: id, kind: "setup_link", by: owner.id });
   const site = await getSiteUrl();
   redirect(`/team/${id}?link=${encodeURIComponent(`${site}/auth/setup/${token}`)}`);
 }
@@ -311,7 +314,7 @@ export async function setLoginType(id: string, formData: FormData) {
   }
   const { error } = await supabase.from("staff").update({ login_type: loginType }).eq("id", id);
   if (error) redirect(`/team/${id}?error=` + encodeURIComponent(dbWords(error, "team/actions")));
-  void owner;
+  await logSignInChange({ staffId: id, kind: "login_type", detail: `${staff.login_type} → ${loginType}`, by: owner.id });
   revalidatePath("/team");
   revalidatePath(`/team/${id}`);
   redirect(`/team/${id}?message=` + encodeURIComponent("Login method changed."));

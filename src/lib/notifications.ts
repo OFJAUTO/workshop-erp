@@ -163,6 +163,10 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "quote_other_editor", label: "Another advisor changed or sent your quotation", locked: true },
   { type: "quote_handed_back", label: "The owner approved or edited your estimate or quotation: check and send", locked: true },
   { type: "advisor_change", label: "A car was put under your name (advisor in charge)", locked: true },
+  // Sign-in security (7 November 2026): always delivered.
+  { type: "passkey_added", label: "A phone was set up to sign in (yours, or for the owner: anyone's)", locked: true },
+  { type: "passkey_removed", label: "The owner removed a phone from your sign-in", locked: true },
+  { type: "password_backup_sign_in", label: "Owner: someone signed in with the password instead of their phone", locked: true },
 ];
 
 /** Every hand-over of a car from one person to the next: these always arrive, whatever the person's preferences. */

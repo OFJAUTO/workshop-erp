@@ -6,6 +6,8 @@ import { getSettings } from "@/lib/settings";
 import { PIN_PATTERN, verifyPin } from "@/lib/pin";
 import { cookies } from "next/headers";
 import { LOGIN_KIND_COOKIE, SESSION_UNTIL_COOKIE, sessionCookieOptions, sessionWindow } from "@/lib/session";
+import { passkeyPerson, rolloutOf } from "@/lib/passkey-rules";
+import { logSignIn, passkeyCount, passkeysReady } from "@/lib/passkey-server";
 
 /**
  * Tablet login: name + 4-digit PIN. Only works from a registered tablet.
@@ -34,11 +36,19 @@ export async function POST(request: NextRequest) {
 
   const { data: staff } = await admin
     .from("staff")
-    .select("id, display_name, login_type, is_active")
+    .select("id, display_name, role_id, team, department_id, login_type, is_active")
     .eq("id", staffId)
     .maybeSingle();
   if (!staff || !staff.is_active || staff.login_type === "password") {
     return NextResponse.json({ error: "This name cannot log in with a PIN." }, { status: 403 });
+  }
+  // Passkey users (7 November 2026): once a phone is set up, the PIN no longer opens the ERP for them (it still signs
+  // hand-overs). Checked before the PIN itself, so nothing is counted against them.
+  const passkeyUser = (await passkeysReady()) && passkeyPerson(staff, rolloutOf(settings.passkeys_rollout));
+  const phones = passkeyUser ? await passkeyCount(staffId).catch(() => 0) : 0;
+  if (passkeyUser && phones > 0) {
+    await logSignIn({ staffId, method: "pin", ok: false, reason: "has a passkey: PIN sign-in is off" });
+    return NextResponse.json({ error: "Your PIN no longer signs you in: use your passkey (the button below).", usePasskey: true }, { status: 403 });
   }
   if (device.kind === "personal" && device.staff_id !== staffId) {
     return NextResponse.json({ error: "This device is assigned to someone else." }, { status: 403 });
@@ -127,6 +137,8 @@ export async function POST(request: NextRequest) {
     .update({ last_seen_at: new Date().toISOString(), last_staff_id: staffId })
     .eq("id", device.id);
 
-  // A temporary PIN from the owner: the person chooses their own before anything else.
-  return NextResponse.json({ ok: true, mustChange: priv.pin_must_change === true });
+  await logSignIn({ staffId, method: "pin", ok: true });
+  // A temporary PIN from the owner: the person chooses their own before anything else. A passkey user with no phone
+  // yet is asked to set one up next.
+  return NextResponse.json({ ok: true, mustChange: priv.pin_must_change === true, setupPasskey: passkeyUser && phones === 0 });
 }

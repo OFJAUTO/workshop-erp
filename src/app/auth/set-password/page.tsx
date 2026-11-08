@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { PublicShell } from "@/components/Shell";
-import { Button, Card, Field, Input, Notice } from "@/components/ui";
+import { Button, Card, Notice } from "@/components/ui";
+import { PasswordBox } from "@/components/PasswordBox";
 import { createClient } from "@/lib/supabase/server";
 import { setPassword } from "./actions";
 
@@ -23,18 +24,14 @@ export default async function SetPasswordPage({
           <div className="flex flex-col gap-1">
             <h1 className="text-3xl font-extrabold">Choose your password</h1>
             <p className="text-sm text-muted">
-              For <span className="font-semibold text-ink">{user.email}</span>. At least 8 characters.
+              For <span className="font-semibold text-ink">{user.email}</span>.
             </p>
           </div>
           <Card>
             <form action={setPassword} className="flex flex-col gap-4">
               {error ? <Notice tone="error">{error}</Notice> : null}
-              <Field label="New password">
-                <Input name="password" type="password" autoComplete="new-password" minLength={8} required autoFocus />
-              </Field>
-              <Field label="Type it again">
-                <Input name="confirm" type="password" autoComplete="new-password" minLength={8} required />
-              </Field>
+              <input type="hidden" name="username" value={user.email ?? ""} autoComplete="username" />
+              <PasswordBox autoFocus />
               <Button type="submit" size="lg">
                 Save password and continue
               </Button>

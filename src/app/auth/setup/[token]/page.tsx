@@ -1,5 +1,6 @@
 import { PublicShell } from "@/components/Shell";
-import { Button, Card, Field, Input, Notice } from "@/components/ui";
+import { Button, Card, Notice } from "@/components/ui";
+import { PasswordBox } from "@/components/PasswordBox";
 import { readSetupToken, SETUP_LINK_HOURS } from "@/lib/setup-links";
 
 export const dynamic = "force-dynamic";
@@ -35,19 +36,14 @@ export default async function SetupPage({
               <div className="flex flex-col gap-1">
                 <h1 className="text-3xl font-extrabold">Welcome, {link.full_name.split(" ")[0]}</h1>
                 <p className="text-sm text-muted">
-                  Choose a password for <span className="font-semibold text-ink">{link.email}</span>. At least 8 characters.
+                  Choose a password for <span className="font-semibold text-ink">{link.email}</span>.
                 </p>
               </div>
               <Card>
                 <form method="post" action={`/api/auth/setup/${token}`} className="flex flex-col gap-4">
                   {error ? <Notice tone="error">{error}</Notice> : null}
                   <input type="hidden" name="username" value={link.email ?? ""} autoComplete="username" />
-                  <Field label="New password">
-                    <Input name="password" type="password" autoComplete="new-password" minLength={8} required autoFocus />
-                  </Field>
-                  <Field label="Type it again">
-                    <Input name="confirm" type="password" autoComplete="new-password" minLength={8} required />
-                  </Field>
+                  <PasswordBox autoFocus />
                   <Button type="submit" size="lg">
                     Save password and sign in
                   </Button>

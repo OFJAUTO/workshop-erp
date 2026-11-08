@@ -1,6 +1,35 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { DEFAULT_SESSION_HOURS, LOGIN_KIND_COOKIE, SESSION_UNTIL_COOKIE, sessionCookieOptions } from "@/lib/session";
+import { PASSKEY_SESSION_HOURS, passkeyPerson, rolloutOf, sessionNeedsCap } from "@/lib/passkey-rules";
+
+/** A long sign-in ("Keep me signed in") was checked for the passkey 12-hour rule within the last hour. */
+const CAP_CHECKED_COOKIE = "erp_cap_checked";
+
+/**
+ * Passkey users (7 November 2026) stay signed in 12 hours at most. A sign-in made before that rule (or before the
+ * rollout reached the person) can end much later; this cuts it back. Asked at most once an hour per long sign-in.
+ * Before the database change is applied the settings row is missing and nothing is cut.
+ */
+async function passkeyCapFor(userId: string): Promise<boolean> {
+  if (!/^[0-9a-f-]{36}$/i.test(userId)) return false;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const h = { apikey: key, Authorization: `Bearer ${key}` };
+  try {
+    const [s, r] = await Promise.all([
+      fetch(`${base}/rest/v1/settings?select=value&key=eq.passkeys_rollout`, { headers: h, cache: "no-store" }),
+      fetch(`${base}/rest/v1/staff?select=role_id,team,department_id&id=eq.${userId}`, { headers: h, cache: "no-store" }),
+    ]);
+    if (!s.ok || !r.ok) return false;
+    const setting = (await s.json()) as { value: unknown }[];
+    const staff = (await r.json()) as { role_id: string; team: string | null; department_id: string | null }[];
+    if (!setting.length || !staff.length) return false;
+    return passkeyPerson(staff[0], rolloutOf(setting[0].value));
+  } catch {
+    return false;
+  }
+}
 
 /** Pages anyone may open without being logged in. */
 const PUBLIC_PREFIXES = ["/login", "/auth", "/tablet", "/api/auth", "/api/tablet", "/api/media", "/api/uploads", "/api/customer", "/api/approve", "/api/cron", "/u", "/approve", "/terms", "/report", "/quote", "/api/quote", "/api/pay", "/api/pdf", "/api/pdf-pages", "/invoice", "/proforma", "/lpo", "/q", "/api/e2e", "/fonts", "/s", "/handover", "/progress", "/drive", "/api/drive", "/m", "/d", "/i", "/r", "/k", "/p", "/warranty"];
@@ -102,6 +131,13 @@ export async function proxy(request: NextRequest) {
       // A session without a limit yet: give it the default working-day window.
       const seconds = DEFAULT_SESSION_HOURS * 3600;
       response.cookies.set(SESSION_UNTIL_COOKIE, String(Date.now() + seconds * 1000), sessionCookieOptions(seconds));
+    } else if (sessionNeedsCap(until, Date.now()) && !request.cookies.get(CAP_CHECKED_COOKIE)?.value) {
+      if (await passkeyCapFor(user.id)) {
+        const seconds = PASSKEY_SESSION_HOURS * 3600;
+        response.cookies.set(SESSION_UNTIL_COOKIE, String(Date.now() + seconds * 1000), sessionCookieOptions(seconds));
+      } else {
+        response.cookies.set(CAP_CHECKED_COOKIE, "1", sessionCookieOptions(Math.min(3600, (until - Date.now()) / 1000)));
+      }
     } else if (Date.now() > until) {
       await supabase.auth.signOut();
       const kind = request.cookies.get(LOGIN_KIND_COOKIE)?.value;

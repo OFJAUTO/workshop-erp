@@ -581,5 +581,13 @@ async function runHousekeeping(): Promise<Record<string, number>> {
       report.monthlySummary = 1;
     }
   }
+
+  // 30. Passkey challenges (7 November 2026): each lasts five minutes and is used once; anything older than a day goes.
+  try {
+    const { data } = await admin.from("passkey_challenges").delete().lt("created_at", new Date(Date.now() - 86400_000).toISOString()).select("id");
+    report.passkeyChallengesRemoved = data?.length ?? 0;
+  } catch {
+    report.passkeyChallengesRemoved = -1;
+  }
   return report;
 }

@@ -8,6 +8,12 @@ import type { DeviceRow, StaffPrivateRow, StaffRow } from "@/lib/types";
 import { createSetupLink, resetPin, setLoginType, setStaffActive, updateStaff, uploadStaffPhoto } from "../actions";
 import { StaffForm } from "../StaffForm";
 import { PinResetForm, PhotoForm, CopyLink } from "./parts";
+import { SignInLog } from "@/components/SignInLog";
+import { passkeyPerson, passkeyRole } from "@/lib/passkey-rules";
+import { passkeyRollout, passkeysReady } from "@/lib/passkey-server";
+import { phonesOf, signInLog } from "@/lib/sign-in-data";
+import { removePasskey, resetPasskeys } from "../passkey-actions";
+import { RemovePhoneForm, ResetPhonesForm } from "../SignInForms";
 
 const LOGIN_LABEL = { password: "PC login (email and password)", pin: "Handheld login (name and PIN)", both: "Both: PC and any registered handheld" } as const;
 
@@ -46,6 +52,13 @@ export default async function StaffDetailPage({
   const isSelf = staff.id === owner.id;
   const usesPassword = staff.login_type !== "pin";
   const usesPin = staff.login_type !== "password";
+
+  // Passkeys (7 November 2026): the person's phones, the owner's Remove / Reset, and their sign-in log.
+  const pkReady = await passkeysReady();
+  const pkRole = pkReady && passkeyRole(staff);
+  const pkOn = pkRole && passkeyPerson(staff, await passkeyRollout());
+  const [phones, pkLog] = pkRole ? await Promise.all([phonesOf(staff.id, { withRemoved: true }), signInLog({ staffId: staff.id, limit: 20 }).catch(() => [])]) : [[], []];
+  const activePhones = phones.filter((p) => !p.removed_at);
 
   return (
     <>
@@ -161,6 +174,58 @@ export default async function StaffDetailPage({
             ) : null}
             {usesPin || !priv?.pin_hash ? <PinResetForm action={resetPin.bind(null, staff.id)} /> : null}
           </Card>
+
+          {pkReady ? (
+            <Card className="flex flex-col gap-4" id="sign-in" data-team-sign-in>
+              <SectionLabel right={pkRole ? `${activePhones.length}` : undefined}>Sign-in phones (passkeys)</SectionLabel>
+              {!pkRole ? (
+                <p className="text-sm text-muted">Not a passkey role: this person keeps their {staff.login_type === "pin" ? "PIN" : staff.login_type === "both" ? "password and PIN" : "password"} login as it is.</p>
+              ) : (
+                <>
+                  {!pkOn ? <p className="text-sm text-muted">Passkeys are not switched on for this person yet (Team › Sign-ins).</p> : null}
+                  {activePhones.length === 0 ? <p className="text-sm font-semibold" data-no-phone>No phone set up yet. At their next sign-in the ERP asks them to set one up.</p> : null}
+                  <ul className="flex flex-col divide-y divide-line">
+                    {phones.map((p) => (
+                      <li key={p.id} className="py-2 flex flex-col gap-2" data-team-phone={p.id} data-removed={p.removed_at ? "1" : "0"}>
+                        <div className="flex flex-col gap-0.5">
+                          <span className={`font-semibold ${p.removed_at ? "line-through text-muted" : ""}`}>{p.name}</span>
+                          <span className="text-xs text-muted">
+                            Added {formatDateTime(p.created_at)} · {p.last_used_at ? `last used ${formatDateTime(p.last_used_at)}` : "not used yet"}
+                            {p.removed_at ? ` · removed ${formatDateTime(p.removed_at)}${p.removedBy ? ` by ${p.removedBy}` : ""}: ${p.removed_reason ?? ""}` : ""}
+                          </span>
+                        </div>
+                        {!p.removed_at && !owner.viewingAs && !owner.actingAs ? (
+                          <details className="group">
+                            <summary className="list-none cursor-pointer text-sm font-semibold text-red underline underline-offset-4 min-h-11 flex items-center" data-remove-open={p.id}>
+                              Remove this phone…
+                            </summary>
+                            <div className="pt-2">
+                              <RemovePhoneForm action={removePasskey.bind(null, staff.id, p.id)} name={p.name} />
+                            </div>
+                          </details>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                  {activePhones.length > 0 && !owner.viewingAs && !owner.actingAs ? (
+                    <details className="border-t border-line pt-3">
+                      <summary className="list-none cursor-pointer text-sm font-semibold underline underline-offset-4 min-h-11 flex items-center" data-reset-open>
+                        Reset passkeys (remove every phone)…
+                      </summary>
+                      <div className="pt-2">
+                        <ResetPhonesForm action={resetPasskeys.bind(null, staff.id)} />
+                      </div>
+                    </details>
+                  ) : null}
+                  <p className="text-xs text-muted">Only you can remove a phone or reset passkeys. The person is told, and it is written in the log below.</p>
+                  <div className="border-t border-line pt-3 flex flex-col gap-2">
+                    <p className="text-sm font-semibold">Sign-ins and changes</p>
+                    <SignInLog lines={pkLog} />
+                  </div>
+                </>
+              )}
+            </Card>
+          ) : null}
 
           <Card className="flex flex-col gap-3">
             <SectionLabel right={`${personalDevices.length}`}>Personal devices</SectionLabel>

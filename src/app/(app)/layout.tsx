@@ -17,6 +17,8 @@ import { AuthAddedWindow } from "@/components/AuthCodeMissing";
 import { SpellHost } from "@/components/SpellHost";
 import { getCurrentDevice } from "@/lib/devices";
 import { SENDS_ON_PRESS_FILTER, syncModeOf } from "@/lib/zoho-sync-rules";
+import Link from "next/link";
+import { passkeysReady } from "@/lib/passkey-server";
 
 /** The browser tab says whose screens these are while the owner views or acts as someone. */
 export async function generateMetadata(): Promise<Metadata> {
@@ -90,6 +92,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ];
   const partsManagement = { group: "parts-management", label: "Parts management", items: partsManagementItems.filter((i) => i.show).map(({ href, label, badge }) => ({ href, label, badge })) };
 
+  const pkReady = await passkeysReady();
   const entries: ((NavItem | typeof partsManagement) & { show: boolean })[] = [
     { href: "/home", label: "Home", show: role !== "gate_in" && role !== "technician" && role !== "qc_inspector" && role !== "team_leader" },
     { href: "/dashboard", label: "Dashboard", show: can(role, "viewDashboard") },
@@ -129,6 +132,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/customers", label: "Customers", show: can(role, "viewCustomers") },
     { href: "/vehicles", label: "Cars", show: can(role, "viewVehicles") && role !== "accounts" },
     { href: "/team", label: "Team", show: can(role, "manageTeam") },
+    { href: "/team/sign-ins", label: "Sign-ins", show: can(role, "manageTeam") && pkReady },
     { href: "/team/tablets", label: "Tablets", show: can(role, "viewTablets") && !can(role, "manageTeam") },
     { href: "/settings", label: "Settings", show: can(role, "manageSettings") },
     { href: "/audit", label: "Change log", show: can(role, "viewAudit") },
@@ -161,6 +165,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         viewingAs={staff.viewingAs}
         actingAs={staff.actingAs}
         footer={
+          <div className="flex flex-col gap-2">
+          {staff.login_type !== "pin" && pkReady ? (
+            <Link href="/account/sign-in" className="min-h-10 px-4 rounded-control border border-white/30 text-white text-sm font-bold hover:bg-white/10 flex items-center justify-center md:w-full" data-my-sign-in-link>
+              My sign-in
+            </Link>
+          ) : null}
           <form method="post" action="/api/auth/signout">
             <button
               type="submit"
@@ -169,6 +179,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               {staff.login_type === "pin" ? "Lock" : "Sign out"}
             </button>
           </form>
+          </div>
         }
       >
         {children}
