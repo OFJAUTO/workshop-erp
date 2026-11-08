@@ -3,7 +3,7 @@
 //       Parts only mark "Ready for handover" (instant notification, 2-hour reminder), nothing blocks
 //       starting work, receiving is required before "Job finished".
 //   node --env-file=.env.test.local tests/browser/test-z.mjs
-import { api, base, browserFor, browserForId, cleanupDb, freeTech, go, makeChecks, setPin, sleep, sql, submitted, pressRecord } from "./pw-lib.mjs";
+import { api, base, browserFor, browserForId, cleanupDb, freeTech, go, makeChecks, setPin, sleep, sql, submitted, pressRecord, sendLpo } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 20 * 60 * 1000).unref();
@@ -198,7 +198,7 @@ if (want("S3")) {
   // Parts send the LPO; the owner approves it.
   const { browser: pb, page: pp } = await browserFor("parts", { viewport: { width: 1360, height: 1000 } });
   await go(pp, `${base}/parts/${jobId}`);
-  await pp.locator("[data-send-lpo]").click();
+  await sendLpo(pp);
   const main = await until(async () => (await sql("select id from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval' limit 1", [jobId]))[0] ?? null, 30, 400);
   check("S3: the main LPO waits for approval", !!main?.id);
   const { browser: ob, page: op } = await browserFor("owner", { viewport: { width: 1360, height: 1000 } });

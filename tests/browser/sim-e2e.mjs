@@ -20,7 +20,7 @@ const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i
 const CLUSTER_PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQCJ9dvEAAAAAElFTkSuQmCC", "base64");
 const shot = (page, name) => page.screenshot({ path: `${shots}/${name}.png`, fullPage: true }).catch(() => null);
 const today = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
-setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 55 * 60 * 1000).unref();
+setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, Number(process.env.SIM_MINUTES ?? 150) * 60 * 1000).unref(); // 8 Nov 2026: 25 paths need more than the old 55 minutes
 
 /* ---- R3: who was told since a mark ---- */
 const mark = async () => Number((await sql("select coalesce(max(id), 0) as m from public.notifications"))[0]?.m ?? 0);

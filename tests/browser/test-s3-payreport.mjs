@@ -28,7 +28,10 @@ const { check, summary } = makeChecks();
 const SHOTS = path.join(here, "shots", "s3-payreport");
 fs.mkdirSync(SHOTS, { recursive: true });
 const shot = (name) => path.join(SHOTS, name);
-const until = async (fn, tries = 40, gap = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(gap); } return null; };
+// 8 November 2026: server answers take 12–25 s on this PC (E1/H2/H3 timed out), so every wait is three times longer;
+// a wait still returns the moment its condition holds, so a fast machine loses nothing.
+const WAIT_X = Number(process.env.WAIT_X ?? 3);
+const until = async (fn, tries = 40, gap = 500) => { for (let i = 0; i < tries * WAIT_X; i++) { const v = await fn(); if (v) return v; await sleep(gap); } return null; };
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 25 * 60 * 1000).unref();
 const ONLY = (process.env.ONLY ?? "").split(",").filter(Boolean);
 const want = (s) => !ONLY.length || ONLY.includes(s);

@@ -8,7 +8,7 @@
 // Run: node --env-file=.env.test.local tests/browser/test-lpo-approvals.mjs   (test server on 3102)
 import path from "node:path";
 import { mkdirSync } from "node:fs";
-import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql, confirmMoney } from "./pw-lib.mjs";
+import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql, confirmMoney, sendLpo } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const dir = path.join(here, "shots", "lpo-approvals");
@@ -64,7 +64,7 @@ try {
   const mount = (await sql("insert into public.part_items (job_id, description, part_number, quantity, confirmed_quantity, cost_aed, supplier, availability, delivery_date, confirm_status, part_type, priced_at, priced_by, order_status, created_by, updated_by) values ($1, 'E2E TRANSMISSION MOUNT', 'E2E-TM-WRONG', 1, 1, 1192, 'E2E WRONG SUPPLIER', 'to_order', (now() + interval '61 days')::date, 'confirmed', 'genuine', now(), $2, 'to_order', $2, $2) returning id", [jobId, partsUser.id]))[0];
   const desk = await open(partsUser.id);
   await go(desk.page, `${base}/parts/${jobId}`);
-  await desk.page.locator("[data-send-lpo]").first().click();
+  await sendLpo(desk.page);
   const lpo = await until(async () => (await sql("select id, number, status, total_cost_aed::float as total from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval'", [jobId]))[0]);
   const lines0 = lpo ? (await sql("select count(*)::int as n from public.purchase_order_lines where po_id = $1 and is_active", [lpo.id]))[0] : null;
   check(`A: Send LPO for approval makes ${lpo?.number} with both suppliers (2 lines, AED ${lpo?.total})`, lines0?.n === 2 && Math.abs((lpo?.total ?? 0) - 1392) < 0.01);
@@ -166,13 +166,9 @@ try {
   await sql("update public.part_requests set status = 'unavailable' where job_id = $1 and status in ('open', 'listed')", [jobId]);
   await sql("insert into public.part_items (job_id, description, quantity, confirmed_quantity, confirm_status, order_status, created_by, updated_by) values ($1, 'E2E HALF PRICED PART', 1, 1, 'confirmed', 'none', $2, $2)", [jobId, partsUser.id]);
   await go(desk.page, `${base}/parts/${jobId}`);
-  const warn = await text(desk.page.locator("[data-lpo-unfinished]"));
-  check(`E: the button names the unfinished line ("${warn}")`, /^1 line not finished: E2E HALF PRICED PART$/i.test(warn));
-  await desk.page.locator("[data-send-lpo]").click();
-  await desk.page.locator("[data-lpo-unfinished-ask]").waitFor({ timeout: 10000 }).catch(() => {});
+  // 8 November 2026: the tick list names what stops a line; an unpriced part is not approved, so it is not listed.
   await desk.page.screenshot({ path: shot("e1-send-warns-unfinished.png") });
-  check("E: pressing it asks first", await desk.page.locator("[data-lpo-unfinished-ask]").isVisible());
-  await desk.page.locator("[data-lpo-unfinished-back]").click();
+  check("E: the brake pads can be ticked; nothing unfinished goes on an LPO", (await desk.page.locator("[data-lpo-line][data-lpo-eligible='1']").count()) === 1);
 
   /* ---------- F. Intake manifold on the tablet and in Add a part ---------- */
   cleanupDb();

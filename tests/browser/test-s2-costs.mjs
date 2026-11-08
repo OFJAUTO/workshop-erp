@@ -23,7 +23,7 @@
 // Run: npm run test:s2-costs   (test server on :3102, or E2E_BASE=http://localhost:3101 for the dev test server)
 import path from "node:path";
 import fs from "node:fs";
-import { api, base, browserFor, cleanupDb, confirmMoney, cookieHeader, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, confirmMoney, cookieHeader, go, here, makeChecks, sleep, sql, sendLpo as sendLpoShared } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const SHOTS = path.join(here, "shots", "s2-costs");
@@ -132,12 +132,9 @@ await section("C LPO gate", async () => {
   await sql("update public.part_requests set status = 'rejected', closed_reason = 'E2E not needed' where job_id = $1", [s.jobId]);
   const { browser, page } = await browserFor("parts", { viewport: { width: 1440, height: 900 } });
   await go(page, `${base}/parts/${s.jobId}`);
-  await page.locator("[data-send-lpo]").click();
-  if (await page.locator("[data-lpo-unfinished-send]").count()) await page.locator("[data-lpo-unfinished-send]").click();
-  await page.waitForURL(/error=/, { timeout: 25000 }).catch(() => null);
-  await sleep(1500);
-  const err = decodeURIComponent((new URL(page.url()).searchParams.get("error") ?? "").replace(/\+/g, " "));
-  check("C1: Send LPO for approval refuses it, naming the part and why", /1 part cannot go on an LPO yet: FRONT BRAKE PADS: "OFJ Additional" is not a supplier/.test(err), err);
+  // 8 November 2026: the tick list names why the line cannot go (it cannot even be ticked).
+  const err = (await sendLpoShared(page)).error ?? "";
+  check("C1: the LPO list refuses the line, naming why", /"OFJ Additional" is not a supplier/.test(err), err);
   check("C1: no LPO was raised", (await sql("select count(*)::int as n from public.purchase_orders where job_id = $1", [s.jobId]))[0]?.n === 0);
   await shot(page, "c1-lpo-refused-1440");
   // 2.4: Prices to fix on /parts, and the line on Parts' Waiting on you.
@@ -366,10 +363,10 @@ await section("H history", async () => {
 /* ------------- Review fixes of 3 November 2026 ------------- */
 const PA = "22222222-0000-4000-8000-00000000e306";
 const sendLpo = async (page) => {
-  await page.locator("[data-send-lpo]").click();
-  await sleep(600);
-  if (await page.locator("[data-lpo-unfinished-send]").count()) await page.locator("[data-lpo-unfinished-send]").click();
-  await page.waitForURL(/error=|message=/, { timeout: 25000 }).catch(() => null);
+  // 8 November 2026: tick every line that can go; the words are the server's refusal or the lines' own reasons.
+  return (await sendLpoShared(page)).error ?? "";
+};
+const sendLpoOld = async (page) => {
   await sleep(1200);
   return decodeURIComponent((new URL(page.url()).searchParams.get("error") ?? "").replace(/\+/g, " "));
 };
@@ -557,7 +554,7 @@ await section("L stock replacement", async () => {
   check("L1: the shelf went down (3 → 2)", (await sql("select quantity::float8 as q from public.stock_items where id = $1", [shelfItem.id]))[0]?.q === 2);
   check("L1: the original is back to none (the replacement took over its approval)", (await partOf(PA))?.order_status === "none");
   await go(page, `${base}/parts/${s.jobId}`);
-  check("L1: nothing is left to order, so no LPO is blocked by it", (await page.locator("[data-send-lpo]").count()) === 0);
+  check("L1: nothing is left to order, so no LPO is blocked by it", (await page.locator("[data-lpo-select]").count()) === 0);
   await browser.close();
 });
 

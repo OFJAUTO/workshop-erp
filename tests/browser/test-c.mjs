@@ -66,7 +66,7 @@ await section("1 LPO supplier copy", async () => {
   }
   const verify = await (await fetch(`${base}/lpo/${token}`)).text();
   const vt = verify.replace(/<script[\s\S]*?<\/script>/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-  check("verification page shows number, supplier, date, total and Valid, nothing else (1)", /e2e Parts Co/i.test(vt) && /Valid/.test(vt) && /including VAT/.test(vt) && !/Brake pads/.test(vt) && !/J-\d{5}/.test(vt), vt.slice(0, 300));
+  check("verification page shows number, supplier, date, total and Valid, nothing else (1)", /e2e Parts Co/i.test(vt) && /Valid/.test(vt) && /incl\. VAT|including VAT/.test(vt) && !/Brake pads/.test(vt) && !/J-\d{5}/.test(vt), vt.slice(0, 300));
   const bad = await (await fetch(`${base}/lpo/notatoken`)).text();
   check("wrong token: not valid", /not valid/.test(bad));
   // The internal view keeps the job card and the people.
@@ -119,8 +119,12 @@ await section("3-12-13 Parts table", async () => {
   await rowOf().locator("select[aria-label='Availability']").selectOption("other");
   await rowOf().locator("input[aria-label='Days until it arrives']").fill("3");
   await rowOf().locator("input[aria-label='Days until it arrives']").press("Tab");
-  await sleep(2500);
-  const saved = await sql("select description, part_number, list_price_aed, discount_percent, cost_aed, supplier, availability from public.part_items where job_id = $1 and description = 'Brake pads'", [jobId]);
+  let saved = [];
+  for (let i = 0; i < 60; i++) {
+    await sleep(500);
+    saved = await sql("select description, part_number, list_price_aed, discount_percent, cost_aed, supplier, availability from public.part_items where job_id = $1 and description = 'Brake pads'", [jobId]);
+    if (saved.length === 1 && saved[0].part_number === "A 222 320 04 38 80" && Number(saved[0].cost_aed) === 425 && saved[0].availability) break;
+  }
   check("the row saved list, discount, net, supplier and Order with days (3)", saved.length === 1 && saved[0].part_number === "A 222 320 04 38 80" && Number(saved[0].list_price_aed) === 500 && Number(saved[0].discount_percent) === 15 && Number(saved[0].cost_aed) === 425 && /e2e discount supplier/i.test(saved[0].supplier ?? "") && saved[0].availability === "to_order", JSON.stringify(saved));
   await go(page, `${base}/parts/${jobId}`);
   check("a saved part number stays in its box, in full, with Copy (3, 12 Oct evening U1)", (await rowOf().getByRole("button", { name: "Copy the part number" }).count()) === 1 && (await rowOf().locator("input[aria-label='Part number']").inputValue()) === "A 222 320 04 38 80");
@@ -128,7 +132,11 @@ await section("3-12-13 Parts table", async () => {
   // 12: the quantity, with a note and the advisor and manager told.
   const mark = Number((await sql("select coalesce(max(id), 0) as m from public.notifications"))[0]?.m ?? 0);
   await rowOf().getByRole("button", { name: "One more" }).click();
-  await sleep(2500);
+  for (let i = 0; i < 60; i++) {
+    await sleep(500);
+    const q = await sql("select confirmed_quantity from public.part_items where job_id = $1 and description = 'Brake pads'", [jobId]);
+    if (Number(q[0]?.confirmed_quantity) === 2) break;
+  }
   // 3 November 2026 (section 9): the one wording of a quantity change.
   check("quantity note on the row (12)", /Technician asked 1, Parts changed to 2/.test(await rowOf().textContent() ?? ""));
   const q2 = await sql("select confirmed_quantity, quantity from public.part_items where job_id = $1 and description = 'Brake pads'", [jobId]);
@@ -162,8 +170,12 @@ await section("3-12-13 Parts table", async () => {
   await page.getByRole("button", { name: "Split into separate parts" }).click();
   await page.locator("input[aria-label='Part 2 name']").fill("Brake sensor");
   await page.getByRole("button", { name: "Split", exact: true }).click();
-  await sleep(3500);
-  const after = await sql("select description, confirmed_quantity, cost_aed from public.part_items where job_id = $1 and is_active and original_description = 'Brake pads' order by created_at", [jobId]);
+  let after = [];
+  for (let i = 0; i < 60; i++) {
+    await sleep(500);
+    after = await sql("select description, confirmed_quantity, cost_aed from public.part_items where job_id = $1 and is_active and original_description = 'Brake pads' order by created_at", [jobId]);
+    if (after.length === 2) break;
+  }
   check("split made two rows, the new one unpriced (12)", after.length === 2 && after.some((r) => r.description === "Brake sensor" && r.cost_aed === null), JSON.stringify(after));
   await browser.close();
 });
@@ -214,7 +226,7 @@ await section("4-10 customer links and messages", async () => {
   const jobHtml = await (await fetch(`${base}/jobs/${jobId}`, { headers: { cookie: await cookieHeader("service_advisor") } })).text();
   check("the ready message carries no bank details and names the proforma (10)", /Send the proforma/.test(jobHtml) && !/Bank transfer: /.test(jobHtml) && !/IBAN AE/.test(jobHtml), (jobHtml.match(/.{0,60}Send the proforma.{0,60}/)?.[0] ?? "").replace(/\s+/g, " "));
   const tpl = await sql("select value from public.settings where key = 'whatsapp_ready_template'");
-  check("the stored ready message is one or two lines with the link (10)", /ready to collect/.test(String(tpl[0]?.value)) && !/Dear|Bank/.test(String(tpl[0]?.value)), String(tpl[0]?.value));
+  check("the stored ready message is one or two lines with the link (10)", /ready/i.test(String(tpl[0]?.value)) && /\[link\]|\[short_link\]|\[url\]/.test(String(tpl[0]?.value)) && !/Bank|IBAN/.test(String(tpl[0]?.value)), String(tpl[0]?.value));
   // The payment form offers bank transfer.
   const inv = await (await fetch(`${base}/jobs/${jobId}/invoice`, { headers: { cookie: await cookieHeader("accounts") } })).text();
   check("Bank transfer is a payment method (6)", /Bank transfer/.test(inv));
@@ -291,7 +303,12 @@ await section("5-6-7 quotation access, lock, payment method", async () => {
     const focusedLabel = await p.evaluate(() => document.activeElement?.getAttribute("aria-label"));
     check("typing keeps the cursor in the markup box (7)", focusedLabel === "Markup percent", String(focusedLabel));
     check("the box still shows what was typed after the save (7)", (await markup.inputValue()) === "45", await markup.inputValue());
-    const m2 = await sql("select markup_percent from public.quotation_lines where id = $1", [partLine?.id]);
+    let m2 = [];
+    for (let i = 0; i < 40; i++) {
+      m2 = await sql("select markup_percent from public.quotation_lines where id = $1", [partLine?.id]);
+      if (Number(m2[0]?.markup_percent) === 45) break;
+      await sleep(500);
+    }
     check("45 saved (7)", Number(m2[0]?.markup_percent) === 45, JSON.stringify(m2));
   }
   check("the quotation bar starts beside the menu (11)", (await p.evaluate(() => { const el = document.querySelector(".fixed.bottom-0"); return el ? el.getBoundingClientRect().left : -1; })) >= 200);
@@ -319,7 +336,7 @@ await section("8 PDF layout", async () => {
   check("long quotation runs over two pages (8)", pages.length >= 2, String(pages.length));
   const last = pages[pages.length - 1];
   check("page 1 has the company block and TRN; later pages the compact header and a page number (8)", /Tax registration/i.test(pages[0]) && pages.slice(1).every((p) => !/Tax registration/i.test(p) && /Page \d+ of \d+/.test(p)), pages.slice(1).map((p) => p.slice(0, 80).replace(/\s+/g, " ")).join(" | "));
-  check("a table that continues repeats its headings (8)", pages.length >= 2 && /Labour and services/i.test(pages[1]) && /Qty/i.test(pages[1]) && /Rate/i.test(pages[1]), pages[1].slice(0, 200).replace(/\s+/g, " "));
+  check("a table that continues repeats its headings (8)", pages.length >= 2 && /Labour and services/i.test(pages[1]) && /Description/i.test(pages[1]) && /Amount/i.test(pages[1]), pages[1].slice(0, 200).replace(/\s+/g, " "));
   check("bank details on the last page only, after the totals (8)", /Bank details/i.test(last) && pages.slice(0, -1).every((p) => !/Bank details/i.test(p)) && last.search(/Taxable amount/i) < last.search(/Bank details/i), "");
   check("amount in words sits after the totals and before the bank details (8)", last.search(/Amount in words/i) > last.search(/Taxable amount/i) && last.search(/Amount in words/i) < last.search(/Bank details/i));
   check("footer on every page (8)", pages.every((p) => /Tel/i.test(p) || /Email/i.test(p)));

@@ -196,6 +196,8 @@ export async function doorRegister({ target, scopeId, path, fields = {}, cookie 
  */
 export async function sendLpo(page, { partIds = null } = {}) {
   await page.locator("[data-lpo-select]").waitFor({ timeout: 20000 });
+  // Nothing can be ticked: the lines' own reasons are the answer (a stand-in supplier, no real price, a repeat).
+  if (!partIds && !(await page.locator("[data-lpo-line][data-lpo-eligible='1']").count())) return { error: (await page.locator("[data-lpo-why]").allTextContents()).join("; ") };
   if (partIds) for (const id of partIds) await page.locator(`[data-lpo-pick="${id}"]`).check();
   else await page.locator("[data-lpo-select-all]").click();
   await page.locator("[data-send-lpo-selected]").click();

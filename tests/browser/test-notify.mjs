@@ -3,7 +3,7 @@
 // quotation sent and approved → planning → parts handover → work finished → work confirmed → QC →
 // wash → proforma → payment and tax invoice → gate-out. Run against `npx next dev -p 3100`:
 //   node --env-file=.env.test.local tests/browser/test-notify.mjs
-import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson, pressRecord } from "./pw-lib.mjs";
+import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson, pressRecord, sendLpo } from "./pw-lib.mjs";
 
 /** Ticks a technician; one already on a car asks "Assign anyway?" first (depends on the live workshop). */
 async function tickTech(page, box) {
@@ -260,10 +260,8 @@ try {
   {
     const { browser, page } = await browserForId(partsId);
     await go(page, `${base}/parts/${jobId}`);
-    const send = page.locator("[data-send-lpo]");
-    if (await send.count()) {
-      await send.click();
-      await submitted(page);
+    if (await page.locator("[data-lpo-select]").count()) {
+      await sendLpo(page);
       const main = (await sql("select id from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval' order by created_at desc limit 1", [jobId]))[0];
       check("9 LPO sent for approval", !!main);
       if (main) {

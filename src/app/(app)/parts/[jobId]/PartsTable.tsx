@@ -133,7 +133,7 @@ type EstimateDesk = { id: string; number: string; preparing: boolean; /** Sent b
 // minimum on two lines went from 10rem to 9rem, the two-line Availability from 9.5rem to 9rem, Disc % from 3.25rem
 // to 3rem and the gaps from 6 to 4 px to pay for it (at 1366 the table had scrolled 29 px sideways, at 1920 7 px), so a
 // name like "AIR SUSPENSION STRUT" still wraps on two lines within the row.
-const GRID = "grid grid-cols-2 md:grid-cols-[minmax(9rem,14rem)_8.25rem_4.25rem_3rem_5.25rem_14rem_9rem_5rem_2.5rem] min-[110rem]:grid-cols-[minmax(12rem,16rem)_8.25rem_17.5rem_11.5rem_4.25rem_3.25rem_5.25rem_14rem_11rem_5rem_2.5rem] gap-x-1 gap-y-1 items-center";
+const GRID = "grid grid-cols-2 md:grid-cols-[minmax(9rem,14rem)_8.25rem_4.25rem_3rem_5.25rem_14rem_9rem_5rem_2.5rem] min-[110rem]:grid-cols-[minmax(10.5rem,14.5rem)_8.25rem_19rem_11.5rem_4.25rem_3.25rem_5.25rem_14rem_11rem_5rem_2.5rem] gap-x-1 gap-y-1 items-center";
 const SECOND_LINE = "col-span-2 md:col-span-4 md:order-2 min-[110rem]:col-span-1 min-[110rem]:order-none";
 const STATUS_LINE = "col-span-2 md:col-span-9 min-[110rem]:col-span-11 md:order-3";
 /** Money for the cost bar and the line totals. */

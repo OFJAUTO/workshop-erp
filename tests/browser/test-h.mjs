@@ -7,7 +7,7 @@
 // Run against `npx next dev -p 3100`:  node --env-file=.env.test.local tests/browser/test-h.mjs
 import fs from "node:fs";
 import path from "node:path";
-import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, projectRoot, sleep, sql, pressYes } from "./pw-lib.mjs";
+import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, projectRoot, sleep, sql, pressYes, sendLpo } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 20 * 60 * 1000).unref();
@@ -209,8 +209,7 @@ await section("C LPO flow", async () => {
   const body = (await page.textContent("body")) ?? "";
   check("17: no 'Planning: the approved parts' screen; a short summary and one button instead", !/Planning: the approved parts/.test(body) && (await page.locator("[data-lpo-card]").count()) === 1 && (await page.locator("[data-send-lpo]").count()) === 1, ((await page.locator("[data-lpo-summary]").textContent().catch(() => "")) ?? "").slice(0, 160));
   check("17: the summary names the parts to order", /1 to order/.test((await page.locator("[data-lpo-summary]").textContent()) ?? ""));
-  await page.locator("[data-send-lpo]").click();
-  await afterSubmit(page);
+  await sendLpo(page);
   const main = (await sql("select id, number, kind, status, total_cost_aed from public.purchase_orders where job_id = $1 and kind = 'main' and is_active order by created_at desc limit 1", [jobId]))[0];
   check("17: one main LPO waits for approval", !!main && main.status === "pending_approval" && /^LPO-\d{5}$/.test(main.number), JSON.stringify(main));
   const pa1 = (await sql("select po_id from public.part_items where id = $1", [PA]))[0];

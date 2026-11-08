@@ -16,7 +16,7 @@
 // Run: node --env-file=.env.test.local tests/browser/test-fix2.mjs   (test server on 3102: npm run test:server)
 import path from "node:path";
 import { mkdirSync } from "node:fs";
-import { api, base, browserFor, browserForId, cleanupDb, go, here, makeChecks, sleep, sql, submitted } from "./pw-lib.mjs";
+import { api, base, browserFor, browserForId, cleanupDb, go, here, makeChecks, sleep, sql, submitted, sendLpo } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const dir = path.join(here, "shots", "fix2");
@@ -55,10 +55,7 @@ const { browser: pb, page: pp } = await browserForId(partsUser.id, { viewport: {
 
 /* ---------------- A. Send the main LPO for approval ---------------- */
 await go(pp, `${base}/parts/${jobId}`);
-await pp.locator("[data-send-lpo]").click();
-// The seed's own part has no supplier yet: "n lines not finished - send anyway?" is answered Send.
-await pp.locator("[data-lpo-unfinished-send]").click({ timeout: 4000 }).catch(() => null);
-await submitted(pp);
+await sendLpo(pp);
 const po = await until(() => sql("select id, number, total_cost_aed from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval'", [jobId]).then((r) => r[0] ?? null));
 if (!po) { console.error("send failed; page url:", pp.url()); process.exit(1); }
 check("A1: the main LPO waits for approval with 3 lines", !!po && (await sql("select count(*)::int as n from public.purchase_order_lines where po_id = $1 and is_active", [po.id]))[0].n === 3, po?.number);

@@ -1,14 +1,17 @@
-# Handover – 8 November 2026
-**Status:** the 9-section batch, the A/B status check and the rest of the audit are done and live; only the items below wait for you.
-**Live (6–7 Nov):** estimate carry-over · resend quote · parts desk edits after sending · supplier payments (on with apply #2) · Zoho to the fils · jobs sorting · small preview + greeting · part labels 50 × 25 · gate-in check · audit H3 code, M1, M3, M6–M8, M13–M15, L2, L3, L6, sim rule. A/B were already live (603ef5d, 0972039). Notes: `docs/*-6-nov-note.md`, `docs/audit-rest-6-nov-note.md`.
-**WAITING FOR APPLY:** nothing. The passkeys were applied on 8 Nov morning (push 7fdac30, migration, live password settings; backup `backups/2026-11-08T05-47-43`; check:live 33/33). Passkeys are ON FOR THE OWNER ONLY until he switches Team › Sign-ins to Everyone.
+# Handover – 8 November 2026 (night)
+
 **NEEDS OMAR:**
-1. Backblaze key → **"key saved"** (backups part 2).
-2. Mathew: set **both Zoho orgs' time zone to Asia/Dubai** (H3's other half).
-3. Zoho Books → Posted → red **LPO-00045-1** row → **Check again in Zoho** (re-posts 1,011.00 in OFJ TEST).
-4. Now that supplier payments are on: one real supplier payment through **Sync to Zoho**, checked once in OFJ TEST.
-5. Passkeys: try your phone at an office PC (Sign in with passkey), then Team › Sign-ins › Everyone › Save; give staff the guide (docs/passkey-staff-guide.md).
-6. Network International: why STL-00012's link payment cost **2.25%** (or change the link rate on Card settlements → Bank fees).
-7. Peter: print the **Test label**, follow `docs/part-labels-guide-for-peter.md`.
-**Assumption:** no title typed → greeted by first name ("Dear Dhia,"); a "How to address" changes it.
-**Left (tests only, product fine):** test-t rewrite; stale old sections in test-c (4), test-g C (bulk delete now asks the ending), test-f C@1920 (1); test-s3-payreport E1/H2/H3 timing on this PC.
+1. **Backup key copy:** `OFJ-BACKUP-KEY.txt` is on your Desktop (same key as GitHub, fingerprint ecfbe604). Put it in your password manager, print it for the safe, then delete the file.
+2. **Move the PC's 20 GB `backups/` folder off-site:** the Backblaze key is only in GitHub (unreadable). Either paste the three B2 values into `.env.local` as `B2_KEY_ID`, `B2_APP_KEY`, `B2_BUCKET` and reply "local key saved", or leave the folder on the PC.
+3. Read (clear) the three old "Off-site … FAILED: B2_KEY_ID is not set" bells; no new ones will come.
+4. Supabase dashboard → Usage → Image transformations: note the count on 9 Nov evening (should stay where it is).
+5. Reply **"apply"** for the WAITING FOR APPLY list below.
+6. From before: Mathew sets both Zoho orgs' time zone to Asia/Dubai; LPO-00045-1 "Check again in Zoho"; one real supplier payment through Sync to Zoho; passkeys for everyone; Network International on STL-00012 (now estimated at 2.25%); Peter's test label.
+
+**Live (8 Nov night):** off-site backups (database backup + restore test proven) · pre-made photo sizes (f3c07b2) · send LPO for selected parts (3b8a704) · settlement date with no default · approve each supplier separately · technician on parts pages · purchase returns (code; switches on with apply #5) · link fee worst case (code default; the stored setting moves with apply #4). Note: `docs/8-nov-batch-note.md`.
+
+**WAITING FOR APPLY** (`docs/waiting-for-apply.md`): #1 photo sizes backfill (1,330 photos, ~0.21 GB) · #2 parts-desk bells (J-00990, J-00016, J-00343) · #3 five missing advisors · #4 link fee setting 1.75 → 2.25 · #5 purchase returns table (backup first).
+
+**Queued next (owner's message of 8 Nov):** 1 softer whites, logo, small print · 2 "urgent" must mean urgent · 3 promised date on every approved job · 4 the bell only counts what is still open.
+
+**Tests:** layout clean, security passed, simulation 341/0, check:live 33/33; the queued test fixes are done. Backups: database copy, storage copy (1,995 files, 2.15 GB) and restore test all green.

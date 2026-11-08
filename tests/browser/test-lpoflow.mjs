@@ -5,7 +5,7 @@
 // the advisor's job card reads "Parts ordered from <supplier> – arriving <date>"; a refusal tells the
 // desk with the reason and the parts return to To order.
 //   node --env-file=.env.test.local tests/browser/test-lpoflow.mjs
-import { api, base, browserFor, cleanupDb, confirmMoney, makeChecks, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, confirmMoney, makeChecks, sql, sendLpo } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots";
@@ -21,10 +21,7 @@ await sql("update public.part_items set supplier = 'E2e Supplier', cost_aed = co
 const desk = await browserFor("parts", { viewport: { width: 1500, height: 1200 } });
 await desk.page.goto(`${base}/parts/${jobId}`, { waitUntil: "load" });
 await desk.page.waitForTimeout(1500);
-await desk.page.locator("[data-send-lpo]").click();
-// Since 1 November 2026 the open request (no part yet) is named first: send without it.
-if (await desk.page.locator("[data-lpo-unfinished-send]").count()) await desk.page.locator("[data-lpo-unfinished-send]").click();
-await desk.page.waitForURL((u) => /message=|error=/.test(u.toString()), { timeout: 30000 });
+await sendLpo(desk.page);
 const main = await until(async () => (await sql("select id, number from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval'", [jobId]))[0] ?? null, 30, 500);
 check("the main LPO waits for approval", !!main, JSON.stringify(main));
 await desk.browser.close();
@@ -89,9 +86,7 @@ await sql("update public.part_items set supplier = 'E2e Supplier', cost_aed = co
 const d2 = await browserFor("parts", { viewport: { width: 1400, height: 1000 } });
 await d2.page.goto(`${base}/parts/${seed2.jobId}`, { waitUntil: "load" });
 await d2.page.waitForTimeout(1500);
-await d2.page.locator("[data-send-lpo]").click();
-if (await d2.page.locator("[data-lpo-unfinished-send]").count()) await d2.page.locator("[data-lpo-unfinished-send]").click();
-await d2.page.waitForURL((u) => /message=/.test(u.toString()), { timeout: 30000 });
+await sendLpo(d2.page);
 await d2.browser.close();
 const main2 = (await sql("select id, number from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval'", [seed2.jobId]))[0];
 const o2 = await browserFor("owner", { viewport: { width: 1400, height: 1000 } });

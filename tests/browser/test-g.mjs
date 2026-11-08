@@ -161,6 +161,9 @@ if (!CLEAR_ONLY) await section("C bulk delete", async () => {
   const jobId = JOB;
   // Three more parts: one of them ordered (kept), two free.
   await sql("insert into public.part_items (job_id, description, part_number, quantity, cost_aed, order_status, confirm_status, is_active, created_by, updated_by) values ($1, 'E2e ordered part', 'ORD-1', 1, 100, 'ordered', 'confirmed', true, $2, $2), ($1, 'E2e free part one', 'FREE-1', 1, 50, 'none', 'confirmed', true, $2, $2), ($1, 'E2e free part two', 'FREE-2', 1, 60, 'none', 'confirmed', true, $2, $2)", [jobId, owner]);
+  // Since 4 November an ordered part with NOTHING arrived is cancelled with the supplier in the same sweep; one that
+  // has arrived is kept (it needs its own ending). The kept part is therefore a received one.
+  await sql("update public.part_items set order_status = 'received', received_qty = 1 where job_id = $1 and part_number = 'ORD-1'", [jobId]);
   const { browser, page } = await browserFor("parts", { viewport: { width: 1366, height: 900 } });
   await go(page, `${base}/parts/${jobId}`);
   const rowsBefore = await page.locator("[data-row-key]").count();
@@ -174,7 +177,7 @@ if (!CLEAR_ONLY) await section("C bulk delete", async () => {
   await del.click();
   await sleep(200);
   const dlg = page.locator("[data-delete-confirm]");
-  check("C2/C5: one question with the count, saying the ordered part is kept", (await dlg.count()) === 1 && /Delete 1 part\?/.test((await dlg.textContent()) ?? "") && /1 ordered part is kept/.test((await dlg.textContent()) ?? ""), ((await dlg.textContent()) ?? "").slice(0, 160));
+  check("C2/C5: one question with the count, saying the ordered part is kept", (await dlg.count()) === 1 && /Delete 1 part( on J-\d+)?\?/.test((await dlg.textContent()) ?? "") && /1 part is kept/.test((await dlg.textContent()) ?? ""), ((await dlg.textContent()) ?? "").slice(0, 160));
   check("C3: no reason box in the question", (await dlg.locator("input, textarea").count()) === 0);
   await page.locator("[data-delete-confirm-yes]").click();
   await until(async () => ((await page.locator("[data-row-key]", { hasText: "E2e free part one" }).count()) === 0 ? "gone" : null), 20, 300);
@@ -195,7 +198,7 @@ if (!CLEAR_ONLY) await section("C bulk delete", async () => {
   await del.click();
   await sleep(200);
   const txt = (await page.locator("[data-delete-confirm]").textContent()) ?? "";
-  check("C2: with nothing ticked the question counts every unordered part", /Delete \d+ parts?\?/.test(txt) && /1 ordered part is kept/.test(txt), txt.slice(0, 120));
+  check("C2: with nothing ticked the question counts every unordered part", /Delete \d+ parts?( on J-\d+)?\?/.test(txt) && /1 part is kept/.test(txt), txt.slice(0, 120));
   await page.locator("[data-delete-confirm-yes]").click();
   await until(async () => ((await page.locator("[data-row-key]").count()) === 1 ? "yes" : null), 30, 500);
   check("C6: only the ordered row is left on the screen", (await page.locator("[data-row-key]").count()) === 1 && /E2e ordered part/.test((await page.locator("[data-row-key]").first().textContent()) ?? ""));

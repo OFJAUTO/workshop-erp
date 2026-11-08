@@ -7,8 +7,8 @@
 - **Restore proven (TEST database only, its scratch schema):** the copy was downloaded from Backblaze, decrypted and
   restored – 118 tables, 259,764 rows, every count matches the dump. Against live now (read-only counts):
   jobs 52 / 52, invoices 24 / 24, payments 21 / 21.
-- **Storage copy:** started by hand at 17:12 UTC; see the handover for its result (photos, videos and PDFs, about
-  0.65 GB of photos plus the videos).
+- **Storage copy, run now: OK.** 1,995 files (photos, videos, PDFs), 2,152.5 MB, each encrypted, in Backblaze under
+  `storage/`. All three watch rows (nightly, weekly, monthly) are green.
 - **The encryption key's other copy:** there was one in an old Claude scratch folder (temporary, gets cleaned). It is
   now on your Desktop as **OFJ-BACKUP-KEY.txt** (the key is never printed in chat, git or logs). The restore test in
   GitHub printed the key's fingerprint `ecfbe604` (the first 8 characters of its SHA-256, not the key), and the
@@ -120,3 +120,17 @@ return or a fee puts the cost back (job or overhead). A credit to use is shown, 
 - Open jobs whose profit estimate goes DOWN (0.5% of the total; no open job has an unsettled link payment):
   J-00017 54.50 · J-00317 72.90 · J-00460 43.50 · J-00491 99.75 · J-00492 50.00 · J-00609 42.15 · J-00940 100.00 ·
   J-00975 71.50 · J-00977 27.50 · J-00980 37.50 · J-00990 33.08 · J-00991 105.00 – AED 737.38 in all.
+
+## End of batch
+
+- `npm run test:layout` (every page, every size, pop-ups, 130% text, the document check): clean; 50 document checks.
+- `npm run test:security`: all passed (`purchase_returns` is in the server-only list).
+- `npm run test:sim`: 341 checks, 0 failed (25 paths; the run's own time cap was raised from 55 to 150 minutes).
+- `npm run check:live` (read-only): 33 of 33.
+- Queued test fixes, done:
+  - test-t brought to today's rules: 56 of 57, and the last check's wording was fixed against the real text. The two checks about the owner's own services list now run only with CHECK_SERVICE_DATA.
+  - test-c 67 of 67 (waits for slow saves; today's VAT and heading words).
+  - test-g 44 of 44 (an ordered part with nothing arrived is now cancelled in the sweep, so the kept part is a received one).
+  - test-f 92 of 92. It found a real fault: a 22-character part number was cut at 1920 px, so the wide-screen part number column is now 19 rem (the name column 10.5 to 14.5 rem).
+  - test-s3-payreport 76 of 76 (its waits are three times longer on this PC).
+  - The other suites that pressed the old "Send LPO" button now use the new `sendLpo` helper.
