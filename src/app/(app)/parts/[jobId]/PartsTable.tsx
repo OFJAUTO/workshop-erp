@@ -67,6 +67,8 @@ export type TableRow = {
   /** On an LPO (bought from a supplier): "Correct the cost…" never offers our stock for it. */
   onLpo?: boolean;
   orderLabel: string | null;
+  /** The same part number on a different part of this job (8 November 2026): red, and the part cannot go on an LPO. */
+  repeatedNumber?: string | null;
   diagramUrl: string | null;
   question: string | null;
   answer: string | null;
@@ -922,6 +924,7 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
         {row.optionGroup ? <Chip tone="outline">Option</Chip> : null}
         {row.unavailable && !row.removed ? <Chip tone="amber">Not available</Chip> : null}
         {row.orderLabel ? <Chip tone="ink">{row.orderLabel}</Chip> : null}
+        {row.repeatedNumber && state !== "removed" ? <span className="inline-flex min-h-5 max-w-full flex-wrap items-center rounded-control border border-red-bar bg-red-soft px-2 py-0.5 text-[11px] font-bold text-red" data-repeated-pn>{row.repeatedNumber}</span> : null}
         {unitsReady && unitOf(v.unit) !== "pc" && num(v.cost_aed) > 0 && state !== "removed" ? <span className="shrink-0 text-[11px] font-semibold" data-per-unit={unitOf(v.unit)}>AED {aed(num(v.cost_aed))} {perUnitWords(unitOf(v.unit))} × {qtyWithUnit(qty, unitOf(v.unit))}</span> : null}
         {row.qtyMemory && !readOnly && (Math.abs(row.qtyMemory.qty - qty) > 0.005 || (unitsReady && row.qtyMemory.unit !== unitOf(v.unit))) ? <button type="button" onClick={() => change({ qty: String(row.qtyMemory!.qty), ...(unitsReady ? { unit: row.qtyMemory!.unit } : {}) })} className="shrink-0 h-5 max-w-[60%] truncate rounded-control border border-ink bg-white px-2 text-[10px] font-bold" title="The quantity used last time on the same model (or make). Nothing changes until you tap it." data-qty-memory={`${row.qtyMemory.qty}${row.qtyMemory.unit}`}>{row.qtyMemory.words} · Use</button> : null}
         {row.estimate ? <EstimateLineExtras quotationId={estimate?.id ?? ""} lineId={partId ?? row.key} est={row.estimate} preparing={!!estimate?.preparing} canPrice={canPrice} onChecked={markChecked} /> : null}

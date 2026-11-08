@@ -11,7 +11,12 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Nothing.
+| # | What | What it does on live | Size |
+|---|---|---|---|
+| 1 | `scripts/photo-sizes-backfill.mjs --apply` (Section 2, storage only, no database change) | Adds the 400 px and 1600 px copies of every EXISTING photo under `_sizes/` in the same bucket. Never changes or deletes an original. New photos get their sizes by themselves since push f3c07b2. | 1,330 photos (750 gate-in, 421 inspection, 93 job files, 66 car pictures) = 2,660 new files, about 0.21 GB extra (165 KB per photo, measured on 12 samples). Read-only count: `docs/proof/2026-11-08-s2/backfill-count-live.txt`. |
+| 2 | `supabase/data-fixes/2026-11-08-lpo-check-bells.sql` (Section 3, bells only) | Three bells to the parts desk: J-00990 (124AA on two parts, on LPO-00062), J-00016 (30 parts at AED 1.00), J-00343 (one part at AED 1.00). Nothing else changes. | 3 bells × each active parts login |
+
+Before #1: no backup is needed (it only adds files); run it, then the count again (it should say 0 without sizes).
 
 ## Applied on 8 November 2026, morning (passkeys)
 

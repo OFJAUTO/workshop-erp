@@ -8,7 +8,9 @@ import { revalidatePath } from "next/cache";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { loadPartsChanges } from "@/lib/parts-changes-data";
 import { formatDate } from "@/lib/format";
-import { receivePartInFull, createMainLpo, lpoProblemWords, lpoProblemsFor, orderSupplierLpo, resendMainLpo, setPartExpected } from "@/lib/lpo";
+import { addPartsToOpenLpo, loadJobLpos, receivePartInFull, createMainLpo, lpoProblemWords, lpoProblemsFor, orderSupplierLpo, resendMainLpo, setPartExpected } from "@/lib/lpo";
+import { lpoSelectRows } from "@/lib/lpo-select-data";
+import { selectionProblem } from "@/lib/lpo-select";
 import { gmailConfigured, sendGmail } from "@/lib/gmail";
 import { notifyJobAdvisors, notifyRoles, notifyStaff } from "@/lib/notifications";
 import { loadPurchaseOrder } from "@/lib/parts-data";
@@ -45,6 +47,39 @@ export async function sendLpoForApproval(jobId: string) {
   // The deposit has not arrived: the owner hears that the LPO waits on it (override on the LPO page, or wait).
   if (r.poId) await warnOwnerIfDepositShort(jobId, r.poId, r.number ?? "");
   redirect(`/parts/${jobId}?message=${enc(`${r.number} sent for approval. After the one-tap approval, one LPO per supplier appears here with Copy, PDF and Ordered.`)}#lpo`);
+}
+
+/**
+ * SEND LPO FOR SELECTED (8 November 2026, Peter): only the parts the desk ticked go for approval; the rest stay
+ * "Approved – to order" for a later LPO. The ticks are checked again here with THE rule (lpoSelectRows): a repeated
+ * part number, an unfinished line or a cost under AED 5 never goes on an LPO. With an LPO already waiting for
+ * approval, the ticked parts join it (one request at a time).
+ */
+export async function sendSelectedLpo(jobId: string, partIds: string[]): Promise<{ error?: string; message?: string; number?: string }> {
+  const staff = await requirePermission("managePurchaseOrders");
+  if (staff.viewingAs) return { error: "View as is read-only." };
+  const ids = Array.from(new Set((partIds ?? []).filter((x) => typeof x === "string" && x.length > 10)));
+  const { rows } = await lpoSelectRows(jobId);
+  const problem = selectionProblem(rows, ids);
+  if (problem) return { error: problem };
+  const { main } = await loadJobLpos(jobId);
+  let number: string | undefined;
+  let poId: string | null = null;
+  if (main && main.status === "pending_approval") {
+    const r = await addPartsToOpenLpo(jobId, staff, { partIds: ids });
+    if (!r.added) return { error: `Could not add the parts to ${main.number}. Reload and try again.` };
+    number = main.number;
+    poId = main.id;
+  } else {
+    const r = await createMainLpo(jobId, staff, { partIds: ids });
+    if (r.error) return { error: r.error };
+    number = r.number;
+    poId = r.poId ?? null;
+    if (r.poId) await warnOwnerIfDepositShort(jobId, r.poId, r.number ?? "");
+  }
+  refresh(jobId, poId);
+  const left = rows.length - ids.length;
+  return { number, message: `${ids.length} part${ids.length === 1 ? "" : "s"} sent for approval on ${number}.${left > 0 ? ` ${left} stay${left === 1 ? "s" : ""} Approved – to order for a later LPO.` : ""}` };
 }
 
 /**

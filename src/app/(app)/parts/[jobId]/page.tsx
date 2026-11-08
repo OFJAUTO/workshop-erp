@@ -20,7 +20,7 @@ import { SupplierChargesStrip } from "./SupplierChargesStrip";
 import { loadCatalogue } from "@/lib/parts-catalogue";
 import { dubaiDate } from "@/lib/jobs";
 import { valuesOfPart, valuesOfRequest } from "@/lib/parts-pricing";
-import { rowState, type SupplierOption } from "@/lib/parts-rows";
+import { type SupplierOption } from "@/lib/parts-rows";
 import { reasonsFor } from "@/lib/reasons";
 import { PARTS_BUCKET, PART_SELECT, REQUEST_SELECT, signPaths, toPart } from "@/lib/quote-data";
 import { partAdvisorCols } from "@/lib/parts-data";
@@ -30,13 +30,14 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { pricingDone, reopenPricing } from "../actions";
-import { emailSupplierLpo, markSupplierOrdered, receiveTicked, resendForApproval, resendRefusedLpo, sendLpoForApproval, setPartExpectedDate } from "../lpo-actions";
+import { emailSupplierLpo, markSupplierOrdered, receiveTicked, resendForApproval, resendRefusedLpo, sendSelectedLpo, setPartExpectedDate } from "../lpo-actions";
 import { gmailConfigured } from "@/lib/gmail";
 import { SupplierLpoCard, type SupplierLpo } from "../SupplierLpoCard";
 import { PartsSteps } from "@/components/PartsSteps";
 import { depositState, depositShortText } from "@/lib/deposits";
 import { PartsTable, type TableRow } from "./PartsTable";
-import { SendLpoButton } from "./SendLpoButton";
+import { LpoSelect } from "./LpoSelect";
+import { lpoSelectRows } from "@/lib/lpo-select-data";
 import { refusalsReady } from "@/lib/lpo";
 import { costChecksFor } from "@/lib/part-cost-history";
 import { isSettledStatus, settledCostProblem } from "@/lib/part-cost-check";
@@ -47,6 +48,8 @@ import { supplierVatLookup, vatChargingSupplierNames } from "@/lib/supplier-vat"
 import { askerOfRequest, requestUnitOf, whoOfRole, type QtyWho } from "@/lib/part-units";
 import { lastQuantitiesFor } from "@/lib/part-memory";
 import { PLANNING_STATUSES } from "@/lib/pricing-done";
+import { JobTechnicianTag } from "@/components/JobTechnicianTag";
+import { jobTechniciansFor } from "@/lib/job-technician";
 
 export const dynamic = "force-dynamic";
 
@@ -230,6 +233,18 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const labelsToPrint = parts.filter((p) => live(p) && (p.order_status === "received" || p.order_status === "partly_received") && String(rawById.get(p.id)?.issue_status ?? "none") !== "confirmed" && String(rawById.get(p.id)?.return_status ?? "none") === "none" && !rawById.get(p.id)?.not_needed_at);
   const hasApproved = approvedParts.length > 0 || lpos.suppliers.length > 0 || !!lpos.main;
   const pendingMain = lpos.main && lpos.main.status === "pending_approval" ? lpos.main : null;
+  // Send LPO for selected (8 November 2026): THE tick list and its rule; "x of y parts on LPO".
+  const lpoSelect = await lpoSelectRows(jobId);
+  const selectOf = new Map(lpoSelect.rows.map((r) => [r.id, r]));
+  const vatNames = await vatChargingSupplierNames();
+  const onLpoCount = approvedParts.filter((p) => !lpos.fromStock.some((f) => f.id === p.id) && (!!rawById.get(p.id)?.po_id || ["ordered", "partly_received", "received"].includes(String(p.order_status)))).length;
+  // Item 6: a line is never "Approved – to order" while it is not finished (or carries a repeated part number).
+  for (const r of rows) {
+    const sel = r.partId ? selectOf.get(r.partId) : null;
+    if (r.orderLabel === "Approved – to order" && sel && !sel.eligible && sel.red) r.orderLabel = "Approved – cannot order yet";
+    const rep = r.partId ? lpoSelect.repeated.get(r.partId) : null;
+    if (rep) r.repeatedNumber = rep;
+  }
   const supplierNames = Array.from(new Set(lpos.toOrder.map((p) => (p.supplier ?? "").trim()).filter(Boolean)));
   // Supplier amounts with VAT (5 November 2026): THE rule, per supplier (the summary, the cards and the bar below).
   const vatOf = await supplierVatLookup();
@@ -250,10 +265,10 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
       .filter((o) => o.lines.length);
   };
   // Lines still being priced (not removed, refused or unavailable): "Send LPO for approval" names them first.
-  const unfinishedNames = rows.filter((r) => !r.removed && !r.refused && !r.unavailable && rowState(r.values, { waitingApproval: r.waitingApproval }) === "not_finished").map((r) => r.name.toUpperCase());
   const car = [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
   // The car's advisor, in bold next to the job (6 November 2026, Peter); tap to ask. Internal only.
   const advisor = await jobAdvisorOf(jobId);
+  const technicians = (await jobTechniciansFor([jobId])).get(jobId) ?? null;
   const askParts = parts.filter((p) => p.is_active !== false).map((p) => ({ id: p.id, name: String(p.description ?? "") }));
   // Pricing done locks the rows until Edit; after the customer's approval the ordered rows are locked on their own.
   const pricingLocked = !inPlanning && !!job.parts_pricing_done_at && !job.parts_pricing_reopened_at;
@@ -277,6 +292,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
           <span className="flex flex-wrap items-center gap-2">
             <span>{car} · {job.job_number}</span>
             <JobAdvisorTag jobId={jobId} jobWords={`${job.job_number}${v ? ` · ${formatPlate(v)}` : ""}`} advisor={advisor} parts={askParts} canAsk={!staff.viewingAs} />
+            <JobTechnicianTag jobId={jobId} technicians={technicians} />
             <VinCopy vin={v?.vin ?? null} />
             {dangers.length ? <Badge tone="red">Dangerous to drive</Badge> : null}
           </span>
@@ -365,9 +381,10 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
           </div>
           <p className="text-sm" data-lpo-summary>{summaryText}</p>
           {pendingMain && lpos.mainChanges.length ? <p className="text-xs text-muted" data-lpo-changes>Since it was sent: {lpos.mainChanges.slice(0, 8).join(" · ")}{lpos.mainChanges.length > 8 ? " · …" : ""}. The approval shows the current list.</p> : null}
-          {lpos.toOrder.length && !pendingMain ? (
+          {lpoSelect.rows.length ? <p className="text-sm font-semibold" data-lpo-count>{onLpoCount} of {onLpoCount + lpoSelect.rows.length} approved part{onLpoCount + lpoSelect.rows.length === 1 ? "" : "s"} on an LPO</p> : null}
+          {lpoSelect.rows.length ? (
             canOrder ? (
-              <SendLpoButton action={sendLpoForApproval.bind(null, jobId)} unfinished={unfinishedNames} />
+              <LpoSelect rows={lpoSelect.rows} vatSupplierNames={vatNames} pendingNumber={pendingMain?.number ?? null} send={sendSelectedLpo.bind(null, jobId)} />
             ) : <p className="text-xs text-muted">Parts send the LPO for approval.</p>
           ) : null}
           {pendingMain ? (

@@ -8,12 +8,12 @@
 // m no-plate car → gate-in asks → plate added (duplicate refused first) → every page shows it ·
 // n advisor on parts pages (tag, ask/answer through the bells, the Advisor filter, never on supplier copies).
 import fs, { mkdirSync } from "node:fs";
-import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson } from "./pw-lib.mjs";
+import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson, sendLpo, confirmMoney } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -400,9 +400,8 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
   {
     const { browser, page } = await browserForId(partsId);
     await go(page, `${base}/parts/${jobId}`);
-    await page.locator("[data-send-lpo]").click();
-    await submitted(page);
-    check("a11: LPO sent, confirmed on screen — R1", /message=/.test(page.url()));
+    const lpoSent = await sendLpo(page);
+    check("a11: LPO sent, confirmed on screen — R1", !!lpoSent.message, lpoSent.error ?? "");
     await shot(page, "a11-lpo-sent-actor");
     await browser.close();
   }
@@ -1161,11 +1160,7 @@ await section("j", "parts changed after approval → resend for approval", async
   {
     const { browser, page } = await browserForId(partsId, { viewport: { width: 1500, height: 1300 } });
     await go(page, `${base}/parts/${jobId}`);
-    await page.locator("[data-send-lpo]").click();
-    // "Send anyway?" when a line is still open (answered: send).
-    await page.locator("[data-lpo-unfinished-send]").click({ timeout: 3000 }).catch(() => null);
-    await page.waitForURL(/message=|error=/, { timeout: 25000 }).catch(() => null);
-    const err = decodeURIComponent(page.url()).split("error=")[1];
+    const err = (await sendLpo(page)).error;
     if (err) console.log("   j1 send LPO said:", err.slice(0, 200));
     await browser.close();
   }
@@ -1454,9 +1449,7 @@ await section("l", "supplier amounts with VAT + LPO tab counts + cancelled LPOs"
     await go(page, `${base}/parts/${jobId}`);
     const cost = ((await page.locator("[data-cost-grand]").textContent()) ?? "").trim();
     check(`l1: the Parts page's Our cost counts VAT only for the VAT supplier: 963 + 48.15 + 100 = AED 1,111.15 incl. VAT ("${cost}")`, cost === "AED 1,111.15 incl. VAT");
-    await page.locator("[data-send-lpo]").click();
-    await page.locator("[data-lpo-unfinished-send]").click({ timeout: 3000 }).catch(() => null);
-    await page.waitForURL(/message=|error=/, { timeout: 25000 }).catch(() => null);
+    await sendLpo(page);
     await browser.close();
   }
   const main = (await sql("select id, number from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval' limit 1", [jobId]))[0];
@@ -2253,6 +2246,163 @@ await section("v", "part labels: exact 50 x 25 mm PDF pages, one per piece, fewe
   await browser.close();
   const anon = await fetch(`${base}/api/pdf/part-labels?test=1`);
   check("v9: nobody signed out gets a label", anon.status === 401);
+});
+
+/* ================================================================================================= */
+/* Path w — SEND LPO FOR SELECTED (8 November 2026, Peter): six approved lines over two suppliers plus  */
+/* two with a repeated part number. Tick 3 → only those go for approval, the rest stay to order; the    */
+/* repeated numbers are red and cannot be ticked; after the approval a second request sends the rest.  */
+/* ================================================================================================= */
+await section("w", "send LPO for selected parts + repeated part numbers", async () => {
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed.jobId;
+  const partsId = (await sql("select id from public.staff where role_id = 'parts' and is_active order by created_at limit 1"))[0].id;
+  await sql("update public.part_requests set status = 'unavailable', closed_reason = 'not needed (test)' where job_id = $1 and status = 'open'", [jobId]);
+  await sql("update public.part_items set is_active = false where job_id = $1", [jobId]);
+  const day = new Date(Date.now() + 4 * 3600000 + 2 * 86400000).toISOString().slice(0, 10);
+  const lines = [["E2E AIR FILTER W", "E2E-W-1", "E2E SUP A", 120], ["E2E OIL FILTER W", "E2E-W-2", "E2E SUP A", 60], ["E2E CABIN FILTER W", "E2E-W-3", "E2E SUP A", 80], ["E2E BRAKE DISC W", "E2E-W-4", "E2E SUP B", 900], ["E2E BRAKE PADS W", "E2E-W-5", "E2E SUP B", 400], ["E2E WIPER W", "E2E-W-6", "E2E SUP B", 50], ["E2E BATTERY W", "1234AA", "E2E SUP B", 700], ["E2E WINDSHIELD W", "1234AA", "E2E SUP A", 1500]];
+  for (const [name, pn, sup, cost] of lines) {
+    await sql("insert into public.part_items (job_id, description, part_number, quantity, confirmed_quantity, cost_aed, supplier, availability, delivery_date, confirm_status, part_type, priced_at, priced_by, order_status, created_by, updated_by) values ($1, $2, $3, 1, 1, $4, $5, 'to_order', $6, 'confirmed', 'genuine', now(), $7, 'to_order', $7, $7)", [jobId, name, pn, cost, sup, day, partsId]);
+  }
+  const ids = Object.fromEntries((await sql("select id::text as id, description from public.part_items where job_id = $1 and is_active", [jobId])).map((r) => [r.description.toUpperCase(), r.id]));
+  if (Object.keys(ids).length !== 8) throw new Error(`seed: ${Object.keys(ids).length} parts`);
+  const { browser, page } = await browserForId(partsId, { viewport: { width: 1440, height: 900 } });
+  await go(page, `${base}/parts/${jobId}`);
+  const eligible = await page.locator("[data-lpo-line][data-lpo-eligible='1']").count();
+  const red = await page.locator("[data-lpo-why-red='1']").count();
+  check(`w1: 6 lines can be ticked, the 2 with part number 1234AA are red and cannot (${eligible} / ${red})`, eligible === 6 && red === 2);
+  check("w1b: the repeated part number shows red on the parts table too", (await page.locator("[data-repeated-pn]").count()) >= 2);
+  check("w1c: the red rows' tick boxes are off", await page.locator(`[data-lpo-pick="${ids["E2E BATTERY W"]}"]`).isDisabled());
+  await page.locator("#lpo").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${shots}/w1-lpo-select-repeated.png` });
+  // w2. Tick 3: two from A, one from B. The preview shows two supplier blocks with incl.-VAT amounts.
+  for (const n of ["E2E AIR FILTER W", "E2E OIL FILTER W", "E2E BRAKE DISC W"]) await page.locator(`[data-lpo-pick="${ids[n]}"]`).check();
+  await page.locator("[data-send-lpo-selected]").click();
+  await page.locator("[data-lpo-preview]").waitFor({ timeout: 10000 });
+  const blocks = await page.locator("[data-lpo-preview-supplier]").count();
+  check(`w2: the preview shows the 2 suppliers (${blocks})`, blocks === 2);
+  await page.screenshot({ path: `${shots}/w2-lpo-select-preview.png` });
+  await page.locator("[data-lpo-preview-confirm]").click();
+  await page.locator("[data-lpo-selected-done], [data-lpo-selected-error]").first().waitFor({ timeout: 60000 });
+  const said = ((await page.locator("[data-lpo-selected-done]").textContent().catch(() => "")) ?? "");
+  check(`w2b: sent, the answer next to the button ("${said.slice(0, 120)}")`, /3 parts sent for approval/.test(said) && /stay/.test(said));
+  const main = (await sql("select id, number from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval' limit 1", [jobId]))[0];
+  const onMain = Number((await sql("select count(*)::int as n from public.purchase_order_lines where po_id = $1 and is_active", [main?.id]))[0]?.n ?? 0);
+  const waiting = Number((await sql("select count(*)::int as n from public.part_items where job_id = $1 and is_active and order_status = 'to_order' and po_id is null", [jobId]))[0].n);
+  check(`w3: only the 3 ticked parts are on ${main?.number} (${onMain}); 5 stay Approved – to order (${waiting})`, onMain === 3 && waiting === 5);
+  await go(page, `${base}/parts/${jobId}`);
+  const count = ((await page.locator("[data-lpo-count]").textContent().catch(() => "")) ?? "");
+  check(`w4: the page says "3 of 8 approved parts on an LPO" ("${count}")`, /3 of 8/.test(count));
+  await browser.close();
+  // w5. The owner approves the first request; then the desk sends the other three good lines.
+  {
+    const { browser: b, page: p } = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+    await go(p, `${base}/parts/orders/${main.id}`);
+    await confirmMoney(p, "lpo-approve");
+    await p.waitForURL(/message=|error=/, { timeout: 30000 }).catch(() => null);
+    await b.close();
+  }
+  const approved = (await sql("select status from public.purchase_orders where id = $1", [main.id]))[0]?.status;
+  check(`w5: the first request is approved (${approved})`, approved === "approved");
+  {
+    const { browser: b, page: p } = await browserForId(partsId, { viewport: { width: 1440, height: 900 } });
+    await go(p, `${base}/parts/${jobId}`);
+    const r = await sendLpo(p, { partIds: [ids["E2E CABIN FILTER W"], ids["E2E BRAKE PADS W"], ids["E2E WIPER W"]] });
+    check(`w6: a second request for the rest ("${(r.message ?? r.error ?? "").slice(0, 100)}")`, !!r.message);
+    await b.close();
+  }
+  const second = (await sql("select id, number from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval' limit 1", [jobId]))[0];
+  const onSecond = Number((await sql("select count(*)::int as n from public.purchase_order_lines where po_id = $1 and is_active", [second?.id]))[0]?.n ?? 0);
+  const left = (await sql("select description from public.part_items where job_id = $1 and is_active and order_status = 'to_order' and po_id is null order by description", [jobId])).map((r) => r.description.toUpperCase());
+  check(`w7: ${second?.number} carries the 3 others; only the 2 red lines stay (${left.join(", ")})`, onSecond === 3 && left.length === 2 && left.every((n) => /BATTERY|WINDSHIELD/.test(n)));
+});
+
+/* ================================================================================================= */
+/* Path x — APPROVE EACH SUPPLIER SEPARATELY (8 November 2026, LPO-00059): a 3-supplier request.        */
+/* Approve 2 (each its own LPO at once), refuse 1 with a reason, the desk replaces it, the replacement  */
+/* joins the same request, approve it: the request is then approved with 3 supplier LPOs.             */
+/* ================================================================================================= */
+await section("x", "approve each supplier separately in one LPO request", async () => {
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed.jobId;
+  const partsId = (await sql("select id from public.staff where role_id = 'parts' and is_active order by created_at limit 1"))[0].id;
+  await sql("update public.part_requests set status = 'unavailable', closed_reason = 'not needed (test)' where job_id = $1 and status = 'open'", [jobId]);
+  await sql("update public.part_items set is_active = false where job_id = $1", [jobId]);
+  const day = new Date(Date.now() + 4 * 3600000 + 2 * 86400000).toISOString().slice(0, 10);
+  const SUP = { A: "E2E SPAREIN X", B: "E2E AL GHANDI X", C: "E2E MEZAN X", D: "E2E OTHER X" };
+  for (const [name, pn, sup, cost] of [["E2E SENSOR X", "E2E-X-1", SUP.A, 340], ["E2E HOSE X", "E2E-X-2", SUP.B, 890], ["E2E MODULE X", "E2E-X-3", SUP.C, 6200]]) {
+    await sql("insert into public.part_items (job_id, description, part_number, quantity, confirmed_quantity, cost_aed, supplier, availability, delivery_date, confirm_status, part_type, priced_at, priced_by, order_status, created_by, updated_by) values ($1, $2, $3, 1, 1, $4, $5, 'to_order', $6, 'confirmed', 'genuine', now(), $7, 'to_order', $7, $7)", [jobId, name, pn, cost, sup, day, partsId]);
+  }
+  {
+    const { browser, page } = await browserForId(partsId, { viewport: { width: 1440, height: 900 } });
+    await go(page, `${base}/parts/${jobId}`);
+    const r = await sendLpo(page);
+    check(`x1: the desk sends the 3-supplier request ("${(r.message ?? r.error ?? "").slice(0, 80)}")`, !!r.message);
+    await browser.close();
+  }
+  const main = (await sql("select id::text as id, number from public.purchase_orders where job_id = $1 and kind = 'main' and status = 'pending_approval' limit 1", [jobId]))[0];
+  if (!main) throw new Error("x1: no request");
+  const owner = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  const p = owner.page;
+  const approveSupplier = async (name) => {
+    await go(p, `${base}/parts/orders/${main.id}`);
+    await p.locator(`[data-supplier-decide="${name}"] [data-confirm-open]`).click();
+    await p.locator(`[data-confirm-yes-money="lpo-approve-supplier"]`).click();
+    await p.waitForURL(/message=|error=/, { timeout: 30000 }).catch(() => null);
+    return decodeURIComponent(p.url());
+  };
+  await go(p, `${base}/parts/orders/${main.id}`);
+  check(`x2: three suppliers, each with its own Approve (${await p.locator("[data-supplier-decide]").count()})`, (await p.locator("[data-supplier-decide]").count()) === 3);
+  const u1 = await approveSupplier(SUP.A);
+  check("x3: Sparein approved on its own", /approved/.test(u1) && !/error=/.test(u1), u1.slice(-120));
+  const childA = (await sql("select number, status from public.purchase_orders where job_id = $1 and kind = 'supplier' and supplier_name ilike $2", [jobId, SUP.A]))[0];
+  const mainNow = (await sql("select status from public.purchase_orders where id = $1", [main.id]))[0]?.status;
+  check(`x4: Sparein is its own LPO straight away (${childA?.number} ${childA?.status}); the request still waits (${mainNow})`, childA?.status === "approved" && mainNow === "pending_approval");
+  await approveSupplier(SUP.B);
+  await go(p, `${base}/parts/orders/${main.id}`);
+  const states = ((await p.locator("[data-supplier-states]").textContent().catch(() => "")) ?? "");
+  check(`x5: "2 of 3 suppliers approved · 1 waiting" ("${states}")`, /2 of 3 suppliers approved · 1 waiting/.test(states));
+  await p.screenshot({ path: `${shots}/x5-two-of-three-approved.png`, fullPage: true });
+  {
+    const { browser, page } = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+    await go(page, `${base}/parts/orders?tab=pending`);
+    const row = ((await page.locator(`[data-lpo-row="${main.number}"] [data-lpo-row-suppliers]`).textContent().catch(() => "")) ?? "");
+    check(`x6: the LPO list shows each supplier's state ("${row}")`, /✓/.test(row) && /waiting/.test(row));
+    await browser.close();
+  }
+  // x7. Refuse the third with a reason; it goes back to the desk.
+  await p.locator(`[data-supplier-refuse="${SUP.C}"] summary`).click();
+  await p.locator(`[data-supplier-refuse="${SUP.C}"] [data-supplier-refuse-reason]`).fill("Too dear, try another supplier");
+  await p.locator(`[data-supplier-refuse="${SUP.C}"] [data-supplier-refuse-send]`).click();
+  await p.waitForURL(/message=|error=/, { timeout: 30000 }).catch(() => null);
+  const refused = (await sql("select id::text as id, refused_reason, order_status from public.part_items where job_id = $1 and description ilike 'E2E MODULE X'", [jobId]))[0];
+  check(`x7: Mezan refused with the reason (${refused?.refused_reason})`, /Too dear/.test(refused?.refused_reason ?? "") && refused?.order_status === "none");
+  // x8. The desk replaces it with another supplier; the replacement joins the SAME request.
+  {
+    const { browser, page } = await browserForId(partsId, { viewport: { width: 1440, height: 900 } });
+    await go(page, `${base}/parts/${jobId}`);
+    await page.locator("[data-replace-part]").first().click();
+    let rep = null;
+    for (let i = 0; i < 20 && !rep; i++) { await sleep(1000); rep = (await sql("select id::text as id from public.part_items where replaced_part_id = $1 and is_active", [refused.id]))[0]; }
+    if (!rep) throw new Error("x8: no replacement row");
+    await sql("update public.part_items set supplier = $2, cost_aed = 5900, part_number = 'E2E-X-4', part_type = 'genuine', availability = 'to_order', delivery_date = $3, priced_at = now(), confirm_status = 'confirmed', order_status = 'to_order' where id = $1", [rep.id, SUP.D, day]);
+    await go(page, `${base}/parts/${jobId}`);
+    const r = await sendLpo(page, { partIds: [rep.id] });
+    check(`x8: the replacement joins ${main.number} ("${(r.message ?? r.error ?? "").slice(0, 90)}")`, !!r.message && r.message.includes(main.number));
+    await browser.close();
+  }
+  await go(p, `${base}/parts/orders/${main.id}`);
+  await confirmMoney(p, "lpo-approve");
+  await p.waitForURL(/message=|error=/, { timeout: 30000 }).catch(() => null);
+  const finalMain = (await sql("select status from public.purchase_orders where id = $1", [main.id]))[0]?.status;
+  const children = (await sql("select supplier_name from public.purchase_orders where job_id = $1 and kind = 'supplier' and status <> 'cancelled' order by supplier_name", [jobId])).map((r) => r.supplier_name.toUpperCase());
+  check(`x9: the request is approved (${finalMain}) with 3 supplier LPOs: ${children.join(", ")}`, finalMain === "approved" && children.length === 3 && !children.some((c) => /MEZAN/.test(c)));
+  if (childA?.number) {
+    const child = (await sql("select id::text as id from public.purchase_orders where number = $1", [childA.number]))[0];
+    await go(p, `${base}/parts/orders/${child.id}`);
+    await p.screenshot({ path: `${shots}/x9-child-lpo-one-supplier.png` });
+  }
+  await owner.browser.close();
 });
 
 const failed = summary();

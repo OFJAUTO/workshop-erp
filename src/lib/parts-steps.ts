@@ -59,7 +59,10 @@ export function partsSteps(i: PartsStepsInput): PartsStep[] {
   const toOrder = i.toOrder ?? nonStock.filter((p) => !p.po_id && !ORDERED.includes(p.order_status ?? "")).length;
   const orderedCount = nonStock.filter((p) => ORDERED.includes(p.order_status ?? "")).length;
   const settled = pending.length === 0;
-  const approvalDone = settled && approved.length > 0 && (nonStock.length === 0 || i.mainLpoStatus === "approved" || (orderedCount === nonStock.length && toOrder === 0));
+  const approvalDone = settled && approved.length > 0 && (nonStock.length === 0 || (i.mainLpoStatus === "approved" && toOrder === 0) || (orderedCount === nonStock.length && toOrder === 0));
+  // "x of y parts on LPO" (8 November 2026): the desk sends only the parts it ticks, so part of a car can wait.
+  const onLpoCount = nonStock.filter((p) => !!p.po_id || ORDERED.includes(p.order_status ?? "")).length;
+  const onLpoWords = nonStock.length && onLpoCount < nonStock.length ? ` · ${onLpoCount} of ${nonStock.length} parts on LPO` : "";
   const orderedDone = settled && approved.length > 0 && (nonStock.length === 0 || (orderedCount === nonStock.length && toOrder === 0));
   const receivedCount = approved.filter((p) => p.from_stock || p.order_status === "received" || p.received_qty + 0.005 >= p.quantity).length;
   const receivedDone = settled && approved.length > 0 && receivedCount === approved.length;
@@ -76,10 +79,10 @@ export function partsSteps(i: PartsStepsInput): PartsStep[] {
         approvalDone
           ? (nonStock.length ? "LPO approved" : "From stock, no LPO needed")
           : i.mainLpoStatus === "pending_approval"
-            ? "Waiting for the owner or accounts"
+            ? `Waiting for the owner or accounts${onLpoWords}`
             : pending.length
               ? `${newWords} need${pending.length === 1 ? "s" : ""} approval – Resend for approval`
-              : approved.length ? "Send the LPO for approval" : "Waiting for the customer's approval",
+              : approved.length ? (onLpoCount ? `${onLpoCount} of ${nonStock.length} parts on LPO – send the rest` : "Send the LPO for approval") : "Waiting for the customer's approval",
         needLpo ? `${orderedCount} of ${nonStockAll.length} ordered` : all.length ? "Our stock, nothing to order" : null,
         all.length ? `${receivedCount} of ${all.length} received` : null,
         all.length ? `Handover ${handedCount} of ${all.length}` : null,

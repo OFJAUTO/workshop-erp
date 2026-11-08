@@ -13,6 +13,13 @@ import { isOurStock, isPlaceholderSupplier, realPartNumber } from "./parts-rows"
 import { costConfirmReady, schemaReady } from "./schema-ready";
 import { lpoLineProblem, lpoProblemAdvice, type LpoProblem } from "./part-cost-check";
 import { costChecksFor, type PartForCheck } from "./part-cost-history";
+import { SELECTED_MARKER } from "./lpo-select";
+
+/** A job whose LPOs are made from ticked parts (any main LPO carrying the marker): nothing joins an LPO by itself. */
+async function jobUsesSelection(jobId: string): Promise<boolean> {
+  const { data } = await createAdminClient().from("purchase_orders").select("id").eq("job_id", jobId).eq("kind", "main").ilike("notes", `%${SELECTED_MARKER}%`).limit(1);
+  return (data ?? []).length > 0;
+}
 
 type Actor = { id: string; display_name: string };
 
@@ -147,14 +154,16 @@ const lineOf = (p: PartFull, i: number) => ({ part_item_id: p.id, position: i + 
  * "Send LPO for approval": the one main LPO for the job with every approved part still to order, whatever the
  * supplier. It waits for the owner or the head accountant. Parts from our own stock never go on it.
  */
-export async function createMainLpo(jobId: string, by: Actor, opts: { /** "Resend for approval" (5 November 2026): the changes since the customer's approval, told to the approvers. */ note?: string } = {}): Promise<{ error?: string; poId?: string; number?: string }> {
+export async function createMainLpo(jobId: string, by: Actor, opts: { /** "Resend for approval" (5 November 2026): the changes since the customer's approval, told to the approvers. */ note?: string; /** "Send LPO for selected" (8 November 2026): only these parts; the rest stay to order. Checked by the caller (lpoSelectRows). */ partIds?: string[] } = {}): Promise<{ error?: string; poId?: string; number?: string }> {
   const admin = createAdminClient();
   const { data: job } = await admin.from("jobs").select("id, job_number, is_open, status").eq("id", jobId).maybeSingle();
   // Part 4 (4 November 2026): a HELD job ("Order parts now" before the car arrives) is booked, not open —
   // its LPO is raised exactly like any other and gate-in opens the job itself.
   if (!job || (!job.is_open && job.status !== "booked")) return { error: "This job is closed." };
-  const { toOrder, main } = await loadJobLpos(jobId);
+  const { toOrder: allToOrder, main } = await loadJobLpos(jobId);
   if (main && main.status === "pending_approval") return { error: `${main.number} is already waiting for approval.` };
+  const toOrder = opts.partIds ? allToOrder.filter((p) => opts.partIds!.includes(p.id)) : allToOrder;
+  if (opts.partIds && toOrder.length !== opts.partIds.length) return { error: "A ticked part changed since the page was opened (it is no longer to order). Reload and tick again." };
   if (!toOrder.length) return { error: "Nothing to order: every approved part is from stock or already on an LPO." };
   // A real cost before anything is ordered (2.2): nothing is sent while one line has no real price.
   const problems = await lpoProblemsFor(jobId, toOrder.map((p) => p.id));
@@ -162,7 +171,7 @@ export async function createMainLpo(jobId: string, by: Actor, opts: { /** "Resen
   const lines = toOrder.map(lineOf);
   const total = round2(lines.reduce((a, l) => a + l.quantity * l.unit_cost, 0));
   const supplierNames = Array.from(new Set(toOrder.map((p) => (p.supplier ?? "").trim()).filter(Boolean)));
-  const { data: po, error } = await admin.from("purchase_orders").insert({ job_id: jobId, kind: "main", supplier_id: null, supplier_name: supplierNames.length === 1 ? supplierNames[0] : `${supplierNames.length} suppliers`, total_cost_aed: total, verify_token: randomBytes(18).toString("hex"), created_by: by.id, updated_by: by.id }).select("id, number").single();
+  const { data: po, error } = await admin.from("purchase_orders").insert({ job_id: jobId, kind: "main", supplier_id: null, supplier_name: supplierNames.length === 1 ? supplierNames[0] : `${supplierNames.length} suppliers`, total_cost_aed: total, verify_token: randomBytes(18).toString("hex"), ...(opts.partIds ? { notes: SELECTED_MARKER } : {}), created_by: by.id, updated_by: by.id }).select("id, number").single();
   if (error || !po) return { error: (error ? dbWords(error, "lib/lpo") : "Could not raise the LPO.") };
   const { data: created } = await admin.from("purchase_order_lines").insert(lines.map((l) => ({ ...l, po_id: po.id, created_by: by.id, updated_by: by.id }))).select("id, part_item_id");
   for (const l of created ?? []) await admin.from("part_items").update({ po_id: po.id, po_line_id: l.id, updated_by: by.id }).eq("id", l.part_item_id);
@@ -183,7 +192,7 @@ export async function createMainLpo(jobId: string, by: Actor, opts: { /** "Resen
  * At approval the main LPO is split into one LPO per supplier (LPO-00012-1, -2, -3), each with only that
  * supplier's parts. The parts point at their supplier LPO from here on; receiving happens there.
  */
-export async function splitMainLpo(mainId: string, by: Actor): Promise<{ created: { id: string; number: string; supplier: string }[] }> {
+export async function splitMainLpo(mainId: string, by: Actor, opts: { /** Approve each supplier separately (8 November 2026): only this supplier's parts become its LPO now. */ only?: string; /** Who approved this supplier and when (the main LPO itself may still be waiting). */ approver?: { id: string; at: string; overrideBy?: string | null; overrideReason?: string | null } } = {}): Promise<{ created: { id: string; number: string; supplier: string }[] }> {
   const admin = createAdminClient();
   const { data: raw } = await admin.from("purchase_orders").select(PO_SELECT).eq("id", mainId).maybeSingle();
   if (!raw) return { created: [] };
@@ -195,6 +204,7 @@ export async function splitMainLpo(mainId: string, by: Actor): Promise<{ created
     // Never "Our stock" or a stand-in supplier as an LPO's supplier (the gate stops them before approval).
     const raw = (p.supplier ?? "").trim();
     const key = raw && !isOurStock(raw) && !isPlaceholderSupplier(raw) ? raw : "Supplier to confirm";
+    if (opts.only !== undefined && key.toLowerCase() !== opts.only.trim().toLowerCase()) continue;
     groups.set(key, [...(groups.get(key) ?? []), p]);
   }
   // One car, one LPO family (5 November 2026, J-00985): a later approval on the same job - parts changed after the
@@ -217,7 +227,7 @@ export async function splitMainLpo(mainId: string, by: Actor): Promise<{ created
     }
     const lines = items.map(lineOf);
     const total = round2(lines.reduce((a, l) => a + l.quantity * l.unit_cost, 0));
-    const { data: po } = await admin.from("purchase_orders").insert({ job_id: main.job_id, kind: "supplier", parent_id: parentId, sub_number: next, number: `${parentNumber}-${next}`, supplier_id: supplierId, supplier_name: supplierName, status: "approved", approved_by: main.approved_by, approved_at: main.approved_at, deposit_override_by: main.deposit_override_by, deposit_override_reason: main.deposit_override_reason, total_cost_aed: total, verify_token: randomBytes(18).toString("hex"), created_by: by.id, updated_by: by.id }).select("id, number").single();
+    const { data: po } = await admin.from("purchase_orders").insert({ job_id: main.job_id, kind: "supplier", parent_id: parentId, sub_number: next, number: `${parentNumber}-${next}`, supplier_id: supplierId, supplier_name: supplierName, status: "approved", approved_by: opts.approver?.id ?? main.approved_by, approved_at: opts.approver?.at ?? main.approved_at, deposit_override_by: opts.approver ? (opts.approver.overrideBy ?? null) : main.deposit_override_by, deposit_override_reason: opts.approver ? (opts.approver.overrideReason ?? null) : main.deposit_override_reason, total_cost_aed: total, verify_token: randomBytes(18).toString("hex"), created_by: by.id, updated_by: by.id }).select("id, number").single();
     if (!po) continue;
     const { data: made } = await admin.from("purchase_order_lines").insert(lines.map((l) => ({ ...l, po_id: po.id, created_by: by.id, updated_by: by.id }))).select("id, part_item_id");
     for (const l of made ?? []) await admin.from("part_items").update({ po_id: po.id, po_line_id: l.id, updated_by: by.id }).eq("id", l.part_item_id);
@@ -376,18 +386,23 @@ const aedText = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractio
  *   - onto a NEW LPO for approval when the main one was already approved.
  * Before the first LPO, the desk's "Send LPO for approval" stays the step.
  */
-export async function addPartsToOpenLpo(jobId: string, by: Actor): Promise<{ added: number; number?: string; created?: boolean }> {
+export async function addPartsToOpenLpo(jobId: string, by: Actor, opts: { /** The desk ticked these parts onto the LPO waiting for approval (8 November 2026). */ partIds?: string[] } = {}): Promise<{ added: number; number?: string; created?: boolean }> {
   const admin = createAdminClient();
   const { data: job } = await admin.from("jobs").select("id, job_number, is_open").eq("id", jobId).maybeSingle();
   if (!job?.is_open) return { added: 0 };
   const { toOrder, main } = await loadJobLpos(jobId);
   if (!main) return { added: 0 };
-  const open = toOrder.filter((p) => p.availability !== "in_stock" && !isOurStock(p.supplier) && !p.not_needed_at);
+  // Since "Send LPO for selected" (8 November 2026) the desk decides what goes on an LPO: once a job has a main LPO
+  // made from ticked parts, nothing is swept onto an LPO by itself any more - the rest stay "Approved – to order".
+  if (!opts.partIds && (await jobUsesSelection(jobId))) return { added: 0 };
+  const open = toOrder.filter((p) => p.availability !== "in_stock" && !isOurStock(p.supplier) && !p.not_needed_at && (!opts.partIds || opts.partIds.includes(p.id)));
   // Only a part with a real cost joins an LPO (2.2): the others wait in the table until their price is real.
   const problems = await lpoProblemsFor(jobId, open.map((p) => p.id));
   const ready = open.filter((p) => !problems.has(p.id));
   if (!ready.length) return { added: 0 };
+  if (opts.partIds && ready.length !== opts.partIds.length) return { added: 0 };
   if (main.status !== "pending_approval") {
+    if (opts.partIds) return { added: 0 };
     // Already approved: the added parts get their own approval request (once every one of them is priced).
     if (ready.length !== open.length) return { added: 0 };
     const r = await createMainLpo(jobId, by);
@@ -594,4 +609,46 @@ export async function restorePendingLpoLines(jobId: string, partIds: string[], b
     const t = await retotalPo(poId, by.id);
     await notifyStaff(await approverIds(), { type: "po_approval", title: `${pending.get(poId)} updated: ${names.join(", ")} put back`, body: `New total ${aedText(t.total)}. The approval page shows the current list.`, jobId, href: `/parts/orders/${poId}` });
   }
+}
+
+/**
+ * APPROVE EACH SUPPLIER SEPARATELY (8 November 2026, LPO-00059): what a main LPO request holds, supplier by supplier.
+ * A supplier is "approved" once its parts moved to their own supplier LPO, "waiting" while its parts still point at
+ * the request, "refused" when its lines were refused and no replacement or removal has been decided yet.
+ */
+export type MainSupplierState = { supplier: string; state: "approved" | "waiting" | "refused"; poNumber: string | null };
+
+export async function mainSupplierStates(mainId: string): Promise<MainSupplierState[]> {
+  const admin = createAdminClient();
+  const { data: lineRows } = await admin.from("purchase_order_lines").select("part_item_id, is_active").eq("po_id", mainId);
+  const ids = Array.from(new Set((lineRows ?? []).map((l) => l.part_item_id as string | null).filter((x): x is string => !!x)));
+  const refusedOn = (await refusalsReady()) ? ((await admin.from("part_items").select("id, supplier, replacement_part_id, not_needed_at, removed_at").eq("refused_po_id", mainId)).data ?? []) : [];
+  const { data: parts } = ids.length ? await admin.from("part_items").select("id, supplier, po_id, is_active").in("id", ids) : { data: [] };
+  const poIds = Array.from(new Set((parts ?? []).map((p) => p.po_id as string | null).filter((x): x is string => !!x && x !== mainId)));
+  const { data: pos } = poIds.length ? await admin.from("purchase_orders").select("id, number").in("id", poIds) : { data: [] };
+  const numberOf = new Map((pos ?? []).map((x) => [x.id as string, x.number as string]));
+  const out = new Map<string, MainSupplierState>();
+  const key = (s: unknown) => String(s ?? "").trim() || "Supplier to confirm";
+  for (const p of parts ?? []) {
+    if (p.is_active === false) continue;
+    const k = key(p.supplier);
+    if (p.po_id === mainId) out.set(k.toLowerCase(), { supplier: k, state: "waiting", poNumber: null });
+    else if (p.po_id && !out.has(k.toLowerCase())) out.set(k.toLowerCase(), { supplier: k, state: "approved", poNumber: numberOf.get(p.po_id as string) ?? null });
+  }
+  for (const r of refusedOn) {
+    const k = key(r.supplier);
+    if (out.has(k.toLowerCase())) continue;
+    if (r.replacement_part_id || r.not_needed_at || r.removed_at) continue;
+    out.set(k.toLowerCase(), { supplier: k, state: "refused", poNumber: null });
+  }
+  return Array.from(out.values()).sort((a, b) => a.supplier.localeCompare(b.supplier));
+}
+
+/** The request is done once no supplier waits and no refused line waits for its replacement: it becomes "approved". */
+export async function finishMainIfDone(mainId: string, by: Actor): Promise<boolean> {
+  const admin = createAdminClient();
+  const states = await mainSupplierStates(mainId);
+  if (states.some((s) => s.state !== "approved") || !states.length) return false;
+  const { data } = await admin.from("purchase_orders").update({ status: "approved", approved_by: by.id, approved_at: new Date().toISOString(), updated_by: by.id }).eq("id", mainId).eq("status", "pending_approval").select("id");
+  return (data ?? []).length > 0;
 }

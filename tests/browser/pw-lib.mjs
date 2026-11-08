@@ -189,3 +189,21 @@ export async function doorRegister({ target, scopeId, path, fields = {}, cookie 
   const r = await fetch(`${base}/api/uploads/register`, { method: "POST", headers: { "Content-Type": "application/json", ...(cookie ? { cookie } : {}) }, body: JSON.stringify({ target, scopeId, path, ...fields }) });
   return { status: r.status, json: await r.json().catch(() => ({})) };
 }
+
+/**
+ * Send LPO for selected (8 November 2026): tick parts (all approved by default, or only these part ids), open the
+ * preview, confirm. Answers { message, error } as the screen shows them (the page refreshes itself, no redirect).
+ */
+export async function sendLpo(page, { partIds = null } = {}) {
+  await page.locator("[data-lpo-select]").waitFor({ timeout: 20000 });
+  if (partIds) for (const id of partIds) await page.locator(`[data-lpo-pick="${id}"]`).check();
+  else await page.locator("[data-lpo-select-all]").click();
+  await page.locator("[data-send-lpo-selected]").click();
+  await page.locator("[data-lpo-preview]").waitFor({ timeout: 10000 });
+  await page.locator("[data-lpo-preview-confirm]").click();
+  const out = page.locator("[data-lpo-selected-done], [data-lpo-selected-error]").first();
+  await out.waitFor({ timeout: 60000 }).catch(() => null);
+  const text = ((await out.textContent().catch(() => "")) ?? "").trim();
+  const isError = (await page.locator("[data-lpo-selected-error]").count()) > 0;
+  return isError ? { error: text } : { message: text };
+}
