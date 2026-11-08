@@ -7,6 +7,7 @@
 //   GitHub Actions: .github/workflows/offsite-restore-test.yml
 //   On the PC:  node --env-file=.env.local scripts/offsite/restore-test.mjs
 import { mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { b2Connect, b2Download, b2List, connectLive, connectTest, decryptFile, heartbeat, keyFromEnv, unTarGz } from "./lib.mjs";
@@ -84,11 +85,32 @@ try {
   if (!cust?.n) problems.push("no customers restored");
   if (!sett?.n) problems.push("the labour rate setting is missing");
 
+  /* 4. The three money tables against LIVE today (read-only counts). A difference is normal when
+     work happened since the copy was taken; it is reported, never a failure. */
+  const COMPARE = ["jobs", "invoices", "payments"];
+  const restoredCounts = {};
+  for (const t of COMPARE) {
+    const { rows: [r] } = await test.query(`select count(*)::int as n from restore_check."${t}"`).catch(() => ({ rows: [{ n: null }] }));
+    restoredCounts[t] = r?.n ?? null;
+  }
   await test.query("drop schema restore_check cascade");
+  const liveRead = await connectLive();
+  const liveCounts = {};
+  try {
+    await liveRead.query("set session characteristics as transaction read only");
+    for (const t of COMPARE) {
+      const { rows: [r] } = await liveRead.query(`select count(*)::int as n from public."${t}"`);
+      liveCounts[t] = r.n;
+    }
+  } finally { await liveRead.end(); }
+  const compareWords = COMPARE.map((t) => `${t} ${restoredCounts[t]} restored / ${liveCounts[t]} live now`).join(", ");
+  console.log(`Compared with live: ${compareWords}`);
+  const fp = createHash("sha256").update((process.env.BACKUP_ENCRYPTION_KEY ?? "").trim()).digest("hex").slice(0, 8);
+  console.log(`Encryption key fingerprint (first 8 of its sha256, not the key): ${fp}`);
 
   const ok = problems.length === 0;
   const words = ok
-    ? `Restored ${path.basename(newest)} into the test project: ${files.length} tables, ${inserted} rows, every count matches; newest job ${job.job_number}, ${cust.n} customers`
+    ? `Restored ${path.basename(newest)} into the test project: ${files.length} tables, ${inserted} rows, every count matches; newest job ${job.job_number}, ${cust.n} customers; ${compareWords}`
     : `RESTORE PROBLEMS on ${path.basename(newest)}: ${problems.slice(0, 3).join("; ")}${problems.length > 3 ? ` (+${problems.length - 3} more)` : ""}`;
   console.log(words);
 
