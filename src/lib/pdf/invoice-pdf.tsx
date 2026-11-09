@@ -1,3 +1,4 @@
+import { batchCell } from "@/lib/warranty";
 import { awaitsBank } from "@/lib/bank-status";
 import { SUPPLIER_VAT_PERCENT, supplierMoney } from "@/lib/supplier-money";
 import { NO_VAT_WORDS, supplierChargesVat } from "@/lib/supplier-rules";
@@ -240,7 +241,7 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
                 <WarrantySection
                   vehicle={[card.car, card.plate, card.vin ? `VIN ${card.vin}` : null].filter(Boolean).join(" · ")}
                   startNote={card.handoverDay ? `From the handover on ${formatDate(card.handoverDay)}` : "Starts on the handover day"}
-                  rows={card.rows.map((r) => ({ product: r.name, coverage: r.coverage, rollBatch: r.rollBatch ?? "—", cut: r.cut ?? "—", darkness: r.darkness ?? "—", period: r.period, validUntil: r.validUntil ? formatDate(r.validUntil) : "From handover" }))}
+                  rows={card.rows.map((r) => ({ product: r.name, coverage: r.coverage, rollBatch: batchCell(r), cut: r.cut ?? "—", darkness: r.darkness ?? "—", period: r.period, validUntil: r.validUntil ? formatDate(r.validUntil) : "From handover" }))}
                 />
                 <WarrantyPanel logo={logo} qr={warrantyQr} certificateNo={card.certificateNo} car={[card.car, card.plate].filter(Boolean).join(" · ")} status={customerWarrantyTitle(card.status)} />
               </>

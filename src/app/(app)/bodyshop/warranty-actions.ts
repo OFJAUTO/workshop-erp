@@ -80,6 +80,10 @@ export async function stageDoneWarrantyAction(jobId: string, stageId: string, fo
     await saveRows(jobId, asked, formData, staff, stageId);
     if (stage!.key === "qc" && card.rows.length) {
       const fresh = await warrantyCardOf(jobId, settings);
+      if (fresh?.missing.length) {
+        const { tellBatchMissing } = await import("@/lib/warranty-data");
+        await tellBatchMissing(jobId, fresh.rows, staff.id).catch(() => false);
+      }
       if (fresh?.missing.length) redirect(`/bodyshop/${jobId}?error=${enc(`Warranty details missing: ${fresh.missing.join(", ")}.`)}#stages`);
       if (formData.get("warranty_complete") !== "on") redirect(`/bodyshop/${jobId}?error=${enc("Tick \"Warranty details complete\" first.")}#stages`);
       await createAdminClient().from("jobs").update({ warranty_confirmed_at: new Date().toISOString(), warranty_confirmed_by: staff.id }).eq("id", jobId);

@@ -166,3 +166,14 @@ export function customerWarrantyTitle(s: WarrantyStatus): string {
   const c = customerWarrantyStatus(s);
   return c.finalCheck ? `${c.title} · ${c.finalCheck}` : c.title;
 }
+
+/**
+ * The roll / batch cell (9 November 2026, Section 6): ONLY PPF (coloured PPF too) and tint lines carry one; every other
+ * line (ceramic coatings, interior protection) shows none. A PPF or tint line never prints "—": several rolls read
+ * "R-0012, R-0013" as typed, and one still missing reads "To be confirmed".
+ */
+export function batchCell(r: { product: string; rollBatch: string | null }): string {
+  if (r.product !== "ppf" && r.product !== "tint") return "";
+  return r.rollBatch?.trim() || "To be confirmed";
+}
+export const hasBatch = (product: string) => product === "ppf" || product === "tint";

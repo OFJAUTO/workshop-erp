@@ -1,3 +1,4 @@
+import { batchCell, hasBatch } from "@/lib/warranty";
 import type { Metadata } from "next";
 import { Logo } from "@/components/Logo";
 import { companyFromSettings } from "@/lib/company";
@@ -78,7 +79,7 @@ export default async function WarrantyPage({ params }: { params: Promise<{ token
               <dt className="text-[#5F6368]">Coverage</dt><dd>{r.coverage}</dd>
               {r.cut ? <><dt className="text-[#5F6368]">Cutting method</dt><dd>{r.cut}</dd></> : null}
               {r.darkness ? <><dt className="text-[#5F6368]">Darkness</dt><dd>{r.darkness}</dd></> : null}
-              <dt className="text-[#5F6368]">Roll / batch</dt><dd>{r.rollBatch ?? "—"}</dd>
+              {hasBatch(r.product) ? <><dt className="text-[#5F6368]">Roll / batch</dt><dd data-warranty-batch>{batchCell(r)}</dd></> : null}
               <dt className="text-[#5F6368]">Warranty</dt><dd>{r.period}</dd>
               <dt className="text-[#5F6368]">Valid</dt><dd className="font-semibold">{r.start && r.validUntil ? `${formatDate(r.start)} to ${formatDate(r.validUntil)}` : "From the handover day"}</dd>
             </dl>

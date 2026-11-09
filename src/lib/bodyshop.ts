@@ -366,7 +366,11 @@ export async function setStageDone(stageId: string, actor: Actor, settings: Sett
     const card = await warrantyCardOf(job.id, settings);
     if (card?.rows.length) {
       if (stage.key === "qc") {
-        if (card.missing.length) return { error: `Warranty details missing: ${card.missing.join(", ")}.` };
+        if (card.missing.length) {
+          const { tellBatchMissing } = await import("./warranty-data");
+          await tellBatchMissing(job.id, card.rows, actor.id).catch(() => false);
+          return { error: `Warranty details missing: ${card.missing.join(", ")}.` };
+        }
         if (!card.confirmedAt) return { error: 'QC ticks "Warranty details complete" before QC is done.' };
       } else {
         const all = await loadStages(job.id);

@@ -38,9 +38,11 @@ export const loginCookiesById = (id) => login({ id });
 export const cookieHeader = async (roleOrId) => ((roleOrId.includes("-") ? await loginCookiesById(roleOrId) : await loginCookies(roleOrId)).map((c) => `${c.name}=${c.value}`).join("; "));
 
 async function open(cookies, opts) {
-  const browser = await chromium.launch({ executablePath: EDGE, headless: true });
+  // opts.args: extra browser switches (a fake camera file for the video recorder, 9 November 2026); opts.permissions: e.g. camera.
+  const browser = await chromium.launch({ executablePath: EDGE, headless: true, args: opts.args ?? [] });
   const context = await browser.newContext({ viewport: opts.viewport ?? { width: 1024, height: 768 }, hasTouch: !!opts.touch, isMobile: !!opts.mobile });
   await context.addCookies(cookies);
+  if (opts.permissions?.length) await context.grantPermissions(opts.permissions, { origin: base });
   // Waiting on you is closed by default (29 October 2026); the tests that act on its rows open it after every load, as
   // a person taps the bar. A test of the bar itself passes { waitingOpen: false }.
   if (opts.waitingOpen !== false) {

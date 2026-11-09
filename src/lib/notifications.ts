@@ -76,6 +76,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "quote_target", label: "Parts pricing or quotation past its target", locked: true },
   { type: "po_approval", label: "An LPO needs approval (owner or head accountant)", locked: true },
   { type: "parts_changed_after_approval", label: "Parts changed after the customer's approval on your car (revise the quotation if the price should change)", locked: true },
+  { type: "batch_missing", label: "A PPF or tint batch number is missing, so the warranty certificate waits (bodyshop manager, advisor)", locked: true },
   { type: "qty_reduced", label: "Fewer parts used than the customer approved: reduce the price (or an advance/refund is due)", locked: true },
   { type: "qty_keep_price", label: "Keeping the approved price although fewer parts were used (owner's decision)", locked: true },
   { type: "qty_after_invoice", label: "A part's quantity changed after its supplier invoice was entered (accounts)", locked: true },

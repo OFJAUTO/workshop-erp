@@ -8,12 +8,14 @@
 // m no-plate car → gate-in asks → plate added (duplicate refused first) → every page shows it ·
 // n advisor on parts pages (tag, ask/answer through the bells, the Advisor filter, never on supplier copies).
 import fs, { mkdirSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson, sendLpo, confirmMoney } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -2958,6 +2960,115 @@ await section("sec5", "simple part sticker", async () => {
   await pa.goto(`${base}${path}`);
   check(`k6: not signed in sees nothing but the sign-in page (${pa.url().replace(base, "")})`, pa.url().includes("/login"));
   await anon.close();
+});
+
+/* ================================================================================================= */
+/* Path sec6 — 9 November 2026, Section 6: the warranty certificate. The J-00974 kind of package (PPF,  */
+/* "ceramic heat rejection tint – side & rear windows", PPF ceramic coating): roll/batch only on PPF and  */
+/* tint, tint covers Glass, the missing batch is named, several rolls on one line, never "—".            */
+/* ================================================================================================= */
+await section("sec6", "warranty batch only for PPF and tint", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-09-warranty-batch";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "bodyshop-plan" })).json;
+  const jobId = seed?.jobId ?? seed?.job?.id;
+  if (!jobId) throw new Error(`seed failed: ${JSON.stringify(seed).slice(0, 200)}`);
+  await sql("update public.jobs set warranty_token = 'e2ewarrantys6token', gated_out_at = coalesce(gated_out_at, now()) where id = $1", [jobId]);
+  const owner = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  // w1. No batch yet: the bodyshop page names what is missing (PPF and tint batch only - no ceramic batch).
+  await go(owner.page, `${base}/bodyshop/${jobId}`);
+  const wtxt = ((await owner.page.textContent("body").catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check("w1: the warranty card asks for the PPF and tint batch", (wtxt.match(/Missing: roll or batch number/g) ?? []).length >= 2, wtxt.match(/missing[^.]{0,200}/i)?.[0] ?? "");
+  check("w1: the tint line covers Glass on the warranty card", /heat rejection tint\s*Glass/i.test(wtxt));
+  check("w1: no ceramic batch is asked", !/Ceramic batch number/i.test(wtxt));
+  // w2. The customer's certificate before the batch: never a dash on PPF or tint; tint covers Glass; ceramic has no batch row.
+  const anon = await (await import("playwright-core")).chromium.launch({ executablePath: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", headless: true });
+  const pa = await anon.newPage({ viewport: { width: 1440, height: 900 } });
+  await pa.goto(`${base}/warranty/e2ewarrantys6token`);
+  const before = await pa.locator("[data-warranty-batch]").allTextContents();
+  check(`w2: batch rows only for PPF and tint (${before.length})`, before.length === 2, JSON.stringify(before));
+  check("w2: a missing batch reads To be confirmed, never a dash", before.every((t) => t.trim() === "To be confirmed"));
+  const page1 = ((await pa.textContent("body").catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check("w2: the tint covers Glass", /Coverage\s*Glass/.test(page1), page1.match(/Coverage.{0,40}/g)?.join(" | ") ?? "");
+  check("w2: nothing says Paintwork and film for the window tint", !/heat rejection[^|]{0,80}Paintwork and film/i.test(page1));
+  // w3. The batches entered (PPF on 1.5 rolls): the certificate shows them, same number and dates.
+  const by = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  await sql("insert into public.warranty_entries (job_id, product, item_key, roll_batch, areas, entered_by, entered_at, created_by, updated_by) values ($1, 'ppf', '', 'R-PPF-0012, R-PPF-0013', jsonb_build_array('Full body'), $2, now(), $2, $2), ($1, 'tint', '', 'T-0451', '[]'::jsonb, $2, now(), $2, $2)", [jobId, by]);
+  await pa.goto(`${base}/warranty/e2ewarrantys6token`);
+  const after = await pa.locator("[data-warranty-batch]").allTextContents();
+  check(`w3: PPF shows both rolls, tint its roll (${after.join(" / ")})`, after.includes("R-PPF-0012, R-PPF-0013") && after.includes("T-0451"));
+  await pa.screenshot({ path: `${proof}/w3-certificate-batch-ppf-tint-only-1440.png`, fullPage: true }).catch(() => null);
+  await anon.close();
+  await owner.browser.close();
+});
+
+/* ================================================================================================= */
+/* Path sec7 — 9 November 2026, Section 7: gate-in videos much clearer. A fake 1920 x 1080 camera:      */
+/* the page records at 1080p, the progress shows, "Video uploaded ✓", the stored file is 1920 x 1080 as */
+/* recorded. A fake 640 x 360 camera is refused below 720p.                                             */
+/* ================================================================================================= */
+await section("sec7", "clear gate-in videos", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-09-clear-videos";
+  mkdirSync(proof, { recursive: true });
+  const scratch = path.join(os.tmpdir(), "ofj-fake-camera");
+  mkdirSync(scratch, { recursive: true });
+  /** A Y4M file the browser plays as its camera (a few moving grey frames). */
+  const y4m = (w, h, frames) => {
+    const file = path.join(scratch, `cam-${w}x${h}.y4m`);
+    const parts = [Buffer.from(`YUV4MPEG2 W${w} H${h} F30:1 Ip A1:1 C420jpeg\n`)];
+    for (let f = 0; f < frames; f++) {
+      const y = Buffer.alloc(w * h);
+      for (let r = 0; r < h; r++) y.fill((r + f * 37) % 220 + 20, r * w, (r + 1) * w);
+      parts.push(Buffer.from("FRAME\n"), y, Buffer.alloc((w / 2) * (h / 2), 128), Buffer.alloc((w / 2) * (h / 2), 128));
+    }
+    fs.writeFileSync(file, Buffer.concat(parts));
+    return file;
+  };
+  const seed = (await api("/api/e2e/stage", { stage: "assign" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  // The seed's gate-in is complete: its videos are taken off so the video step asks again.
+  await sql("update public.gate_in_media set kind = 'gate_out_photo' where job_id = $1 and kind in ('video_exterior', 'video_interior')", [jobId]);
+  const hi = y4m(1920, 1080, 6);
+  const b = await browserFor("owner", { viewport: { width: 1280, height: 900 }, args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", `--use-file-for-fake-video-capture=${hi}`], permissions: ["camera", "microphone"] });
+  await go(b.page, `${base}/jobs/${jobId}/media`);
+  const ext = b.page.locator('[data-media-item="video_exterior"]');
+  await ext.locator("[data-record-video]").click();
+  const q = ((await b.page.locator("[data-recorder-quality]").textContent({ timeout: 20000 }).catch(() => "")) ?? "");
+  check(`c7a: the page records at 1920 x 1080 (${q})`, q.startsWith("1920 × 1080"));
+  await b.page.locator("[data-recorder-start]").click();
+  await sleep(4000);
+  // Slow the line so the progress shows, then stop.
+  const cdp = await b.context.newCDPSession(b.page);
+  await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 200, downloadThroughput: 200_000, uploadThroughput: 150_000 });
+  await b.page.locator("[data-recorder-stop]").click();
+  await ext.locator("[data-video-pending]").waitFor({ timeout: 30000 }).catch(() => null);
+  await ext.screenshot({ path: `${proof}/c7-upload-progress-1280.png` }).catch(() => null);
+  const pendingTxt = ((await ext.locator("[data-video-pending]").textContent().catch(() => "")) ?? "");
+  check("c7b: the upload shows its progress", /Sending|%|Waiting|device|Processing/i.test(pendingTxt), pendingTxt.slice(0, 160));
+  await cdp.send("Network.emulateNetworkConditions", { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+  await ext.locator("[data-video-uploaded]").waitFor({ timeout: 120000 }).catch(() => null);
+  check("c7c: Video uploaded ✓", (await ext.locator("[data-video-uploaded]").count()) === 1);
+  // The stored file, exactly as recorded: its picture size read back by the browser.
+  const row = (await sql("select storage_path from public.gate_in_media where job_id = $1 and kind = 'video_exterior' order by created_at desc limit 1", [jobId]))[0];
+  const { createClient } = await import("@supabase/supabase-js");
+  const admin = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+  const { data: signed } = row ? await admin.storage.from("gate-in-media").createSignedUrl(row.storage_path, 600) : { data: null };
+  const { data: blob } = row ? await admin.storage.from("gate-in-media").download(row.storage_path) : { data: null };
+  const dims = signed?.signedUrl ? await b.page.evaluate(async (u) => await new Promise((res) => { const v = document.createElement("video"); v.muted = true; v.preload = "metadata"; v.onloadedmetadata = () => res({ w: v.videoWidth, h: v.videoHeight }); v.onerror = () => res(null); setTimeout(() => res(null), 15000); v.src = u; }), signed.signedUrl) : null;
+  const mb = blob ? +(blob.size / 1048576).toFixed(2) : null;
+  fs.writeFileSync(`${proof}/c7-new-video.json`, JSON.stringify({ path: row?.storage_path ?? null, width: dims?.w ?? null, height: dims?.h ?? null, mb }, null, 2));
+  check(`c7d: the stored video is 1920 x 1080 as recorded (${dims ? `${dims.w} x ${dims.h}` : "unread"}, ${mb} MB)`, dims?.w === 1920 && dims?.h === 1080);
+  await b.browser.close();
+  // c7e. A camera that only gives 640 x 360: refused, nothing can be recorded.
+  const lo = y4m(640, 360, 4);
+  const l = await browserFor("owner", { viewport: { width: 1280, height: 900 }, args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream", `--use-file-for-fake-video-capture=${lo}`], permissions: ["camera", "microphone"] });
+  await go(l.page, `${base}/jobs/${jobId}/media`);
+  await l.page.locator('[data-media-item="video_interior"] [data-record-video]').click();
+  const err = ((await l.page.locator("[data-recorder-error]").textContent({ timeout: 20000 }).catch(() => "")) ?? "");
+  check("c7e: below 720p is refused with a message", /only gives 640 × 360/.test(err), err.slice(0, 160));
+  check("c7e: recording cannot start", await l.page.locator("[data-recorder-start]").isDisabled().catch(() => false));
+  await l.browser.close();
 });
 
 const failed = summary();

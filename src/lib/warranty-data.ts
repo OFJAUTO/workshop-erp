@@ -113,16 +113,17 @@ async function fittedOf(jobId: string): Promise<Cand[]> {
     const parts = l.package_items ? packageParts(l.package_items) : null;
     if (parts) {
       for (const it of parts.items) {
-        if (isPpfFilmItem(it.label)) add("ppf", "", it.label, it.warranty, cut, l.film_colour ?? null);
-        else if (isTintText(it.label)) add("tint", "", it.label, it.warranty, null, null);
+        // Film on glass is tint first (9 November 2026, J-00974's "ceramic heat rejection film – side & rear windows").
+        if (isTintText(it.label)) add("tint", "", it.label, it.warranty, null, null);
+        else if (isPpfFilmItem(it.label)) add("ppf", "", it.label, it.warranty, cut, l.film_colour ?? null);
         else if (/ceramic|coating/i.test(it.label)) add("ceramic", slug(it.label), it.label, it.warranty, null, null);
       }
       continue;
     }
     const title = l.title ?? "";
     if (kind === "ppf_removal" || /remov/i.test(title)) continue;
-    if (kind === "ppf" || kind === "coloured_ppf" || (isPpfText(title) && !/ceramic|coating|tint/i.test(title))) add("ppf", "", title, null, cut, l.film_colour ?? null);
-    else if (kind === "tint" || isTintText(title)) add("tint", "", title, null, null, null);
+    if (kind === "tint" || (kind !== "ppf" && kind !== "coloured_ppf" && isTintText(title))) add("tint", "", title, null, null, null);
+    else if (kind === "ppf" || kind === "coloured_ppf" || (isPpfText(title) && !/ceramic|coating|tint/i.test(title))) add("ppf", "", title, null, cut, l.film_colour ?? null);
     else if (/ceramic|coating/i.test(title)) add("ceramic", slug(title), title, null, null, null);
   }
   const order: WarrantyProduct[] = ["ppf", "tint", "ceramic"];
@@ -179,7 +180,9 @@ export async function warrantyCardOf(jobId: string, settings: Settings, opts: { 
       cut = co.note ? `${co.short} (${co.note})` : co.short;
     } else if (c.product === "tint") {
       name = (c.labels.find((x) => /tint/i.test(x)) ?? label).split(/\s+[-–—]\s+/)[0].trim() || "Window tint";
-      coverage = tintCoverageOf(spec, c.labels);
+      // 9 November 2026: every tint line covers "Glass" - with the windows when the tint spec names them.
+      const windows = spec ? tintCoverageOf(spec, []) : "";
+      coverage = windows && windows !== "Windows" ? `Glass – ${windows.charAt(0).toLowerCase()}${windows.slice(1)}` : "Glass";
       darkness = tintSummary(spec);
     } else {
       name = e?.product_name?.trim() || label;
@@ -193,10 +196,10 @@ export async function warrantyCardOf(jobId: string, settings: Settings, opts: { 
       if (!r.rollBatch) missing.push("PPF film roll or batch number");
       if (!r.areas.length) missing.push("PPF areas covered");
     } else if (r.product === "tint") {
-      if (!r.rollBatch) missing.push("Tint roll number");
+      if (!r.rollBatch) missing.push("Tint roll or batch number");
     } else {
+      // Ceramic coatings and interior protection: the product only - no roll or batch row (9 November 2026).
       if (!r.productName) missing.push(`Ceramic product (${r.label})`);
-      if (!r.rollBatch) missing.push(`Ceramic batch number (${r.label})`);
     }
   }
   const mechanical = job.department && job.department !== "bodyshop" ? { months: terms.mechanical.months, period: periodWords(terms.mechanical.months), start: handoverDay, validUntil: handoverDay ? addMonthsIso(handoverDay, terms.mechanical.months) : null } : null;
@@ -254,8 +257,8 @@ export function stageAsks(stage: { key: string }, stageKeys: string[], rows: War
 /** The words that say what a row still needs (empty when complete). */
 export function rowMissing(r: WarrantyRow): string[] {
   if (r.product === "ppf") return [!r.rollBatch ? "roll or batch number" : null, !r.areas.length ? "areas covered" : null].filter((x): x is string => !!x);
-  if (r.product === "tint") return !r.rollBatch ? ["roll number"] : [];
-  return [!r.productName ? "product" : null, !r.rollBatch ? "batch number" : null].filter((x): x is string => !!x);
+  if (r.product === "tint") return !r.rollBatch ? ["roll or batch number"] : [];
+  return [!r.productName ? "product" : null].filter((x): x is string => !!x);
 }
 
 /** Save one product's details (the stage's Done, or the Warranty details card). */
@@ -265,4 +268,25 @@ export async function saveWarrantyEntry(jobId: string, input: { product: Warrant
   const { data: have } = await admin.from("warranty_entries").select("id").eq("job_id", jobId).eq("product", input.product).eq("item_key", input.itemKey).eq("is_active", true).abortSignal(new AbortController().signal).maybeSingle();
   if (have) await admin.from("warranty_entries").update(row).eq("id", have.id);
   else await admin.from("warranty_entries").insert({ job_id: jobId, product: input.product, item_key: input.itemKey, ...row, created_by: actor.id });
+}
+
+/**
+ * "Batch number missing for: <items>" (9 November 2026, Section 6): a PPF or tint line with no roll/batch holds the
+ * certificate back; the bodyshop manager and the advisors in charge hear it (once a day per car).
+ */
+export async function tellBatchMissing(jobId: string, rows: WarrantyRow[], byStaffId: string | null): Promise<boolean> {
+  const items = rows.filter((r) => (r.product === "ppf" || r.product === "tint") && !r.rollBatch).map((r) => r.name);
+  if (!items.length) return false;
+  const admin = createAdminClient();
+  const since = new Date(Date.now() - 20 * 3600_000).toISOString();
+  const { data: was } = await admin.from("job_events").select("id").eq("job_id", jobId).eq("event_type", "batch_missing").gte("created_at", since).limit(1);
+  if ((was ?? []).length) return false;
+  const words = `Batch number missing for: ${items.join(", ")}`;
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "batch_missing", note: `${words}. The warranty certificate waits for it.`, created_by: byStaffId });
+  const { notifyManagers, notifyStaff, jobAdvisorIds } = await import("./notifications");
+  const { data: job } = await admin.from("jobs").select("job_number").eq("id", jobId).maybeSingle();
+  const n = { type: "batch_missing", title: `${words} · ${job?.job_number ?? ""}`, body: "Pick the roll on the car's Warranty details (or type it): the certificate is issued once it is there.", jobId, href: `/bodyshop/${jobId}#warranty` };
+  await notifyManagers("bodyshop", n);
+  await notifyStaff(await jobAdvisorIds(jobId), n);
+  return true;
 }

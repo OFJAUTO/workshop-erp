@@ -1,3 +1,4 @@
+import { batchCell } from "@/lib/warranty";
 import "server-only";
 import { customerWarrantyTitle } from "@/lib/warranty";
 import { Text, View, renderToBuffer } from "@react-pdf/renderer";
@@ -25,7 +26,7 @@ export async function renderWarrantyPdf(card: WarrantyCard, verifyUrl: string, s
       <WarrantySection
         vehicle={[card.car, card.plate, card.vin ? `VIN ${card.vin}` : null].filter(Boolean).join(" · ")}
         startNote={card.handoverDay ? `From the handover on ${formatDate(card.handoverDay)}` : "Starts on the handover day"}
-        rows={card.rows.map((r) => ({ product: r.name, coverage: r.coverage, rollBatch: r.rollBatch ?? "—", cut: r.cut ?? "—", darkness: r.darkness ?? "—", period: r.period, validUntil: r.validUntil ? formatDate(r.validUntil) : "From handover" }))}
+        rows={card.rows.map((r) => ({ product: r.name, coverage: r.coverage, rollBatch: batchCell(r), cut: r.cut ?? "—", darkness: r.darkness ?? "—", period: r.period, validUntil: r.validUntil ? formatDate(r.validUntil) : "From handover" }))}
       />
       <WarrantyPanel logo={logo} qr={panelQr} certificateNo={card.certificateNo} car={[card.car, card.plate].filter(Boolean).join(" · ")} status={customerWarrantyTitle(card.status)} />
       <View style={{ marginTop: px(16) }}>

@@ -224,5 +224,9 @@ export function tintCostFactor(spec: TintSpec | null, doubleLayerHours: number):
 /** Whether a document line or package item is tint work at all. */
 export function isTintText(s: string | null | undefined): boolean {
   // A check visit ("tint recheck", "10-day check") names tint but fits none (30 October 2026).
-  return /\btint(s|ing|ed)?\b|window film|wind(shield|screen) film|roof film/i.test(s ?? "") && !/re-?check|\bcheck\b|inspect|after-?care/i.test(s ?? "");
+  // 9 November 2026 (J-00974): "OFJ ceramic heat rejection film – side & rear windows / windshield / glass roof" is window
+  // tint, never a ceramic coating - film on glass is tint whatever else its name says.
+  const t = s ?? "";
+  const glassFilm = /heat[\s-]*rejection|\bfilm\b[^.]*\b(windows?|wind(shield|screen)|glass roof|sun ?roof|glass)\b|\b(windows?|wind(shield|screen)|glass roof|sun ?roof)\b[^.]*\bfilm\b/i.test(t);
+  return (/\btint(s|ing|ed)?\b|window film|wind(shield|screen) film|roof film/i.test(t) || glassFilm) && !/re-?check|\bcheck\b|inspect|after-?care/i.test(t);
 }
