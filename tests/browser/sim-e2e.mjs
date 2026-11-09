@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -3069,6 +3069,145 @@ await section("sec7", "clear gate-in videos", async () => {
   check("c7e: below 720p is refused with a message", /only gives 640 × 360/.test(err), err.slice(0, 160));
   check("c7e: recording cannot start", await l.page.locator("[data-recorder-start]").isDisabled().catch(() => false));
   await l.browser.close();
+});
+
+/* ================================================================================================= */
+/* Path sec8 — 9 November 2026, Section 8: outsourced lathe work. The price list kept by the owner;    */
+/* 3 tickets on 2 cars (SUB- numbers, one under the AED 200 limit skipping the LPO, at least 3 × cost  */
+/* on the quotation, the SUB number on the sticker); one Back; the month-end bill covering 2 tickets   */
+/* at a different price with 1 line that has no ticket (Parts told); 1 ticket still open; the report.  */
+/* ================================================================================================= */
+await section("sec8", "outsourced lathe work", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-09-lathe";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "quote" })).json;
+  const jobA = seed?.jobId;
+  const qA = seed?.quotationId;
+  if (!jobA || !qA) throw new Error(`seed failed: ${JSON.stringify(seed).slice(0, 200)}`);
+  const job = (await sql("select customer_id, vehicle_id, gated_in_by from public.jobs where id = $1", [jobA]))[0];
+  // The second car of the same customer, in the workshop.
+  const vehB = "22222222-0000-4000-8000-00000000e9c2";
+  const jobB = "22222222-0000-4000-8000-00000000e9c3";
+  await sql("insert into public.vehicles (id, customer_id, make_id, model_id, model_year, has_plate, plate_country, plate_emirate, plate_code, plate_number, kind) select $2, customer_id, make_id, model_id, model_year, true, plate_country, plate_emirate, 'L', '80808', kind from public.vehicles where id = $1", [job.vehicle_id, vehB]);
+  await sql("insert into public.jobs (id, job_number, customer_id, vehicle_id, gated_in_by, status, stage, department, is_open, gated_in_at) values ($1, 'E2E-J-S8B', $2, $3, $4, 'in_work', 'work', 'mechanical', true, now())", [jobB, job.customer_id, vehB, job.gated_in_by]);
+  if (!(await sql("select 1 as ok from public.jobs where id = $1", [jobB]))[0]) throw new Error("second car not seeded");
+  await sql("insert into public.suppliers (name, is_active, vat_registered) select 'E2E Lathe Works', true, false where not exists (select 1 from public.suppliers where name = 'E2E Lathe Works')");
+  const before = (await sql("select value from public.settings where key = 'lathe_price_list'"))[0]?.value ?? [];
+  const m0 = await mark();
+  try {
+    // l1. The owner keeps the price list (a range costs its highest).
+    const owner = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+    await go(owner.page, `${base}/parts/lathe`);
+    await owner.page.locator("[data-lathe-price-list]").fill("Brake disc | 80 | Brake disc resurfacing\nFlywheel | 150-250 | Flywheel resurfacing\nBrake drum | 60");
+    await owner.page.locator("[data-lathe-settings-save]").click();
+    const saved = ((await owner.page.locator("[data-lathe-settings] [data-lathe-done]").textContent({ timeout: 20000 }).catch(() => "")) ?? "");
+    check("l1: the price list is saved (3 items)", /3 items/.test(saved), saved);
+    await owner.browser.close();
+    // l2. Parts record three tickets on two cars.
+    const parts = await browserFor("parts", { viewport: { width: 1440, height: 900 } });
+    const ticket = async (jobId, item, qty) => {
+      await go(parts.page, `${base}/parts/${jobId}`);
+      await parts.page.locator("[data-lathe-open]").click();
+      await parts.page.locator(`[data-lathe-item="${item}"]`).click();
+      await parts.page.locator("[data-lathe-qty]").fill(String(qty));
+      await parts.page.locator("[data-lathe-supplier]").selectOption("E2E Lathe Works");
+      await parts.page.locator("[data-lathe-taken]").fill("Driver Ravi");
+      await parts.page.locator("[data-lathe-save]").click();
+      return ((await parts.page.locator("[data-lathe-ticket-form] [data-lathe-done], [data-lathe-ticket-form] [data-lathe-error]").first().textContent({ timeout: 30000 }).catch(() => "")) ?? "");
+    };
+    const w1 = await ticket(jobA, "Brake disc", 2);
+    const w2 = await ticket(jobA, "Flywheel", 1);
+    const w3 = await ticket(jobB, "Brake drum", 2);
+    check("l2: three tickets with SUB- numbers", [w1, w2, w3].every((w) => /^SUB-\d{5}/.test(w)), [w1, w2, w3].join(" | ").slice(0, 300));
+    const rows = await sql("select id, job_id, lathe_ticket, description, cost_aed, quantity, order_status, lathe_taken_by from public.part_items where job_id in ($1, $2) and lathe_ticket is not null order by lathe_ticket", [jobA, jobB]);
+    const [t1, t2, t3] = rows;
+    check(`l2: 3 tickets on 2 cars (${rows.length})`, rows.length === 3 && new Set(rows.map((r) => r.job_id)).size === 2);
+    check("l2: a range costs its highest (Flywheel 250)", Number(t2?.cost_aed) === 250);
+    check("l2: under AED 200 skips the LPO (ordered at once), above waits for it", t1?.order_status === "ordered" && t2?.order_status === "none", `${t1?.order_status} / ${t2?.order_status}`);
+    check("l2: who took it is recorded", t3?.lathe_taken_by === "Driver Ravi");
+    // l3. On the quotation: the service name only, at least 3 × the cost.
+    const lines = await sql("select part_item_id, title, line_total, markup_percent from public.quotation_lines where quotation_id = $1 and part_item_id in ($2, $3) and is_active", [qA, t1?.id, t2?.id]);
+    check(`l3: both car A tickets are on the quotation (${lines.length})`, lines.length === 2);
+    check("l3: the customer reads only the service name", lines.every((l) => /RESURFACING/i.test(l.title) && !/SUB-/.test(l.title)), lines.map((l) => l.title).join(" | "));
+    const cost1 = Number(t1.cost_aed) * Number(t1.quantity);
+    const cost2 = Number(t2.cost_aed) * Number(t2.quantity);
+    const lt = (id) => Number(lines.find((l) => l.part_item_id === id)?.line_total ?? 0);
+    check(`l3: at least 3 × the cost (${lt(t1.id)} ≥ ${cost1 * 3}, ${lt(t2.id)} ≥ ${cost2 * 3})`, lt(t1.id) >= cost1 * 3 - 0.01 && lt(t2.id) >= cost2 * 3 - 0.01);
+    // l4. The SUB number is on the car's page and on the sticker.
+    await go(parts.page, `${base}/parts/${jobA}`);
+    const carTickets = await parts.page.locator("[data-lathe-car-ticket]").evaluateAll((els) => els.map((e) => e.getAttribute("data-lathe-car-ticket")));
+    check("l4: the car's page lists its SUB tickets", carTickets.includes(t1.lathe_ticket) && carTickets.includes(t2.lathe_ticket));
+    await parts.page.locator("[data-lathe-car-tickets]").scrollIntoViewIfNeeded().catch(() => null);
+    await parts.page.screenshot({ path: `${proof}/s8-job-lathe-line-sub-number-1440.png` }).catch(() => null);
+    const mupdf = await import("mupdf");
+    const pdf = await parts.context.request.get(`${base}/api/pdf/part-labels?job=${jobA}&parts=${t1.id}`);
+    const buf = Buffer.from(await pdf.body());
+    let stickerText = "";
+    try { const doc = mupdf.Document.openDocument(buf, "application/pdf"); stickerText = doc.loadPage(0).toStructuredText().asText().replace(/\s+/g, " "); } catch { stickerText = `(no pdf, ${pdf.status()})`; }
+    check("l4: the sticker carries the SUB number", stickerText.includes(t1.lathe_ticket), stickerText.slice(0, 160));
+    // l5. Back from the lathe.
+    await go(parts.page, `${base}/parts/lathe`);
+    await parts.page.locator(`[data-lathe-back="${t1.id}"]`).click();
+    await parts.page.locator("[data-lathe-back-done]").first().waitFor({ timeout: 20000 }).catch(() => null);
+    const back = (await sql("select lathe_back_at is not null as back, order_status from public.part_items where id = $1", [t1.id]))[0];
+    check("l5: Back from the lathe (received)", back?.back === true && back?.order_status === "received");
+    await parts.browser.close();
+    // The customer approves car A's quotation (what we charged counts in the report).
+    await sql("update public.quotations set status = 'approved' where id = $1", [qA]);
+    // l6. Accounts enter the month-end bill: 2 tickets at a different price, 1 line with no ticket.
+    const acc = await browserFor("accounts", { viewport: { width: 1440, height: 900 } });
+    await go(acc.page, `${base}/parts/lathe`);
+    const form = acc.page.locator("[data-lathe-bill-form]");
+    await form.locator("[data-lathe-bill-supplier]").selectOption("E2E Lathe Works");
+    await form.locator("[data-lathe-bill-number]").fill("E2E-LB-1");
+    await form.locator("[data-lathe-bill-date]").fill(today);
+    await form.locator("[data-lathe-bill-net]").fill("390");
+    await form.locator("[data-lathe-bill-vat]").fill("19.50");
+    await form.locator(`[data-lathe-bill-tick="${t1.lathe_ticket}"]`).check();
+    await form.locator(`[data-lathe-bill-tick="${t2.lathe_ticket}"]`).check();
+    await form.locator(`[data-lathe-bill-amount="${t1.lathe_ticket}"]`).fill("140");
+    await form.locator(`[data-lathe-bill-amount="${t2.lathe_ticket}"]`).fill("220");
+    await form.locator("[data-lathe-extra-desc]").first().fill("Drum machining, no slip");
+    await form.locator("[data-lathe-extra-amount]").first().fill("30");
+    await form.scrollIntoViewIfNeeded().catch(() => null);
+    await acc.page.screenshot({ path: `${proof}/s8-open-tickets-matching-bill-1440.png`, fullPage: true }).catch(() => null);
+    await form.locator("[data-lathe-bill-save]").click();
+    const billed = ((await form.locator("[data-lathe-done], [data-lathe-error]").first().textContent({ timeout: 30000 }).catch(() => "")) ?? "");
+    check("l6: the bill is recorded (2 tickets, 1 line Parts told)", /2 tickets billed/.test(billed) && /Parts told/.test(billed), billed);
+    const after = await sql("select id, lathe_bill_amount_aed, final_cost_aed from public.part_items where id in ($1, $2, $3) order by lathe_ticket", [t1.id, t2.id, t3.id]);
+    check("l6: the actual cost replaces the estimate on each car (140 = 70 each, 220)", Number(after[0]?.lathe_bill_amount_aed) === 140 && Number(after[0]?.final_cost_aed) === 70 && Number(after[1]?.lathe_bill_amount_aed) === 220, JSON.stringify(after));
+    check("l6: the ticket not on the bill stays open", after[2]?.lathe_bill_amount_aed === null);
+    const lines2 = await sql("select part_item_id, line_total from public.quotation_lines where quotation_id = $1 and part_item_id in ($2, $3) and is_active", [qA, t1.id, t2.id]);
+    check("l6: what the customer is charged never changes", lines2.every((l) => Number(l.line_total) === lt(l.part_item_id)));
+    const bill = (await sql("select id, total_aed, jsonb_array_length(extra_lines) as extras from public.lathe_bills where bill_number = 'E2E-LB-1'"))[0];
+    check(`l6: one bill AED 409.50 with 1 line that has no ticket (${bill?.total_aed})`, Number(bill?.total_aed) === 409.5 && Number(bill?.extras) === 1);
+    const told = await sql("select count(*)::int as n from public.notifications where id > $1 and type = 'lathe_unmatched' and staff_id in (select id from public.staff where role_id = 'parts')", [m0]);
+    check("l6: the parts desk is told about the line with no ticket", Number(told[0]?.n) >= 1);
+    const zoho = (await sql("select status from public.zoho_outbox where kind = 'lathebill' and record_id = $1", [bill?.id]))[0];
+    check("l6: one Zoho bill waits for Sync to Zoho", !!zoho, zoho?.status ?? "none");
+    await go(acc.page, `${base}/parts/lathe`);
+    const open = await acc.page.locator("[data-lathe-ticket]").evaluateAll((els) => els.map((e) => e.getAttribute("data-lathe-ticket")));
+    check("l7: the open list keeps only the unbilled ticket", open.includes(t3.lathe_ticket) && !open.includes(t1.lathe_ticket) && !open.includes(t2.lathe_ticket), open.join(","));
+    // l8. The report: tickets, our cost (bill else estimate), what we charged, the profit.
+    const charged = lt(t1.id) + lt(t2.id);
+    const ourCost = 140 + 220 + Number(t3.cost_aed) * Number(t3.quantity);
+    const rep = ((await acc.page.locator("[data-lathe-report]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+    const money = (n) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    check(`l8: the report (3 tickets, cost ${money(ourCost)}, charged ${money(charged)}, profit ${money(charged - ourCost)})`, /3 tickets \(2 billed\)/.test(rep) && rep.includes(money(ourCost)) && rep.includes(money(charged)) && rep.includes(money(charged - ourCost)), rep.slice(0, 220));
+    await acc.page.locator("[data-lathe-report]").screenshot({ path: `${proof}/s8-lathe-report-1440.png` }).catch(() => null);
+    // l9. One payment for the whole bill.
+    await acc.page.locator(`[data-lathe-bill="E2E-LB-1"] input[name=paid_on]`).fill(today);
+    await acc.page.locator(`[data-lathe-bill="E2E-LB-1"] button[type=submit]`).click();
+    const paid = await until(async () => (await sql("select paid_at is not null as p from public.lathe_bills where id = $1", [bill?.id]))[0]?.p === true, 40);
+    check("l9: the bill paid as one supplier payment", paid === true);
+    // l10. A ticket not billed after a month is flagged.
+    await sql("update public.part_items set lathe_sent_at = now() - interval '40 days' where id = $1", [t3.id]);
+    await go(acc.page, `${base}/parts/lathe`);
+    check("l10: not billed after a month is flagged", (await acc.page.locator(`[data-lathe-ticket="${t3.lathe_ticket}"] [data-lathe-late]`).count()) === 1);
+    await acc.browser.close();
+  } finally {
+    await sql("update public.settings set value = $1::jsonb where key = 'lathe_price_list'", [JSON.stringify(before)]);
+  }
 });
 
 const failed = summary();

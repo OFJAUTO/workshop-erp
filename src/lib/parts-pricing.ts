@@ -24,12 +24,16 @@ export async function pricingPartSelect(): Promise<string> {
   if (await partUnitsReady()) base = `${base}, unit`;
   // Enter price myself (5 November 2026): the advisor's own price on a job's part, read once the columns exist.
   if (await advisorPricePartsReady()) base = `${base}, priced_by_advisor, price_checked_at`;
+  // Lathe work (9 November 2026, Section 8): a ticket is a service on the customer's own part - no part number or type.
+  const { latheReady } = await import("./lathe");
+  if (await latheReady()) base = `${base}, lathe_ticket`;
   return base;
 }
 export const PRICING_REQUEST_SELECT = "id, label, status, quantity, unit, closed_reason, created_at, removed_at, removed_by, removed_reason";
 
 export type PricingPart = {
   id: string;
+  lathe_ticket?: string | null;
   part_request_id: string | null;
   description: string;
   /** The technician's words, when Parts corrected the name. */
@@ -87,6 +91,7 @@ export function valuesOfPart(p: PricingPart, today: string, check?: CostCheck | 
     ...(p.stock_item_id ? { stock_item: p.stock_item_id } : {}),
     ...(stock ? { stock_words: stock.words, stock_on_hand: String(stock.onHand) } : {}),
     ...(settled ? { settled: "1" } : {}),
+    ...(p.lathe_ticket ? { lathe: p.lathe_ticket } : {}),
     part_number: cleanPartNumber(p.part_number) ?? "",
     part_type: p.part_type ?? "",
     brand: p.brand ?? "",

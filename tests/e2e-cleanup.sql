@@ -22,6 +22,12 @@ begin
     delete from public.charge_lines where job_id = any(job_ids) or entry_id in (select id from public.charge_entries where customer_id = any(cust_ids) or job_id = any(job_ids));
     delete from public.charge_entries where customer_id = any(cust_ids) or job_id = any(job_ids);
   end if;
+  -- Lathe bills (9 November 2026): the test lathe shop's bills and their Zoho rows.
+  if to_regclass('public.lathe_bills') is not null then
+    update public.part_items set lathe_bill_id = null where lathe_bill_id in (select id from public.lathe_bills where supplier_name ilike 'e2e %');
+    delete from public.zoho_outbox where kind = 'lathebill' and record_id in (select id from public.lathe_bills where supplier_name ilike 'e2e %');
+    delete from public.lathe_bills where supplier_name ilike 'e2e %';
+  end if;
   delete from public.payments where invoice_id in (select id from public.invoices where job_id is null and customer_id = any(cust_ids));
   delete from public.invoice_lines where invoice_id in (select id from public.invoices where job_id is null and customer_id = any(cust_ids));
   update public.invoices set converted_to = null, converted_from = null where job_id is null and customer_id = any(cust_ids);

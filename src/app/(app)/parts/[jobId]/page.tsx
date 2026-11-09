@@ -1,4 +1,8 @@
 import { addSupplierMoney, supplierMoney, supplierMoneyText } from "@/lib/supplier-money";
+import { LatheTicketForm } from "@/components/Lathe";
+import { latheReady, latheSettingsOf, loadLatheTickets } from "@/lib/lathe";
+import { ticketStatus } from "@/lib/lathe-rules";
+import { dubaiToday as dubaiTodayLathe } from "@/lib/card-settlements";
 import { VinCopy } from "@/components/VinCopy";
 import { ReceivePanel } from "./ReceivePanel";
 import { PAST_QUOTE, partsSteps, stepPartOf } from "@/lib/parts-steps";
@@ -73,7 +77,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     admin.from("jobs").select("id, vehicle_id, job_number, status, is_open, parts_pricing_done_at, parts_pricing_reopened_at, plan_parts_done_at, plan_parts_ready_date, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, tyre_size_front, tyre_size_rear, make:vehicle_makes(name), model:vehicle_models(name))").eq("id", jobId).maybeSingle(),
     admin.from("part_requests").select(REQUEST_SELECT + ", removed_at, removed_by, removed_reason, created_by").eq("job_id", jobId).eq("is_active", true).order("created_at"),
     // Removed parts ("not needed") stay on the list, greyed, with Put back.
-    admin.from("part_items").select(PART_SELECT + `, po_id, expected_date, received_qty, issue_status, return_status, replaced_part_id, replacement_part_id, not_needed_at, not_needed_reason, disposition, disposition_at, disposition_by, disposition_note, stock_item_id, final_cost_aed, exchange_status, quantity_changed_by${(await refusalsReady()) ? ", refused_at, refused_by, refused_reason" : ""}${(await costConfirmReady()) ? ", cost_confirmed_aed" : ""}${unitsReady ? ", unit" : ""}${await partAdvisorCols()}`).eq("job_id", jobId).or("is_active.eq.true,removed_at.not.is.null").order("created_at"),
+    admin.from("part_items").select(PART_SELECT + `, po_id, expected_date, received_qty, issue_status, return_status, replaced_part_id, replacement_part_id,${(await latheReady()) ? " lathe_ticket," : ""} not_needed_at, not_needed_reason, disposition, disposition_at, disposition_by, disposition_note, stock_item_id, final_cost_aed, exchange_status, quantity_changed_by${(await refusalsReady()) ? ", refused_at, refused_by, refused_reason" : ""}${(await costConfirmReady()) ? ", cost_confirmed_aed" : ""}${unitsReady ? ", unit" : ""}${await partAdvisorCols()}`).eq("job_id", jobId).or("is_active.eq.true,removed_at.not.is.null").order("created_at"),
     admin.from("suppliers").select("id, name, default_discount_percent, discount_by_type").eq("is_active", true).order("name"),
     admin.from("staff").select("id, display_name, role_id").eq("is_active", true),
     loadInspection(jobId),
@@ -178,7 +182,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     info: infoOf(r, p),
     shownPositions: p.positions?.length ? p.positions : (r?.positions ?? null),
     // The same values and state function as the server's counts (src/lib/parts-pricing.ts), so nothing can disagree.
-    values: valuesOfPart({ ...p, stock_item_id: (rawById.get(p.id)?.stock_item_id as string | null) ?? null, priced_by_advisor: (rawById.get(p.id)?.priced_by_advisor as boolean | null | undefined) ?? null, price_checked_at: (rawById.get(p.id)?.price_checked_at as string | null | undefined) ?? null }, today, costChecks.get(p.id), stockOfItem.get(String(rawById.get(p.id)?.stock_item_id ?? "")) ?? null),
+    values: valuesOfPart({ ...p, lathe_ticket: (rawById.get(p.id)?.lathe_ticket as string | null | undefined) ?? null, stock_item_id: (rawById.get(p.id)?.stock_item_id as string | null) ?? null, priced_by_advisor: (rawById.get(p.id)?.priced_by_advisor as boolean | null | undefined) ?? null, price_checked_at: (rawById.get(p.id)?.price_checked_at as string | null | undefined) ?? null }, today, costChecks.get(p.id), stockOfItem.get(String(rawById.get(p.id)?.stock_item_id ?? "")) ?? null),
     // Enter price myself (5 November 2026): who priced it, for the desk's "Price is right ✓" look.
     advisorPriced: rawById.get(p.id)?.priced_by_advisor ? { name: nameOf.get(String(rawById.get(p.id)?.priced_by ?? "")) ?? null, at: (rawById.get(p.id)?.priced_at as string | null) ?? null, checked: !!rawById.get(p.id)?.price_checked_at } : null,
     removed: endedRow(p) ? { by: endedRow(p)!.by, reason: endedRow(p)!.reason } : p.removed_at ? { by: nameOf.get(p.removed_by ?? "") ?? "Parts", reason: p.removed_reason ?? "" } : null,
@@ -428,10 +432,31 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
       ) : null}
 
       <Card id="pricing" className="flex flex-col gap-2 overflow-visible">
+        {canPrice && (await latheReady()) ? <div className="mb-3"><LatheTicketForm jobId={jobId} items={latheSettingsOf(settings).items} suppliers={suppliers.map((s) => s.name)} today={dubaiTodayLathe()} minMarkup={latheSettingsOf(settings).minMarkup} /><LatheCarTickets jobId={jobId} /></div> : null}
         <PartsTable vatSupplierNames={await vatChargingSupplierNames()} tyreBrands={Array.from(new Set([...((settings.tyre_brands ?? []) as string[]), ...Object.keys((settings.tyre_brand_custom ?? {}) as Record<string, number>)]))} tyreModels={(settings.tyre_models ?? {}) as Record<string, string[]>} tyreSizes={{ front: v?.tyre_size_front ?? "", rear: v?.tyre_size_rear ?? "" }} jobId={jobId} rows={rows} suppliers={suppliers} types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]} canPrice={canPrice} unitsReady={unitsReady} refLabel={job.job_number} car={[v?.make?.name, v?.model?.name, v?.variant, v?.model_year].filter(Boolean).join(" ")} vin={v?.vin ?? null} openingLine={String(settings.supplier_quote_opening_line || "Please quote price and availability:")} catalogue={catalogue} lastImport={lastImport} pricingDoneAt={job.parts_pricing_done_at} onPricingDone={pricingDone.bind(null, jobId)} showBar={canPrice && !inPlanning} showCost={["owner", "service_advisor", "parts"].includes(role)} removeReasons={reasonsFor(settings, "remove_part")} pricingLocked={pricingLocked} onReopen={reopenPricing.bind(null, jobId)} reopenedAt={job.parts_pricing_reopened_at} extraCosts={["owner", "service_advisor", "parts"].includes(role) ? chargeRows.map((c) => ({ supplier: c.supplier, amount: c.amount })) : []} />
         {["owner", "service_advisor", "parts", "accounts"].includes(role) ? <SupplierChargesStrip jobId={jobId} charges={chargeRows} canEdit={canPrice} /> : null}
       </Card>
       {canPrice && !inPlanning ? <div className="h-28" /> : null}
     </>
+  );
+}
+
+/** The car's lathe tickets (9 November 2026, Section 8): SUB- number, status, what went, and its sticker. */
+async function LatheCarTickets({ jobId }: { jobId: string }) {
+  const tickets = await loadLatheTickets({ jobId });
+  if (!tickets.length) return null;
+  return (
+    <ul className="mt-2 flex flex-col divide-y divide-line rounded-control border border-line text-sm" data-lathe-car-tickets>
+      {tickets.map((t) => (
+        <li key={t.partId} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2" data-lathe-car-ticket={t.ticket}>
+          <span className="font-bold">{t.ticket}</span>
+          <span className="rounded-full border border-line-strong px-2 text-xs font-bold" data-lathe-car-status>{ticketStatus({ lathe_sent_at: t.sentAt, lathe_back_at: t.backAt, lathe_bill_id: t.billId })}</span>
+          <span>Outsourced – lathe: {t.item} × {t.qty}</span>
+          <span className="text-muted">{t.supplier}{t.takenBy ? ` · taken by ${t.takenBy}` : ""}</span>
+          <span className="text-muted">customer reads: <span className="uppercase">{t.service}</span></span>
+          <a href={`/api/pdf/part-labels?job=${jobId}&parts=${t.partId}`} target="_blank" rel="noreferrer" className="ml-auto font-semibold underline underline-offset-4" data-lathe-sticker>Print sticker</a>
+        </li>
+      ))}
+    </ul>
   );
 }

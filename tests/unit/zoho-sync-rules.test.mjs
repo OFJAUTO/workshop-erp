@@ -16,7 +16,7 @@ check("a missing setting is manual", syncModeOf(undefined) === "manual" && syncM
 check("only the exact word 'automatic' is automatic", syncModeOf("automatic") === "automatic" && syncModeOf("Automatic") === "manual" && syncModeOf(true) === "manual" && syncModeOf("manual") === "manual");
 
 // Words.
-check("every kind has its words, and every kind has a posting rank", ZOHO_KINDS.length === 14 && ZOHO_KINDS.every((k) => KIND_WORDS[k] && typeof POSTING_ORDER[k] === "number"));
+check("every kind has its words, and every kind has a posting rank", ZOHO_KINDS.length === 16 && ZOHO_KINDS.every((k) => KIND_WORDS[k] && typeof POSTING_ORDER[k] === "number"));
 check("kind words read as the sync page always did", kindWord("invoice") === "Tax invoice" && kindWord("billpayment") === "Supplier payment" && kindWord("nonsense") === "Document");
 check("counts in a sentence: one and many", kindCount("invoice", 1) === "1 tax invoice" && kindCount("invoice", 5) === "5 tax invoices" && kindCount("settlement", 2) === "2 bank postings");
 check("items: 1 item / 12 items", itemsWord(1) === "1 item" && itemsWord(12) === "12 items" && itemsWord(0) === "0 items");

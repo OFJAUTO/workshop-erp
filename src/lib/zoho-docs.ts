@@ -116,6 +116,15 @@ export async function outboxDocs(rows: { kind: ZohoKind; record_id: string; zoho
     const amount = round2(Number(p.amount_aed) || 0);
     put(`supplierpay:${p.id}`, `${p.number} · ${p.supplier_name} · ${aed(amount)}`, amount, { inZoho: !!p.zoho_payment_id, notForZoho: p.status === "void" ? "the payment was voided in the ERP" : null });
   });
+  // Combined payments (one cheque for several cars) and month-end lathe bills (9 November 2026).
+  await each<{ id: string; number: string; amount_aed: number | string; is_active: boolean; zoho_payment_id: string | null }>("payment_groups", "id, number, amount_aed, is_active, zoho_payment_id", idsOf("paygroup"), (g) => {
+    const amount = round2(Number(g.amount_aed) || 0);
+    put(`paygroup:${g.id}`, `${g.number} · combined payment · ${aed(amount)}`, amount, { inZoho: !!g.zoho_payment_id, notForZoho: null });
+  });
+  await each<{ id: string; bill_number: string; supplier_name: string; total_aed: number | string; is_active: boolean; zoho_bill_id: string | null }>("lathe_bills", "id, bill_number, supplier_name, total_aed, is_active, zoho_bill_id", idsOf("lathebill"), (b) => {
+    const amount = round2(Number(b.total_aed) || 0);
+    put(`lathebill:${b.id}`, `Lathe bill ${b.bill_number} · ${b.supplier_name} · ${aed(amount)}`, amount, { inZoho: !!b.zoho_bill_id, notForZoho: null });
+  });
   await each<{ id: string; number: string; recipient: string; amount_aed: number | string; is_active: boolean; zoho_expense_id: string | null }>("commission_payments", "id, number, recipient, amount_aed, is_active, zoho_expense_id", idsOf("commission"), (v) => {
     const amount = round2(Number(v.amount_aed) || 0);
     put(`commission:${v.id}`, `${v.number} · ${v.recipient} · ${aed(amount)}`, amount, { inZoho: !!v.zoho_expense_id, notForZoho: v.is_active === false ? "the voucher is inactive in the ERP" : null });

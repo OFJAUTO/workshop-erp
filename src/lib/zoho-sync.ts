@@ -372,7 +372,7 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
 
 /* ------------------------------------------------------- the outbox ------------------------------------------------------- */
 
-export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery" | "vendorcredit" | "cnrefund" | "settlement" | "supplierpay" | "paygroup";
+export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery" | "vendorcredit" | "cnrefund" | "settlement" | "supplierpay" | "paygroup" | "lathebill";
 export type OutboxRow = {
   id: string;
   kind: ZohoKind;
@@ -952,6 +952,63 @@ async function syncPayGroupRow(org: string, accounts: Resolved, groupId: string)
   // Each share takes it and applies its part as its invoice allows (queued, so each shows its own row).
   for (const k of live) await ensureQueued(k.job_id ? "payment" : "deposit", k.id, k.job_id);
   return { zohoId: zid, result: { combined: g.number, amount, shares: live.length, receipts: live.map((k) => k.number), undeposited: via } };
+}
+
+/**
+ * A month-end lathe bill (9 November 2026, Section 8): ONE Zoho bill with a line per job ("J-00940 · Brake disc
+ * resurfacing (SUB-00012)") plus the bill's lines with no ticket, on the parts purchases account; once accounts mark it
+ * paid, ONE vendor payment for the whole bill from the mapped account. Each is searched before it is made.
+ */
+async function syncLatheBillRow(org: string, accounts: Resolved, billId: string): Promise<HandlerOut> {
+  const admin = createAdminClient();
+  const { data: raw } = await admin.from("lathe_bills").select("id, supplier_id, supplier_name, bill_number, bill_date, before_vat_aed, vat_aed, total_aed, extra_lines, paid_at, paid_method, paid_reference, zoho_bill_id, zoho_payment_id, is_active").eq("id", billId).maybeSingle();
+  const b = raw as { id: string; supplier_id: string | null; supplier_name: string; bill_number: string; bill_date: string; before_vat_aed: number | string; vat_aed: number | string; total_aed: number | string; extra_lines: { description: string; amount: number }[] | null; paid_at: string | null; paid_method: string | null; paid_reference: string | null; zoho_bill_id: string | null; zoho_payment_id: string | null; is_active: boolean } | null;
+  if (!b) throw new ZohoError("The lathe bill no longer exists in the ERP.");
+  if (!b.supplier_id) throw new ZohoError(`${b.supplier_name} is not on the supplier list: add it (Parts › Suppliers) with its TRN, then press Retry.`);
+  const gate = await startDateSkip(String(b.bill_date).slice(0, 10), ["lathebill"], b.id);
+  if (gate) return gate;
+  const vendorId = await ensureVendor(org, b.supplier_id);
+  const purchases = needAccounts(accounts.purchases?.parts, accounts.purchasesError);
+  const taxed = (Number(b.vat_aed) || 0) > 0;
+  const { data: partRows } = await admin.from("part_items").select("id, job_id, description, lathe_ticket, lathe_bill_amount_aed").eq("lathe_bill_id", b.id);
+  const parts = (partRows ?? []) as { id: string; job_id: string; description: string; lathe_ticket: string; lathe_bill_amount_aed: number | string | null }[];
+  const { data: jobs } = parts.length ? await admin.from("jobs").select("id, job_number").in("id", Array.from(new Set(parts.map((p) => p.job_id)))) : { data: [] };
+  const jobNo = new Map(((jobs ?? []) as { id: string; job_number: string }[]).map((j) => [j.id, j.job_number]));
+  const line_items: Record<string, unknown>[] = parts.map((p) => ({ name: cut(`${jobNo.get(p.job_id) ?? ""} · ${p.description} (${p.lathe_ticket})`, 100), rate: round2(Number(p.lathe_bill_amount_aed) || 0), quantity: 1, account_id: purchases, ...(taxed ? { tax_id: accounts.taxId } : {}) }));
+  for (const l of b.extra_lines ?? []) line_items.push({ name: cut(`${l.description} (no ticket)`, 100), rate: round2(Number(l.amount) || 0), quantity: 1, account_id: purchases, ...(taxed ? { tax_id: accounts.taxId } : {}) });
+  if (!line_items.length) throw new ZohoError(`Lathe bill ${b.bill_number} has no lines.`);
+  let zid = b.zoho_bill_id;
+  if (!zid) {
+    const j = await zohoFetch<{ bills?: ZohoBill[] }>(`/bills?bill_number=${encodeURIComponent(b.bill_number)}&vendor_id=${encodeURIComponent(vendorId)}`, { org });
+    const found = j.bills?.find((x) => x.bill_number === b.bill_number) ?? null;
+    if (found) {
+      const full = await zohoBillById(org, found.bill_id);
+      if (full && !near(full.total, Number(b.total_aed))) throw new ZohoError(`A bill numbered ${b.bill_number} already exists in Zoho for ${b.supplier_name} with a different total (${full.total.toFixed(2)} there, ${Number(b.total_aed).toFixed(2)} here): the accountant checks it in Zoho.`);
+      zid = found.bill_id;
+    }
+  }
+  if (!zid) {
+    const created = await zohoFetch<{ bill?: ZohoBill }>("/bills", { org, method: "POST", body: { vendor_id: vendorId, bill_number: b.bill_number, date: String(b.bill_date).slice(0, 10), reference_number: cut(`LATHE ${b.bill_number}`, 50), line_items, is_inclusive_tax: false, tax_treatment: taxed ? "vat_registered" : "vat_not_registered", notes: `Lathe work, ${parts.length} ticket${parts.length === 1 ? "" : "s"}` } });
+    zid = created.bill?.bill_id ?? null;
+    if (!zid) throw new ZohoError("Zoho did not return the new bill.");
+  }
+  await admin.from("lathe_bills").update({ zoho_bill_id: zid }).eq("id", b.id);
+  // Paid as ONE supplier payment, once accounts mark it paid.
+  let payId = b.zoho_payment_id;
+  if (b.paid_at && !payId) {
+    const method = (b.paid_method ?? "transfer") as SupplierPayKey;
+    const paidThrough = accounts.paidFromBy?.[method] ?? needAccounts(accounts.paidFrom, accounts.paidFromError);
+    const ref = cut(`LATHE ${b.bill_number}`, 50);
+    const j = await zohoFetch<{ vendorpayments?: { payment_id: string; reference_number?: string }[] }>(`/vendorpayments?reference_number=${encodeURIComponent(ref)}&vendor_id=${encodeURIComponent(vendorId)}`, { org });
+    payId = j.vendorpayments?.find((x) => x.reference_number === ref)?.payment_id ?? null;
+    if (!payId) {
+      const amount = round2(Number(b.total_aed) || 0);
+      const made = await zohoFetch<{ vendorpayment?: { payment_id: string } }>("/vendorpayments", { org, method: "POST", body: { vendor_id: vendorId, amount, date: dubaiDate(b.paid_at), payment_mode: MODE[method as MethodKey] ?? "banktransfer", paid_through_account_id: paidThrough, reference_number: ref, description: cut(`Lathe bill ${b.bill_number}${b.paid_reference ? ` · ${b.paid_reference}` : ""}`, 200), bills: [{ bill_id: zid, amount_applied: amount }] } });
+      payId = made.vendorpayment?.payment_id ?? null;
+    }
+    if (payId) await admin.from("lathe_bills").update({ zoho_payment_id: payId }).eq("id", b.id);
+  }
+  return { zohoId: zid, result: { lathe_bill: b.bill_number, lines: line_items.length, total: round2(Number(b.total_aed) || 0), payment: payId ?? null } };
 }
 
 async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string): Promise<HandlerOut> {
@@ -2291,6 +2348,7 @@ async function processOutboxRow(row: WorkRow, ctx: RunCtx): Promise<RowDone> {
           : row.kind === "cnrefund" ? await syncCnRefundRow(org, accounts, row.record_id)
           : row.kind === "settlement" ? await syncSettlementRow(org, accounts, row.record_id)
           : row.kind === "paygroup" ? await syncPayGroupRow(org, accounts, row.record_id)
+          : row.kind === "lathebill" ? await syncLatheBillRow(org, accounts, row.record_id)
           : await syncPaymentRow(org, accounts, row.record_id);
       }
     }

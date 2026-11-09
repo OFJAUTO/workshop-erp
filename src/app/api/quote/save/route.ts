@@ -183,6 +183,9 @@ export async function POST(request: NextRequest) {
   const { data: vehicle } = q.vehicle_id ? await admin.from("vehicles").select("make:vehicle_makes(name)").eq("id", q.vehicle_id).maybeSingle() : { data: null };
   const makeName = (vehicle?.make as unknown as { name: string } | null)?.name ?? null;
   const minMarkup = minMarkupFor(settings, makeName);
+  // 9 November 2026, Section 8: outsourced lathe work sells at least at 3 × its cost (200% markup); lower needs the owner.
+  const { latheFloorFor } = await import("@/lib/lathe");
+  const floorOf = await latheFloorFor(q.job_id ?? null, settings, minMarkup);
   const { data: job } = q.job_id ? await admin.from("jobs").select("department, job_number").eq("id", q.job_id).maybeSingle() : { data: null };
   const labourRate = labourRateFor(settings, job?.department ?? null, makeName);
   const recoveryTypes = (settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[];
@@ -272,14 +275,15 @@ export async function POST(request: NextRequest) {
         // the minimum (in the line's own mode); only the owner can go below (kept as confirmed for the floor check).
         const mode = p.markup_mode === "aed" || p.markup_mode === "percent" ? p.markup_mode : current?.markup_mode === "aed" ? "aed" : "percent";
         const cost = Number(current?.unit_cost ?? 0) || 0;
-        let pct = p.markup_percent !== undefined ? (n(p.markup_percent) ?? minMarkup) : Number(current?.markup_percent ?? minMarkup);
+        const floor = floorOf((current as { part_item_id?: string | null } | null | undefined)?.part_item_id ?? null);
+        let pct = p.markup_percent !== undefined ? (n(p.markup_percent) ?? floor) : Number(current?.markup_percent ?? floor);
         let amt: number | null = p.markup_aed !== undefined ? n(p.markup_aed) : current?.markup_aed ?? null;
         if (mode === "aed" && (amt === null || amt === undefined)) amt = round2((cost * pct) / 100);
         let belowByOwner = false;
-        if (effectiveMarkupPercent({ unit_cost: cost, markup_percent: pct, markup_mode: mode, markup_aed: amt }) < minMarkup - 1e-9) {
+        if (effectiveMarkupPercent({ unit_cost: cost, markup_percent: pct, markup_mode: mode, markup_aed: amt }) < floor - 1e-9) {
           if (isOwner) belowByOwner = true;
-          else if (mode === "aed") amt = minimumMarkupAed(cost, minMarkup);
-          else pct = minMarkup;
+          else if (mode === "aed") amt = minimumMarkupAed(cost, floor);
+          else pct = floor;
         }
         out.markup_mode = mode;
         out.markup_percent = Math.round(pct * 1e6) / 1e6;

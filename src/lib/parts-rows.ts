@@ -4,6 +4,8 @@
  * notification and the quotation can never disagree.
  */
 export type RowValues = {
+  /** A lathe ticket (SUB-): outsourced machining of the customer's own part - no part number or type is asked. */
+  lathe?: string;
   part_number: string;
   part_type: string;
   brand: string;
@@ -173,7 +175,7 @@ export function rowMissing(v: RowValues): Missing[] {
   // An advisor's own price ("Enter price myself", 5 November 2026): his cost is the price - no part number, type,
   // availability or even supplier was ever asked of him, and it counts as PRICED at once (off the desk's waiting
   // list); the desk's "Price is right ✓" is a later look, never a hold.
-  const advisorPriced = v.advisor_price === "1" || v.advisor_price === "checked";
+  const advisorPriced = v.advisor_price === "1" || v.advisor_price === "checked" || !!v.lathe;
   if (!advisorPriced && v.tyre_row) {
     if (!(v.tyre_brand ?? "").trim() || !/^\d{3}\/\d{2} R\d{2}$/.test(v.tyre_size ?? "")) out.push({ field: "tyre", short: "Tyre size and brand needed", long: "tyre size and brand needed" });
   } else if (!advisorPriced && !v.part_number.trim()) out.push({ field: "part_number", short: "No part number", long: "no part number" });

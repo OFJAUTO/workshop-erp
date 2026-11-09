@@ -27,7 +27,8 @@ export function dubaiDayStart(now = new Date()): string {
 export async function partLabelsFor(opts: { jobId?: string | null; partIds?: string[]; poId?: string | null; keys?: string[]; today?: boolean }, staffId: string | null): Promise<PartLabel[]> {
   const admin = createAdminClient();
   const unitsReady = await partUnitsReady();
-  const select = "id, job_id, description, positions, quantity, confirmed_quantity, received_qty, po_id, po_line_id" + (unitsReady ? ", unit" : "");
+  const { latheReady } = await import("./lathe");
+  const select = "id, job_id, description, positions, quantity, confirmed_quantity, received_qty, po_id, po_line_id" + (unitsReady ? ", unit" : "") + ((await latheReady()) ? ", lathe_ticket" : "");
   // The day a part arrived is on its LPO line (the part keeps only how many arrived).
   let todayIds: string[] | null = null;
   if (opts.today) {
@@ -35,7 +36,9 @@ export async function partLabelsFor(opts: { jobId?: string | null; partIds?: str
     todayIds = Array.from(new Set(((lines ?? []) as { part_item_id: string }[]).map((l) => l.part_item_id)));
     if (!todayIds.length) return [];
   }
-  let q = admin.from("part_items").select(select).eq("is_active", true).gt("received_qty", 0).order("created_at");
+  // A lathe ticket's sticker goes WITH the part to the lathe (9 November 2026, Section 8), before it is back.
+  let q = admin.from("part_items").select(select).eq("is_active", true).order("created_at");
+  q = select.includes("lathe_ticket") ? q.or("received_qty.gt.0,lathe_ticket.not.is.null") : q.gt("received_qty", 0);
   if (opts.jobId) q = q.eq("job_id", opts.jobId);
   if (opts.poId) q = q.eq("po_id", opts.poId);
   if (opts.partIds?.length) q = q.in("id", opts.partIds);
@@ -77,7 +80,9 @@ export async function partLabelsFor(opts: { jobId?: string | null; partIds?: str
     for (let n = 1; n <= count; n++) {
       const key = `${p.id}-${n}`;
       if (wanted && !wanted.has(key)) continue;
-      out.push({ key, ...base, name: p.description, side: stickerPosition(p.positions, n, count), index: n, count });
+      // 9 November 2026, Section 8: a lathe ticket's sticker carries its SUB- number with the name.
+      const lathe = (p as { lathe_ticket?: string | null }).lathe_ticket;
+      out.push({ key, ...base, name: lathe ? `${p.description} ${lathe}` : p.description, side: stickerPosition(p.positions, n, count), index: n, count });
     }
   }
   return out;

@@ -81,6 +81,7 @@ export const ACTION_RULES: Record<string, ActionRule> = {
   low_profit: { open: "manual" },
   qty_reduced: { open: "manual" },
   batch_missing: { open: "manual" },
+  lathe_unmatched: { open: "manual" },
   qty_keep_price: { open: "manual" },
   qty_after_invoice: { open: "manual" },
 };

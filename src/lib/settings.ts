@@ -223,6 +223,11 @@ const DEFAULTS = {
   payment_report_reminder_hours: 4,
   /** 9 November 2026, Section 7: videos move to the off-site archive this many months after the car leaves. */
   video_archive_months: 12,
+  /** 9 November 2026, Section 8: outsourced lathe work. The price list ({ item, price, priceTo?, service? }), the cost
+   *  under which a ticket skips LPO approval, and the minimum markup on the cost (200% = 3 × the cost). */
+  lathe_price_list: [] as unknown[],
+  lathe_lpo_threshold_aed: 200,
+  lathe_min_markup_percent: 200,
   /** "Urgent" must mean urgent (9 November 2026): a customer waiting on us longer than these WORKING hours makes the
    *  task urgent on Waiting on you (Settings > Money). */
   urgent_customer_wait_hours: 4,
