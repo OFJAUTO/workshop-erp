@@ -97,7 +97,7 @@ export function LatheBillForm({ suppliers, tickets, today }: { suppliers: string
         {Array.from({ length: extras }).map((_, i) => (
           <div key={i} className="flex flex-wrap gap-2"><Input name="extra_desc" placeholder="What the bill says" className="w-64" data-lathe-extra-desc /><Input name="extra_amount" inputMode="decimal" placeholder="Amount" className="w-28" data-lathe-extra-amount /></div>
         ))}
-        <button type="button" onClick={() => setExtras((n) => n + 1)} className="self-start text-sm font-semibold underline underline-offset-4">+ another line</button>
+        <button type="button" onClick={() => setExtras((n) => n + 1)} className="min-h-11 self-start text-sm font-semibold underline underline-offset-4">+ another line</button>
       </div>
       <div><Button type="submit" size="md" disabled={busy || !ticked.size} data-lathe-bill-save>{busy ? "Saving…" : `Record the bill (${ticked.size} ticket${ticked.size === 1 ? "" : "s"})`}</Button></div>
       <Answer s={state} />

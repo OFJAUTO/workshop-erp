@@ -27,10 +27,10 @@ export default async function OverridesPage() {
         <Card className="p-0 overflow-hidden">
           <ul className="divide-y divide-line">
             {rows.map((e) => (
-              <li key={e.id} className="px-5 py-3 flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-4 text-sm">
-                <span className="text-xs text-muted sm:w-36 shrink-0">{formatDateTime(e.created_at)}</span>
-                <span className="font-bold sm:w-40 shrink-0">{label[e.event_type] ?? e.event_type}</span>
-                <Link href={`/jobs/${e.job_id}`} className="font-semibold underline underline-offset-4 sm:w-20 shrink-0">
+              <li key={e.id} className="px-5 py-3 flex flex-col lg:flex-row lg:items-baseline gap-1 lg:gap-4 text-sm">
+                <span className="text-xs text-muted lg:w-36 shrink-0">{formatDateTime(e.created_at)}</span>
+                <span className="font-bold lg:w-40 shrink-0">{label[e.event_type] ?? e.event_type}</span>
+                <Link href={`/jobs/${e.job_id}`} className="font-semibold underline underline-offset-4 lg:w-20 shrink-0">
                   {e.job?.job_number ?? "job"}
                 </Link>
                 <span className="flex-1 min-w-0 break-words">
