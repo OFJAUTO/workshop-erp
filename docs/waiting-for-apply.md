@@ -11,6 +11,12 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
+Nothing.
+
+## Applied on 9 November 2026, night
+
+The owner replied "apply". A fresh backup was taken first: `backups/2026-11-09T19-20-13` (119 tables, 263,454 rows). The five migrations were run with `scripts/db-sql.mjs` in order without an error and recorded with `scripts/db-record-migration.mjs`. J-00974 was read on live first (no roll/batch entered yet, no bell sent yet), then the bells file ran: 2 bells. `npm run check:live`: 33 passed, 0 failed.
+
 | # | What | What it does on live | Size |
 |---|---|---|---|
 | 1 | `supabase/migrations/20261211090000_accounts_posting.sql` (9 Nov, Section 2) | Adds `payments.cheque_deposited_at/_to/_by` and `bounce_charge_aed`, and lets a posting row (STL-) be a cheque or bank-transfer posting. Until then: cheques and transfers can already be marked cleared / confirmed / bounced (the payment counts, the tax invoice follows), but **Mark deposited** is hidden, and Zoho keeps the old way (a cheque posts to the bank on its clearing day instead of going through Undeposited Funds). | 4 columns + 1 rule |
