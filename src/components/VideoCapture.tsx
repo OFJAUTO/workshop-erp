@@ -5,11 +5,29 @@ import { useRouter } from "next/navigation";
 import { devicePlatform } from "./CameraCapture";
 import { PendingRows, gateInFields, videoInfo } from "./MediaCapture";
 import { reportUploadFailure, type UploadKind } from "@/lib/upload-client";
+import { qualityProblem } from "@/lib/video-quality";
+import { VideoRecorder } from "@/components/VideoRecorder";
 import type { Checklist } from "@/lib/media";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { pendingWords, useSendQueue, type PendingFile } from "@/lib/use-send-queue";
 
 export const MAX_VIDEO_SECONDS = 240;
+
+/** The picture size of a video file, from the browser's own player (null when it cannot tell). */
+function readDimensions(file: Blob): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement("video");
+    let settled = false;
+    const finish = (d: { width: number; height: number } | null) => { if (settled) return; settled = true; URL.revokeObjectURL(url); resolve(d); };
+    v.preload = "metadata";
+    v.muted = true;
+    v.onloadedmetadata = () => finish(v.videoWidth && v.videoHeight ? { width: v.videoWidth, height: v.videoHeight } : null);
+    v.onerror = () => finish(null);
+    setTimeout(() => finish(null), 6000);
+    v.src = url;
+  });
+}
 const MAX_VIDEO_BYTES = 500 * 1024 * 1024;
 /** Video types the gate-in takes (the door and the bucket refuse anything else, for good). */
 const VIDEO_TYPES = ["video/mp4", "video/webm", "video/quicktime"];
@@ -171,10 +189,24 @@ export function VideoCapture({
     },
   });
 
+  // 9 November 2026, Section 7: the page records at 1080p itself (the camera app through a web page gave 480 × 360).
+  const [recorderOpen, setRecorderOpen] = useState(false);
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
+    // A video chosen from the phone: below 720p is refused (too blurry for the record).
+    const dims = await readDimensions(file);
+    const low = dims ? qualityProblem(dims.width, dims.height, "file") : null;
+    if (low) {
+      setError(low);
+      reportUploadFailure({ jobId, kind, step: "decode", error: `Video refused: ${dims!.width}x${dims!.height}`, token, sizeBytes: file.size, contentType: file.type });
+      return;
+    }
+    await keepFile(file);
+  }
+
+  async function keepFile(file: File) {
     setError(null);
     if (file.size > MAX_VIDEO_BYTES) {
       setError("That video is over 500 MB. Record a shorter one.");
@@ -239,14 +271,19 @@ export function VideoCapture({
 
       {!checking ? (
         <>
-          <input ref={inputRef} type="file" accept="video/*" capture="environment" onChange={onFile} className="sr-only" tabIndex={-1} aria-hidden />
-          <button type="button" onClick={() => { const el = inputRef.current; if (el) { el.value = ""; el.click(); } }} className={`inline-flex min-h-14 w-full items-center justify-center rounded-control px-5 text-base font-bold ${finished || onDevice ? "border border-line-strong bg-white" : "bg-ink text-on-dark"}`}>
-            {finished || onDevice ? "Record again" : "Record with the camera"}
+          <input ref={inputRef} type="file" accept="video/*" onChange={onFile} className="sr-only" tabIndex={-1} aria-hidden />
+          <button type="button" onClick={() => setRecorderOpen(true)} className={`inline-flex min-h-14 w-full items-center justify-center rounded-control px-5 text-base font-bold ${finished || onDevice ? "border border-line-strong bg-white" : "bg-ink text-on-dark"}`} data-record-video>
+            {finished || onDevice ? "Record again" : "Record video (1080p)"}
           </button>
-          {ios ? <p className="text-xs text-muted">iPhone or iPad: Settings › Camera › Formats › Most Compatible, so the customer&apos;s phone can play the video.</p> : null}
+          <button type="button" onClick={() => { const el = inputRef.current; if (el) { el.value = ""; el.click(); } }} className="min-h-11 text-sm font-semibold underline underline-offset-4" data-choose-video>
+            Choose a video already on this phone (at least 720p)
+          </button>
+          {ios ? <p className="text-xs text-muted">iPhone or iPad: allow the camera and the microphone for erp.ofjauto.com when asked.</p> : null}
+          {recorderOpen ? <VideoRecorder maxSeconds={MAX_VIDEO_SECONDS} onClose={() => setRecorderOpen(false)} onDone={(file) => { setRecorderOpen(false); void keepFile(file); }} /> : null}
         </>
       ) : null}
 
+      {green ? <p className="text-sm font-bold text-green-text" data-video-uploaded>Video uploaded ✓</p> : null}
       {checking ? <p className="text-sm text-muted" data-video-step={step}>{step === "keeping" ? "Saving the video on this device…" : "Checking the video…"}</p> : null}
 
       {onDevice ? (

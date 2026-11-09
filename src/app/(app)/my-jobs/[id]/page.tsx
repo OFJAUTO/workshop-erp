@@ -389,7 +389,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
       )}
 
       {!loose ? <Collapsible title="Gate-in photos and videos" right={`${media.length}`}>
-        <MediaGallery media={media} urls={Object.fromEntries(card.mediaUrls)} carPictureUrl={card.vehiclePhotoUrl} damageNote={gateIn?.damage_note} compact />
+        <MediaGallery staffDownload media={media} urls={Object.fromEntries(card.mediaUrls)} carPictureUrl={card.vehiclePhotoUrl} damageNote={gateIn?.damage_note} compact />
       </Collapsible> : null}
 
       {(!inWork || ownerDirect) && insp && formProps && (insp.status === "in_progress" || insp.status === "submitted" || insp.status === "approved" || ownerDirect) ? (

@@ -708,6 +708,9 @@ export function SettingsForm({
               <Field label="Payment waiting limit (hours)" hint="A sent proforma unpaid this long turns red on the job card and the owner is told once.">
                 <Input name="payment_waiting_hours" defaultValue={v.payment_waiting_hours ?? "24"} inputMode="numeric" required />
               </Field>
+            <Field label="Videos stay in the app for (months after the car leaves)" hint="Then they move to the off-site archive only (still retrievable). 9 November 2026: videos are 1080p now, about 60 MB a minute.">
+              <Input name="video_archive_months" defaultValue={v.video_archive_months ?? "12"} inputMode="numeric" required data-video-archive-months />
+            </Field>
             </div>
             <Field label="WhatsApp follow-up message" hint="Placeholders: [name], [make model], [plate].">
               <Textarea name="whatsapp_followup_template" defaultValue={v.whatsapp_followup_template} rows={3} required />

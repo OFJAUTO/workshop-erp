@@ -81,7 +81,7 @@ export default async function JobMediaPage({ params, searchParams }: { params: P
 
           <Card className="flex flex-col gap-3">
             <SectionLabel right={`${card.media.length}`}>Uploaded so far</SectionLabel>
-            <MediaGallery media={card.media} urls={Object.fromEntries(card.mediaUrls)} damageNote={card.gateIn?.damage_note} compact canRemove={staff.role_id === "owner" || !card.gateIn?.is_complete} />
+            <MediaGallery staffDownload media={card.media} urls={Object.fromEntries(card.mediaUrls)} damageNote={card.gateIn?.damage_note} compact canRemove={staff.role_id === "owner" || !card.gateIn?.is_complete} />
           </Card>
         </div>
       </div>

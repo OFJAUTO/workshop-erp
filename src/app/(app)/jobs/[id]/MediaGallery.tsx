@@ -144,7 +144,10 @@ export function MediaGallery({
   hideVideos = false,
   canRemove = false,
   damageElsewhere = false,
+  staffDownload = false,
 }: {
+  /** Staff pages (9 November 2026): each video offers its original file to download, exactly as recorded. */
+  staffDownload?: boolean;
   media: GateInMediaRow[];
   urls: Record<string, string>;
   /** Small pictures for the page (the viewer opens the sharp `urls`); missing ones fall back to the sharp address. */
@@ -237,6 +240,7 @@ export function MediaGallery({
                   {KIND_LABEL[v.kind]}
                   {v.duration_s ? ` · ${v.duration_s}s` : ""}
                   {compact ? "" : ` · ${formatDateTime(v.taken_at)}`}
+                  {staffDownload && url ? <> · <a href={`${url}${url.includes("?") ? "&" : "?"}download=${encodeURIComponent(`${KIND_LABEL[v.kind] ?? "video"}.${String(v.storage_path).split(".").pop() ?? "mp4"}`)}`} className="underline underline-offset-4" data-video-download>Download original</a></> : null}
                 </figcaption>
               </figure>
             );

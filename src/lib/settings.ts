@@ -221,6 +221,8 @@ const DEFAULTS = {
   /** Payment hand-over (2 November 2026, section 3): a payment an advisor sent to accounts and not recorded or queried
    *  within these WORKING hours reminds accounts and the owner once (Settings > Money). */
   payment_report_reminder_hours: 4,
+  /** 9 November 2026, Section 7: videos move to the off-site archive this many months after the car leaves. */
+  video_archive_months: 12,
   /** "Urgent" must mean urgent (9 November 2026): a customer waiting on us longer than these WORKING hours makes the
    *  task urgent on Waiting on you (Settings > Money). */
   urgent_customer_wait_hours: 4,

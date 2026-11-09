@@ -17,6 +17,7 @@ import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 
 const NUMBER_KEYS = [
   "ppf_warranty_years",
+  "video_archive_months",
   "bodyshop_final_check_days",
   "tablet_idle_lock_seconds",
   "pin_max_attempts",
@@ -141,6 +142,7 @@ const TEXT_KEYS = [
 const LIMITS: Record<(typeof NUMBER_KEYS)[number], [number, number, string]> = {
   tablet_idle_lock_seconds: [30, 3600, "Tablet idle lock"],
   ppf_warranty_years: [1, 30, "PPF warranty years"],
+  video_archive_months: [1, 120, "Months a video stays in the app after the car leaves"],
   bodyshop_final_check_days: [1, 60, "Final check days after handover"],
   pin_max_attempts: [3, 10, "Wrong PINs before lock"],
   pin_lock_minutes: [1, 60, "PIN lock time"],

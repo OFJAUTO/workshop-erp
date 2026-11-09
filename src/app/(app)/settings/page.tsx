@@ -1,4 +1,6 @@
 import { Button, Card, Input, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { storageCostWords } from "@/lib/video-quality";
 import { requirePermission } from "@/lib/auth";
 import { DEPARTMENT_LABELS, type DepartmentId } from "@/lib/roles";
 import { formatBytes, storageUsage } from "@/lib/storage-usage";
@@ -157,6 +159,19 @@ export default async function SettingsPage() {
         <div className="flex flex-col gap-6">
           <Card id="background-jobs" className="flex flex-col gap-3" data-background-jobs>
             <SectionLabel>Background jobs</SectionLabel>
+            {await (async () => {
+              // 9 November 2026, Section 7: the video storage line (videos are 1080p now) and how long they stay here.
+              const { data: v } = await createAdminClient().rpc("video_storage_summary");
+              const row = (Array.isArray(v) ? v[0] : v) as { total_bytes: number; total_videos: number; month_bytes: number; month_videos: number } | null;
+              const { data: mrow } = await createAdminClient().from("settings").select("value").eq("key", "video_archive_months").maybeSingle();
+              const months = Number(mrow?.value ?? 12) || 12;
+              return (
+                <p className="rounded-control border border-line bg-white px-3 py-2 text-sm" data-video-storage>
+                  {row ? <>Video storage: <b>{storageCostWords(Number(row.total_bytes))}</b> ({row.total_videos} videos) · added this month {(Number(row.month_bytes) / 1073741824).toFixed(2)} GB ({row.month_videos}).</> : "Video storage: the monthly line switches on with the database update of 9 November."}
+                  {" "}Videos move to the off-site archive {months} months after the car leaves (still retrievable).
+                </p>
+              );
+            })()}
             <ul className="flex flex-col divide-y divide-line">
               {jobs.map((j) => {
                 const late = jobLate(j, nowMs);
