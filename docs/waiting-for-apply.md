@@ -13,6 +13,14 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 | # | What | What it does on live | Size |
 |---|---|---|---|
+| – | Nothing waiting. | | |
+
+## Applied on 9 November 2026, afternoon
+
+The owner replied "apply". A fresh backup was taken first: `backups/2026-11-09T14-14-12` (119 tables, 263,256 rows). The two migrations were run with `scripts/db-sql.mjs` without an error and recorded with `scripts/db-record-migration.mjs`; the bells file was run after reading live again: the advisors had set most dates during the day, so only 2 bells went (Anas: J-00317; the owner: J-00991, no advisor). `npm run check:live`: 33 passed, 0 failed.
+
+| # | What | What it does on live | Size |
+|---|---|---|---|
 | 1 | `supabase/migrations/20261210090000_promised_time.sql` (part 3) | Adds `jobs.promised_time` (the optional time next to the promised date). Until then the time box is hidden; the date works already. | 1 column |
 | 2 | `supabase/migrations/20261210100000_bell_open_only.sql` (part 4) | Adds `notifications.cleared_at` and `archived_at`. Until then a done task already clears itself (marked read) and the badge already counts open actions only; with it the cleared stamp is kept and read notices leave the panel after 30 days. | 2 columns + 1 index |
 | 3 | `supabase/data-fixes/2026-11-09-promised-date-bells.sql` (part 3, bells only) | One bell per advisor with the approved cars that have no promised date (read on live 9 Nov): Anas 5 (J-00317, J-00940, J-00977, J-00980, J-00990), Hamza 3 (J-00858, J-00860, J-00972), Adarsh 2 (J-00492, J-00986), the owner 1 (J-00991, no advisor). No date is set. | 4 bells |
