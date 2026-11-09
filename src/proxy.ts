@@ -32,7 +32,7 @@ async function passkeyCapFor(userId: string): Promise<boolean> {
 }
 
 /** Pages anyone may open without being logged in. */
-const PUBLIC_PREFIXES = ["/login", "/auth", "/tablet", "/api/auth", "/api/tablet", "/api/media", "/api/uploads", "/api/customer", "/api/approve", "/api/cron", "/u", "/approve", "/terms", "/report", "/quote", "/api/quote", "/api/pay", "/api/pdf", "/api/pdf-pages", "/invoice", "/proforma", "/lpo", "/q", "/api/e2e", "/fonts", "/s", "/handover", "/progress", "/drive", "/api/drive", "/m", "/d", "/i", "/r", "/k", "/p", "/warranty"];
+const PUBLIC_PREFIXES = ["/login", "/auth", "/tablet", "/api/auth", "/api/tablet", "/api/media", "/api/uploads", "/api/customer", "/api/approve", "/api/cron", "/u", "/approve", "/terms", "/report", "/quote", "/api/quote", "/api/pay", "/api/pdf", "/api/pdf-pages", "/invoice", "/proforma", "/lpo", "/q", "/api/e2e", "/fonts", "/s", "/handover", "/progress", "/drive", "/api/drive", "/m", "/d", "/i", "/r", "/k", "/p", "/warranty", "/statement"];
 
 function isPublic(pathname: string) {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));

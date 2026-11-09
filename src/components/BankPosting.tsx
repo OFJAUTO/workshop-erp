@@ -71,6 +71,7 @@ export function BankRow({ row, today, canSave, ready, proofUrl = null, withTick 
         {row.notDue ? <span className="rounded-control border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold" data-bank-not-due>Post-dated: {row.notDue}</span> : null}
         {row.depositedAt ? <span className="rounded-control border border-line bg-white px-2 py-0.5 text-xs font-bold" data-bank-deposited>Deposited {row.depositedAt}{row.depositedTo ? ` · ${row.depositedTo}` : ""}</span> : cheque ? <span className="text-xs font-semibold text-amber-text" data-bank-received>Received – not deposited yet</span> : <span className="text-xs font-semibold text-amber-text" data-bank-received>Waiting for the bank</span>}
         {row.late ? <span className="text-xs font-semibold text-amber-text">older than 3 working days</span> : null}
+        {row.group ? <span className="w-full text-xs font-bold" data-bank-group={row.group.number}>{row.group.words} · {row.group.number}: clears and bounces as one</span> : null}
         {proofUrl ? <SlipTile url={proofUrl} path={row.proofPath} label={`${row.number} proof`} hook={row.number} size="h-9 w-9" /> : null}
       </div>
       {canSave && !done ? (
@@ -92,7 +93,7 @@ export function BankRow({ row, today, canSave, ready, proofUrl = null, withTick 
         <form action={clrAction} className="flex flex-wrap items-end gap-2 rounded-control border border-line bg-white p-3" data-bank-form="clear">
           <input type="hidden" name="ids" value={row.id} />
           <MoneyDate name="settled_on" label={cheque ? "Cleared on (the day on the statement)" : "Reached the bank on"} defaultValue="" max={today} min={row.depositedAt ?? received} minWords={row.depositedAt ? "the day it was deposited" : "the day it was received"} hook="data-bank-clear-date" />
-          <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">{cheque ? "Amount" : "Amount actually received"}</span><Input name="amount" inputMode="decimal" required defaultValue={row.amount.toFixed(2)} className="w-36" data-bank-clear-amount /></label>
+          <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">{cheque ? "Amount" : "Amount actually received"}</span><Input name="amount" inputMode="decimal" required defaultValue={(row.group?.total ?? row.amount).toFixed(2)} className="w-36" data-bank-clear-amount /></label>
           <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Statement reference</span><Input name="statement_ref" className="w-48" data-bank-clear-ref /></label>
           <Button type="submit" size="md" disabled={clrBusy} data-bank-save="clear">{clrBusy ? "Saving…" : "Record"}</Button>
           {!cheque ? <span className="w-full text-xs text-muted">Less arrived: the balance stays open. More arrived: the rest becomes an advance.</span> : null}
@@ -126,7 +127,7 @@ export function BankPostingPanel({ method, rows, today, canSave, ready, proofUrl
     <div className="flex flex-col gap-3" data-bank-panel={method}>
       {rows.length ? (
         <ul className="divide-y divide-line" data-bank-list>
-          {rows.map((r) => <BankRow key={r.id} row={r} today={today} canSave={canSave} ready={ready} proofUrl={r.proofPath ? (proofUrls[r.proofPath] ?? null) : null} withTick={canSave} ticked={ticked.has(r.id)} onTick={(on) => { setTicked((s) => { const n = new Set(s); if (on) n.add(r.id); else n.delete(r.id); return n; }); setAmount(null); }} />)}
+          {rows.map((r) => <BankRow key={r.id} row={r} today={today} canSave={canSave} ready={ready} proofUrl={r.proofPath ? (proofUrls[r.proofPath] ?? null) : null} withTick={canSave} ticked={ticked.has(r.id)} onTick={(on) => { setTicked((s) => { const n = new Set(s); for (const x of rows.filter((y) => y.id === r.id || (!!r.group && y.group?.number === r.group.number))) { if (on) n.add(x.id); else n.delete(x.id); } return n; }); setAmount(null); }} />)}
         </ul>
       ) : (
         <p className="text-sm text-muted" data-bank-empty>No {word}s waiting for the bank.</p>

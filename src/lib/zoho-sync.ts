@@ -372,7 +372,7 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
 
 /* ------------------------------------------------------- the outbox ------------------------------------------------------- */
 
-export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery" | "vendorcredit" | "cnrefund" | "settlement" | "supplierpay";
+export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery" | "vendorcredit" | "cnrefund" | "settlement" | "supplierpay" | "paygroup";
 export type OutboxRow = {
   id: string;
   kind: ZohoKind;
@@ -889,12 +889,82 @@ async function reverseZohoPayment(org: string, zohoId: string, receipt: string, 
   return { zohoId, result: { receipt, reversed: "removed from Zoho", reason, reversed_at: new Date().toISOString() } };
 }
 
+/** A share of a combined payment: waits for the group's ONE Zoho payment, then applies its part to its car's invoice. */
+async function syncGroupShare(org: string, p: PaymentRow & { zoho_payment_id: string | null }, groupId: string): Promise<HandlerOut> {
+  const admin = createAdminClient();
+  const { data: g } = await admin.from("payment_groups").select("id, number, zoho_payment_id").eq("id", groupId).maybeSingle();
+  if (!g) throw new ZohoError("The combined payment of this receipt no longer exists in the ERP.");
+  if (p.status === "voided" || p.status === "reversed") return { result: { skipped: `Part of ${g.number}: the combined payment is taken back as one.`, receipt: p.number } };
+  if (!g.zoho_payment_id) {
+    await ensureQueued("paygroup", g.id, p.job_id);
+    return { wait: `Waiting for the combined payment ${g.number} to reach Zoho first.` };
+  }
+  const zid = String(g.zoho_payment_id);
+  if (p.zoho_payment_id !== zid) await admin.from("payments").update({ zoho_payment_id: zid }).eq("id", p.id);
+  let applied = 0;
+  if (p.invoice_id) {
+    const { data: inv } = await admin.from("invoices").select("kind, zoho_invoice_id").eq("id", p.invoice_id).maybeSingle();
+    if (inv?.kind === "tax_invoice" && inv.zoho_invoice_id) applied = (await applyToZohoInvoice(org, String(inv.zoho_invoice_id), [{ zohoId: zid, amount: p.amount_aed, receipt: p.number }])).applied;
+  }
+  return { zohoId: zid, result: { receipt: p.number, amount: p.amount_aed, via_group: g.number, applied } };
+}
+
+/**
+ * A combined payment (CP-, 9 November 2026): ONE Zoho customer payment for the whole amount, unapplied; each share then
+ * applies its part to its car's tax invoice (when that reaches Zoho, as any advance). A cheque or transfer goes into
+ * Undeposited Funds on the day it was received once Accounts posting is applied; bounced or voided as a whole, it is
+ * taken back out of Zoho.
+ */
+async function syncPayGroupRow(org: string, accounts: Resolved, groupId: string): Promise<HandlerOut> {
+  const admin = createAdminClient();
+  const { data: gRow } = await admin.from("payment_groups").select("id, number, customer_id, method, amount_aed, received_at, zoho_payment_id").eq("id", groupId).maybeSingle();
+  const g = gRow as { id: string; number: string; customer_id: string; method: MethodKey; amount_aed: number | string; received_at: string; zoho_payment_id: string | null } | null;
+  if (!g) throw new ZohoError("The combined payment no longer exists in the ERP.");
+  const { data: kidRows } = await admin.from("payments").select("id, number, status, cheque_status, amount_aed, received_at, cleared_at, settlement_id, job_id, is_active").eq("group_id", g.id);
+  const kids = (kidRows ?? []) as { id: string; number: string; status: string; cheque_status: string | null; amount_aed: number | string; received_at: string; cleared_at: string | null; settlement_id: string | null; job_id: string | null; is_active: boolean }[];
+  const live = kids.filter((k) => k.is_active && k.status === "recorded" && k.cheque_status !== "bounced");
+  if (!live.length) {
+    if (g.zoho_payment_id) return reverseZohoPayment(org, g.zoho_payment_id, g.number, "bounced or voided in the ERP");
+    return { result: { skipped: "Bounced or voided before it reached Zoho. Nothing went to Zoho." } };
+  }
+  const ready = await bankPostingReady();
+  const pendingKid = live.find((k) => k.cheque_status === "pending");
+  const via = isBankMethod(g.method) && ready && live.every((k) => k.cheque_status === "pending" || !!k.settlement_id);
+  if (isBankMethod(g.method) && !via && pendingKid) return { wait: g.method === "cheque" ? "Waiting for the cheque to clear." : "Waiting for the transfer to be confirmed in the bank." };
+  const day = dubaiDate(via ? g.received_at : (live[0].cleared_at ?? g.received_at));
+  const gate = await startDateSkip(day, ["paygroup"], g.id);
+  if (gate) return gate;
+  const amount = round2(live.reduce((a, k) => a + (Number(k.amount_aed) || 0), 0));
+  const contactId = await ensureContact(org, g.customer_id);
+  let zid = g.zoho_payment_id;
+  if (!zid) {
+    const j = await zohoFetch<{ customerpayments?: ZohoPayment[] }>(`/customerpayments?reference_number=${encodeURIComponent(g.number)}&customer_id=${encodeURIComponent(contactId)}`, { org });
+    const same = j.customerpayments?.find((x) => x.reference_number === g.number) ?? null;
+    if (same && !near(Number(same.amount), amount)) throw new ZohoError(`A payment with the reference ${g.number} already exists in Zoho with a different amount (${Number(same.amount).toFixed(2)} there, ${amount.toFixed(2)} here): the accountant checks it in Zoho.`);
+    zid = same?.payment_id ?? null;
+  }
+  if (!zid) {
+    const j = await zohoFetch<{ payment?: ZohoPayment }>("/customerpayments", { org, method: "POST", body: { customer_id: contactId, payment_mode: MODE[g.method], amount, date: day, reference_number: g.number, description: `Combined payment ${g.number} for ${live.length} car${live.length === 1 ? "" : "s"} (${live.map((k) => k.number).join(", ")})`, account_id: via ? needAccounts(accounts.undeposited, accounts.undepositedError) : accounts.depositTo[g.method] } });
+    zid = j.payment?.payment_id ?? null;
+    if (!zid) throw new ZohoError("Zoho did not return the new payment.");
+  }
+  await admin.from("payment_groups").update({ zoho_payment_id: zid }).eq("id", g.id);
+  // Each share takes it and applies its part as its invoice allows (queued, so each shows its own row).
+  for (const k of live) await ensureQueued(k.job_id ? "payment" : "deposit", k.id, k.job_id);
+  return { zohoId: zid, result: { combined: g.number, amount, shares: live.length, receipts: live.map((k) => k.number), undeposited: via } };
+}
+
 async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string): Promise<HandlerOut> {
   const admin = createAdminClient();
-  const { data: raw } = await admin.from("payments").select(`${PAYMENT_SELECT}, zoho_payment_id`).eq("id", paymentId).maybeSingle();
+  const groupCol = (await schemaReady("payments", "group_id")) ? ", group_id" : "";
+  const { data: rawData } = await admin.from("payments").select(`${PAYMENT_SELECT}, zoho_payment_id${groupCol}` as string).eq("id", paymentId).maybeSingle();
+  const raw = rawData as unknown as Record<string, unknown> | null;
   if (!raw) throw new ZohoError("The payment no longer exists in the ERP.");
   const p = toPayment(raw as Record<string, unknown>) as PaymentRow & { zoho_payment_id: string | null };
   if (p.status === "pending_owner") return { wait: "Waiting for the owner to approve the over-balance payment." };
+  // 9 November 2026: a share of a combined payment (one cheque for several cars) is part of ONE Zoho customer payment.
+  const groupId = ((raw as Record<string, unknown>).group_id as string | null | undefined) ?? null;
+  if (groupId) return syncGroupShare(org, p, groupId);
   if ((p.status === "voided" || p.status === "reversed") && !p.zoho_payment_id) return { result: { skipped: "Voided in the ERP before it was posted. Nothing went to Zoho." } };
   if (p.status === "voided" || p.status === "reversed") return reverseZohoPayment(org, p.zoho_payment_id!, p.number, p.void_reason ?? p.reversed_reason);
   // 9 November 2026: a cheque or transfer waiting for the bank posts at once into Undeposited Funds (dated the day it was
@@ -2220,6 +2290,7 @@ async function processOutboxRow(row: WorkRow, ctx: RunCtx): Promise<RowDone> {
           : row.kind === "vendorcredit" ? await syncVendorCreditRow(org, accounts, row.record_id)
           : row.kind === "cnrefund" ? await syncCnRefundRow(org, accounts, row.record_id)
           : row.kind === "settlement" ? await syncSettlementRow(org, accounts, row.record_id)
+          : row.kind === "paygroup" ? await syncPayGroupRow(org, accounts, row.record_id)
           : await syncPaymentRow(org, accounts, row.record_id);
       }
     }

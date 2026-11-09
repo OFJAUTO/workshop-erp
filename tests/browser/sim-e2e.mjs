@@ -13,7 +13,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -2707,6 +2707,122 @@ await section("sec2", "accounts posting: cheques and transfers", async () => {
   check("s8: short transfer counts what arrived (980)", short?.a === 980, JSON.stringify(short));
   const extra = (await sql("select amount_aed::float as a from public.payments where job_id = $1 and notes like $2", [jobId, `Extra that reached the bank with ${t2.number}%`]))[0];
   check("s8: over transfer: the extra 20 is an advance", extra?.a === 20, JSON.stringify(extra));
+  await a.browser.close();
+});
+
+/* ================================================================================================= */
+/* Path sec3 — 9 November 2026, Section 3: one payment for several cars (AL ALI: cheque 019383,       */
+/* AED 4,368.00 for two Corollas). Replace with combined payment (the cheque recorded on one car),     */
+/* the statement and one bill for both, a combined bounce, a combined cheque with a leftover advance   */
+/* cleared as one -> both proformas become tax invoices.                                               */
+/* ================================================================================================= */
+await section("sec3", "one payment for several cars", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-09-combined-payments";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "ready" })).json;
+  const jobA = seed.jobId;
+  if (!jobA) throw new Error("seed failed");
+  const job = (await sql("select customer_id, vehicle_id, gated_in_by from public.jobs where id = $1", [jobA]))[0];
+  const acc = (await sql("select id from public.staff where role_id = 'accounts' and is_active order by created_at limit 1"))[0].id;
+  // The second car of the same customer (a second job), and one proforma on each: 2,236.50 (older) and 2,131.50.
+  const jobB = "22222222-0000-4000-8000-00000000e9b1";
+  await sql("insert into public.jobs (id, job_number, customer_id, vehicle_id, gated_in_by, status, is_open, gated_in_at) values ($1, 'E2E-J-S3B', $2, $3, $4, 'pending_payment', true, now() - interval '2 days')", [jobB, job.customer_id, job.vehicle_id, job.gated_in_by]);
+  await sql("update public.invoices set status = 'cancelled' where job_id = $1 and kind = 'proforma' and status = 'issued'", [jobA]);
+  const mkPro = async (jobId, number, net, vat, total, token, ago) => {
+    const r = (await sql(`insert into public.invoices (number, kind, job_id, customer_id, vehicle_id, status, issued_at, sent_at, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed, token, created_by, updated_by) values ($1, 'proforma', $2, $3, $4, 'issued', now() - ($8 || ' hours')::interval, now(), $5, 0, $5, $6, $7, $9, $10, $10) returning id`, [number, jobId, job.customer_id, job.vehicle_id, net, vat, total, String(ago), token, acc]))[0];
+    await sql("insert into public.invoice_lines (invoice_id, position, section, description, quantity, unit_price, amount_aed, vat_aed, total_aed, cost_aed, created_by, updated_by) values ($1, 1, 'labour', 'E2E SERVICE', 1, $2, $2, $3, $4, 0, $5, $5)", [r.id, net, vat, total, acc]);
+    return r.id;
+  };
+  const proB = await mkPro(jobB, "E2E-PRO-S3B", 2130, 106.5, 2236.5, "e2e-s3-prob", 30);
+  const proA = await mkPro(jobA, "E2E-PRO-S3A", 2030, 101.5, 2131.5, "e2e-s3-proa", 20);
+  // The J-00858 situation: the cheque recorded on ONE car only (2,131.50).
+  const old = (await sql("insert into public.payments (job_id, invoice_id, customer_id, vehicle_id, method, amount_aed, bank_charge_aed, is_deposit, status, cheque_number, cheque_bank, cheque_date, cheque_status, received_by, created_by, updated_by) values ($1, $2, $3, $4, 'cheque', 2131.5, 0, false, 'recorded', '019383', 'Emirates NBD', '2026-11-02', 'pending', $5, $5, $5) returning id, number", [jobA, proA, job.customer_id, job.vehicle_id, acc]))[0];
+
+  const a = await browserForId(acc, { viewport: { width: 1440, height: 900 } });
+  // c1. "Replace with combined payment" on that receipt → the window, the old receipt ticked; 4,368.00 split oldest first.
+  await go(a.page, `${base}/jobs/${jobA}/invoice`);
+  const rep = a.page.locator(`[data-replace-combined="${old.number}"]`);
+  check("c1: Replace with combined payment is on the cheque", (await rep.count()) === 1);
+  await rep.click();
+  await a.page.waitForURL((u) => u.toString().includes("replace="), { timeout: 20000 }).catch(() => null);
+  const win = a.page.locator("[data-receive-window]");
+  await win.waitFor({ timeout: 15000 });
+  check("c1: the old receipt is ticked to be replaced", await win.locator(`[data-receive-replace-id="${old.number}"]`).isChecked().catch(() => false));
+  await win.locator("[data-receive-amount]").pressSequentially("4368", { delay: 20 });
+  await win.locator("[data-receive-cheque-bank]").fill("Emirates NBD");
+  await win.locator("[data-receive-cheque-date]").fill("2026-11-02");
+  await win.locator("[data-receive-replace-reason]").fill("One cheque for two cars, recorded on one car only");
+  const sB = await win.locator('[data-receive-share-amount="E2E-PRO-S3B"]').inputValue().catch(() => "");
+  const sA = await win.locator('[data-receive-share-amount="E2E-PRO-S3A"]').inputValue().catch(() => "");
+  check(`c1: split oldest first (${sB} + ${sA})`, sB === "2236.50" && sA === "2131.50");
+  await win.screenshot({ path: `${proof}/c1-receive-4368-two-cars-1440.png` }).catch(() => null);
+  await win.locator("[data-receive-save]").click();
+  await win.locator("[data-receive-done], [data-receive-error]").first().waitFor({ timeout: 60000 });
+  const doneWords = ((await win.textContent()) ?? "").replace(/\s+/g, " ");
+  check("c1: recorded as one combined payment", /CP-\d{5}: AED 4,368\.00 by cheque 019383 over 2 cars/.test(doneWords), doneWords.slice(0, 260));
+  const oldNow = (await sql("select status, void_reason from public.payments where id = $1", [old.id]))[0];
+  check("c1: the old receipt is voided with the reason", oldNow?.status === "voided" && /Replaced by a combined payment/.test(oldNow?.void_reason ?? ""), JSON.stringify(oldNow));
+  const shares = await sql("select p.number, p.amount_aed::float as a, p.notes, g.number as g, g.replaced_payment_ids::text as rep from public.payments p join public.payment_groups g on g.id = p.group_id where g.customer_id = $1 and p.status = 'recorded' order by p.amount_aed", [job.customer_id]);
+  check(`c1: two shares in one group (${shares.map((s) => s.a).join(" + ")})`, shares.length === 2 && shares[0].a === 2131.5 && shares[1].a === 2236.5 && shares[0].g === shares[1].g);
+  check("c1: each share says Part of cheque 019383 (AED 4,368.00 total)", shares.every((s) => (s.notes ?? "").startsWith("Part of cheque 019383 (AED 4,368.00 total)")));
+  check("c1: the group keeps the replaced receipt", (shares[0]?.rep ?? "").includes(old.id));
+  await win.locator("[data-receive-close]").click().catch(() => null);
+  // The job shows the share words.
+  await go(a.page, `${base}/jobs/${jobA}/invoice`);
+  check("c1: the job shows Part of cheque …", (await a.page.locator("[data-payment-group]").count()) >= 1);
+
+  // c2. The statement and one bill for both cars; the customer's link opens without signing in.
+  await go(a.page, `${base}/customers/${job.customer_id}/statement`);
+  const stTxt = ((await a.page.locator("[data-statement]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check("c2: the statement shows both cars, waiting for the bank and the balance once cleared", stTxt.includes("E2E-PRO-S3A") && stTxt.includes("E2E-PRO-S3B") && stTxt.includes("Waiting for the bank AED 4,368.00") && stTxt.includes("Balance once cleared AED 0.00"), stTxt.slice(0, 300));
+  await a.page.screenshot({ path: `${proof}/c2-statement-1440.png`, fullPage: false }).catch(() => null);
+  await a.page.locator("[data-combined-tick]").first().check();
+  await a.page.locator("[data-combined-tick]").nth(1).check();
+  await a.page.locator("[data-combined-send]").click();
+  const msg = await a.page.locator("[data-send-message]").inputValue({ timeout: 20000 }).catch(() => "");
+  const link = (msg.match(/https?:\/\/\S+/) ?? [""])[0];
+  check("c2: one bill message carries the link", /one bill for your 2 cars/.test(msg) && !!link, msg.slice(0, 200));
+  await a.page.keyboard.press("Escape").catch(() => null);
+  const tok = (await sql("select url from public.short_links where url like $1 order by created_at desc limit 1", ["%/statement/%"]).catch(() => []))[0]?.url ?? "";
+  const path = tok.includes("/statement/") ? tok.slice(tok.indexOf("/statement/")) : "";
+  if (path) {
+    const anon = await (await import("playwright-core")).chromium.launch({ executablePath: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", headless: true });
+    const pg = await anon.newPage();
+    await pg.goto(`${base}${path}`);
+    const pub = ((await pg.locator("[data-statement-page]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+    check("c2: the customer's combined bill opens without signing in", pub.includes("Combined proforma") && pub.includes("Total to pay"), pub.slice(0, 200));
+    await anon.close();
+  } else check("c2: the combined bill link was saved", false, tok);
+
+  // c3. A combined cheque bounces as ONE: both shares reversed.
+  await go(a.page, `${base}/accounts-posting?tab=cheque`);
+  const firstShare = a.page.locator(`[data-bank-row="${shares[0].number}"]`);
+  check("c3: the share shows it clears and bounces as one", (await firstShare.locator("[data-bank-group]").count()) === 1);
+  await firstShare.locator("[data-bank-open='bounce']").click();
+  await firstShare.locator("[data-bank-save='bounce']").click();
+  const both = await until(async () => { const r = await sql("select count(*)::int as n from public.payments p join public.payment_groups g on g.id = p.group_id where g.customer_id = $1 and p.status = 'reversed'", [job.customer_id]); return (r[0]?.n ?? 0) >= 2 ? r[0].n : null; }, 60, 500);
+  check(`c3: both shares reversed (${both})`, both === 2);
+
+  // c4. A new combined cheque of 4,868.00: both cars paid and AED 500.00 left over as an advance; cleared as ONE.
+  await go(a.page, `${base}/customers/${job.customer_id}?receive=1`);
+  const w2 = a.page.locator("[data-receive-window]");
+  await w2.waitFor({ timeout: 15000 });
+  await w2.locator("[data-receive-amount]").pressSequentially("4868", { delay: 20 });
+  await w2.locator("[data-receive-cheque-number]").fill("019400");
+  await w2.locator("[data-receive-cheque-date]").fill(today);
+  check("c4: AED 500.00 left over becomes an advance", /AED 500\.00 left over becomes an advance/.test((await w2.locator("[data-receive-leftover]").textContent().catch(() => "")) ?? ""));
+  await w2.locator("[data-receive-save]").click();
+  await w2.locator("[data-receive-done], [data-receive-error]").first().waitFor({ timeout: 60000 });
+  const g2 = await sql("select p.number, p.amount_aed::float as a, p.invoice_id from public.payments p join public.payment_groups g on g.id = p.group_id where g.customer_id = $1 and g.cheque_number = '019400' order by p.amount_aed", [job.customer_id]);
+  check(`c4: three shares (${g2.map((x) => x.a).join(", ")})`, g2.length === 3 && g2[0].a === 500 && !g2[0].invoice_id);
+  await go(a.page, `${base}/accounts-posting?tab=cheque`);
+  await a.page.locator(`[data-bank-tick="${g2[1].number}"]`).check();
+  const ticked = await a.page.locator("[data-bank-tick]:checked").count();
+  check(`c4: ticking one share ticks the whole cheque (${ticked})`, ticked === 3);
+  await a.page.locator("[data-bank-record-date]").fill(today);
+  await a.page.locator("[data-bank-record-save]").click();
+  const taxes = await until(async () => { const r = await sql("select count(*)::int as n from public.invoices where job_id in ($1, $2) and kind = 'tax_invoice' and status = 'issued'", [jobA, jobB]); return (r[0]?.n ?? 0) >= 2 ? r[0].n : null; }, 120, 500);
+  check(`c4: cleared as one → both cars' tax invoices (${taxes})`, taxes === 2);
   await a.browser.close();
 });
 

@@ -15,6 +15,8 @@ import type { QuoteFamily } from "@/lib/quote-history";
 import { refuseRecord } from "@/lib/refusal";
 import { RecordPaymentButton } from "@/components/RecordPaymentHost";
 import { UnallocatedList } from "@/components/UnallocatedList";
+import { ReceivePaymentButton } from "@/components/ReceivePayment";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { PaidSoFar } from "@/components/PaidSoFar";
 import { paymentChoices, unallocatedOf } from "@/lib/customer-money";
 
@@ -23,11 +25,12 @@ export default async function CustomerPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ message?: string; error?: string }>;
+  searchParams: Promise<{ message?: string; error?: string; receive?: string; job?: string; replace?: string }>;
 }) {
   const staff = await requirePermission("viewCustomers");
   const { id } = await params;
-  const { message, error } = await searchParams;
+  const { message, error, receive: receiveParam, job: receiveJob, replace: replaceId } = await searchParams;
+  const receiveFlag = (j?: string, r?: string, p?: string) => p === "1" || !!j || !!r;
   const canEdit = can(staff.role_id as RoleId, "editCustomers");
 
   const supabase = await createClient();
@@ -65,6 +68,15 @@ export default async function CustomerPage({
   const seesMoney = can(role, "viewInvoices");
   const [moneyChoices, credit] = seesMoney ? await Promise.all([paymentChoices({ customerId: id }, await getSettingsForGoodwill()), unallocatedOf({ customerId: id })]) : [null, []];
   const owing = (moneyChoices?.targets ?? []).filter((t) => t.kind !== "unallocated");
+  // 9 November 2026, Section 3: Receive payment (one payment over several cars) and the customer's statement.
+  const receive = mayPay || viewPay ? await (async () => {
+    const { openDocsOfCustomer, groupsReady } = await import("@/lib/payment-groups");
+    const { data: rec } = await createAdminClient().from("payments").select("id, number, amount_aed, method, cheque_number, cheque_status, status, job:jobs!payments_job_id_fkey(job_number)").eq("customer_id", id).eq("is_active", true).eq("status", "recorded").in("method", ["cheque", "transfer"]).eq("cheque_status", "pending").order("received_at");
+    const receipts = ((rec ?? []) as unknown as { id: string; number: string; amount_aed: number | string; method: string; cheque_number: string | null; cheque_status: string | null; status: string; job: { job_number: string } | null }[]).map((r) => ({ id: r.id, number: r.number, amount: Number(r.amount_aed), method: r.method, chequeNumber: r.cheque_number, job: r.job?.job_number ?? null, status: r.cheque_status ?? r.status }));
+    const docs = await openDocsOfCustomer(id, undefined, { ignore: replaceId ? receipts.map((r) => r.id) : [] });
+    const firstJobTitle = receiveJob ? (docs.find((d) => d.jobId === receiveJob)?.title ?? null) : null;
+    return { docs: docs.map((d) => ({ invoiceId: d.invoiceId, number: d.number, issuedAt: d.issuedAt, due: d.due, title: d.title })), receipts, ready: await groupsReady(), firstJobTitle };
+  })() : null;
   const creditTotal = credit.filter((p) => p.status === "recorded").reduce((a, p) => a + p.amount_aed, 0);
 
   return (
@@ -82,7 +94,9 @@ export default async function CustomerPage({
         actions={
           canEdit || mayPay || viewPay ? (
             <>
+              {mayPay && receive ? <ReceivePaymentButton customerId={c.id} docs={receive.docs} receipts={receive.receipts} ready={receive.ready} openOnLoad={receiveFlag(receiveJob, replaceId, receiveParam)} firstJobTitle={receive.firstJobTitle} replaceId={replaceId ?? null} /> : null}
               {mayPay || viewPay ? <RecordPaymentButton customerId={c.id} readOnly={viewPay} size="lg" tone="secondary" /> : null}
+              {seesMoney ? <LinkButton href={`/customers/${c.id}/statement`} tone="secondary" data-customer-statement>Statement</LinkButton> : null}
               {canEdit ? (
                 <>
                   <LinkButton href={`/vehicles/new?customer=${c.id}`} tone="secondary">

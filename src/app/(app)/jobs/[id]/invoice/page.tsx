@@ -6,6 +6,7 @@ import { SlipTile } from "@/components/PaymentReport";
 import { bankPostingReady } from "@/lib/schema-ready";
 import { VinCopy } from "@/components/VinCopy";
 import { signJobFiles } from "@/lib/work-data";
+import Link from "next/link";
 import { PositionsLine } from "@/components/PositionsLine";
 import { notFound } from "next/navigation";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
@@ -232,6 +233,9 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
     .replaceAll("[amount]", outstandingDeposit.toLocaleString("en-GB", { minimumFractionDigits: 2 }))
     .replaceAll("[quotation]", dep.quotationNumbers.join(", "));
 
+  // 9 November 2026: a share of one payment for several cars says so ("Part of cheque 019383 (AED 4,368.00 total)").
+  const { groupWordsFor } = await import("@/lib/payment-groups");
+  const groupWords = await groupWordsFor([...payments, ...depositRows].map((p) => p.id));
   const paymentLine = (p: PaymentRow, isDeposit: boolean) => {
     const by = p.received_by ? personOf.get(p.received_by) : null;
     const counter = !!by && by.role_id !== "owner" && by.role_id !== "accounts";
@@ -247,6 +251,8 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
         {/* Only the actual method ever shows; a payment with no recorder came through Pay now. */}
         {by?.display_name ? <span className="text-xs text-muted" data-paid-by>by {by.display_name}</span> : p.client_key?.startsWith("ngenius:") ? <span className="text-xs text-muted" data-paid-by>paid online (Pay now)</span> : null}
         <span className="ml-auto font-semibold">AED {m(p.amount_aed)}</span>
+        {groupWords.get(p.id) ? <span className="w-full text-xs font-bold no-underline" data-payment-group={groupWords.get(p.id)!.number}>{groupWords.get(p.id)!.words} · {groupWords.get(p.id)!.number}</span> : null}
+        {!struck && mayPay && awaitsBank(p) && !groupWords.get(p.id) ? <Link href={`/customers/${job.customer_id}?replace=${p.id}`} className="text-xs font-bold underline underline-offset-4" data-replace-combined={p.number}>Replace with combined payment</Link> : null}
         {needsBank ? <Badge tone="amber">{p.method === "cash" ? "Cash: to confirm & bank" : "Recorded by advisor, to confirm"}</Badge> : null}
         {needsBank && canVerify ? <form action={verifyPaymentAction.bind(null, p.id)}><input type="hidden" name="return_to" value={here} /><Button type="submit" size="md" tone="secondary" {...(isDeposit ? { "data-confirm-deposit": "" } : { "data-confirm-counter": "" })}>Confirmed &amp; banked</Button></form> : null}
         {p.status === "pending_owner" ? <Badge tone="amber">Waiting for the owner</Badge> : null}
@@ -311,6 +317,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
 
           <Card id="bank" className="flex flex-col gap-2 border-ink" data-what-now>
             <SectionLabel>What to do now</SectionLabel>
+            {mayPay && job.is_open && unpaid ? <Link href={`/customers/${job.customer_id}?receive=1&job=${id}`} className="text-sm font-bold underline underline-offset-4" data-covers-other-cars>This payment also covers other cars of this customer → add jobs</Link> : null}
             {waitingReport && (mayPay || viewPay) ? (
               <div className="flex flex-wrap items-center gap-2 rounded-control border-2 border-amber-bar bg-amber-soft p-3" data-what-now-report>
                 <span className="min-w-[12rem] flex-1 text-sm font-semibold">Payment reported by {firstName(waitingReport.reporter)} · AED {m(waitingReport.amount)} · <ReportMethodWords r={waitingReport} /> – record it.</span>

@@ -49,6 +49,7 @@ begin
   delete from public.settlement_reports where file_name ilike 'e2e%' or file_name ilike 'ni-mtr-%';
   delete from public.invoice_lines where invoice_id in (select id from public.invoices where job_id = any(job_ids));
   delete from public.payments where invoice_id in (select id from public.invoices where job_id = any(job_ids)) or job_id = any(job_ids) or customer_id = any(cust_ids);
+  if to_regclass('public.payment_groups') is not null then execute 'delete from public.payment_groups where customer_id = any($1)' using cust_ids; end if;
   update public.invoices set converted_to = null, converted_from = null where job_id = any(job_ids);
   delete from public.inspection_items where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.inspection_findings where inspection_id in (select id from public.inspections where job_id = any(job_ids));
@@ -129,6 +130,7 @@ begin
   delete from public.settlement_reports where file_name ilike 'e2e%' or file_name ilike 'ni-mtr-%';
   delete from public.invoice_lines where invoice_id in (select id from public.invoices where job_id = any(job_ids));
   delete from public.payments where invoice_id in (select id from public.invoices where job_id = any(job_ids)) or job_id = any(job_ids) or customer_id = any(cust_ids);
+  if to_regclass('public.payment_groups') is not null then execute 'delete from public.payment_groups where customer_id = any($1)' using cust_ids; end if;
   update public.invoices set converted_to = null, converted_from = null where job_id = any(job_ids);
   delete from public.inspection_items where inspection_id in (select id from public.inspections where job_id = any(job_ids));
   delete from public.inspection_findings where inspection_id in (select id from public.inspections where job_id = any(job_ids));

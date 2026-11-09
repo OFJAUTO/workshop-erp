@@ -108,6 +108,8 @@ const TEXT_KEYS = [
   "whatsapp_invoice_template",
   "whatsapp_deposit_request_template",
   "whatsapp_payment_request_template",
+  "whatsapp_statement_template",
+  "whatsapp_combined_bill_template",
   "whatsapp_deposit_receipt_template",
   "supplier_lpo_from_email",
   "supplier_lpo_email_text",

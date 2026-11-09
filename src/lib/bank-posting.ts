@@ -62,7 +62,9 @@ export type ClearResult = { error?: string; ok?: boolean; words?: string; number
  */
 export async function clearBankPayments(ids: string[], input: { date: string; amount: number; statementRef?: string | null; fee?: number | null; note?: string | null }, actor: BankActor): Promise<ClearResult> {
   if (!mayPost(actor)) return { error: "Only accounts or the owner record money reaching the bank." };
-  const list = Array.from(new Set(ids.filter(Boolean)));
+  // A combined cheque or transfer (one payment for several cars) clears as ONE: every share of its group goes together.
+  const { groupSiblings } = await import("./payment-groups");
+  const list = await groupSiblings(Array.from(new Set(ids.filter(Boolean))));
   if (!list.length) return { error: "Tick the payments this money covers." };
   const day = String(input.date ?? "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { error: "Pick the day the money reached the bank (on the statement)." };
@@ -141,9 +143,30 @@ export async function clearBankPayments(ids: string[], input: { date: string; am
   return { ok: true, number: posting?.number ?? null, words: `${cleared.map((p) => p.number).join(", ")}: ${cleared.length} ${what} ${method === "cheque" ? "cleared" : "confirmed in the bank"} on ${day}${posting ? ` (${posting.number})` : ""}.${extra}` };
 }
 
-/** A bounced cheque, or a transfer that never arrived: the payment reverses and the balance is due again. */
+/** A bounced cheque, or a transfer that never arrived: the payment reverses and the balance is due again. A combined
+ *  cheque (one payment for several cars) bounces as ONE: every share is reversed, the bank charge written once. */
 export async function bounceBankPayment(paymentId: string, input: { charge?: number | null; note?: string | null }, actor: BankActor): Promise<{ error?: string; ok?: boolean; words?: string }> {
   if (!mayPost(actor)) return { error: "Only accounts or the owner mark a payment bounced." };
+  const { groupSiblings } = await import("./payment-groups");
+  const all = await groupSiblings([paymentId]);
+  if (all.length > 1) {
+    const words: string[] = [];
+    for (const id of all) {
+      const r = await bounceOne(id, id === paymentId ? input : { note: input.note }, actor);
+      if (r.error) return { error: r.error, words: words.join(" ") || undefined };
+      words.push(r.words ?? "");
+    }
+    const { data: g } = await createAdminClient().from("payments").select("group_id").eq("id", paymentId).maybeSingle();
+    if (g?.group_id) {
+      const { reopenZoho } = await import("./zoho-sync");
+      await reopenZoho("paygroup", String(g.group_id)).catch(() => null);
+    }
+    return { ok: true, words: `One combined payment: all ${all.length} shares reversed. ${words.join(" ")}` };
+  }
+  return bounceOne(paymentId, input, actor);
+}
+
+async function bounceOne(paymentId: string, input: { charge?: number | null; note?: string | null }, actor: BankActor): Promise<{ error?: string; ok?: boolean; words?: string }> {
   const admin = createAdminClient();
   const { data } = await admin.from("payments").select(PAY_COLS).eq("id", paymentId).maybeSingle();
   const p = data as Pay | null;
@@ -199,7 +222,7 @@ async function afterBankMoney(pays: Pay[], what: "cleared" | "bounced", actor: B
   }
 }
 
-export type BankWaiting = { id: string; number: string; method: "cheque" | "transfer"; amount: number; receivedAt: string; chequeNumber: string | null; chequeBank: string | null; chequeDate: string | null; notDue: string | null; depositedAt: string | null; depositedTo: string | null; reference: string | null; jobId: string | null; jobNumber: string | null; plate: string; customer: string; late: boolean; proofPath: string | null };
+export type BankWaiting = { id: string; number: string; method: "cheque" | "transfer"; amount: number; receivedAt: string; chequeNumber: string | null; chequeBank: string | null; chequeDate: string | null; notDue: string | null; depositedAt: string | null; depositedTo: string | null; reference: string | null; jobId: string | null; jobNumber: string | null; plate: string; customer: string; late: boolean; proofPath: string | null; /** A share of a combined payment (one cheque for several cars): it clears and bounces with the whole. */ group: { number: string; words: string; total: number } | null };
 
 /** Cheques and transfers waiting for the bank, oldest first (Accounts posting's Cheque and Bank transfer tabs). */
 export async function loadBankWaiting(opts: { jobIds?: string[]; ids?: string[] } = {}): Promise<BankWaiting[]> {
@@ -224,7 +247,10 @@ export async function loadBankWaiting(opts: { jobIds?: string[]; ids?: string[] 
   const wt = workingTimeOf(settings);
   const today = dubaiToday();
   type Row = { id: string; number: string; method: "cheque" | "transfer"; amount_aed: number | string; received_at: string; cheque_number: string | null; cheque_bank: string | null; cheque_date: string | null; reference: string | null; proof_path: string | null; job_id: string | null; cheque_deposited_at?: string | null; cheque_deposited_to?: string | null; job: { job_number: string; vehicle: Parameters<typeof formatPlate>[0] | null } | null; customer: { full_name: string | null; company_name: string | null } | null };
-  return ((data ?? []) as unknown as Row[]).map((p) => ({
+  const rows = (data ?? []) as unknown as Row[];
+  const { groupWordsFor } = await import("./payment-groups");
+  const groups = await groupWordsFor(rows.map((r) => r.id));
+  return rows.map((p) => ({
     id: p.id,
     number: p.number,
     method: p.method,
@@ -243,6 +269,7 @@ export async function loadBankWaiting(opts: { jobIds?: string[]; ids?: string[] 
     customer: p.customer?.company_name || p.customer?.full_name || "",
     late: addWorkingDays(dubaiDay(p.received_at), 3, wt) < today,
     proofPath: p.proof_path,
+    group: groups.has(p.id) ? { number: groups.get(p.id)!.number, words: groups.get(p.id)!.words, total: groups.get(p.id)!.amount } : null,
   }));
 }
 
