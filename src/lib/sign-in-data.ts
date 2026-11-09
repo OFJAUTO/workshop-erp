@@ -83,7 +83,14 @@ export type PasskeyOverviewRow = {
   lastPasskey: string | null;
   backupUses30: number;
   skips30: number;
+  /** 9 November 2026: which devices hold the passkeys ("iPhone", "Android phone"…). */
+  kinds: string[];
+  /** This week's successful sign-ins: by passkey or by password, and from a phone/tablet or a PC. */
+  week: { passkey: number; password: number; phone: number; pc: number };
 };
+
+/** A phone or tablet (iPhone, iPad, Android) vs a computer, from the stored browser string. */
+export const isHandheldUa = (ua: string | null | undefined) => /iPhone|iPad|Android|Mobile/.test(ua ?? "");
 
 /** Everyone in the passkey roles: phones, last passkey sign-in, password backup uses and skipped setups (30 days). */
 export async function passkeyOverview(rollout: PasskeyRollout): Promise<PasskeyOverviewRow[]> {
@@ -94,11 +101,24 @@ export async function passkeyOverview(rollout: PasskeyRollout): Promise<PasskeyO
   const ids = people.map((p) => p.id as string);
   if (!ids.length) return [];
   const since = new Date(Date.now() - 30 * 86400_000).toISOString();
-  const [{ data: keys }, { data: events }, { data: skips }] = await Promise.all([
-    admin.from("staff_passkeys").select("staff_id").in("staff_id", ids).is("removed_at", null),
+  const weekAgo = new Date(Date.now() - 7 * 86400_000).toISOString();
+  const [{ data: keys }, { data: events }, { data: skips }, { data: week }] = await Promise.all([
+    admin.from("staff_passkeys").select("staff_id, name").in("staff_id", ids).is("removed_at", null),
     admin.from("sign_in_events").select("staff_id, method, ok, at").in("staff_id", ids).gte("at", since).in("method", ["passkey", "password_backup"]).eq("ok", true),
     admin.from("sign_in_changes").select("staff_id").in("staff_id", ids).eq("kind", "setup_skipped").gte("at", since),
+    admin.from("sign_in_events").select("staff_id, method, user_agent").in("staff_id", ids).gte("at", weekAgo).eq("ok", true),
   ]);
+  const kindsOf = new Map<string, string[]>();
+  for (const k of (keys ?? []) as { staff_id: string; name: string | null }[]) kindsOf.set(k.staff_id, [...(kindsOf.get(k.staff_id) ?? []), k.name ?? "Device"]);
+  const weekOf = new Map<string, { passkey: number; password: number; phone: number; pc: number }>();
+  for (const e of (week ?? []) as { staff_id: string; method: string; user_agent: string | null }[]) {
+    const w = weekOf.get(e.staff_id) ?? { passkey: 0, password: 0, phone: 0, pc: 0 };
+    if (e.method === "passkey") w.passkey++;
+    else if (/password|code|pin/.test(e.method)) w.password++;
+    if (isHandheldUa(e.user_agent)) w.phone++;
+    else w.pc++;
+    weekOf.set(e.staff_id, w);
+  }
   const phones = new Map<string, number>();
   for (const k of keys ?? []) phones.set(k.staff_id as string, (phones.get(k.staff_id as string) ?? 0) + 1);
   const lastPk = new Map<string, string>();
@@ -120,6 +140,8 @@ export async function passkeyOverview(rollout: PasskeyRollout): Promise<PasskeyO
     lastPasskey: lastPk.get(p.id as string) ?? null,
     backupUses30: backup.get(p.id as string) ?? 0,
     skips30: skipped.get(p.id as string) ?? 0,
+    kinds: kindsOf.get(p.id as string) ?? [],
+    week: weekOf.get(p.id as string) ?? { passkey: 0, password: 0, phone: 0, pc: 0 },
   }));
 }
 

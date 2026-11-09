@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { browserSupportsWebAuthn, startAuthentication } from "@simplewebauthn/browser";
 import { Button, Notice } from "@/components/ui";
+import { PasskeySlowHelp } from "@/components/PasskeySlowHelp";
 
 /** The browser's own refusals, in plain words (cancelled, timed out, no passkey on this device…). */
 export function passkeyErrorWords(err: unknown): string {
@@ -56,6 +57,7 @@ export function PasskeySignIn({ next = "/home", staffId, label = "Sign in with p
       <Button type="button" size={size} onClick={go} disabled={busy} className="w-full !whitespace-normal text-center" data-passkey-signin-button>
         {busy ? "Waiting for your phone…" : label}
       </Button>
+      <PasskeySlowHelp busy={busy} />
     </div>
   );
 }

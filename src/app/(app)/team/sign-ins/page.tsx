@@ -6,8 +6,10 @@ import { formatDateTime } from "@/lib/format";
 import { ROLE_LABELS, type RoleId } from "@/lib/roles";
 import { passkeyRollout, passkeysReady } from "@/lib/passkey-server";
 import { passkeyOverview, signInLog } from "@/lib/sign-in-data";
-import { setPasskeyRollout } from "../passkey-actions";
-import { RolloutForm } from "../SignInForms";
+import { setPasskeyRollout, setRequiredRoles } from "../passkey-actions";
+import { RequiredRolesForm, RolloutForm } from "../SignInForms";
+import { PASSKEY_ROLES, requiredRolesOf } from "@/lib/passkey-rules";
+import { getSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
@@ -40,6 +42,12 @@ export default async function SignInsPage() {
         </p>
       </Card>
 
+      <Card className="flex flex-col gap-3" data-require-card>
+        <SectionLabel>Require passkey</SectionLabel>
+        <p className="text-xs text-muted">Off until you tick a role. Ticked: anyone in that role WITH a passkey can no longer use the password and code; anyone without one is told to set one up on their phone and can use the password until they do. Nobody is ever locked out: a lost phone gets your one-time code (Team › the person).</p>
+        {owner.viewingAs || owner.actingAs ? <p className="text-sm text-muted">Leave View as / Act as to change this.</p> : <RequiredRolesForm action={setRequiredRoles} roles={PASSKEY_ROLES.map((r) => ({ id: r, label: ROLE_LABELS[r as RoleId] ?? r }))} required={requiredRolesOf((await getSettings()).passkeys_required_roles)} />}
+      </Card>
+
       <Card className="flex flex-col gap-3">
         <SectionLabel>People</SectionLabel>
         <ul className="flex flex-col divide-y divide-line" data-passkey-people>
@@ -53,14 +61,16 @@ export default async function SignInsPage() {
                 <Badge tone="outline">Not switched on yet</Badge>
               ) : r.phones > 0 ? (
                 <Badge tone="green" data-phones={r.phones}>
-                  {r.phones} phone{r.phones === 1 ? "" : "s"}
+                  Passkey: yes · {r.phones} device{r.phones === 1 ? "" : "s"}
                 </Badge>
               ) : (
-                <Badge tone="red" data-phones="0">No phone yet</Badge>
+                <Badge tone="red" data-phones="0">Passkey: no</Badge>
               )}
               <span className="text-xs text-muted">{r.lastPasskey ? `last passkey sign-in ${formatDateTime(r.lastPasskey)}` : "no passkey sign-in yet"}</span>
               {r.backupUses30 ? <Badge tone="amber">Password used {r.backupUses30}× (30 days)</Badge> : null}
               {r.skips30 ? <Badge tone="amber">Skipped setup {r.skips30}×</Badge> : null}
+              {r.kinds.length ? <span className="text-xs" data-passkey-kinds>Passkey on: {r.kinds.join(", ")}</span> : null}
+              <span className="w-full text-xs text-muted" data-passkey-week>This week: {r.week.passkey} by passkey · {r.week.password} by password · {r.week.phone} from a phone · {r.week.pc} from a PC</span>
             </li>
           ))}
         </ul>

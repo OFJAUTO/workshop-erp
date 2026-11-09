@@ -50,7 +50,15 @@ At least **10 characters**, with a **small letter**, a **capital letter** and a 
 ## If something goes wrong
 
 - **"Cancelled or timed out"**: press the button again.
-- **No QR code, or the phone doesn't connect**: check Bluetooth is on, on both, and the phone has internet.
+- **The computer says "Connecting…" and nothing happens** (after 30 seconds the ERP says so): your phone and the computer can't find each other.
+  - Check **Bluetooth is on, on both**, and keep the phone **close to the computer**.
+  - Or set up the passkey **on your phone** instead: open **erp.ofjauto.com** on your phone, sign in, add passkey. From then on, sign in on your phone or approve from it.
+- **Your phone needs a screen lock** (PIN, Face ID or fingerprint), or it cannot keep a passkey.
+- **Where the passkey is kept**:
+  - **iPhone**: iCloud Keychain (Settings › your name › iCloud › Passwords and Keychain: on).
+  - **Android**: Google Password Manager, or Samsung Pass on a Samsung phone.
+- **Shared device**: never save your passkey on an office PC or a workshop tablet. The ERP warns you: save it on your own phone instead.
+- **Lost your phone?** Ask the owner for a **one-time sign-in code** (it works once, for 15 minutes). On the login page press "Lost your phone? Use the owner's one-time code", type your email and the code, then set up your new phone. Nobody else can reset it for you.
 - **"This phone was removed"**: the owner removed it. Sign in with your password, then set up your phone again.
 - Still stuck? Ask the owner.
 

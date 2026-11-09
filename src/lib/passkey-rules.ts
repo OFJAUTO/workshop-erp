@@ -17,6 +17,16 @@ export type PasskeyRollout = "owner" | "all";
 
 export const PASSKEY_SESSION_HOURS = 12;
 
+/** THE "Require passkey" switch per role (9 November 2026, off until the owner turns it on). */
+export function requiredRolesOf(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String).filter((r) => (PASSKEY_ROLES as readonly string[]).includes(r)) : [];
+}
+/** With the switch on for the role: a person WITH a passkey cannot use the password; one without may until they set one up. */
+export function passwordRefusedFor(role: string, requiredRoles: string[], phones: number): boolean {
+  return requiredRoles.includes(role) && phones > 0;
+}
+export const PASSWORD_REFUSED_WORDS = "Your role signs in with your passkey: press “Sign in with passkey”. Lost your phone? Ask the owner for a one-time sign-in code.";
+
 /** The role (and side) gets passkeys at all. */
 export function passkeyRole(p: { role_id: string; team?: string | null; department_id?: string | null }): boolean {
   if (!(PASSKEY_ROLES as readonly string[]).includes(p.role_id)) return false;
@@ -97,6 +107,7 @@ export const METHOD_WORDS: Record<string, string> = {
   pin: "PIN",
   setup_link: "Setup link",
   quick: "Phone code",
+  owner_code: "One-time code from the owner (lost phone)",
 };
 
 /** What the log calls each change of a person's ways in. */
@@ -111,4 +122,10 @@ export const CHANGE_WORDS: Record<string, string> = {
   login_type: "Login method changed",
   setup_skipped: "Phone setup skipped for now",
   rollout: "Passkeys switched on",
+  one_time_code: "One-time sign-in code given (15 minutes, single use)",
+  require_passkey: "Require passkey changed",
 };
+
+/** The owner's one-time sign-in code for a lost phone (9 November 2026): 15 minutes, single use. */
+export const RESET_CODE_MINUTES = 15;
+export const RESET_CODE_MAX_TRIES = 5;

@@ -4,6 +4,7 @@ import { useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { browserSupportsWebAuthn, startAuthentication, startRegistration } from "@simplewebauthn/browser";
 import { Button, Field, Input, LinkButton, Notice } from "@/components/ui";
+import { PasskeySlowHelp } from "@/components/PasskeySlowHelp";
 import { passkeyErrorWords } from "./PasskeySignIn";
 
 function subscribeCoarse(cb: () => void) {
@@ -25,7 +26,7 @@ async function post<T>(url: string, body: unknown): Promise<T & { error?: string
  * the phone through a QR code (Windows asks for Bluetooth); on a phone or tablet the device itself. A second phone
  * needs a fresh approval with a phone already set up first.
  */
-export function PasskeySetup({ hasPhones, next, doneHref, touchGuess = false }: { hasPhones: boolean; next?: string; doneHref?: string; touchGuess?: boolean }) {
+export function PasskeySetup({ hasPhones, next, doneHref, touchGuess = false, sharedDevice = false }: { hasPhones: boolean; next?: string; doneHref?: string; touchGuess?: boolean; /** A registered shared device (workshop tablet) - 9 November 2026: saving a passkey HERE is warned against. */ sharedDevice?: boolean }) {
   const router = useRouter();
   // The server guesses from the browser (a phone or tablet), so the right buttons show from the first paint.
   // A touch screen (an iPad says it is a Mac) or a phone's browser: either is enough.
@@ -36,6 +37,9 @@ export function PasskeySetup({ hasPhones, next, doneHref, touchGuess = false }: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  // 9 November 2026: a passkey saved on a shared device (an office PC, a workshop tablet) is everyone's way in.
+  const shared = sharedDevice || !touch;
+  const [warnShared, setWarnShared] = useState(false);
 
   async function confirm() {
     setError(null);
@@ -54,6 +58,10 @@ export function PasskeySetup({ hasPhones, next, doneHref, touchGuess = false }: 
 
   async function register(where: "phone" | "here") {
     setError(null);
+    if (where === "here" && shared && !warnShared) {
+      setWarnShared(true);
+      return;
+    }
     if (!browserSupportsWebAuthn()) {
       setError("This browser cannot use passkeys. Try Chrome, Edge or Safari, or a different device.");
       return;
@@ -104,6 +112,7 @@ export function PasskeySetup({ hasPhones, next, doneHref, touchGuess = false }: 
           <Button type="button" size="lg" onClick={confirm} disabled={busy} className="w-full !whitespace-normal" data-passkey-confirm>
             {busy ? "Waiting for your phone…" : "Approve with my phone"}
           </Button>
+          <PasskeySlowHelp busy={busy} />
         </div>
       ) : (
         <>
@@ -113,7 +122,7 @@ export function PasskeySetup({ hasPhones, next, doneHref, touchGuess = false }: 
           {touch ? (
             <>
               <Button type="button" size="lg" onClick={() => register("here")} disabled={busy} className="w-full !whitespace-normal" data-passkey-register="here">
-                {busy ? "Waiting…" : "Use this phone or tablet"}
+                {busy ? "Waiting…" : warnShared ? "Save on this device anyway" : "Use this phone or tablet"}
               </Button>
               <Button type="button" tone="secondary" onClick={() => register("phone")} disabled={busy} className="w-full !whitespace-normal" data-passkey-register="phone">
                 Use a different phone (scan a QR code)
@@ -125,10 +134,17 @@ export function PasskeySetup({ hasPhones, next, doneHref, touchGuess = false }: 
                 {busy ? "Waiting for your phone…" : "Use my phone (scan a QR code)"}
               </Button>
               <Button type="button" tone="secondary" onClick={() => register("here")} disabled={busy} className="w-full !whitespace-normal" data-passkey-register="here">
-                Use this computer instead (only if nobody else uses it)
+                {warnShared ? "Save on this computer anyway" : "Use this computer instead (only if nobody else uses it)"}
               </Button>
             </>
           )}
+          {warnShared ? (
+            <div className="flex flex-col gap-2 rounded-control border-2 border-amber-bar bg-amber-soft p-3" data-passkey-shared-warning>
+              <span className="text-sm font-bold">This is a shared device. Save your passkey on your own phone instead.</span>
+              <span className="text-xs">Anyone who uses this {touch ? "tablet" : "computer"} could sign in as you. Press the button above again only if this device is yours alone.</span>
+            </div>
+          ) : null}
+          <PasskeySlowHelp busy={busy} />
         </>
       )}
     </div>

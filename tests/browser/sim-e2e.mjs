@@ -13,7 +13,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -2824,6 +2824,77 @@ await section("sec3", "one payment for several cars", async () => {
   const taxes = await until(async () => { const r = await sql("select count(*)::int as n from public.invoices where job_id in ($1, $2) and kind = 'tax_invoice' and status = 'issued'", [jobA, jobB]); return (r[0]?.n ?? 0) >= 2 ? r[0].n : null; }, 120, 500);
   check(`c4: cleared as one → both cars' tax invoices (${taxes})`, taxes === 2);
   await a.browser.close();
+});
+
+/* ================================================================================================= */
+/* Path sec4 — 9 November 2026, Section 4: passkey rules. The 30-second "can't find each other" help, */
+/* the shared-device warning, the owner's list (passkey yes/no, this week's sign-ins), the Require    */
+/* passkey switch (off), the owner's one-time code for a lost phone (single use).                     */
+/* ================================================================================================= */
+await section("sec4", "passkey rules", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-09-passkeys";
+  mkdirSync(proof, { recursive: true });
+  // p1. The 30-second help: the phone never answers (the prompt is held open), the clock moves on 31 seconds.
+  {
+    const b = await (await import("playwright-core")).chromium.launch({ executablePath: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", headless: true });
+    const pg = await b.newPage({ viewport: { width: 1440, height: 900 } });
+    await pg.addInitScript(() => { if (navigator.credentials) navigator.credentials.get = () => new Promise(() => {}); });
+    await pg.clock.install();
+    await pg.goto(`${base}/login`);
+    await pg.locator("[data-passkey-signin-button]").click();
+    await pg.locator("[data-passkey-signin-button]", { hasText: "Waiting for your phone" }).waitFor({ timeout: 15000 }).catch(() => null);
+    await pg.clock.fastForward(31_000);
+    const slow = ((await pg.locator("[data-passkey-slow]").textContent({ timeout: 5000 }).catch(() => "")) ?? "");
+    check("p1: after 30 seconds the phone-and-computer help shows", slow.startsWith("Your phone and this computer can't find each other."), slow.slice(0, 120));
+    await pg.screenshot({ path: `${proof}/p1-30-second-help-1440.png` }).catch(() => null);
+    check("p1: the lost-phone code form is on the login page", (await pg.locator("[data-login-lost]").count()) === 1);
+    await b.close();
+  }
+  // p2. The owner's page: Require passkey (every role OFF), the people with passkey yes/no and this week's sign-ins.
+  const owner = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  await go(owner.page, `${base}/team/sign-ins`);
+  const boxes = owner.page.locator("[data-require-passkey]");
+  const n = await boxes.count();
+  const on = await boxes.evaluateAll((els) => els.filter((e) => e.checked).length);
+  check(`p2: Require passkey listed per role and OFF (${n} roles, ${on} ticked)`, n >= 7 && on === 0);
+  check("p2: each person shows this week's sign-ins (passkey / password, phone / PC)", (await owner.page.locator("[data-passkey-week]").count()) >= 1);
+  await owner.page.screenshot({ path: `${proof}/p2-owner-list-switch-off-1440.png`, fullPage: false }).catch(() => null);
+  // p3. Lost phone: the owner gives a one-time code; it signs the person in once and goes to the new-phone setup.
+  const person = (await sql("select s.id, sp.email from public.staff s join public.staff_private sp on sp.staff_id = s.id where s.role_id = 'service_advisor' and s.is_active and sp.email is not null order by s.created_at limit 1"))[0];
+  // Passkeys on for everyone during this check (as on live); the test copy's own setting is put back after.
+  const rolloutWas = (await sql("select value::text as v from public.settings where key = 'passkeys_rollout'"))[0]?.v ?? null;
+  await sql("insert into public.settings (key, label, value) values ('passkeys_rollout', 'Passkeys switched on for', to_jsonb('all'::text)) on conflict (key) do update set value = excluded.value");
+  await go(owner.page, `${base}/team/${person.id}#sign-in`);
+  await owner.page.locator("[data-reset-code-give]").click();
+  const code = ((await owner.page.locator("[data-reset-code-value]").textContent({ timeout: 20000 }).catch(() => "")) ?? "").replace(/\D/g, "").slice(0, 8);
+  check("p3: the owner gets an 8-digit code with its time limit", code.length === 8, code);
+  const anon = await (await import("playwright-core")).chromium.launch({ executablePath: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", headless: true });
+  const pa = await anon.newPage();
+  const tryCode = async () => {
+    await pa.goto(`${base}/login?lost=1`);
+    await pa.locator("[data-login-code] input[name='email']").fill(person.email);
+    await pa.locator("[data-login-code-input]").fill(code);
+    await pa.locator("[data-login-code] button[type='submit']").click();
+    await pa.waitForURL((u) => !u.toString().endsWith("/login?lost=1"), { timeout: 30000 }).catch(() => null);
+    return pa.url();
+  };
+  const first = await tryCode();
+  check("p3: the code signs in and opens the new-phone setup", first.includes("/passkey/setup") && first.includes("lost=1"), first);
+  // p4. On a PC (a shared office computer): saving the passkey HERE is warned against.
+  const here = pa.locator("[data-passkey-register='here']");
+  if (await here.count()) {
+    await here.click();
+    const warn = ((await pa.locator("[data-passkey-shared-warning]").textContent({ timeout: 5000 }).catch(() => "")) ?? "");
+    check("p4: shared device warning", warn.includes("This is a shared device. Save your passkey on your own phone instead."), warn.slice(0, 120));
+  } else check("p4: the setup offers this device", false, await pa.url());
+  await pa.context().clearCookies();
+  const second = await tryCode();
+  check("p3: the same code a second time is refused", second.includes("/login") && /error=/.test(second), second);
+  await anon.close();
+  if (rolloutWas) await sql("update public.settings set value = $1::jsonb where key = 'passkeys_rollout'", [rolloutWas]);
+  const ev = await sql("select method, ok from public.sign_in_events where staff_id = $1 and method = 'owner_code' order by at desc limit 2", [person.id]);
+  check("p3: both tries are logged", ev.length === 2, JSON.stringify(ev));
+  await owner.browser.close();
 });
 
 const failed = summary();

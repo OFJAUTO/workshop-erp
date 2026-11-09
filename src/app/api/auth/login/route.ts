@@ -6,7 +6,7 @@ import { getSettings } from "@/lib/settings";
 import { SENSITIVE_ROLES, type RoleId } from "@/lib/roles";
 import { LOGIN_KIND_COOKIE, SESSION_UNTIL_COOKIE, sessionCookieOptions, sessionWindow } from "@/lib/session";
 import { notifyStaff } from "@/lib/notifications";
-import { passkeyPerson, rolloutOf } from "@/lib/passkey-rules";
+import { PASSWORD_REFUSED_WORDS, passkeyPerson, passwordRefusedFor, requiredRolesOf, rolloutOf } from "@/lib/passkey-rules";
 import { logSignIn, ownerIds, passkeyCount, passkeysReady, safeNext } from "@/lib/passkey-server";
 
 /**
@@ -78,6 +78,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.redirect(`${origin}/passkey/setup?next=${encodeURIComponent(next)}`, { status: 303 });
   }
 
+  // 9 November 2026: "Require passkey" on for this role - a person with a passkey cannot use the password any more.
+  if (passwordRefusedFor(role, requiredRolesOf(settings.passkeys_required_roles), phones)) {
+    await supabase.auth.signOut({ scope: "local" });
+    await logSignIn({ staffId: staff.id, method: "password", ok: false, reason: "passkey required for this role" });
+    return fail(PASSWORD_REFUSED_WORDS);
+  }
   await logSignIn({ staffId: staff.id, method: "password_backup", ok: true, reason: "password used instead of the phone" });
   if (role !== "owner") {
     await notifyStaff(await ownerIds(), {

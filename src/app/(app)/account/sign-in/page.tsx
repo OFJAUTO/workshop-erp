@@ -1,4 +1,5 @@
 import { headers } from "next/headers";
+import { getCurrentDevice } from "@/lib/devices";
 import { Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { PasskeySetup } from "@/components/PasskeySetup";
 import { SignInLog } from "@/components/SignInLog";
@@ -54,7 +55,7 @@ export default async function MySignInPage({ searchParams }: { searchParams: Pro
           )}
           <div className="flex flex-col gap-2 border-t border-line pt-4">
             <p className="font-semibold">{phones.length ? "Add another phone" : "Set up your phone"}</p>
-            <PasskeySetup hasPhones={phones.length > 0} touchGuess={touchGuess} />
+            <PasskeySetup hasPhones={phones.length > 0} touchGuess={touchGuess} sharedDevice={(await getCurrentDevice())?.kind === "shared"} />
           </div>
           <p className="text-xs text-muted">Lost a phone? Tell the owner straight away: only the owner can remove it. Until then, sign in with your password.</p>
         </Card>

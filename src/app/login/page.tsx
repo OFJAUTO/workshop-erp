@@ -8,9 +8,9 @@ export const dynamic = "force-dynamic";
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; next?: string; message?: string }>;
+  searchParams: Promise<{ error?: string; next?: string; message?: string; lost?: string }>;
 }) {
-  const { error, next: rawNext, message } = await searchParams;
+  const { error, next: rawNext, message, lost } = await searchParams;
   const next = safeNext(rawNext);
   // Passkeys (7 November 2026): the phone first, the password as the backup.
   const passkeys = !!passkeyRp() && (await passkeysReady());
@@ -33,7 +33,7 @@ export default async function LoginPage({
 
           <Card>
             <form method="post" action="/api/auth/login" className="flex flex-col gap-4" data-login-password>
-              {error ? <Notice tone="error">{error}</Notice> : null}
+              {error && lost !== "1" ? <Notice tone="error">{error}</Notice> : null}
               {message ? <Notice tone="success">{message}</Notice> : null}
               {passkeys ? <p className="text-sm font-semibold">Or use your password (backup)</p> : null}
               <input type="hidden" name="next" value={next} />
@@ -53,6 +53,20 @@ export default async function LoginPage({
               </Button>
             </form>
           </Card>
+
+          {passkeys ? (
+            <details className="rounded-card border border-line bg-white p-4" open={lost === "1"} data-login-lost>
+              <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold">Lost your phone? Use the owner&apos;s one-time code</summary>
+              <form method="post" action="/api/auth/passkey/code" className="mt-2 flex flex-col gap-3" data-login-code>
+                {lost === "1" && error ? <Notice tone="error">{error}</Notice> : null}
+                <input type="hidden" name="next" value={next} />
+                <Field label="Email"><Input name="email" type="email" autoComplete="username" required /></Field>
+                <Field label="One-time code (8 digits, from the owner)"><Input name="code" inputMode="numeric" autoComplete="one-time-code" required data-login-code-input /></Field>
+                <Button type="submit" size="lg" tone="secondary">Sign in and set up my new phone</Button>
+                <p className="text-xs text-muted">Only the owner gives these codes. A code works once, for 15 minutes.</p>
+              </form>
+            </details>
+          ) : null}
 
           <LinkButton href="/tablet" tone="secondary" size="lg" className="w-full">
             Workshop tablet or phone: tap your name

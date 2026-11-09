@@ -247,6 +247,8 @@ const DEFAULTS = {
   keep_signed_in_days_owner_accounts: 1,
   /** Passkeys (7 November 2026): "owner" = only the owner while he tries it, "all" = every passkey role (passkey-rules.ts). */
   passkeys_rollout: "owner" as string,
+  /** 9 November 2026: roles whose people with a passkey may no longer use the password (empty = nobody, the owner switches it on). */
+  passkeys_required_roles: [] as string[],
   discount_limit_percent: 10,
   parts_min_markup_percent: 5,
   /** People we pay commission to (one-tap choices in the internal box of a quotation). */

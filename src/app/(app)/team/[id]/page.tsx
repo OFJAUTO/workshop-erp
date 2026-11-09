@@ -13,6 +13,7 @@ import { passkeyPerson, passkeyRole } from "@/lib/passkey-rules";
 import { passkeyRollout, passkeysReady } from "@/lib/passkey-server";
 import { phonesOf, signInLog } from "@/lib/sign-in-data";
 import { removePasskey, resetPasskeys } from "../passkey-actions";
+import { ResetCodeButton } from "@/components/ResetCodeButton";
 import { RemovePhoneForm, ResetPhonesForm } from "../SignInForms";
 
 const LOGIN_LABEL = { password: "PC login (email and password)", pin: "Handheld login (name and PIN)", both: "Both: PC and any registered handheld" } as const;
@@ -218,6 +219,7 @@ export default async function StaffDetailPage({
                     </details>
                   ) : null}
                   <p className="text-xs text-muted">Only you can remove a phone or reset passkeys. The person is told, and it is written in the log below.</p>
+                  {!owner.viewingAs && !owner.actingAs ? <ResetCodeButton staffId={staff.id} name={staff.display_name} /> : null}
                   <div className="border-t border-line pt-3 flex flex-col gap-2">
                     <p className="text-sm font-semibold">Sign-ins and changes</p>
                     <SignInLog lines={pkLog} />

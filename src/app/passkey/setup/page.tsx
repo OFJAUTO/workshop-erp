@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { getCurrentDevice } from "@/lib/devices";
 import { headers } from "next/headers";
 import { PublicShell } from "@/components/Shell";
 import { Card, LinkButton } from "@/components/ui";
@@ -55,7 +56,7 @@ export default async function PasskeySetupPage({ searchParams }: { searchParams:
                   computer sends the question straight to your phone.
                 </li>
               </ol>
-              <PasskeySetup hasPhones={false} next={next} touchGuess={touchGuess} />
+              <PasskeySetup hasPhones={false} next={next} touchGuess={touchGuess} sharedDevice={(await getCurrentDevice())?.kind === "shared"} />
               <form method="post" action="/api/auth/passkey/skip" className="flex justify-center">
                 <input type="hidden" name="next" value={next} />
                 <button type="submit" className="min-h-11 px-4 text-sm font-semibold text-muted underline underline-offset-4 cursor-pointer" data-passkey-skip>
