@@ -1,3 +1,4 @@
+import { awaitsBank } from "@/lib/bank-status";
 import { SUPPLIER_VAT_PERCENT, supplierMoney } from "@/lib/supplier-money";
 import { NO_VAT_WORDS, supplierChargesVat } from "@/lib/supplier-rules";
 import { isPickupShownByPackage, packagesGivePickup } from "../packages";
@@ -150,7 +151,7 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const pkgDiscounts = pkgRows.filter((l) => l.unit_price * l.quantity - l.amount_aed > 0.004).map((l) => ({ label: `Package discount${Number(l.discount_percent) > 0 ? ` (${String(Number(l.discount_percent))}%)` : ""}`, value: round2(l.unit_price * l.quantity - l.amount_aed) }));
   const gross = round2(pkgRows.reduce((a, l) => a + l.unit_price * l.quantity, 0) + [...services, ...parts, ...fees].reduce((a, l) => a + l.amount, 0));
   const paidRows = isCredit ? [] : live.map((p) => {
-    const pending = p.method === "cheque" && p.cheque_status !== "cleared";
+    const pending = awaitsBank(p);
     const what = p.is_deposit ? (p.deposit_invoice_number ? `Deposit invoiced (${p.deposit_invoice_number})` : `Deposit paid (${p.number})`) : `Paid ${formatDate(p.received_at)} · ${METHOD_LABELS[p.method] ?? p.method} (${p.number})`;
     return { label: pending ? `Cheque pending, not counted yet (${p.number})` : what, value: p.amount_aed, kind: pending ? ("after" as const) : ("paid" as const) };
   });
@@ -329,7 +330,7 @@ export async function renderReceiptPdf(data: ReceiptData, settings: Settings): P
   const currency = currencyOf(settings);
   const company = companyOf(settings);
   const [logo, qr] = await Promise.all([loadLogo(), data.invoiceToken ? qrPng(`${PRODUCTION_SITE_URL}/invoice/${data.invoiceToken}`) : Promise.resolve(null)]);
-  const pending = payment.method === "cheque" && payment.cheque_status === "pending" && payment.status === "recorded";
+  const pending = awaitsBank(payment) && payment.status === "recorded";
   const voided = payment.status === "voided" || payment.status === "reversed";
   const note = String(settings.receipt_footer_note ?? "").trim();
   const boxes: Box[] = [

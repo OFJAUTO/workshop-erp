@@ -1,4 +1,6 @@
 import "server-only";
+import { zohoPayDay } from "./bank-status";
+import { bankPostingReady } from "./schema-ready";
 import { rowsOnDay, shiftDay } from "@/lib/zoho-sync-rules";
 import { clearingOpenAt } from "@/lib/card-settlements";
 import { logAppError } from "@/lib/app-errors";
@@ -103,11 +105,22 @@ export async function compareDay(org: string, day: string): Promise<{ status: "g
 
   // Payments count on the day they count in Zoho: non-cheques when received, cheques when cleared.
   const MODE: Record<string, string> = { cash: "cash", card: "creditcard", link: "others", transfer: "banktransfer", cheque: "check" };
+  // 9 November 2026: THE posting day (zohoPayDay) - cheques and transfers go into Undeposited Funds the day they were
+  // received once Accounts posting is applied, else on their clearing day.
+  const postingReady = await bankPostingReady();
+  const PAY_COLS = "id, method, amount_aed, is_deposit, cheque_status, received_at, cleared_at, settlement_id";
   const [{ data: payA }, { data: payB }] = await Promise.all([
-    admin.from("payments").select("method, amount_aed, is_deposit").eq("status", "recorded").eq("is_active", true).neq("method", "cheque").gte("received_at", from).lt("received_at", to),
-    admin.from("payments").select("method, amount_aed, is_deposit").eq("status", "recorded").eq("is_active", true).eq("method", "cheque").eq("cheque_status", "cleared").gte("cleared_at", from).lt("cleared_at", to),
+    admin.from("payments").select(PAY_COLS).eq("status", "recorded").eq("is_active", true).gte("received_at", from).lt("received_at", to),
+    admin.from("payments").select(PAY_COLS).eq("status", "recorded").eq("is_active", true).in("method", ["cheque", "transfer"]).gte("cleared_at", from).lt("cleared_at", to),
   ]);
-  const payRows = [...(payA ?? []), ...(payB ?? [])] as { method: string; amount_aed: number; is_deposit: boolean }[];
+  type PayRow = { id: string; method: string; amount_aed: number; is_deposit: boolean; cheque_status: string | null; received_at: string; cleared_at: string | null; settlement_id: string | null };
+  const seen = new Set<string>();
+  const payRows = ([...(payA ?? []), ...(payB ?? [])] as PayRow[]).filter((p) => {
+    if (seen.has(p.id)) return false;
+    seen.add(p.id);
+    const d = zohoPayDay(p, postingReady);
+    return !!d && Date.parse(d) >= Date.parse(from) && Date.parse(d) < Date.parse(to);
+  });
   const erpByMode: Record<string, number> = {};
   for (const p of payRows) {
     const mode = MODE[p.method] ?? "others";

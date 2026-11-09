@@ -216,6 +216,8 @@ export type CollectedPayment = { status: string; is_active?: boolean | null; met
 export function collectedAt(p: CollectedPayment): string | null {
   if (p.status !== "recorded" || p.is_active === false) return null;
   if (p.method === "cheque") return p.cheque_status === "cleared" ? (p.cleared_at ?? p.received_at) : null;
+  // A bank transfer recorded from 9 November 2026 waits for the bank like a cheque (no status = recorded before: as received).
+  if (p.method === "transfer" && p.cheque_status) return p.cheque_status === "cleared" ? (p.cleared_at ?? p.received_at) : null;
   return p.received_at;
 }
 

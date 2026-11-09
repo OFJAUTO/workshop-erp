@@ -158,6 +158,9 @@ export default async function ZohoMappingPage({ searchParams }: { searchParams: 
             <Field label="Bank transaction fee (payment link AED 1.00 each)" hint="Usually the same account as the bank charges; a separate one when the accountant wants it apart.">
               {box("map__bank_txn_fees", bestMatch(map.bankTxnFees || map.bankCharges, SUGGESTED_MAP.bankTxnFees, expense, MATCH_WORDS.bank_charges), expense)}
             </Field>
+            <Field label="Cheques and transfers before they clear" hint="Received cheques and bank transfers wait here (Zoho's Undeposited Funds) until Accounts posting records them cleared; then they move to the bank they went into, on that day.">
+              {box("map__undeposited", bestMatch(map.undeposited, SUGGESTED_MAP.undeposited, depositable, ["undeposited"]), depositable)}
+            </Field>
             <Field label="Customer advances" hint="Agreed liability account for unapplied deposits — set it in Zoho's own settings too.">
               {box("map__advances", bestMatch(map.advances, SUGGESTED_MAP.advances, liability, MATCH_WORDS.advances), liability)}
             </Field>

@@ -38,7 +38,10 @@ export function PaymentForm({
   prefill = null,
   fixedKey = null,
   initialProofs = null,
+  pendingBank = null,
 }: {
+  /** 9 November 2026: a cheque or transfer already waiting for the bank covers the balance ("A cheque for AED 2,131.50 is already pending (RCT-00058). Record another anyway?"): a reason is needed. */
+  pendingBank?: string | null;
   /** Opened from an advisor's payment report (2 November 2026): what he sent fills the form; accounts check and confirm. */
   prefill?: { amount: number; method: string; authCode: string | null; reference: string | null } | null;
   /** The receipt's key is fixed (the report's id): one report makes one receipt, never two. */
@@ -200,8 +203,15 @@ export function PaymentForm({
         ) : null}
         <p className="text-xs text-muted">
           {feeRuleWords(rule) !== "no bank fee" ? `Bank fee ${feeRuleWords(rule)} on ${(PAYMENT_METHOD_LABELS[method] ?? method).toLowerCase()}${value > 0 ? ` (estimated ${money(feesFor(value, rule).cost)}${feesFor(value, rule).vat > 0 ? ` + VAT ${money(feesFor(value, rule).vat)}` : ""})` : ""}, internal, never shown to the customer.` : "No bank fee on this method."}
-          {method === "cheque" ? " A cheque counts as unpaid until it is marked cleared." : ""}
+          {method === "cheque" ? " A cheque counts as unpaid until it is marked cleared." : method === "transfer" ? " A transfer counts once accounts confirm it reached the bank." : ""}
         </p>
+        {pendingBank ? (
+          <label className="flex flex-col gap-1 rounded-control border-2 border-amber-bar bg-amber-soft p-3" data-duplicate-warning>
+            <span className="text-sm font-bold">{pendingBank}</span>
+            <span className="text-xs text-muted">Only if the customer really paid again. Write why – it is kept with the payment.</span>
+            <Input name="duplicate_reason" required minLength={3} placeholder="e.g. the cheque is for another car; a second payment for the extra work" data-duplicate-reason />
+          </label>
+        ) : null}
         {over ? (
           // 1 November 2026: more than what is left is allowed with a note of why; it is logged and the owner is told.
           <label className="flex flex-col gap-1 rounded-control border-2 border-amber-bar bg-amber-soft p-3" data-over-warning>

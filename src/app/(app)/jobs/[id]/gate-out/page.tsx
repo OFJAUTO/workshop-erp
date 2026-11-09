@@ -46,6 +46,9 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
   const [card, bal, settings] = await Promise.all([loadJobCard(supabase, id), jobBalance(id), getSettings()]);
   if (!card) return refuseRecord("job", id);
   if (!card.job.is_open) redirect(`/jobs/${id}`);
+  // 9 November 2026: a cheque not cleared or a transfer not confirmed holds the car (the owner may release it, logged).
+  const { loadBankWaiting } = await import("@/lib/bank-posting");
+  const bankHold = await loadBankWaiting({ jobIds: [id] });
   const loose = card.job.job_kind === "loose";
   if (!loose && !card.gateIn) notFound();
   const g = card.gateIn;
@@ -106,6 +109,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
             </Card>
           ) : (
             <Card>
+              {bankHold.length ? <div className="mb-3 rounded-control border-2 border-amber-bar bg-amber-soft p-3 text-sm font-semibold" data-gateout-bank-hold>Waiting for the bank: {bankHold.map((w) => `${w.method === "cheque" ? "cheque" : "transfer"} ${w.number} (AED ${w.amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })})`).join(", ")} has not cleared. The car stays until accounts mark it cleared{role === "owner" ? " – or release it now with a reason (logged)" : ", unless the owner approves"}.</div> : null}
               <GateOutForm
             mileage={mileage}
             drivers={drivers}

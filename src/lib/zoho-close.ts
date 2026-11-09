@@ -1,3 +1,4 @@
+import { countsAsPaid } from "@/lib/bank-status";
 import "server-only";
 import { clearingOpenAt, loadUnsettled } from "@/lib/card-settlements";
 import { payableCommissions } from "@/lib/commissions";
@@ -106,7 +107,7 @@ export async function loadMonthlyClose(month: string): Promise<CloseData> {
 
   // 3. Deposits held on open jobs (money received before the tax invoice).
   const depRaw = await pageAll<Record<string, unknown>>((a, b) => admin.from("payments").select("id, amount_aed, method, cheque_status, job:jobs!payments_job_id_fkey(is_open)").eq("is_deposit", true).eq("status", "recorded").eq("is_active", true).order("id").range(a, b));
-  const heldRows = (depRaw as unknown as { amount_aed: number; method: string; cheque_status: string | null; job: { is_open: boolean } | null }[]).filter((p) => p.job?.is_open && (p.method !== "cheque" || p.cheque_status === "cleared"));
+  const heldRows = (depRaw as unknown as { amount_aed: number; method: string; cheque_status: string | null; job: { is_open: boolean } | null }[]).filter((p) => p.job?.is_open && (countsAsPaid(p)));
   lines.push({
     key: "deposits_held",
     label: "Deposits held on open jobs",
@@ -176,7 +177,7 @@ export async function loadMonthlyClose(month: string): Promise<CloseData> {
     ok: stillOpen.length === 0,
     amount: round2(stillOpen.reduce((a, p) => a + p.amount, 0)),
     detail: stillOpen.length
-      ? `${stillOpen.length} payment${stillOpen.length === 1 ? "" : "s"} (${aed(round2(stillOpen.reduce((a, p) => a + p.amount, 0)))}) still not settled by the bank: record them on Card settlements.`
+      ? `${stillOpen.length} payment${stillOpen.length === 1 ? "" : "s"} (${aed(round2(stillOpen.reduce((a, p) => a + p.amount, 0)))}) still not settled by the bank: record them on Accounts posting.`
       : endTotal > 0 ? `${aed(endTotal)} was in clearing at month end; every payment is settled since.` : "Clearing was at zero at month end.",
   });
 

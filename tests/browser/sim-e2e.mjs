@@ -13,7 +13,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -2609,6 +2609,105 @@ await section("z", "quantity change after approval: down, down with payment, up,
   check("z5: the quantity did not change", p5?.q === 2, JSON.stringify(p5));
   await desk.browser.close();
   await adv.browser.close();
+});
+
+/* ================================================================================================= */
+/* Path sec2 — 9 November 2026, Section 2: Accounts posting. J-00858 recreated (cheque RCT on a       */
+/* proforma of 2,131.50): pending figures, no second payment invited, duplicate warning, gate-out     */
+/* held; Accounts posting's four tabs; deposited → cleared → tax invoice; bounced; post-dated;        */
+/* transfer short and over.                                                                           */
+/* ================================================================================================= */
+await section("sec2", "accounts posting: cheques and transfers", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-09-accounts-posting";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "ready" })).json;
+  const jobId = seed.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const job = (await sql("select customer_id, vehicle_id, gated_in_by from public.jobs where id = $1", [jobId]))[0];
+  const acc = (await sql("select id from public.staff where role_id = 'accounts' and is_active order by created_at limit 1"))[0].id;
+  // The J-00858 situation: a proforma of AED 2,131.50 and a cheque recorded on it (Emirates NBD 019383, dated 02/11/2026).
+  await sql("update public.invoices set status = 'cancelled' where job_id = $1 and kind = 'proforma' and status = 'issued'", [jobId]);
+  const pro = (await sql("insert into public.invoices (number, kind, job_id, customer_id, vehicle_id, status, issued_at, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed, token, created_by, updated_by) values ('E2E-PRO-S2', 'proforma', $1, $2, $3, 'issued', now(), 2030, 0, 2030, 101.5, 2131.5, 'e2e-s2-pro', $4, $4) returning id", [jobId, job.customer_id, job.vehicle_id, acc]))[0];
+  await sql("update public.invoices set sent_at = now() where id = $1", [pro.id]);
+  await sql("insert into public.invoice_lines (invoice_id, position, section, description, quantity, unit_price, amount_aed, vat_aed, total_aed, cost_aed, created_by, updated_by) values ($1, 1, 'labour', 'E2E SERVICE', 1, 2030, 2030, 101.5, 2131.5, 0, $2, $2)", [pro.id, acc]);
+  const chq = (await sql("insert into public.payments (job_id, invoice_id, customer_id, vehicle_id, method, amount_aed, bank_charge_aed, is_deposit, status, cheque_number, cheque_bank, cheque_date, cheque_status, received_by, created_by, updated_by, received_at) values ($1, $2, $3, $4, 'cheque', 2131.5, 0, false, 'recorded', '019383', 'Emirates NBD', '2026-11-02', 'pending', $5, $5, $5, now() - interval '2 hours') returning id, number", [jobId, pro.id, job.customer_id, job.vehicle_id, acc]))[0];
+
+  // s1. The money page: Paid 0.00 · Cheque pending 2,131.50 (RCT-…) · Balance once cleared 0.00; no "record it again".
+  const a = await browserForId(acc, { viewport: { width: 1440, height: 900 } });
+  await go(a.page, `${base}/jobs/${jobId}/invoice`);
+  const line = ((await a.page.locator("[data-bank-pending-line]").first().textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check(`s1: pending figures shown (${line})`, line.includes("Paid 0.00") && line.includes(`Cheque pending 2,131.50 (${chq.number})`) && line.includes("Balance once cleared 0.00"));
+  const what = ((await a.page.locator("[data-what-now]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check("s1: What to do now says waiting to clear, accounts mark deposited / cleared", what.includes("Cheque recorded – waiting to clear. Accounts: mark deposited / cleared."), what.slice(0, 200));
+  check("s1: the Mark cleared button is on the job page", (await a.page.locator("[data-what-now-bank] [data-bank-open='clear']").count()) === 1);
+  // s2. Recording another payment warns and needs a reason.
+  await a.page.locator("[data-what-now-bank] [data-record-block] summary").click().catch(() => null);
+  const dup = ((await a.page.locator("[data-duplicate-warning]").first().textContent().catch(() => "")) ?? "");
+  check("s2: duplicate warning names the pending cheque", dup.includes(`A cheque for AED 2,131.50 is already pending (${chq.number}). Record another anyway?`), dup.slice(0, 160));
+  await a.page.screenshot({ path: `${proof}/s1-j00858-pending-1440.png`, fullPage: false }).catch(() => null);
+  // s3. Gate-out held for accounts (only the owner may release before it clears).
+  await go(a.page, `${base}/jobs/${jobId}/gate-out`);
+  check("s3: gate-out held while the cheque waits", (await a.page.locator("[data-gateout-bank-hold]").count()) === 1);
+
+  // s4. Accounts posting: the renamed page with four tabs, the cheque row.
+  await go(a.page, `${base}/card-settlements?tab=cheque`);
+  check("s4: the old address lands on Accounts posting", a.page.url().includes("/accounts-posting"), a.page.url());
+  const tabs = await a.page.locator("[data-posting-tab]").evaluateAll((els) => els.map((e) => e.getAttribute("data-posting-tab")));
+  check(`s4: four tabs (${tabs.join(",")})`, tabs.join(",") === "card,link,cheque,transfer");
+  const row = a.page.locator(`[data-bank-row="${chq.number}"]`);
+  check("s4: the cheque is listed", (await row.count()) === 1);
+  // s5. Post-dated cheque: shown "due on", cannot be deposited.
+  const pd = (await sql("insert into public.payments (job_id, customer_id, vehicle_id, method, amount_aed, bank_charge_aed, is_deposit, status, cheque_number, cheque_bank, cheque_date, cheque_status, received_by, created_by, updated_by) values ($1, $2, $3, 'cheque', 100, 0, true, 'recorded', '777001', 'ADCB', (now() + interval '10 days')::date, 'pending', $4, $4, $4) returning number", [jobId, job.customer_id, job.vehicle_id, acc]))[0];
+  await go(a.page, `${base}/accounts-posting?tab=cheque`);
+  const pdRow = a.page.locator(`[data-bank-row="${pd.number}"]`);
+  check("s5: post-dated shows due on", /Post-dated: due on/.test((await pdRow.textContent().catch(() => "")) ?? ""));
+  check("s5: post-dated cannot be deposited", await pdRow.locator("[data-bank-open='deposit']").isDisabled().catch(() => false));
+  await a.page.screenshot({ path: `${proof}/s4-accounts-posting-cheque-tab-1440.png`, fullPage: false }).catch(() => null);
+  // s6. Mark deposited, then cleared → the payment counts and the proforma becomes the tax invoice.
+  await row.locator("[data-bank-open='deposit']").click();
+  await row.locator("[data-bank-deposit-date]").fill(today);
+  await row.locator("[data-bank-save='deposit']").click();
+  await until(async () => (await sql("select cheque_deposited_at from public.payments where id = $1", [chq.id]))[0]?.cheque_deposited_at, 40, 500);
+  await a.page.locator("[data-bank-answer-ok]").click().catch(() => null);
+  await go(a.page, `${base}/accounts-posting?tab=cheque`);
+  const row2 = a.page.locator(`[data-bank-row="${chq.number}"]`);
+  check("s6: deposited shows on the row", (await row2.locator("[data-bank-deposited]").count()) === 1);
+  await row2.locator("[data-bank-open='clear']").click();
+  await row2.locator("[data-bank-clear-date]").fill(today);
+  await row2.locator("[data-bank-clear-ref]").fill("STMT-019383");
+  await row2.locator("[data-bank-save='clear']").click();
+  const cleared = await until(async () => { const r = (await sql("select p.cheque_status, p.settlement_id, (select count(*)::int from public.invoices i where i.job_id = $2 and i.kind = 'tax_invoice' and i.status = 'issued') as tax from public.payments p where p.id = $1", [chq.id, jobId]))[0]; return r?.cheque_status === "cleared" && r?.tax >= 1 ? r : null; }, 180, 500) ?? (await sql("select p.cheque_status, p.settlement_id, 0 as tax from public.payments p where p.id = $1", [chq.id]))[0];
+  check(`s6: cleared, in a posting row, tax invoice issued (${JSON.stringify(cleared)})`, cleared?.cheque_status === "cleared" && !!cleared?.settlement_id && cleared?.tax >= 1);
+  const st = cleared?.settlement_id ? (await sql("select method, received_aed::float as r from public.card_settlements where id = $1", [cleared.settlement_id]))[0] : null;
+  check("s6: the posting is a cheque posting of 2,131.50", st?.method === "cheque" && st?.r === 2131.5, JSON.stringify(st));
+  // s7. Bounced: the payment reverses, owner + advisor told.
+  const b1 = (await sql("insert into public.payments (job_id, customer_id, vehicle_id, method, amount_aed, bank_charge_aed, is_deposit, status, cheque_number, cheque_bank, cheque_date, cheque_status, received_by, created_by, updated_by) values ($1, $2, $3, 'cheque', 250, 0, true, 'recorded', '555002', 'FAB', now()::date, 'pending', $4, $4, $4) returning id, number", [jobId, job.customer_id, job.vehicle_id, acc]))[0];
+  let m = await mark();
+  await go(a.page, `${base}/accounts-posting?tab=cheque`);
+  const brow = a.page.locator(`[data-bank-row="${b1.number}"]`);
+  await brow.locator("[data-bank-open='bounce']").click();
+  await brow.locator("[data-bank-bounce-charge]").fill("50");
+  await brow.locator("[data-bank-save='bounce']").click();
+  const bounced = await until(async () => (await sql("select status, cheque_status from public.payments where id = $1", [b1.id]))[0]?.status === "reversed" ? true : null, 40, 500);
+  check("s7: bounced reverses the payment", bounced === true);
+  await told("s7", m, jobId, [{ label: "the owner", role: "owner", type: "cheque_bounced" }]);
+  // s8. Transfers: one short, one over.
+  const t1 = (await sql("insert into public.payments (job_id, customer_id, vehicle_id, method, amount_aed, bank_charge_aed, is_deposit, status, cheque_status, reference, received_by, created_by, updated_by) values ($1, $2, $3, 'transfer', 1000, 0, true, 'recorded', 'pending', 'TT-SHORT', $4, $4, $4) returning id, number", [jobId, job.customer_id, job.vehicle_id, acc]))[0];
+  const t2 = (await sql("insert into public.payments (job_id, customer_id, vehicle_id, method, amount_aed, bank_charge_aed, is_deposit, status, cheque_status, reference, received_by, created_by, updated_by) values ($1, $2, $3, 'transfer', 500, 0, true, 'recorded', 'pending', 'TT-OVER', $4, $4, $4) returning id, number", [jobId, job.customer_id, job.vehicle_id, acc]))[0];
+  for (const [t, amt] of [[t1, "980"], [t2, "520"]]) {
+    await go(a.page, `${base}/accounts-posting?tab=transfer`);
+    const r = a.page.locator(`[data-bank-row="${t.number}"]`);
+    await r.locator("[data-bank-open='clear']").click();
+    await r.locator("[data-bank-clear-date]").fill(today);
+    await r.locator("[data-bank-clear-amount]").fill(amt);
+    await r.locator("[data-bank-save='clear']").click();
+    await until(async () => (await sql("select cheque_status from public.payments where id = $1", [t.id]))[0]?.cheque_status === "cleared" ? true : null, 40, 500);
+  }
+  const short = (await sql("select amount_aed::float as a from public.payments where id = $1", [t1.id]))[0];
+  check("s8: short transfer counts what arrived (980)", short?.a === 980, JSON.stringify(short));
+  const extra = (await sql("select amount_aed::float as a from public.payments where job_id = $1 and notes like $2", [jobId, `Extra that reached the bank with ${t2.number}%`]))[0];
+  check("s8: over transfer: the extra 20 is an advance", extra?.a === 20, JSON.stringify(extra));
+  await a.browser.close();
 });
 
 const failed = summary();

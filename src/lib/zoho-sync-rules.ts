@@ -41,7 +41,7 @@ export const KIND_WORDS: Record<ZohoKind, [string, string]> = {
   recovery: ["Recovery month", "Recovery months"],
   vendorcredit: ["Supplier credit", "Supplier credits"],
   cnrefund: ["Customer refund", "Customer refunds"],
-  settlement: ["Card settlement", "Card settlements"],
+  settlement: ["Bank posting", "Bank postings"],
 };
 
 export const ZOHO_KINDS = Object.keys(KIND_WORDS) as ZohoKind[];
@@ -192,7 +192,7 @@ export const PREVIEW_GROUPS: { key: string; label: string; kinds: ZohoKind[]; mo
   { key: "bills", label: "Supplier bills", kinds: ["bill"], money: null },
   { key: "billpayments", label: "Supplier payments", kinds: ["billpayment", "supplierpay"], money: "out" },
   { key: "vendorcredits", label: "Supplier credits", kinds: ["vendorcredit"], money: null },
-  { key: "settlements", label: "Card settlements", kinds: ["settlement"], money: null },
+  { key: "settlements", label: "Bank postings (card, link, cheque, transfer)", kinds: ["settlement"], money: null },
   { key: "expenses", label: "Expenses (commissions, recovery months)", kinds: ["commission", "recovery"], money: "out" },
   { key: "records", label: "Customer and supplier records", kinds: ["contact", "vendor"], money: null, countOnly: true },
 ];

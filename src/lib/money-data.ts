@@ -1,3 +1,4 @@
+import { awaitsBank, countsAsPaid } from "@/lib/bank-status";
 import { plateHistoryReady } from "./schema-ready";
 import "server-only";
 import { supplierInvoicesToCheckCount } from "./supplier-invoices";
@@ -146,7 +147,7 @@ export async function loadMoneyList(settings: Settings, opts: MoneyListScope = {
     ]);
     const clearedOn = new Map<string, number>();
     const lastMoneyOn = new Map<string, string>();
-    for (const p of docPays) if (p.invoice_id && (p.method !== "cheque" || p.cheque_status === "cleared")) {
+    for (const p of docPays) if (p.invoice_id && (countsAsPaid(p))) {
       clearedOn.set(p.invoice_id, round2((clearedOn.get(p.invoice_id) ?? 0) + Number(p.amount_aed)));
       const at = p.cleared_at ?? p.received_at;
       if (at > (lastMoneyOn.get(p.invoice_id) ?? "")) lastMoneyOn.set(p.invoice_id, at);
@@ -211,7 +212,7 @@ export async function loadMoneyList(settings: Settings, opts: MoneyListScope = {
     const proforma = (issued.find((i) => i.kind === "proforma" && !i.converted_to && !i.deposit_for_quotation_id) ?? null) as (MoneyInvoice & ListInvoice) | null;
     const doc = taxInvoice ?? proforma;
     const pays = payOf.get(job.id) ?? [];
-    const counted = (doc ? pays.filter((p) => p.invoice_id === doc.id) : pays).filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared"));
+    const counted = (doc ? pays.filter((p) => p.invoice_id === doc.id) : pays).filter((p) => p.status === "recorded" && (countsAsPaid(p)));
     const paidAt = counted.map((p) => p.cleared_at ?? p.received_at).sort().at(-1) ?? null;
     const today = todayOfJob.get(job.id) ?? { aed: 0, count: 0 };
     const taxToday = taxTodayOf.get(job.id) ?? [];
@@ -309,7 +310,7 @@ export async function loadMoneyList(settings: Settings, opts: MoneyListScope = {
         total: null,
         paid,
         balance: null,
-        pendingCheque: round2(list.filter((p) => p.method === "cheque" && p.cheque_status === "pending").reduce((a, p) => a + p.amount_aed, 0)),
+        pendingCheque: round2(list.filter((p) => awaitsBank(p)).reduce((a, p) => a + p.amount_aed, 0)),
         credited: 0,
         recentPaidOnly: false,
         advance: 0,

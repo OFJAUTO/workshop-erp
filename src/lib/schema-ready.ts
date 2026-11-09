@@ -88,3 +88,6 @@ export const estimatePayLinkReady = () => schemaReady("payment_requests", "estim
 export const estimateReportReady = () => schemaReady("payment_reports", "estimate_id");
 /** Part 3 (combined proformas): migration 20261204120000_estimate_money2. */
 export const estimateCombineReady = () => schemaReady("invoices", "covers_estimate_ids");
+
+/** Cheques deposited/cleared and transfers confirmed through Accounts posting (migration 20261211090000_accounts_posting.sql, 9 November 2026). */
+export const bankPostingReady = () => schemaReady("payments", "cheque_deposited_at, cheque_deposited_to");

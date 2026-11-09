@@ -40,10 +40,12 @@ export async function saveZohoMapping(formData: FormData) {
   const bankTxn = String(formData.get("map__bank_txn_fees") ?? "").trim();
   const adv = String(formData.get("map__advances") ?? "").trim();
   const advRefund = String(formData.get("map__advances_refund") ?? "").trim();
+  const undeposited = String(formData.get("map__undeposited") ?? "").trim();
   if (bank) map.bankCharges = bank.slice(0, 200);
   map.bankTxnFees = (bankTxn || bank || map.bankCharges || "").slice(0, 200) || undefined;
   if (adv) map.advances = adv.slice(0, 200);
   if (advRefund) map.advancesRefund = advRefund.slice(0, 200);
+  if (undeposited) map.undeposited = undeposited.slice(0, 200);
   const missing = [
     ...INCOME_TYPES.filter((t) => !map.income[t.key]).map((t) => t.label),
     ...DEPOSIT_METHODS.filter((m) => !map.depositTo[m.key]).map((m) => `Deposit-to for ${m.label}`),
@@ -74,6 +76,7 @@ export async function useSuggestedMapping() {
     bankTxnFees: stored.bankTxnFees || stored.bankCharges || SUGGESTED_MAP.bankTxnFees,
     advances: stored.advances || SUGGESTED_MAP.advances,
     advancesRefund: stored.advancesRefund || SUGGESTED_MAP.advancesRefund,
+    undeposited: stored.undeposited || SUGGESTED_MAP.undeposited,
   };
   const { error } = await admin.from("settings").update({ value: map as unknown as Record<string, unknown>, updated_by: staff.id }).eq("key", "zoho_account_map");
   if (error) return back("error", dbWords(error, "settings/zoho/mapping/actions"));

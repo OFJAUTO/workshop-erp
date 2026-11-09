@@ -86,6 +86,7 @@ export async function paymentFromForm(staff: { id: string; display_name: string;
     clientKey: clientKeyIn,
     unallocated: unallocatedCustomer ? { customerId: unallocatedCustomer, vehicleId: vehicleIn } : null,
     overNote: blankToNull(formData.get("over_note")),
+    duplicateReason: blankToNull(formData.get("duplicate_reason")),
     overCheck: true,
     // The report is closed by this receipt and its advisor told "Recorded ✓ RCT-…" (recordPaymentCore).
     reportId: report?.id ?? null,

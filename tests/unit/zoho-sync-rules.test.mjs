@@ -18,7 +18,7 @@ check("only the exact word 'automatic' is automatic", syncModeOf("automatic") ==
 // Words.
 check("every kind has its words, and every kind has a posting rank", ZOHO_KINDS.length === 14 && ZOHO_KINDS.every((k) => KIND_WORDS[k] && typeof POSTING_ORDER[k] === "number"));
 check("kind words read as the sync page always did", kindWord("invoice") === "Tax invoice" && kindWord("billpayment") === "Supplier payment" && kindWord("nonsense") === "Document");
-check("counts in a sentence: one and many", kindCount("invoice", 1) === "1 tax invoice" && kindCount("invoice", 5) === "5 tax invoices" && kindCount("settlement", 2) === "2 card settlements");
+check("counts in a sentence: one and many", kindCount("invoice", 1) === "1 tax invoice" && kindCount("invoice", 5) === "5 tax invoices" && kindCount("settlement", 2) === "2 bank postings");
 check("items: 1 item / 12 items", itemsWord(1) === "1 item" && itemsWord(12) === "12 items" && itemsWord(0) === "0 items");
 check("every kind sits in exactly one preview group", ZOHO_KINDS.every((k) => PREVIEW_GROUPS.filter((g) => g.kinds.includes(k)).length === 1));
 
@@ -108,7 +108,7 @@ check("the sync cannot run (posting stopped): no bell", reminderDue({ ...base, b
 check("Dubai clock: 23:30 UTC on Monday is Tuesday 03:30 in Dubai", (() => { const c = dubaiClock(Date.parse("2026-11-02T23:30:00Z")); return c.date === "2026-11-03" && c.hour === 3 && c.dayId === "tue"; })());
 const words = reminderWords({ total: 12, byKind: { payment: 4, invoice: 5, bill: 2, settlement: 1 }, red: 1 });
 check("the bell's title is the owner's words", words.title === "12 items waiting to sync to Zoho", words.title);
-check("the body lists the kinds in posting order, then the red rows, then what to do", words.body === "5 tax invoices · 4 payments · 2 supplier bills · 1 card settlement. 1 red row needs a look. Open Zoho Books and press Sync to Zoho: check the preview, then Yes.", words.body);
+check("the body lists the kinds in posting order, then the red rows, then what to do", words.body === "5 tax invoices · 4 payments · 2 supplier bills · 1 bank posting. 1 red row needs a look. Open Zoho Books and press Sync to Zoho: check the preview, then Yes.", words.body);
 check("one item: singular", reminderWords({ total: 1, byKind: { invoice: 1 }, red: 0 }).title === "1 item waiting to sync to Zoho");
 check("the cron's line on manual", manualCronWords({ total: 12, red: 1 }) === "Manual: 12 items waiting for Sync to Zoho · 1 red" && manualCronWords({ total: 0, red: 0 }) === "Manual: nothing waiting");
 

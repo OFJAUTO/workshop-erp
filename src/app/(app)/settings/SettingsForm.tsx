@@ -413,8 +413,8 @@ export function SettingsForm({
               <Field label="Quote sent after pricing (hours)" hint="Working hours for the advisor to send once the parts are priced.">
                 <Input name="quote_send_target_hours" defaultValue={v.quote_send_target_hours} inputMode="numeric" required />
               </Field>
-              <Field label="Bank fees per payment method" hint="MSF % before VAT, the fee per transaction, the VAT and the terminal IDs: set by the owner or accounts on Card settlements.">
-                <a href="/card-settlements#fees" className="inline-flex min-h-11 items-center rounded-control border border-line-strong bg-white px-3 text-sm font-bold" data-settings-bank-fees-link>Open the bank fees</a>
+              <Field label="Bank fees per payment method" hint="MSF % before VAT, the fee per transaction, the VAT and the terminal IDs: set by the owner or accounts on Accounts posting.">
+                <a href="/accounts-posting#fees" className="inline-flex min-h-11 items-center rounded-control border border-line-strong bg-white px-3 text-sm font-bold" data-settings-bank-fees-link>Open the bank fees</a>
               </Field>
               <Field label="Remind Parts after (minutes)" hint="The advisor's Remind Parts button opens after this wait.">
                 <Input name="parts_remind_minutes" defaultValue={v.parts_remind_minutes} inputMode="numeric" required />

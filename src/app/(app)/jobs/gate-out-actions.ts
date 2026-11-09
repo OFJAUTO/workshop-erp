@@ -148,6 +148,17 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
   const { data: creditJob } = await createAdminClient().from("jobs").select("customer_id").eq("id", jobId).maybeSingle();
   const { data: creditCust } = creditJob?.customer_id ? await createAdminClient().from("customers").select("credit_terms_days").eq("id", creditJob.customer_id).maybeSingle() : { data: null };
   const creditDays = Number(creditCust?.credit_terms_days) || 0;
+  // 9 November 2026: no car leaves on a cheque not cleared or a transfer not confirmed (it may bounce) unless the OWNER
+  // approves with a reason, written on the job.
+  const { loadBankWaiting } = await import("@/lib/bank-posting");
+  const waitingBank = await loadBankWaiting({ jobIds: [jobId] });
+  let bankHold: string | null = null;
+  if (waitingBank.length) {
+    const what = waitingBank.map((w) => `${w.method === "cheque" ? `cheque ${w.chequeNumber ?? ""}`.trim() : "transfer"} ${w.number} (AED ${w.amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })})`).join(", ");
+    if (role !== "owner") return { error: `Waiting for the bank: ${what} has not cleared yet. The car can leave once accounts mark it cleared, or with the owner's approval.`, values };
+    if (releaseReason.length < 5) return { error: `${what} has not cleared yet. Write the reason to release the car before it clears (logged).`, values };
+    bankHold = `Released before ${what} cleared: ${releaseReason}`;
+  }
   if (bal.state === "no_invoice" && job.declined_out_at) {
     // The customer declined the quotation and no charge was added: the car leaves free, written down.
     releaseBy = staff.id;
@@ -163,6 +174,11 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
     if (!can(role, "approveRelease")) return { error: `Balance due AED ${bal.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}. Only the owner or accounts can approve the release.`, values };
     if (releaseReason.length < 5) return { error: "Write the reason for releasing with a balance due (logged).", values };
     releaseBy = staff.id;
+  }
+  if (bankHold) {
+    releaseBy = staff.id;
+    releaseReason = bankHold;
+    await createAdminClient().from("job_events").insert({ job_id: jobId, event_type: "release_approved", note: `${bankHold} (${staff.display_name})`, created_by: staff.id });
   }
 
   // Recovery: the company, the driver (one tap or a new one, saved), the customer's pin, the day and the time.

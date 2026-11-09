@@ -1,3 +1,4 @@
+import { awaitsBank, duplicateWords } from "@/lib/bank-status";
 import Link from "next/link";
 import { signJobFiles } from "@/lib/work-data";
 import { PositionsLine } from "@/components/PositionsLine";
@@ -46,6 +47,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   // 3 November 2026: what credit notes took off a tax invoice is not owed (less any refund paid out on them).
   const creditOff = invoice.kind === "tax_invoice" ? ((await creditsOnDocs([invoice.id])).get(invoice.id) ?? 0) : 0;
   const bal = invoiceBalance(invoice, live, creditOff);
+  const pendingBank = duplicateWords(live.filter((p) => p.status === "recorded" && awaitsBank(p)).map((p) => ({ method: p.method, number: p.number, amount: p.amount_aed })), bal.balance);
   const canPay = can(role, "recordPayments") && !staff.viewingAs && invoice.kind === "tax_invoice" && invoice.status === "issued";
   const canVoid = (role === "owner" || (role === "accounts" && staff.is_head_accountant)) && !staff.viewingAs;
   const undoMinutes = Number((settings as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES;
@@ -116,7 +118,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                     <div className={`flex flex-wrap items-center gap-3 ${p.status === "voided" || p.status === "reversed" ? "line-through" : ""}`}>
                       <span className="font-semibold">{p.number}</span>
                       <span>{formatDateTime(p.received_at)}</span>
-                      <Badge tone={p.status === "pending_owner" ? "amber" : p.method === "cheque" && p.cheque_status === "pending" ? "amber" : p.status === "voided" || p.status === "reversed" ? "red" : "neutral"}>{METHOD_LABELS[p.method]}{p.method === "cheque" ? ` · ${p.cheque_status}` : ""}{p.is_deposit ? " · deposit" : ""}{p.status === "pending_owner" ? " · waiting for the owner" : ""}</Badge>
+                      <Badge tone={p.status === "pending_owner" ? "amber" : awaitsBank(p) ? "amber" : p.status === "voided" || p.status === "reversed" ? "red" : "neutral"}>{METHOD_LABELS[p.method]}{p.method === "cheque" ? ` · ${p.cheque_status}` : ""}{p.is_deposit ? " · deposit" : ""}{p.status === "pending_owner" ? " · waiting for the owner" : ""}</Badge>
                       {p.status !== "voided" && p.status !== "reversed" && authCodeMissing(p) ? <AuthCodeMissing paymentId={p.id} number={p.number} method={p.method} code={p.auth_code ?? null} canAdd={canAddAuth} /> : <span className="text-muted">{p.method === "cheque" ? [p.cheque_number, p.cheque_bank, p.cheque_date].filter(Boolean).join(" · ") : realAuthCode(p.auth_code) ? `Auth ${realAuthCode(p.auth_code)}` : p.reference}</span>}
                       <span className="text-muted">by {nameOf.get(p.received_by ?? "") ?? ""}</span>
                       <span className="ml-auto font-semibold">AED {m(p.amount_aed)}</span>
@@ -132,7 +134,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                       {p.status === "recorded" && !p.verified_at && canVerify ? (
                         <form action={verifyPaymentAction.bind(null, p.id)}><Button type="submit" size="md" tone="secondary">Verified: the money is in</Button></form>
                       ) : null}
-                      {canPay && p.status === "recorded" && p.method === "cheque" && p.cheque_status === "pending" ? (
+                      {canPay && p.status === "recorded" && awaitsBank(p) ? (
                         <form action={setChequeStatus.bind(null, p.id)} className="flex gap-1">
                           <Button type="submit" name="status" value="cleared" size="md" tone="secondary">Cleared</Button>
                           <ConfirmSubmit label="Bounced" name="status" value="bounced" size="md" tone="danger" title="Mark this cheque as bounced?" lines={[`${p.number} · AED ${Number(p.amount_aed).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`, "The money comes off what the customer has paid, and Zoho is corrected."]} confirmLabel="Yes, it bounced" hook="cheque-bounced" />
@@ -153,7 +155,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               </ul>
               {canPay && bal.balance > 0 ? (
                 <div className="border-t border-line pt-3">
-                  <PaymentForm invoiceId={invoice.id} jobId={null} proofJobId={invoice.job_id} balance={bal.balance} action={recordPayment} charges={bankCharges} methods={methodsFor(role)} invoiceNumber={invoice.number} isProforma={invoice.kind === "proforma"} nextTaxNumber={invoice.kind === "proforma" ? await nextDocumentNumber("tax_invoice", settings) : null} isOwner={role === "owner"} spentKeys={payments.map((p) => (p as { client_key?: string | null }).client_key).filter((k): k is string => !!k && !k.startsWith("ngenius:"))} />
+                  <PaymentForm invoiceId={invoice.id} jobId={null} proofJobId={invoice.job_id} balance={bal.balance} action={recordPayment} charges={bankCharges} methods={methodsFor(role)} invoiceNumber={invoice.number} isProforma={invoice.kind === "proforma"} nextTaxNumber={invoice.kind === "proforma" ? await nextDocumentNumber("tax_invoice", settings) : null} isOwner={role === "owner"} pendingBank={pendingBank} spentKeys={payments.map((p) => (p as { client_key?: string | null }).client_key).filter((k): k is string => !!k && !k.startsWith("ngenius:"))} />
                 </div>
               ) : null}
               {payable && bal.state === "paid" ? <div className="rounded-card border-2 border-green p-4 text-center text-lg font-extrabold text-green-text">Paid in full{bal.paidAt ? ` · ${formatDate(bal.paidAt)}` : ""}</div> : null}

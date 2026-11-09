@@ -70,6 +70,8 @@ export type RecordAnywhereState = {
   paymentId?: string;
   clientKey?: string | null;
   needsOverNote?: { balance: number };
+  /** 9 November 2026: a cheque or transfer already waiting covers the balance - the window asks why another payment. */
+  needsDuplicateReason?: string;
   receiptUrl?: string;
   receiptShort?: string;
   receiptMessage?: string;
@@ -101,7 +103,7 @@ export async function recordPaymentAnywhere(_prev: RecordAnywhereState, formData
   const settings = await getSettings();
   const r = await paymentFromForm(staff, formData, settings);
   const clientKey = String(formData.get("client_key") ?? "") || null;
-  if (r.error || !r.paymentId) return { error: r.error ?? "Couldn't record it – nothing was saved. Try again.", needsOverNote: r.needsOverNote, at: Date.now() };
+  if (r.error || !r.paymentId) return { error: r.error ?? "Couldn't record it – nothing was saved. Try again.", needsOverNote: r.needsOverNote, needsDuplicateReason: r.needsDuplicateReason, at: Date.now() };
   const admin = createAdminClient();
   const { data: p } = await admin.from("payments").select("id, number, amount_aed, token, job_id, invoice_id, customer_id, vehicle_id, deposit_quotation_id").eq("id", r.paymentId).maybeSingle();
   if (!p) return { ok: true, number: r.number, paymentId: r.paymentId, clientKey, recordedAt: new Date().toISOString(), undoMinutes: Number((settings as unknown as Record<string, unknown>).money_undo_minutes) || DEFAULT_UNDO_MINUTES, at: Date.now() };

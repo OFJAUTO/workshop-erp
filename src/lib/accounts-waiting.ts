@@ -54,8 +54,9 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
     });
   }
 
-  // 1b. Cheques recorded and still clearing (deposits and payments): "Cleared" right on the row (26 October 2026).
-  const { data: chequeRows } = await admin.from("payments").select(PAYMENT_SELECT + `, job:jobs(job_number, vehicle:vehicles(${PLATE_SELECT}))`).eq("is_active", true).eq("status", "recorded").eq("method", "cheque").eq("cheque_status", "pending");
+  // 1b. Cheques and (from 9 November 2026) bank transfers still waiting for the bank: Accounts posting records the day
+  // they reach the bank (no date is ever assumed), so the row opens its tab.
+  const { data: chequeRows } = await admin.from("payments").select(PAYMENT_SELECT + `, job:jobs(job_number, vehicle:vehicles(${PLATE_SELECT}))`).eq("is_active", true).eq("status", "recorded").in("method", ["cheque", "transfer"]).eq("cheque_status", "pending");
   for (const raw of (chequeRows ?? []) as unknown as Record<string, unknown>[]) {
     const p = toPayment(raw);
     const job = raw.job as { job_number: string; vehicle: PlateRow | null } | null;
@@ -63,16 +64,15 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
       jobId: p.job_id ?? `cheque:${p.id}`,
       plate: job?.vehicle ? formatPlate(job.vehicle) : (job?.job_number ?? p.number),
       car: null,
-      what: `Cheque${p.cheque_number ? ` ${p.cheque_number}` : ""} (${p.number}) to clear when the bank confirms`,
+      what: p.method === "cheque" ? `Cheque${p.cheque_number ? ` ${p.cheque_number}` : ""} (${p.number}) to deposit and clear` : `Bank transfer (${p.number}) to confirm in the bank`,
       amount: aed(p.amount_aed),
-      actionLabel: "Cleared",
-      href: p.job_id ? `/jobs/${p.job_id}/invoice` : p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices",
+      actionLabel: p.method === "cheque" ? "Mark deposited / cleared" : "Confirm in bank",
+      href: `/accounts-posting?tab=${p.method}`,
       always: true,
       replaces: true,
       urgency: "amber",
       since: p.cheque_date ?? p.received_at,
-      hint: "The cheque is recorded. Tap Cleared once the bank confirms the money; a bounced cheque is reversed from the money page.",
-      inline: { kind: "cheque_clear", paymentId: p.id },
+      hint: p.method === "cheque" ? "The cheque is recorded. Mark it deposited, then cleared on the day it shows on the statement; a bounced cheque reverses the payment." : "The transfer is recorded. Confirm it with the amount that reached the bank.",
     });
   }
 
@@ -182,7 +182,7 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
     const mine = late.filter((p) => p.method === method);
     if (!mine.length) continue;
     const total = round2(mine.reduce((a, p) => a + p.amount, 0));
-    out.push({ jobId: `settle:${method}`, plate: method === "card" ? "Card machine" : "Payment link", car: null, what: `${mine.length} ${method === "card" ? "card" : "payment-link"} payment${mine.length === 1 ? "" : "s"} not settled after 3 working days`, amount: aed(total), actionLabel: "Record the settlement", href: `/card-settlements?method=${method}`, always: true, urgency: "amber", since: mine[0].receivedAt, hint: "Match the bank's payout on the statement, then record what actually came in: the real fee replaces the estimate on each job." });
+    out.push({ jobId: `settle:${method}`, plate: method === "card" ? "Card machine" : "Payment link", car: null, what: `${mine.length} ${method === "card" ? "card" : "payment-link"} payment${mine.length === 1 ? "" : "s"} not settled after 3 working days`, amount: aed(total), actionLabel: "Record the settlement", href: `/accounts-posting?method=${method}`, always: true, urgency: "amber", since: mine[0].receivedAt, hint: "Match the bank's payout on the statement, then record what actually came in: the real fee replaces the estimate on each job." });
   }
 
   // 7. A red reconciliation day (phase 4): the books differ somewhere until someone looks.

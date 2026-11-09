@@ -1,3 +1,5 @@
+import { loadBankWaiting } from "@/lib/bank-posting";
+import { pendingLine } from "@/lib/bank-status";
 import { compCostOf, loadCompJobs, reworkByOriginal } from "@/lib/comp-data";
 import { withAddressAs } from "@/lib/customer-address";
 import { RecentJobMark } from "@/components/RecentJobs";
@@ -350,6 +352,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // any amount sent (advisors). "Paid so far · Balance" before the proforma is the approved total less every advance; the
   // chip says so too ("Advance AED 30,000 · AED 7,930 to pay", 3 November 2026).
   const jobMoney = can(role, "viewInvoices") ? await jobMoneyOf(id, settings) : null;
+  // 9 November 2026: cheques and transfers of this car still waiting for the bank (the words and the one action).
+  const bankWait = jobMoney && jobMoney.pendingCheque > 0 ? await loadBankWaiting({ jobIds: [id] }) : [];
+  const bankWords = jobMoney ? pendingLine({ paid: jobMoney.paid, pending: bankWait.map((r) => ({ method: r.method, number: r.number, amount: r.amount })), balance: jobMoney.balance }) : null;
   const money = moneyState({
     jobStatus: job.status,
     isOpen: job.is_open,
@@ -360,6 +365,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     paid: bal?.paid ?? 0,
     balance: bal?.balance ?? 0,
     chequePending: bal?.pending ?? 0,
+    pendingWord: bankWait.length && bankWait.every((r) => r.method === "transfer") ? "Transfer" : "Cheque",
     needsInvoice: !!bal?.needsInvoice,
     creditDays: Number(creditCust?.credit_terms_days) || 0,
     declinedOut: !!stepJob?.declined_out_at,
@@ -941,11 +947,18 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             <Badge tone={money.chip.tone === "ink" ? "ink" : money.chip.tone}>{money.chip.text}</Badge>
           </span>
           {jobMoney && (jobMoney.total !== null || jobMoney.paid > 0) ? <PaidSoFar m={jobMoney} /> : null}
+          {bankWords ? <span className="text-sm font-semibold text-amber-text" data-bank-pending-line>{bankWords}</span> : null}
           {jobReports.length ? <PaymentReportLines reports={jobReports} viewerId={staff.id} canRecord={can(role, "recordPayments")} canReport={role === "service_advisor" || role === "owner"} readOnly={!!staff.viewingAs} balance={jobMoney?.balance ?? null} expected={liveProforma?.expected_payment_method ?? null} isOwner={role === "owner"} reasons={reasonsFor(settings, "payment_query")} /> : null}
           {job.ready_sent_at ? <span className="text-xs text-muted">Proforma sent {formatDayTime(job.ready_sent_at)}</span> : null}
           {money.waitingHours ? <span className="text-xs font-bold text-red" data-money-waiting>Waiting {money.waitingHours} h for payment</span> : null}
           {job.invoice_sent_at ? <span className="text-xs text-muted">Tax invoice sent {formatDayTime(job.invoice_sent_at)}</span> : null}
           <div className="mt-auto flex flex-col gap-2" data-money-action={money.action}>
+            {money.action === "clear_bank" ? (
+              <div className="flex flex-col gap-2" data-bank-wait>
+                <span className="text-sm font-semibold">{money.actionLabel}</span>
+                {can(role, "recordPayments") ? <LinkButton href={`/jobs/${id}/invoice#bank`} size="lg" className="w-full" data-bank-open-money>Mark deposited / cleared</LinkButton> : null}
+              </div>
+            ) : null}
             {money.action === "prepare_proforma" && can(role, "markReadyToInvoice") && !staff.viewingAs && job.is_open ? <form action={markReadyToInvoice.bind(null, id)}><Button type="submit" size="lg" className="w-full">Prepare the proforma</Button></form> : null}
             {(money.action === "send_proforma" || money.action === "send_tax_invoice") && money.live && can(role, "sendApproval") && !staff.viewingAs && job.is_open ? (
               <ReadySendControl jobId={id} size="lg" token={money.live.token} shortLink={money.live.token ? await shortFor(`${PRODUCTION_SITE_URL}/${money.live.kind === "tax_invoice" ? "invoice" : "proforma"}/${money.live.token}`) : null} kind={money.live.kind === "tax_invoice" ? "tax_invoice" : "proforma"} siteUrl={site} messageTemplate={money.live.kind === "tax_invoice" ? invoiceTemplate : readyTemplate} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={money.live.kind === "tax_invoice" ? job.invoice_sent_at : job.ready_sent_at} expectedMethod={liveProforma?.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={money.live.token ? { href: `/api/pdf/invoice/${money.live.token}`, fileName: `OFJ ${money.live.kind === "tax_invoice" ? "Tax invoice" : "Proforma"} ${money.live.number}.pdf` } : null} />

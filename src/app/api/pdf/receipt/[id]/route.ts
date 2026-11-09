@@ -1,3 +1,4 @@
+import { awaitsBank } from "@/lib/bank-status";
 import { NextResponse, type NextRequest } from "next/server";
 import { staffPdfAccess } from "@/lib/pdf/access";
 import { PAYMENT_SELECT, loadInvoice, toPayment } from "@/lib/invoice-data";
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   // Paid to date on the job: every recorded payment, deposits included (a pending cheque counts, with its note).
   const recorded = ((payRows ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded");
   const paid = round2(recorded.reduce((a, p) => a + p.amount_aed, 0));
-  const pendingCheque = recorded.some((p) => p.method === "cheque" && p.cheque_status === "pending");
+  const pendingCheque = recorded.some((p) => awaitsBank(p));
   const summaryOf = (totalLabel: string, total: number): ReceiptSummary => ({
     totalLabel,
     total,

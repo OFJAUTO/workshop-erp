@@ -1,3 +1,4 @@
+import { awaitsBank, countsAsPaid } from "@/lib/bank-status";
 import "server-only";
 import { capsText } from "./text-case";
 import { chargesToInvoiceMany } from "./charges";
@@ -168,8 +169,8 @@ export const toPayment = (r: Record<string, unknown>) => num(r as unknown as Pay
  */
 export function invoiceBalance(invoice: Pick<InvoiceRow, "total_aed">, payments: PaymentRow[], credited = 0) {
   const live = payments.filter((p) => p.status === "recorded");
-  const cleared = live.filter((p) => p.method !== "cheque" || p.cheque_status === "cleared");
-  const pending = live.filter((p) => p.method === "cheque" && p.cheque_status === "pending");
+  const cleared = live.filter((p) => countsAsPaid(p));
+  const pending = live.filter((p) => awaitsBank(p));
   const paid = round2(cleared.reduce((a, p) => a + p.amount_aed, 0));
   const pendingAmount = round2(pending.reduce((a, p) => a + p.amount_aed, 0));
   const balance = round2(invoice.total_aed - paid - credited);

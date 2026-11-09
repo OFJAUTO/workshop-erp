@@ -1,5 +1,7 @@
 import "server-only";
 import { DEFAULT_UNDO_MINUTES, heldForUndo } from "./money-undo";
+import { countsAsPaid, isBankMethod, zohoPayDay } from "./bank-status";
+import { bankPostingReady } from "./schema-ready";
 import { logAppError } from "@/lib/app-errors";
 import { INVOICE_LINE_SELECT, INVOICE_SELECT, PAYMENT_SELECT, toInvoice, toInvoiceLine, toPayment, type InvoiceLineRow, type InvoiceRow, type PaymentRow } from "@/lib/invoice-data";
 import { round2 } from "@/lib/money";
@@ -93,10 +95,12 @@ export type ZohoAccountMap = {
   advances?: string;
   /** Reference only (no ERP refund records yet): where a credit-note refund would be paid from. */
   advancesRefund?: string;
+  /** Cheques and bank transfers wait here until cleared/confirmed (9 November 2026), then move to their bank. */
+  undeposited?: string;
 };
 
 /** The pre-fill when the live chart has no better match; also what "Create the suggested accounts" makes in OFJ TEST. */
-export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Record<MethodKey, string>; purchases: Record<PurchaseKey, string>; expense: Record<ExpenseKey, string>; paidFrom: string; paidFromBy: Record<SupplierPayKey, string>; bankCharges: string; bankTxnFees: string; advances: string; advancesRefund: string } = {
+export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Record<MethodKey, string>; purchases: Record<PurchaseKey, string>; expense: Record<ExpenseKey, string>; paidFrom: string; paidFromBy: Record<SupplierPayKey, string>; bankCharges: string; bankTxnFees: string; advances: string; advancesRefund: string; undeposited: string } = {
   income: {
     labour: "Mechanical labour income",
     parts: "Spare parts income",
@@ -126,11 +130,12 @@ export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Reco
   bankTxnFees: "Bank Fees and Charges",
   advances: "Customer advances",
   advancesRefund: "Bank - AED",
+  undeposited: "Undeposited Funds",
 };
 
 export function readZohoMap(settings: Settings): ZohoAccountMap {
   const raw = (settings.zoho_account_map ?? {}) as ZohoAccountMap;
-  return { income: raw.income ?? {}, depositTo: raw.depositTo ?? {}, purchases: raw.purchases ?? {}, expense: raw.expense ?? {}, paidFrom: raw.paidFrom, paidFromBy: raw.paidFromBy ?? {}, bankCharges: raw.bankCharges, bankTxnFees: raw.bankTxnFees, advances: raw.advances, advancesRefund: raw.advancesRefund };
+  return { income: raw.income ?? {}, depositTo: raw.depositTo ?? {}, purchases: raw.purchases ?? {}, expense: raw.expense ?? {}, paidFrom: raw.paidFrom, paidFromBy: raw.paidFromBy ?? {}, bankCharges: raw.bankCharges, bankTxnFees: raw.bankTxnFees, advances: raw.advances, advancesRefund: raw.advancesRefund, undeposited: raw.undeposited };
 }
 
 /** True once the books have EVER gone live (the switch runs once; OFJ TEST is never written again after it). */
@@ -246,6 +251,9 @@ type Resolved = {
   /** Card/link settlements: the fee per transaction (default the bank charges account). */
   bankTxnFees?: string;
   bankTxnFeesError?: string;
+  /** Cheques and transfers before they clear (resolved softly; empty mapping = "Undeposited Funds"). */
+  undeposited?: string;
+  undepositedError?: string;
 };
 
 /** The account a handler needs, or its group's plain-words reason. */
@@ -353,6 +361,11 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
     out.bankTxnFees = await resolve(map.bankTxnFees || map.bankCharges, "Bank transaction fees (payment link, per transaction)", "expense");
   } catch (e) {
     out.bankTxnFeesError = e instanceof Error ? e.message : String(e);
+  }
+  try {
+    out.undeposited = await resolve(map.undeposited || SUGGESTED_MAP.undeposited, "Undeposited Funds (cheques and transfers before they clear)", "cash");
+  } catch (e) {
+    out.undepositedError = e instanceof Error ? e.message : String(e);
   }
   return out;
 }
@@ -626,7 +639,7 @@ async function zohoCreditedTotal(org: string, zohoInvoiceId: string): Promise<nu
 
 /** The ERP payments that belong on this invoice: its own rows plus the job's deposits; cheques only once cleared. */
 function countablePayments(rows: PaymentRow[]): PaymentRow[] {
-  return rows.filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared"));
+  return rows.filter((p) => p.status === "recorded" && countsAsPaid(p));
 }
 
 /** How much of a Zoho payment is still unapplied (a deposit may already sit on another invoice). */
@@ -884,8 +897,15 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
   if (p.status === "pending_owner") return { wait: "Waiting for the owner to approve the over-balance payment." };
   if ((p.status === "voided" || p.status === "reversed") && !p.zoho_payment_id) return { result: { skipped: "Voided in the ERP before it was posted. Nothing went to Zoho." } };
   if (p.status === "voided" || p.status === "reversed") return reverseZohoPayment(org, p.zoho_payment_id!, p.number, p.void_reason ?? p.reversed_reason);
-  if (p.method === "cheque" && p.cheque_status !== "cleared") return { wait: "Waiting for the cheque to clear." };
-  const payGate = await startDateSkip(dubaiDate(p.method === "cheque" ? (p.cleared_at ?? p.received_at) : p.received_at), ["deposit", "payment"], p.id);
+  // 9 November 2026: a cheque or transfer waiting for the bank posts at once into Undeposited Funds (dated the day it was
+  // received); when it clears, the "bankmove" row moves it to the bank on the clearing day. One cleared before it
+  // reached Zoho goes straight to its bank, dated the day it cleared (as before).
+  const settlementId = (raw as Record<string, unknown>).settlement_id ?? null;
+  const viaUndeposited = isBankMethod(p.method) && (await bankPostingReady()) && (p.cheque_status === "pending" || !!settlementId);
+  if (!viaUndeposited && isBankMethod(p.method) && p.cheque_status === "pending") return { wait: p.method === "cheque" ? "Waiting for the cheque to clear." : "Waiting for the transfer to be confirmed in the bank." };
+  if (p.cheque_status === "bounced") return { result: { skipped: "Bounced before it reached Zoho. Nothing went to Zoho." } };
+  const payDay = zohoPayDay({ ...p, settlement_id: settlementId as string | null }, await bankPostingReady()) ?? p.received_at;
+  const payGate = await startDateSkip(dubaiDate(payDay), ["deposit", "payment"], p.id);
   if (payGate) return payGate;
 
   const contactId = await ensureContact(org, p.customer_id);
@@ -922,13 +942,13 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
       customer_id: contactId,
       payment_mode: MODE[p.method],
       amount: p.amount_aed,
-      date: dubaiDate(p.method === "cheque" ? (p.cleared_at ?? p.received_at) : p.received_at),
+      date: dubaiDate(payDay),
       reference_number: p.number,
       description: p.is_deposit ? `Advance payment (deposit)${p.deposit_invoice_number ? ` · ${p.deposit_invoice_number}` : ""}` : `Payment in the ERP (${p.number})`,
       // Card and payment-link money lands in its clearing account at the FULL amount; the bank's actual fee
       // reaches Zoho only with the settlement (27 October 2026). Other methods keep their recorded charge.
       ...(p.bank_charge_aed > 0 && p.method !== "card" && p.method !== "link" ? { bank_charges: p.bank_charge_aed } : {}),
-      account_id: accounts.depositTo[p.method],
+      account_id: viaUndeposited ? needAccounts(accounts.undeposited, accounts.undepositedError) : accounts.depositTo[p.method],
     };
     try {
       // The plan's model: an advance is an unapplied payment, applied to the tax invoice when that syncs.
@@ -2006,7 +2026,7 @@ async function syncSettlementRow(org: string, accounts: Resolved, settlementId: 
   const admin = createAdminClient();
   const { data } = await admin.from("card_settlements").select("id, number, method, settled_on, payment_count, gross_aed, received_aed, fee_aed, msf_aed, txn_fee_aed, vat_aed, difference_aed, statement_ref, is_active, zoho_transfer_id, zoho_fee_id").eq("id", settlementId).maybeSingle();
   const parts = data as { msf_aed: number | string | null; txn_fee_aed: number | string | null; vat_aed: number | string | null; difference_aed: number | string | null } | null;
-  const st = data as { id: string; number: string; method: "card" | "link"; settled_on: string; payment_count: number; gross_aed: number | string; received_aed: number | string; fee_aed: number | string; statement_ref: string | null; is_active: boolean; zoho_transfer_id: string | null; zoho_fee_id: string | null } | null;
+  const st = data as { id: string; number: string; method: "card" | "link" | "cheque" | "transfer"; settled_on: string; payment_count: number; gross_aed: number | string; received_aed: number | string; fee_aed: number | string; statement_ref: string | null; is_active: boolean; zoho_transfer_id: string | null; zoho_fee_id: string | null } | null;
   if (!st) throw new ZohoError("The settlement no longer exists in the ERP.");
   if (!st.is_active) {
     if (st.zoho_transfer_id || st.zoho_fee_id) throw new ZohoError(`${st.number} was undone in the ERP after it reached Zoho: the accountant removes the transfer and the fee in Zoho by hand.`);
@@ -2031,11 +2051,13 @@ async function syncSettlementRow(org: string, accounts: Resolved, settlementId: 
   }
   const received = round2(Number(st.received_aed) || 0);
   const fee = round2(Number(st.fee_aed) || 0);
-  const clearing = accounts.depositTo[st.method];
-  const bank = accounts.depositTo.transfer;
+  // Cheques and transfers (9 November 2026): from Undeposited Funds to the bank they were paid into, on the posting day.
+  const bankMethod = st.method === "cheque" || st.method === "transfer";
+  const clearing = bankMethod ? needAccounts(accounts.undeposited, accounts.undepositedError) : accounts.depositTo[st.method];
+  const bank = bankMethod ? accounts.depositTo[st.method] : accounts.depositTo.transfer;
   const date = String(st.settled_on).slice(0, 10);
   const reference = cut(`${st.number}${st.statement_ref ? ` · ${st.statement_ref}` : ""}`, 100);
-  const what = st.method === "card" ? "Card machine" : "Payment link";
+  const what = st.method === "card" ? "Card machine" : st.method === "link" ? "Payment link" : st.method === "cheque" ? "Cheque" : "Bank transfer";
 
   let transferId = st.zoho_transfer_id;
   if (!transferId && received > 0) {

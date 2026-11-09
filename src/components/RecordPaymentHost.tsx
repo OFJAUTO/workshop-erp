@@ -369,6 +369,7 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
                 invoiceNumber={target.invoiceNumber ?? ""}
                 isProforma={target.isProforma}
                 nextTaxNumber={choices.nextTaxNumber}
+                pendingBank={state?.needsDuplicateReason && state.at !== dismissedAt ? state.needsDuplicateReason : null}
                 hidden={target.kind === "unallocated" ? { unallocated: "1", customer_id: choices.customer.id, vehicle_id: carId } : null}
                 extra={
                   target.kind === "unallocated" ? (

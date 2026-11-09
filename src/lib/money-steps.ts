@@ -55,6 +55,8 @@ export type MoneyInput = {
   paid: number;
   balance: number;
   chequePending: number;
+  /** "Cheque" or "Transfer": what waits for the bank (9 November 2026); default Cheque. */
+  pendingWord?: string;
   /** An approved quotation or a fee exists, so a proforma is due. */
   needsInvoice: boolean;
   creditDays?: number;
@@ -71,7 +73,13 @@ export type MoneyInput = {
   advance?: { paid: number; left: number | null } | null;
 };
 
-export type MoneyAction = "prepare_proforma" | "send_proforma" | "record_payment" | "send_tax_invoice" | "gate_out" | "none";
+export type MoneyAction = "prepare_proforma" | "send_proforma" | "record_payment" | "clear_bank" | "send_tax_invoice" | "gate_out" | "none";
+
+/** 9 November 2026 (J-00858): a cheque or transfer already waiting for the bank covers what is due - the one action is
+ *  accounts marking it deposited / cleared, never recording the payment again. */
+export function bankWaitWords(word: string): string {
+  return `${word} recorded – waiting to clear. Accounts: mark deposited / cleared.`;
+}
 
 export type MoneyState = {
   current: MoneyStepKey;
@@ -109,6 +117,7 @@ export function moneyState(i: MoneyInput): MoneyState {
     if (!paidInFull && !onCredit) {
       const waiting = i.taxInvoice.sent_at ? Math.floor((now - Date.parse(i.taxInvoice.sent_at)) / 3600000) : null;
       if (i.reported) return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: `Payment reported by ${i.reported.by}, checking`, tone: "amber" }, action: "record_payment", actionLabel: "Record the reported payment", waitingHours: waiting !== null && waiting >= limitHours ? waiting : null, live };
+      if (i.chequePending > 0 && i.chequePending + 0.005 >= i.balance) return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: `${i.pendingWord ?? "Cheque"} pending – waiting to clear`, tone: "amber" }, action: "clear_bank", actionLabel: bankWaitWords(i.pendingWord ?? "Cheque"), waitingHours: null, live };
       return { current: "payment", done: ["job_done", "proforma_sent"], chip: i.paid > 0 ? { text: `Part paid · ${money(i.balance)} due`, tone: "amber" } : i.chequePending > 0 ? { text: "Cheque pending", tone: "amber" } : { text: `Tax invoice issued, ${money(i.balance)} due`, tone: "amber" }, action: "record_payment", actionLabel: "Record payment", waitingHours: waiting !== null && waiting >= limitHours ? waiting : null, live };
     }
     if (!i.taxInvoice.sent_at) return { current: "tax_invoice", done: ["job_done", "proforma_sent", "payment"], chip: { text: onCredit ? `On credit · ${money(i.balance)} due` : "Paid · tax invoice to send", tone: onCredit ? "amber" : "green" }, action: "send_tax_invoice", actionLabel: "Send the tax invoice", waitingHours: null, live };
@@ -121,8 +130,9 @@ export function moneyState(i: MoneyInput): MoneyState {
     const long = waited >= limitHours;
     if (i.reported) return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: `Payment reported by ${i.reported.by}, checking`, tone: "amber" }, action: "record_payment", actionLabel: "Record the reported payment", waitingHours: long ? waited : null, live };
     if (i.proforma.customer_says_paid_at) return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: "Customer says paid, checking", tone: "amber" }, action: "record_payment", actionLabel: "Confirm the payment", waitingHours: long ? waited : null, live };
+    if (i.chequePending > 0 && i.chequePending + 0.005 >= i.balance) return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: `${i.pendingWord ?? "Cheque"} pending – waiting to clear`, tone: "amber" }, action: "clear_bank", actionLabel: bankWaitWords(i.pendingWord ?? "Cheque"), waitingHours: null, live };
     if (i.paid > 0) return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: `Part paid · ${money(i.balance)} due`, tone: "amber" }, action: "record_payment", actionLabel: "Record payment", waitingHours: long ? waited : null, live };
-    if (i.chequePending > 0) return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: "Cheque pending clearance", tone: "amber" }, action: "record_payment", actionLabel: "Record payment", waitingHours: long ? waited : null, live };
+    if (i.chequePending > 0) return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: `${i.pendingWord ?? "Cheque"} pending clearance`, tone: "amber" }, action: "record_payment", actionLabel: "Record payment", waitingHours: long ? waited : null, live };
     if (onCredit) return { current: "released", done: ["job_done", "proforma_sent"], chip: { text: `Credit terms · ${money(i.balance)} due in ${i.creditDays} days`, tone: "amber" }, action: "gate_out", actionLabel: "Gate out", waitingHours: null, live };
     const expected = i.proforma.expected_payment_method ? ` · ${PAYMENT_METHOD_LABELS[i.proforma.expected_payment_method] ?? i.proforma.expected_payment_method}` : "";
     return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: `Awaiting payment${expected}`, tone: long ? "red" : "amber" }, action: "record_payment", actionLabel: "Record payment", waitingHours: long ? waited : null, live };

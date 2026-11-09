@@ -39,7 +39,7 @@ export async function recordSettlementAction(_prev: FormState, formData: FormDat
     staff.id,
   );
   if (!res.ok) return { error: res.error, values: { ...values, ...(res.askAgain ? { ask: "1" } : {}) } };
-  revalidatePath("/card-settlements");
+  revalidatePath("/accounts-posting");
   return { success: `${res.number} recorded: ${res.count} payment${res.count === 1 ? "" : "s"}, the bank kept AED ${res.fee.toFixed(2)} (MSF + fee AED ${res.cost.toFixed(2)} on the jobs, the VAT reclaimable)${res.difference ? `, saved with an AED ${Math.abs(res.difference).toFixed(2)} difference (written in the change log)` : ""}. Each job now shows the actual fee; Zoho gets the transfer, the fees and the input VAT.` };
 }
 
@@ -79,7 +79,7 @@ export async function saveBankFeesAction(_prev: FormState, formData: FormData): 
     if (error) return { error: "Couldn't save the bank fees. Try again.", values };
   }
   await admin.from("audit_log").insert({ table_name: "settings", record_id: null, action: "update", new_data: { bank_fees: Object.fromEntries(updates.map((u) => [u.key, u.value])), by: staff.display_name } }).then(() => null, () => null);
-  revalidatePath("/card-settlements");
+  revalidatePath("/accounts-posting");
   revalidatePath("/invoices");
   revalidatePath("/settings");
   const g = (k: string) => updates.find((u) => u.key === k)?.value;
@@ -91,7 +91,7 @@ export async function undoSettlementAction(settlementId: string, _prev: FormStat
   if (staff.viewingAs) return { error: "You are viewing as someone else: switch back to undo a settlement." };
   const res = await undoSettlement(settlementId, String(formData.get("reason") ?? ""), staff.id);
   if (!res.ok) return { error: res.error };
-  revalidatePath("/card-settlements");
+  revalidatePath("/accounts-posting");
   return { success: `${res.number} undone: its payments are back to "not settled".${res.posted ? " Zoho already had it: the sync page shows the transfer and fee to remove by hand." : ""}` };
 }
 
@@ -103,7 +103,7 @@ export async function uploadReportAction(_prev: FormState, formData: FormData): 
   if (!(file instanceof File)) return { error: "Choose the report file (PDF, CSV or Excel)." };
   const res = await uploadSettlementReport(file, staff.id);
   if (!res.ok) return { error: res.error };
-  redirect(`/card-settlements?report=${res.id}#report`);
+  redirect(`/accounts-posting?report=${res.id}#report`);
 }
 
 /** Record the reviewed report: one settlement per method, each payment with its exact MSF, fee and VAT. */
@@ -117,7 +117,7 @@ export async function recordReportAction(reportId: string, _prev: FormState, for
   }
   const res = await recordReport(reportId, { picks, settledOn: String(formData.get("settled_on") ?? "").slice(0, 10), statementRef: blank(formData.get("statement_ref")), note: blank(formData.get("note")), flagsSeen: formData.get("flags_seen") === "1" }, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
   if (!res.ok) return { error: res.error };
-  revalidatePath("/card-settlements");
+  revalidatePath("/accounts-posting");
   revalidatePath("/invoices");
   const parts = [
     res.numbers.length ? `${res.numbers.join(" and ")} recorded from the bank's report: each payment carries its exact MSF, fee and VAT, and each job now shows the actual fee.` : "Nothing new to record: every payment on this report was already settled.",
@@ -137,7 +137,52 @@ export async function confirmSuggestionAction(reportId: string, index: number, p
   if (!/^[0-9a-f-]{36}$/.test(reportId) || !/^[0-9a-f-]{36}$/.test(paymentId) || !Number.isInteger(index)) return { error: "That line or payment was not found. Reload the page." };
   const r = await fillAuthFromReport(reportId, index, paymentId, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
   if (!r.ok) return { error: r.error };
-  revalidatePath("/card-settlements");
+  revalidatePath("/accounts-posting");
   revalidatePath("/invoices");
   return { ok: true, settledIn: r.settledIn, message: `Auth ${r.code} saved on ${r.number}${r.settledIn ? ` · already settled in ${r.settledIn}` : ""}.` };
+}
+
+/* ---- Cheques and bank transfers (9 November 2026, Section 2): THE steps in src/lib/bank-posting.ts ---- */
+
+export type BankAnswer = { error?: string; message?: string; at: number };
+
+async function bankActor() {
+  const staff = await requirePermission("recordPayments");
+  return { staff, actor: { id: staff.id, display_name: staff.display_name, role_id: staff.role_id } };
+}
+function bankRefresh() {
+  revalidatePath("/accounts-posting");
+  revalidatePath("/invoices");
+  revalidatePath("/dashboard");
+  revalidatePath("/jobs", "layout");
+}
+
+export async function markDepositedAction(paymentId: string, _prev: BankAnswer | null, formData: FormData): Promise<BankAnswer> {
+  const { staff, actor } = await bankActor();
+  if (staff.viewingAs) return { error: "View as is read-only – use Act as to change it.", at: Date.now() };
+  const { markChequeDeposited } = await import("@/lib/bank-posting");
+  const r = await markChequeDeposited(paymentId, { date: String(formData.get("deposited_on") ?? ""), account: String(formData.get("deposited_to") ?? "") }, actor);
+  if (r.ok) bankRefresh();
+  return { error: r.error, message: r.words, at: Date.now() };
+}
+
+export async function clearBankAction(_prev: BankAnswer | null, formData: FormData): Promise<BankAnswer> {
+  const { staff, actor } = await bankActor();
+  if (staff.viewingAs) return { error: "View as is read-only – use Act as to change it.", at: Date.now() };
+  const { clearBankPayments } = await import("@/lib/bank-posting");
+  const amount = reportNumber(formData.get("amount"));
+  const fee = reportNumber(formData.get("fee"));
+  const r = await clearBankPayments(formData.getAll("ids").map(String), { date: String(formData.get("settled_on") ?? ""), amount: amount ?? 0, statementRef: blank(formData.get("statement_ref")), fee: fee === null ? 0 : Math.abs(fee), note: blank(formData.get("note")) }, actor);
+  if (r.ok) bankRefresh();
+  return { error: r.error, message: r.words, at: Date.now() };
+}
+
+export async function bounceBankAction(paymentId: string, _prev: BankAnswer | null, formData: FormData): Promise<BankAnswer> {
+  const { staff, actor } = await bankActor();
+  if (staff.viewingAs) return { error: "View as is read-only – use Act as to change it.", at: Date.now() };
+  const { bounceBankPayment } = await import("@/lib/bank-posting");
+  const charge = reportNumber(formData.get("bounce_charge"));
+  const r = await bounceBankPayment(paymentId, { charge: charge === null ? 0 : Math.abs(charge), note: blank(formData.get("bounce_note")) }, actor);
+  if (r.ok) bankRefresh();
+  return { error: r.error, message: r.words, at: Date.now() };
 }

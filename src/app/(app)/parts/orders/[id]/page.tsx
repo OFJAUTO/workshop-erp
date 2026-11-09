@@ -1,3 +1,4 @@
+import { countsAsPaid } from "@/lib/bank-status";
 import Link from "next/link";
 import { SupplierPayBox } from "@/components/SupplierPayBox";
 import { advancesOf, openInvoicesOf, paymentsOnPo, supplierPaymentsReadyNow } from "@/lib/supplier-payments";
@@ -78,7 +79,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
     isMain ? loadJobLpos(po.job_id) : Promise.resolve(null),
   ]);
   const depositRequired = Number(q?.deposit_aed) || 0;
-  const depositReceived = ((pays ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared")).reduce((a, p) => a + p.amount_aed, 0);
+  const depositReceived = ((pays ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded" && (countsAsPaid(p))).reduce((a, p) => a + p.amount_aed, 0);
   let depositShort = depositRequired > 0 && depositReceived + 0.005 < depositRequired ? `Deposit AED ${depositRequired.toLocaleString("en-GB")} not received yet${depositReceived > 0 ? ` (AED ${depositReceived.toLocaleString("en-GB")} received so far)` : ""}. Quotation ${q?.number}.` : null;
   // Part 4 (4 November 2026): an LPO on a HELD job ("Order parts now" before the car arrives) with
   // NOTHING paid on the estimate - the owner sees the warning and can approve anyway with a reason.

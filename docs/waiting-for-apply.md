@@ -13,7 +13,7 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 | # | What | What it does on live | Size |
 |---|---|---|---|
-| – | Nothing waiting. | | |
+| 1 | `supabase/migrations/20261211090000_accounts_posting.sql` (9 Nov, Section 2) | Adds `payments.cheque_deposited_at/_to/_by` and `bounce_charge_aed`, and lets a posting row (STL-) be a cheque or bank-transfer posting. Until then: cheques and transfers can already be marked cleared / confirmed / bounced (the payment counts, the tax invoice follows), but **Mark deposited** is hidden, and Zoho keeps the old way (a cheque posts to the bank on its clearing day instead of going through Undeposited Funds). | 4 columns + 1 rule |
 
 ## Applied on 9 November 2026, afternoon
 

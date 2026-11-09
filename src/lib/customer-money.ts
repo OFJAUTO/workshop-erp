@@ -1,3 +1,4 @@
+import { awaitsBank, countsAsPaid } from "@/lib/bank-status";
 import "server-only";
 import { loadChargeEntries } from "./charges";
 import { loadEstimateMoneyRows } from "./estimate-money";
@@ -86,8 +87,8 @@ export function jobMoneyFrom(job: JobMoneyFacts, invoices: InvoiceRow[], payment
   }
   const total = draftTotal;
   const live = payments.filter((p) => p.status === "recorded");
-  const paid = round2(live.filter((p) => p.method !== "cheque" || p.cheque_status === "cleared").reduce((a, p) => a + p.amount_aed, 0));
-  const pendingCheque = round2(live.filter((p) => p.method === "cheque" && p.cheque_status === "pending").reduce((a, p) => a + p.amount_aed, 0));
+  const paid = round2(live.filter((p) => countsAsPaid(p)).reduce((a, p) => a + p.amount_aed, 0));
+  const pendingCheque = round2(live.filter((p) => awaitsBank(p)).reduce((a, p) => a + p.amount_aed, 0));
   return { ...base, live: null, total, paid, balance: total === null ? null : Math.max(0, round2(total - paid)), pendingCheque, credited: 0 };
 }
 

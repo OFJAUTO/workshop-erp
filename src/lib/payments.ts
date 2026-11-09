@@ -1,3 +1,4 @@
+import { awaitsBank, countsAsPaid, duplicateWords, isBankMethod } from "@/lib/bank-status";
 import "server-only";
 import { DEFAULT_UNDO_MINUTES, mayUndo } from "./money-undo";
 import { afterPendingChargePayment } from "./charges";
@@ -18,7 +19,7 @@ import { flagZohoAttention, reopenZoho, tryEnqueueZoho, zohoPostedSomewhere } fr
 import { AUTH_CODE_RE, authCodeMissing, authCodeProblem, authCodeRefusal, authCodeWhere, cleanAuthCode, isFakeAuthCode, needsAuthCode, realAuthCode } from "./auth-code";
 import { jobMoneyOf } from "./customer-money";
 import { newToken } from "./media";
-import { paymentsAnytimeReady } from "./schema-ready";
+import { bankPostingReady, paymentsAnytimeReady } from "./schema-ready";
 
 /** Who records: a staff member, or the payment gateway (no id). */
 export type Actor = { id: string | null; display_name: string; role_id: string; is_head_accountant?: boolean };
@@ -44,8 +45,10 @@ export type PaymentInput = {
   overCheck?: boolean;
   /** Recorded from an advisor's payment report (2 November 2026, section 3): the report is closed by this receipt. */
   reportId?: string | null;
+  /** 9 November 2026: why another payment is recorded while a cheque or transfer already waiting for the bank covers the balance. */
+  duplicateReason?: string | null;
 };
-export type PaymentResult = { error?: string; ok?: boolean; number?: string; paymentId?: string; pendingOwner?: boolean; message?: string; /** The same client key was already used: this is that earlier receipt (its amount and method). */ repeat?: { amount: number; method: string }; /** More than what is left and no note yet: the form asks for one. */ needsOverNote?: { balance: number }; token?: string | null };
+export type PaymentResult = { error?: string; ok?: boolean; number?: string; paymentId?: string; pendingOwner?: boolean; message?: string; /** The same client key was already used: this is that earlier receipt (its amount and method). */ repeat?: { amount: number; method: string }; /** More than what is left and no note yet: the form asks for one. */ needsOverNote?: { balance: number }; token?: string | null; /** A cheque or transfer already waiting for the bank covers what is due: the form asks why another one (9 November 2026). */ needsDuplicateReason?: string };
 
 const money = (n: number) => `AED ${round2(n).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
 
@@ -157,8 +160,21 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     const twin = await authCodeTwin(authCode, method, null);
     if (twin) return { error: twin };
   }
-  const cheque = method === "cheque" ? { cheque_number: input.cheque?.number ?? null, cheque_bank: input.cheque?.bank ?? null, cheque_date: input.cheque?.date ?? null, cheque_status: "pending" as const } : {};
+  // A bank transfer waits for the bank like a cheque (9 November 2026): accounts confirm it in Accounts posting.
+  const cheque = method === "cheque" ? { cheque_number: input.cheque?.number ?? null, cheque_bank: input.cheque?.bank ?? null, cheque_date: input.cheque?.date ?? null, cheque_status: "pending" as const } : method === "transfer" ? { cheque_status: "pending" as const } : {};
   if (method === "cheque" && (!cheque.cheque_number || !cheque.cheque_date)) return { error: "A cheque needs its number and date." };
+  // No duplicates (9 November 2026, J-00858: RCT-00058 was recorded twice more while the cheque waited): money already
+  // waiting for the bank that covers what is due asks why another payment is recorded; the reason is kept on it.
+  let dupWords: string | null = null;
+  if (jobId || input.invoiceId) {
+    const { data: waitRows } = jobId ? await admin.from("payments").select("number, method, amount_aed, cheque_status, status, is_active").eq("job_id", jobId).eq("is_active", true).eq("status", "recorded") : await admin.from("payments").select("number, method, amount_aed, cheque_status, status, is_active").eq("invoice_id", input.invoiceId!).eq("is_active", true).eq("status", "recorded");
+    const pending = ((waitRows ?? []) as { number: string; method: string; amount_aed: number | string; cheque_status: string | null }[]).filter((p) => awaitsBank(p)).map((p) => ({ method: p.method, number: p.number, amount: Number(p.amount_aed) || 0 }));
+    if (pending.length) {
+      const due = balance ?? (jobId ? ((await jobMoneyOf(jobId, settings))?.balance ?? null) : null);
+      dupWords = duplicateWords(pending, due);
+      if (dupWords && !(input.duplicateReason ?? "").trim()) return { error: `${dupWords} Write why in the box.`, needsDuplicateReason: dupWords };
+    }
+  }
   // A payment with no invoice is a deposit on the job: it points at the approved quotation it was asked for on.
   const depositQuoteId = input.invoiceId || !jobId ? null : ((await approvedQuotations(jobId))[0]?.id ?? null);
   const over = balance !== null && amount > balance + 0.005;
@@ -167,7 +183,7 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   // and told to the owner. The gateway (no person) never waits: its money is real.
   const overNote = input.overNote?.trim().slice(0, 500) || (over && !actor.id ? "Paid online above the balance" : null);
   if (over && !overNote) return { error: `More than what is left (${money(balance ?? 0)}). Write why – a refund to make or credit to keep. It is logged.`, needsOverNote: { balance: balance ?? 0 } };
-  const notes = [input.notes?.trim() || null, over ? `Above the balance of ${money(balance ?? 0)}: ${overNote}` : null].filter(Boolean).join(" · ") || null;
+  const notes = [input.notes?.trim() || null, over ? `Above the balance of ${money(balance ?? 0)}: ${overNote}` : null, dupWords ? `Recorded although ${dupWords.replace(/ Record another anyway\?$/, "").replace(/^A /, "a ")}: ${input.duplicateReason!.trim().slice(0, 300)}` : null].filter(Boolean).join(" · ") || null;
   // The bank's fee as estimated at recording (bank-fees.ts): MSF, fee per transaction and VAT apart; the job's cost is MSF + fee.
   const fees = feesFor(amount, bankFeesOf(settings)[method]);
   const verifies = actor.role_id === "owner" || actor.role_id === "accounts";
@@ -182,7 +198,7 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   // The receipt is written: what follows never turns it into a "failed" save for staff (logged instead).
   try {
     const codeWords = codeMissing ? ` · auth code missing${isFakeAuthCode(typedCode) ? ` (${typedCode} typed, not a real code)` : ""}` : "";
-    if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: ${money(amount)} by ${method}${method === "cheque" ? " (pending clearance)" : ""}${input.invoiceId ? "" : " as an advance"} received by ${actor.display_name}${over ? ` (above the balance of ${money(balance ?? 0)}: ${overNote})` : ""}${codeWords}`, created_by: actor.id });
+    if (jobId) await admin.from("job_events").insert({ job_id: jobId, event_type: "payment", note: `${created.number}: ${money(amount)} by ${method}${method === "cheque" ? " (pending clearance)" : method === "transfer" ? " (waiting for the bank)" : ""}${input.invoiceId ? "" : " as an advance"} received by ${actor.display_name}${over ? ` (above the balance of ${money(balance ?? 0)}: ${overNote})` : ""}${codeWords}`, created_by: actor.id });
     // Money arrived: "Customer says paid" is answered.
     if (input.invoiceId) await admin.from("invoices").update({ customer_says_paid_at: null, updated_by: actor.id }).eq("id", input.invoiceId).not("customer_says_paid_at", "is", null);
     if (input.invoiceId && jobId) await settleJob(jobId, input.invoiceId, actor.id, settings);
@@ -191,8 +207,9 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
     // A pending cheque never converts (invoiceBalance counts cleared money only); the cheque-clear action re-checks.
     if (input.invoiceId && !jobId) await afterEstimatePayment(input.invoiceId, actor.id ? { id: actor.id, display_name: actor.display_name } : null, settings);
     if (!input.invoiceId && jobId) await afterDepositRecorded(jobId, String(created.id), amount, actor, settings);
-    // Zoho Books (one-way): the recorded money joins the outbox; a cheque waits until it clears.
-    if (method !== "cheque") await tryEnqueueZoho(input.invoiceId ? "payment" : "deposit", String(created.id), jobId ?? null, actor.id);
+    // Zoho Books (one-way): the recorded money joins the outbox. A cheque or transfer goes into Undeposited Funds at once
+    // once Accounts posting is applied; before that it waits until it clears.
+    if (!isBankMethod(method) || (await bankPostingReady())) await tryEnqueueZoho(input.invoiceId ? "payment" : "deposit", String(created.id), jobId ?? null, actor.id);
     if (jobId) await notifyStaff(await advisorsOf(jobId), { type: "payment_received", title: `Payment received · ${created.number}`, body: `${money(amount)} by ${method}${input.invoiceId ? "" : " (deposit)"}`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : `/jobs/${jobId}` });
     if (!verifies) await notifyRoles(["accounts"], { type: "payment_verify", title: `Payment to verify · ${created.number}`, body: `${actor.display_name} recorded ${money(amount)} by ${method}. Tick it once the money is confirmed.`, jobId, href: input.invoiceId ? `/invoices/${input.invoiceId}` : "/invoices" });
     // An advisor's payment report is answered by its receipt: the one it was recorded from, or one waiting on this job for
@@ -312,7 +329,7 @@ export async function voidPayment(paymentId: string, actor: Actor, reason: strin
   if (p.status === "voided") return { error: "Already voided." };
   if (p.settlement_id) {
     const { data: st } = await admin.from("card_settlements").select("number").eq("id", p.settlement_id).maybeSingle();
-    return { error: `${p.number} is part of the bank settlement ${(st as { number: string } | null)?.number ?? ""}. Undo that settlement on Card settlements first, then void the receipt.` };
+    return { error: `${p.number} is part of the bank settlement ${(st as { number: string } | null)?.number ?? ""}. Undo that settlement on Accounts posting first, then void the receipt.` };
   }
   await admin.from("payments").update({ status: "voided", void_reason: clean, voided_by: actor.id, voided_at: new Date().toISOString(), updated_by: actor.id }).eq("id", paymentId);
   // A receipt that already reached a Zoho book cannot be unposted from here: the row turns red for accounts to fix
@@ -358,7 +375,7 @@ export async function decideOverpayment(paymentId: string, actor: Actor, approve
     await admin.from("payments").update({ status: "recorded", approved_by: actor.id, approved_at: now, verified_at: now, verified_by: actor.id, updated_by: actor.id }).eq("id", paymentId);
     if (p.job_id) await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment", note: `${p.number}: ${money(p.amount_aed)} above the balance approved by ${actor.display_name}${note ? `: ${note}` : ""}`, created_by: actor.id });
     if (p.job_id && p.invoice_id) await settleJob(p.job_id, p.invoice_id, actor.id);
-    if (p.method !== "cheque" || p.cheque_status === "cleared") await tryEnqueueZoho(p.is_deposit ? "deposit" : "payment", paymentId, p.job_id, actor.id);
+    if (countsAsPaid(p)) await tryEnqueueZoho(p.is_deposit ? "deposit" : "payment", paymentId, p.job_id, actor.id);
     if (p.approval_requested_by) await notifyStaff([p.approval_requested_by], { type: "payment_void", title: `Payment approved · ${p.number}`, body: `${money(p.amount_aed)} is recorded.`, jobId: p.job_id, href: p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices" });
     return { ok: true, message: `${p.number} recorded.` };
   }

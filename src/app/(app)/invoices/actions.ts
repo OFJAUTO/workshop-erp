@@ -1,29 +1,27 @@
 "use server";
+import { countsAsPaid } from "@/lib/bank-status";
 import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
-import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { revalidatePath } from "next/cache";
 import { requirePermission, requireStaff } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { PAYMENT_SELECT, buildInvoiceDraft, loadInvoice, nextDocumentNumber, toPayment } from "@/lib/invoice-data";
 import { newToken } from "@/lib/media";
 import { round2 } from "@/lib/money";
-import { notifyRoles, notifyStaff } from "@/lib/notifications";
-import { addAuthCode, settleJob, undoPayment, verifyPayment, voidPayment, type Actor, tellDepositCovered } from "@/lib/payments";
+import { notifyRoles } from "@/lib/notifications";
+import { addAuthCode, undoPayment, verifyPayment, voidPayment, type Actor } from "@/lib/payments";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { validateGatewayUrl } from "@/lib/pay-page";
 import { convertProformaIfPaid, ensureProforma } from "@/lib/invoice-flow";
-import { afterEstimatePayment } from "@/lib/estimate-money";
-import { afterPendingChargePayment } from "@/lib/charges";
 import { ensureAutoPayLink, replacePaymentLink } from "@/lib/payment-links";
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS } from "@/lib/money-steps";
 import { getSiteUrl } from "@/lib/site";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { paymentFromForm } from "@/lib/payment-form";
-import { flagZohoAttention, tryEnqueueZoho, zohoPostedSomewhere } from "@/lib/zoho-sync";
+import { tryEnqueueZoho } from "@/lib/zoho-sync";
 import { fitTotal, roundoffCheck, roundoffLimitsOf, roundoffWords } from "@/lib/roundoff";
 
 function refresh(jobId: string | null, invoiceId?: string) {
@@ -38,9 +36,6 @@ function refresh(jobId: string | null, invoiceId?: string) {
   revalidatePath("/profit");
 }
 
-async function advisorsOf(jobId: string) {
-  return advisorsInCharge(jobId);
-}
 const actorOf = (s: { id: string; display_name: string; role_id: string; is_head_accountant?: boolean }): Actor => ({ id: s.id, display_name: s.display_name, role_id: s.role_id, is_head_accountant: s.is_head_accountant });
 
 /**
@@ -178,7 +173,7 @@ export async function customerSaysPaid(invoiceId: string, formData: FormData) {
   const { data: job } = bundle!.invoice.job_id ? await admin.from("jobs").select("job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("id", bundle!.invoice.job_id).maybeSingle() : { data: null };
   const plate = job?.vehicle ? formatPlate(job.vehicle as unknown as Parameters<typeof formatPlate>[0]) : bundle!.invoice.number;
   const live = bundle!.payments.filter((p) => p.status === "recorded");
-  const due = round2(bundle!.invoice.total_aed - live.filter((p) => p.method !== "cheque" || p.cheque_status === "cleared").reduce((a, p) => a + p.amount_aed, 0));
+  const due = round2(bundle!.invoice.total_aed - live.filter((p) => countsAsPaid(p)).reduce((a, p) => a + p.amount_aed, 0));
   if (bundle!.invoice.job_id) await admin.from("job_events").insert({ job_id: bundle!.invoice.job_id, event_type: "payment", note: `Customer says paid (${method ? PAYMENT_METHOD_LABELS[method] ?? method : "method not given"})${note ? `: ${note}` : ""}, noted by ${staff.display_name}. Accounts asked to check.`, created_by: staff.id });
   await notifyRoles(["accounts"], { type: "customer_says_paid", title: `Customer says paid: ${plate}, AED ${due.toLocaleString("en-GB")}`, body: `${bundle!.invoice.number}${method ? ` by ${PAYMENT_METHOD_LABELS[method] ?? method}` : ""}${note ? ` · ${note}` : ""}. Check the bank and record the payment.`, jobId: bundle!.invoice.job_id, href: bundle!.invoice.job_id ? `/jobs/${bundle!.invoice.job_id}/invoice` : `/invoices/${invoiceId}` });
   refresh(bundle!.invoice.job_id, invoiceId);
@@ -231,7 +226,7 @@ export async function addAuthCodeAction(_prev: { ok?: boolean; error?: string; m
   if (r.error) return { error: r.error, at };
   const { data: p } = await createAdminClient().from("payments").select("job_id, invoice_id").eq("id", paymentId).maybeSingle();
   refresh(p?.job_id ?? null, p?.invoice_id ?? undefined);
-  revalidatePath("/card-settlements");
+  revalidatePath("/accounts-posting");
   return { ok: true, message: r.message, at };
 }
 
@@ -268,49 +263,23 @@ export async function setPaymentLink(invoiceId: string, formData: FormData) {
 export async function setChequeStatus(paymentId: string, formData: FormData) {
   const staff = await requirePermission("recordPayments");
   const admin = createAdminClient();
-  const { data: raw } = await admin.from("payments").select(`${PAYMENT_SELECT}, zoho_payment_id`).eq("id", paymentId).maybeSingle();
+  const { data: raw } = await admin.from("payments").select(PAYMENT_SELECT).eq("id", paymentId).maybeSingle();
   if (!raw) redirect("/invoices");
   const p = toPayment(raw as Record<string, unknown>);
-  const back = String(formData.get("return_to") ?? "") === "/dashboard" ? "/dashboard" : p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices";
+  const asked = String(formData.get("return_to") ?? "");
+  const back = asked === "/dashboard" || asked.startsWith("/jobs/") || asked.startsWith("/accounts-posting") ? asked : p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices";
   const status = String(formData.get("status") ?? "");
-  if (p.method !== "cheque" || !["cleared", "bounced"].includes(status)) redirect(back);
-  const now = new Date().toISOString();
-  await admin.from("payments").update(status === "cleared" ? { cheque_status: "cleared", cleared_at: now, updated_by: staff.id } : { cheque_status: "bounced", status: "reversed", reversed_at: now, reversed_reason: "Cheque bounced", updated_by: staff.id }).eq("id", paymentId);
-  // Zoho Books (one-way): a cheque counts the day it clears; a bounce after it reached Zoho turns red for accounts.
-  if (status === "cleared") await tryEnqueueZoho(p.is_deposit ? "deposit" : "payment", paymentId, p.job_id, staff.id);
-  else {
-    const where = (raw as Record<string, unknown>).zoho_payment_id ? "current" : await zohoPostedSomewhere(["deposit", "payment"], paymentId, p.cleared_at ?? p.received_at);
-    if (where) {
-      await flagZohoAttention(
-        p.is_deposit ? "deposit" : "payment",
-        paymentId,
-        where === "opening"
-          ? `${p.number} bounced after go-live; it reached OFJ TEST before the start date and sits in the REAL book's opening balances: reverse it there by hand, then press "Done by hand".`
-          : `${p.number} bounced in the ERP after it reached Zoho: remove the payment in Zoho by hand, then press "Done by hand".`,
-        { handOnly: where === "opening" },
-      );
-    }
-  }
-  // A cheque clearing on a JOB-LESS proforma (an estimate's, or a pending charge's) may complete it:
-  // the tax invoice follows now, exactly as it would for money recorded straight (4 November 2026).
-  if (!p.job_id && p.invoice_id && status === "cleared") {
-    const settings = await getSettings();
-    await afterPendingChargePayment(p.invoice_id, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id }, settings).catch(() => null);
-    await afterEstimatePayment(p.invoice_id, { id: staff.id, display_name: staff.display_name }, settings).catch(() => null);
-  }
-  if (p.job_id) {
-    await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment", note: `${p.number}: cheque ${p.cheque_number ?? ""} ${status} (${staff.display_name})`, created_by: staff.id });
-    if (p.invoice_id) await settleJob(p.job_id, p.invoice_id, staff.id);
-    // A deposit cheque that clears: the deposit may now be covered, so Parts hear the LPO can go.
-    if (!p.invoice_id && status === "cleared") await tellDepositCovered(p.job_id).catch(() => null);
-    if (status === "bounced") {
-      const advisors = await advisorsOf(p.job_id);
-      await notifyStaff(advisors, { type: "cheque_bounced", title: `Cheque bounced · ${p.number}`, body: `AED ${p.amount_aed.toLocaleString("en-GB")} reversed. The balance is due again.`, jobId: p.job_id, href: back });
-      await notifyRoles(["owner"], { type: "cheque_bounced", title: `Cheque bounced · ${p.number}`, body: `AED ${p.amount_aed.toLocaleString("en-GB")} reversed.`, jobId: p.job_id, href: back });
-    }
-  }
+  if (!["cheque", "transfer"].includes(p.method) || !["cleared", "bounced"].includes(status)) redirect(back);
+  // 9 November 2026: THE bank steps (src/lib/bank-posting.ts) - cleared on the day typed (today when none), or bounced.
+  const { bounceBankPayment, clearBankPayments } = await import("@/lib/bank-posting");
+  const actor = { id: staff.id, display_name: staff.display_name, role_id: staff.role_id };
+  const day = String(formData.get("cleared_on") ?? "").slice(0, 10) || new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
+  const r = status === "cleared"
+    ? await clearBankPayments([paymentId], { date: day, amount: Number(formData.get("amount") ?? p.amount_aed) || p.amount_aed, statementRef: blankToNull(formData.get("statement_ref")) }, actor)
+    : await bounceBankPayment(paymentId, { charge: Number(formData.get("bounce_charge") ?? 0) || 0, note: blankToNull(formData.get("bounce_note")) }, actor);
   refresh(p.job_id, p.invoice_id ?? undefined);
-  redirect(`${back}?message=${encodeURIComponent(status === "cleared" ? "Cheque cleared." : "Cheque bounced: the payment is reversed.")}`);
+  const sep = back.includes("?") ? "&" : "?";
+  redirect(`${back}${sep}${r.error ? "error" : "message"}=${encodeURIComponent(r.error ?? r.words ?? "Saved.")}`);
 }
 
 /** Accounts ask the owner for a credit note. */

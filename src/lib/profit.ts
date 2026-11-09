@@ -1,3 +1,4 @@
+import { awaitsBank, countsAsPaid } from "@/lib/bank-status";
 import { uninvoicedCompCost } from "./comp-data";
 import "server-only";
 import { dubaiDate } from "./jobs";
@@ -186,7 +187,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     const credited = round2(((credits ?? []) as { credit_of: string; taxable_aed: number | string }[]).filter((c) => c.credit_of === invoice.id).reduce((a, c) => a + Number(c.taxable_aed), 0));
     const revenue = round2(invoice.taxable_aed - credited);
     const openPos = ((pos ?? []) as { job_id: string; supplier_invoice_status: string; status: string }[]).filter((p) => p.job_id === invoice.job_id && p.status !== "cancelled" && p.supplier_invoice_status !== "received");
-    const pending = pays.filter((p) => p.status === "recorded" && p.method === "cheque" && p.cheque_status === "pending");
+    const pending = pays.filter((p) => p.status === "recorded" && awaitsBank(p));
     const why: string[] = [];
     if (openPos.length) why.push(`${openPos.length} supplier invoice${openPos.length === 1 ? "" : "s"} to follow`);
     if (pending.length) why.push("cheque pending clearance");
@@ -278,7 +279,7 @@ export async function dailyProfit(settings: Settings, date = dubaiDate()): Promi
   const earlierProfit = round2(earlier.reduce((a, p) => a + p.profit, 0) - compEarlier);
   const carry = round2(earlierProfit - days * target);
   const invoicedProfit = round2(today.reduce((a, p) => a + p.profit, 0) - compToday);
-  const collected = round2(((pays ?? []) as { amount_aed: number | string; method: string; cheque_status: string | null; status: string }[]).filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared")).reduce((a, p) => a + Number(p.amount_aed), 0));
+  const collected = round2(((pays ?? []) as { amount_aed: number | string; method: string; cheque_status: string | null; status: string }[]).filter((p) => p.status === "recorded" && (countsAsPaid(p))).reduce((a, p) => a + Number(p.amount_aed), 0));
   const effective = round2(invoicedProfit + carry);
   const percent = target > 0 ? Math.round((effective / target) * 100) : 0;
   const tone: DailyProfit["tone"] = target <= 0 ? "green" : percent >= 100 ? "green" : percent >= yellowPercent ? "amber" : "red";

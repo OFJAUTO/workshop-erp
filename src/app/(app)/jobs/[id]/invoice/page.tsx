@@ -1,3 +1,9 @@
+import { awaitsBank, duplicateWords, pendingLine } from "@/lib/bank-status";
+import { loadBankWaiting } from "@/lib/bank-posting";
+import { dubaiToday } from "@/lib/card-settlements";
+import { BankAnswerHost, BankRow } from "@/components/BankPosting";
+import { SlipTile } from "@/components/PaymentReport";
+import { bankPostingReady } from "@/lib/schema-ready";
 import { VinCopy } from "@/components/VinCopy";
 import { signJobFiles } from "@/lib/work-data";
 import { PositionsLine } from "@/components/PositionsLine";
@@ -9,7 +15,7 @@ import { detailsWithoutHours, formatDateTime, formatDayTime, hoursQty } from "@/
 import { INVOICE_LINE_SELECT, INVOICE_SELECT, METHOD_LABELS, PAYMENT_SELECT, buildInvoiceDraft, creditsOnDocs, invoiceBalance, nextDocumentNumber, toInvoice, toInvoiceLine, toPayment, type PaymentRow } from "@/lib/invoice-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { STATUS_LABELS } from "@/lib/jobs";
-import { PAYMENT_METHOD_LABELS, methodsFor, moneyState, type MoneyInvoice, type MoneyStepKey } from "@/lib/money-steps";
+import { PAYMENT_METHOD_LABELS, methodsFor, moneyState, type MoneyInvoice, type MoneyStepKey, bankWaitWords } from "@/lib/money-steps";
 import { ngeniusConfigured } from "@/lib/ngenius";
 import { currentPaymentLink, paymentLinksOf } from "@/lib/payment-links";
 import { can, type RoleId } from "@/lib/roles";
@@ -122,6 +128,9 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   // THE job money (3 November 2026): before the proforma "Paid so far · Balance" is the approved total less every cleared
   // payment on the job (deposit documents included, a cheque only once cleared) - the same figures as the job card.
   const jobMoney = await jobMoneyOf(id, settings);
+  // "Cheque" or "Transfer": what waits for the bank on this job (9 November 2026).
+  const waitingNow = [...payments, ...depositRows].filter((p) => p.status === "recorded" && awaitsBank(p));
+  const pendingWord = waitingNow.length && waitingNow.every((p) => p.method === "transfer") ? "Transfer" : "Cheque";
   const money = moneyState({
     jobStatus: job.status,
     isOpen: job.is_open,
@@ -132,6 +141,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
     paid: bal?.paid ?? 0,
     balance: bal?.balance ?? 0,
     chequePending: bal?.pendingAmount ?? 0,
+    pendingWord,
     needsInvoice: draft.lines.length > 0,
     creditDays,
     declinedOut: !!stepJob?.declined_out_at,
@@ -145,6 +155,17 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   // Section 12: deposits (no invoice yet) are people's work too - without them in this lookup a cash
   // deposit used to fall back to a provider name on screen.
   const everyPayment = [...payments, ...depositRows];
+  // 9 November 2026: a cheque or transfer already waiting for the bank that covers the balance asks why another payment.
+  const bankWaiting = everyPayment.filter((p) => p.status === "recorded" && awaitsBank(p)).map((p) => ({ method: p.method, number: p.number, amount: p.amount_aed }));
+  // The cheques and transfers of this job still waiting for the bank, with their buttons (owner and accounts).
+  const bankRows = bankWaiting.length ? await loadBankWaiting({ jobIds: [id] }) : [];
+  const bankProofs = await signJobFiles(bankRows.map((r) => r.proofPath).filter((x): x is string => !!x));
+  const todayDubai = dubaiToday();
+  const bankReady = await bankPostingReady();
+  // The money waiting for the bank covers what is due: the one step is clearing it (never recording it again).
+  const bankCovers = bankWaiting.length > 0 && !!bal && bankWaiting.reduce((x, p) => x + p.amount, 0) + 0.005 >= bal.balance;
+  const bankLine = pendingLine({ paid: bal?.paid ?? 0, pending: bankWaiting, balance: bal?.balance ?? null });
+  const pendingBank = duplicateWords(bankWaiting, bal?.balance ?? null);
   const { data: people } = everyPayment.length ? await admin.from("staff").select("id, display_name, role_id").in("id", Array.from(new Set(everyPayment.flatMap((p) => [p.received_by, p.verified_by]).filter((x): x is string => !!x)))) : { data: [] };
   const personOf = new Map((people ?? []).map((p) => [p.id, p]));
   const acting = !staff.viewingAs && job.is_open;
@@ -220,7 +241,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
       <li key={p.id} className={`py-2 flex flex-wrap items-center gap-3 text-sm ${struck ? "text-muted line-through" : ""}`} data-payment-row={p.number} {...(isDeposit ? { "data-deposit-row": p.number } : {})}>
         <span className="font-semibold">{p.number}</span>
         <span className="text-muted">{formatDayTime(p.received_at)}</span>
-        <Badge tone={p.status === "pending_owner" ? "amber" : p.method === "cheque" && p.cheque_status === "pending" ? "amber" : struck ? "red" : "neutral"}>{METHOD_LABELS[p.method]}{p.method === "cheque" && p.cheque_status ? ` · ${p.cheque_status}` : ""}{isDeposit ? " · deposit" : ""}</Badge>
+        <Badge tone={p.status === "pending_owner" ? "amber" : awaitsBank(p) ? "amber" : struck ? "red" : "neutral"}>{METHOD_LABELS[p.method]}{p.method === "cheque" && p.cheque_status ? ` · ${p.cheque_status}` : ""}{isDeposit ? " · deposit" : ""}</Badge>
         {/* 3 November 2026: a card or link payment with no real auth code is flagged; owner and accounts add it here. */}
         {!struck && authCodeMissing(p) ? <AuthCodeMissing paymentId={p.id} number={p.number} method={p.method} code={p.auth_code ?? null} canAdd={mayPay} /> : realAuthCode(p.auth_code) ? <span className="text-xs text-muted" data-auth-shown>Auth {realAuthCode(p.auth_code)}</span> : p.reference ? <span className="text-xs text-muted">{p.reference}</span> : null}
         {/* Only the actual method ever shows; a payment with no recorder came through Pay now. */}
@@ -232,10 +253,8 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
         {p.status === "recorded" && !staff.viewingAs && (role === "owner" || p.received_by === staff.id) && p.created_at ? <UndoButton at={p.created_at} minutes={undoMinutes} done="Payment recorded" action={undoPaymentAction.bind(null, p.id, here)} /> : null}
         {p.status === "recorded" ? <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Receipt</a> : null}
         {p.proof_path && proofUrls[p.proof_path] ? (
-          <a href={proofUrls[p.proof_path] ?? "#"} target="_blank" rel="noreferrer" className="inline-flex" data-proof-link aria-label={p.method === "card" ? "Card slip" : "Proof"}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={proofUrls[p.proof_path] ?? ""} alt={p.method === "card" ? "Card slip" : "Proof"} className="h-12 w-12 rounded-control object-cover border border-line" />
-          </a>
+          // 9 November 2026: a proof that is a PDF (a cheque scan) shows as a PDF tile that opens it, never a broken picture.
+          <span className="inline-flex" data-proof-link><SlipTile url={proofUrls[p.proof_path] ?? null} path={p.proof_path} label={p.method === "card" ? "Card slip" : p.method === "cheque" ? "Cheque" : "Proof"} hook={p.number} size="h-12 w-12" /></span>
         ) : null}
         {isDeposit && p.status === "recorded" ? <DepositReceiptSend number={p.number} message={depositMessage(p.amount_aed, depositShorts.get(p.id) ?? `${site}/api/pdf/receipt/${p.id}`)} phoneDigits={phoneDigits} pdfHref={`/api/pdf/receipt/${p.id}`} fileName={`OFJ Receipt ${p.number}.pdf`} jobId={id} /> : null}
       </li>
@@ -245,6 +264,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   return (
     <>
       <LiveRefresh tables={["payments", "invoices", "jobs", ...(reportsOn ? ["payment_reports"] : [])]} jobId={id} />
+      <BankAnswerHost />
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`Invoice · ${formatPlate(vehicle)}`}
@@ -277,7 +297,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
               <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Paid so far</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(paidSoFar)}</span></div>
               <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Balance due</span><span className={`text-xl sm:text-2xl font-extrabold ${balTone}`} data-balance>{live && !unpaid ? "Paid in full" : `AED ${m(balanceDue)}`}</span></div>
             </div>
-            {chequeClearing ? <p className="text-sm font-semibold text-amber-text">Cheque of AED {m(chequeClearing)} pending clearance.</p> : null}
+            {bankLine ? <p className="text-sm font-semibold text-amber-text" data-bank-pending-line>{bankLine}</p> : chequeClearing ? <p className="text-sm font-semibold text-amber-text">Cheque of AED {m(chequeClearing)} pending clearance.</p> : null}
             {bal?.credited ? <p className="text-sm font-semibold text-muted" data-credit-note-off>Credit notes AED {m(bal.credited)} taken off the balance.</p> : null}
             {proforma && !taxInvoice && acting && ["owner", "accounts", "service_advisor"].includes(role) ? (
               <div className="flex flex-wrap items-center gap-2 border-t border-line pt-2" data-invoice-roundoff>
@@ -289,7 +309,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
             {taxInvoice && unpaid ? <p className="text-sm font-semibold text-amber-text">Tax invoice issued before full payment{taxInvoice.issue_reason ? `: ${taxInvoice.issue_reason}` : ""}. The balance is still due.</p> : null}
           </Card>
 
-          <Card className="flex flex-col gap-2 border-ink" data-what-now>
+          <Card id="bank" className="flex flex-col gap-2 border-ink" data-what-now>
             <SectionLabel>What to do now</SectionLabel>
             {waitingReport && (mayPay || viewPay) ? (
               <div className="flex flex-wrap items-center gap-2 rounded-control border-2 border-amber-bar bg-amber-soft p-3" data-what-now-report>
@@ -319,6 +339,21 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
               if (!live && money.action === "prepare_proforma" && can(role, "markReadyToInvoice") && acting) {
                 return <form action={markReadyToInvoice.bind(null, id)}><Button type="submit" size="lg" className="w-full sm:w-auto">Prepare the proforma</Button></form>;
               }
+              if (live && unpaid && bankCovers) {
+                return (
+                  <div className="flex flex-col gap-2" data-what-now-bank>
+                    <p className="text-sm font-semibold" data-bank-wait-words>{bankWaitWords(pendingWord)}</p>
+                    {proforma && !proforma.sent_at && canSend ? <ReadySendControl jobId={id} size="md" token={proforma.token} shortLink={proformaShort} kind="proforma" siteUrl={site} messageTemplate={readyTemplate} phoneDigits={phoneDigits} sentAt={proforma.sent_at} expectedMethod={proforma.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={proforma.token ? { href: `/api/pdf/invoice/${proforma.token}`, fileName: `OFJ Proforma ${proforma.number}.pdf` } : null} /> : null}
+                    {canRecord ? <ul className="divide-y divide-line">{bankRows.map((r) => <BankRow key={r.id} row={r} today={todayDubai} canSave={acting} ready={bankReady} proofUrl={r.proofPath ? (bankProofs[r.proofPath] ?? null) : null} />)}</ul> : <p className="text-xs text-muted">Accounts mark it cleared when it is on the bank statement; the payment counts then.</p>}
+                    {canRecord ? (
+                      <details className="border-t border-line pt-2" data-record-block data-folded>
+                        <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold text-muted">Record a different payment</summary>
+                        <div className="pt-2"><PaymentForm invoiceId={live!.id} jobId={null} proofJobId={id} spentKeys={spentKeys} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} pendingBank={pendingBank} /></div>
+                      </details>
+                    ) : null}
+                  </div>
+                );
+              }
               if (proforma && unpaid && !proforma.sent_at) {
                 return (
                   <div className="flex flex-col gap-2">
@@ -326,14 +361,14 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                     {canRecord ? (
                       <details className="border-t border-line pt-2" data-record-block data-folded>
                         <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold text-muted">{otherPay ? `${otherPay} (not the one ${firstName(waitingReport?.reporter)} reported)` : "Record a payment before the proforma is sent"}</summary>
-                        <div className="pt-2"><PaymentForm invoiceId={live!.id} jobId={null} proofJobId={id} spentKeys={spentKeys} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} /></div>
+                        <div className="pt-2"><PaymentForm invoiceId={live!.id} jobId={null} proofJobId={id} spentKeys={spentKeys} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} pendingBank={pendingBank} /></div>
                       </details>
                     ) : viewPay ? <div><RecordPaymentButton jobId={id} readOnly size="md" label="Record a payment" /></div> : null}
                   </div>
                 );
               }
               if (live && unpaid && canRecord) {
-                const form = <PaymentForm invoiceId={live!.id} jobId={null} proofJobId={id} spentKeys={spentKeys} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} />;
+                const form = <PaymentForm invoiceId={live!.id} jobId={null} proofJobId={id} spentKeys={spentKeys} balance={bal!.balance} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={proforma?.expected_payment_method ?? null} invoiceNumber={live!.number} isProforma={live!.kind === "proforma"} nextTaxNumber={nextTax} isOwner={role === "owner"} pendingBank={pendingBank} />;
                 // A payment an advisor sent waits: "Record it" above opens it with his slip; this form is for a DIFFERENT
                 // payment, folded so the reported one is never recorded twice by mistake.
                 if (waitingReport) {

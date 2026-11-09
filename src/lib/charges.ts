@@ -1,3 +1,4 @@
+import { countsAsPaid } from "@/lib/bank-status";
 import "server-only";
 import { chargeNet, chargeProblem, chargeTitle, chargeTotals, type ChargeInput, type ChargeLineRow } from "./charge-rules";
 import { chargeCostsOnce, chargeItems, rootLineOf, recoveryAlready, recoveryAlreadyWords, recoveryWords, type ChargeCostRow, type ChargeCosts, type ChargeItem, type ChargeQuoteVersion, type ChargeTrip } from "./charge-items";
@@ -523,7 +524,7 @@ export async function loadChargeEntries(filter: { customerId?: string; vehicleId
     const c = custOf.get(e.customer_id) as { full_name: string; company_name: string | null; phone: string | null } | undefined;
     const car = e.vehicle_id ? carOf.get(e.vehicle_id) : null;
     const live = e.tax_invoice_id ?? e.proforma_id;
-    const paid = r2(((pays ?? []) as { invoice_id: string; amount_aed: number | string; status: string; method: string; cheque_status: string | null; is_active: boolean }[]).filter((p) => p.invoice_id === live && p.is_active && p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared")).reduce((a, p) => a + Number(p.amount_aed), 0));
+    const paid = r2(((pays ?? []) as { invoice_id: string; amount_aed: number | string; status: string; method: string; cheque_status: string | null; is_active: boolean }[]).filter((p) => p.invoice_id === live && p.is_active && p.status === "recorded" && (countsAsPaid(p))).reduce((a, p) => a + Number(p.amount_aed), 0));
     const total = live ? Number(invOf.get(live)?.total_aed ?? 0) : chargeTotals(mine).total;
     return {
       ...e,

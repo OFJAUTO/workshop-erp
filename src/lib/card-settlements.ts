@@ -136,7 +136,7 @@ export async function loadSettlements(limit = 40): Promise<SettlementRow[]> {
   }));
 }
 
-async function nextNumber(): Promise<string> {
+export async function nextSettlementNumber(): Promise<string> {
   const { data } = await createAdminClient().from("card_settlements").select("number").like("number", "STL-%").order("number", { ascending: false }).limit(1);
   const last = Number(String((data?.[0] as { number: string } | undefined)?.number ?? "STL-0").slice(4)) || 0;
   return `STL-${String(last + 1).padStart(5, "0")}`;
@@ -205,7 +205,7 @@ export async function recordSettlement(input: SettleInput, actorId: string): Pro
   const net = round2(input.net ?? 0);
   const shares = splitFigures(amounts, { msf, txn, vat }, input.exact ?? {});
 
-  let number = await nextNumber();
+  let number = await nextSettlementNumber();
   let made: { id: string; number: string } | null = null;
   for (let attempt = 0; attempt < 2 && !made; attempt++) {
     const { data, error } = await admin
@@ -214,7 +214,7 @@ export async function recordSettlement(input: SettleInput, actorId: string): Pro
       .select("id, number")
       .single();
     if (data) made = data as { id: string; number: string };
-    else if (error && /duplicate|unique/i.test(error.message)) number = await nextNumber();
+    else if (error && /duplicate|unique/i.test(error.message)) number = await nextSettlementNumber();
     else {
       await logAppError("card_settlement_insert", error ?? "no row", { staffId: actorId, detail: { number, ids } });
       return { ok: false, error: SAVE_FAILED };

@@ -1,3 +1,4 @@
+import { awaitsBank, countsAsPaid } from "@/lib/bank-status";
 import "server-only";
 import { PAYMENT_SELECT, toPayment } from "./invoice-data";
 import { round2 } from "./money";
@@ -25,7 +26,7 @@ export async function depositState(jobId: string): Promise<DepositState> {
   const admin = createAdminClient();
   const [qs, { data: pays }] = await Promise.all([approvedQuotations(jobId), admin.from("payments").select(PAYMENT_SELECT).eq("job_id", jobId).eq("is_active", true)]);
   const required = round2(qs.reduce((a, q) => a + (Number(q.deposit_aed) || 0), 0));
-  const received = round2(((pays ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared")).reduce((a, p) => a + p.amount_aed, 0));
+  const received = round2(((pays ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded" && (countsAsPaid(p))).reduce((a, p) => a + p.amount_aed, 0));
   return {
     required,
     received,
@@ -71,9 +72,9 @@ export async function depositsWaiting(): Promise<DepositWaiting[]> {
     admin.from("payments").select(PAYMENT_SELECT).in("job_id", jobIds).eq("is_active", true),
   ]);
   const live = ((pays ?? []) as Record<string, unknown>[]).map(toPayment).filter((p) => p.status === "recorded");
-  const payments = live.filter((p) => p.method !== "cheque" || p.cheque_status === "cleared");
+  const payments = live.filter((p) => countsAsPaid(p));
   // A cheque still clearing (26 October 2026): recorded, so not "to record" again; it shows as "Cheque to clear".
-  const clearing = live.filter((p) => p.method === "cheque" && p.cheque_status === "pending");
+  const clearing = live.filter((p) => awaitsBank(p));
   const out: DepositWaiting[] = [];
   for (const j of (jobs ?? []) as unknown as { id: string; job_number: string; is_open: boolean; gated_in_by: string | null; customer: { full_name: string; company_name: string | null; phone: string | null } | null; vehicle: (PlateRow & { model_year?: number | null; make?: { name: string } | null; model?: { name: string } | null }) | null }[]) {
     if (!j.is_open) continue;

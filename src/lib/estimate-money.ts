@@ -1,3 +1,4 @@
+import { awaitsBank, countsAsPaid } from "@/lib/bank-status";
 import "server-only";
 /**
  * Money from the estimate (4 November 2026) — the server side. A proforma invoice issued from an
@@ -114,8 +115,8 @@ export async function estimateMoneyMany(estimateIds: string[], opts: { totals?: 
     const taxes = docs.filter((i) => i.kind === "tax_invoice");
     const docIds = new Set(docs.map((d) => d.id));
     const pays = payments.filter((p) => p.invoice_id && docIds.has(p.invoice_id));
-    const cleared = pays.filter((p) => p.method !== "cheque" || p.cheque_status === "cleared");
-    const pendingCheque = round2(pays.filter((p) => p.method === "cheque" && p.cheque_status !== "cleared" && p.cheque_status !== "bounced").reduce((a, p) => a + p.amount_aed, 0));
+    const cleared = pays.filter((p) => countsAsPaid(p));
+    const pendingCheque = round2(pays.filter((p) => awaitsBank(p)).reduce((a, p) => a + p.amount_aed, 0));
     const paid = round2(cleared.reduce((a, p) => a + p.amount_aed, 0));
     // The figure the badge measures against: the newest APPROVED version's total (rounded when rounded), else the asked row's.
     const ests = ((estRows ?? []) as { id: string; status: string; rounded_total_aed: number | string | null; total_aed: number | string | null }[]).filter((q) => famSet.has(q.id));
@@ -375,7 +376,7 @@ export async function moveEstimateMoneyToJob(estimateIds: string[], jobId: strin
   const docs = ((moved ?? []) as { id: string; number: string; kind: string; total_aed: number | string; status: string; converted_to: string | null; deposit_for_quotation_id: string | null }[]);
   if (!docs.length) return { moved: 0, paid: 0, words: null };
   const { data: pays } = await admin.from("payments").update({ job_id: jobId, updated_by: by }).in("invoice_id", docs.map((d) => d.id)).is("job_id", null).eq("is_active", true).select("id, amount_aed, status, method, cheque_status");
-  const paid = Math.round(((pays ?? []) as { amount_aed: number | string; status: string; method: string; cheque_status: string | null }[]).filter((p) => p.status === "recorded" && (p.method !== "cheque" || p.cheque_status === "cleared")).reduce((a, p) => a + (Number(p.amount_aed) || 0), 0) * 100) / 100;
+  const paid = Math.round(((pays ?? []) as { amount_aed: number | string; status: string; method: string; cheque_status: string | null }[]).filter((p) => p.status === "recorded" && (countsAsPaid(p))).reduce((a, p) => a + (Number(p.amount_aed) || 0), 0) * 100) / 100;
   const live = docs.filter((d) => d.status === "issued" && !d.converted_to);
   const words = `Estimate money carried over: ${live.map((d) => `${d.number} (${d.kind === "tax_invoice" ? (d.deposit_for_quotation_id ? "advance tax invoice" : "tax invoice") : "proforma"}, ${money(Number(d.total_aed) || 0)})`).join(", ") || docs.map((d) => d.number).join(", ")}${paid > 0 ? ` · ${money(paid)} already paid` : ""}. It counts on this job now.`;
   return { moved: docs.length, paid, words };
