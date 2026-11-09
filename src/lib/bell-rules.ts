@@ -79,6 +79,9 @@ export const ACTION_RULES: Record<string, ActionRule> = {
   quote_below_cost: { open: "manual" },
   high_markup: { open: "manual" },
   low_profit: { open: "manual" },
+  qty_reduced: { open: "manual" },
+  qty_keep_price: { open: "manual" },
+  qty_after_invoice: { open: "manual" },
 };
 
 export type ActionRule = {

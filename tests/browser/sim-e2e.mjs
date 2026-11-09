@@ -13,7 +13,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -2492,6 +2492,123 @@ await section("y", "purchase returns: note, sent back, credit expected, credit r
   const refused = (await sql("select r.status, r.refused_action, p.disposition from public.purchase_returns r join public.part_items p on p.id = r.part_item_id where r.id = $1", [pr2.id]))[0];
   check(`y7: refused by the supplier → back to our stock (${refused?.status}, ${refused?.refused_action}, part ${refused?.disposition})`, refused?.status === "refused" && refused?.refused_action === "stock" && refused?.disposition === "stock");
   await desk.browser.close();
+});
+
+/* ================================================================================================= */
+/* Path z — 9 November 2026, Section 1: a part's quantity changed after approval / handover (the BMW  */
+/* REAR DIFFERENTIAL OIL approved 3 × 185.00, only 2 bought and used): down without a payment (reduce */
+/* the customer's price, extras to stock), down with a payment (advance), up (re-approval), after the */
+/* tax invoice (refused, credit note offered).                                                         */
+/* ================================================================================================= */
+await section("z", "quantity change after approval: down, down with payment, up, after the tax invoice", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-09-qty-change";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const partsId = (await sql("select id from public.staff where role_id = 'parts' and is_active order by created_at limit 1"))[0].id;
+  const advisorId = (await sql("select gated_in_by as id from public.jobs where id = $1", [jobId]))[0].id;
+  await sql("update public.part_requests set status = 'unavailable', closed_reason = 'not needed (test)' where job_id = $1 and status = 'open'", [jobId]);
+  const part = (await sql("select id from public.part_items where job_id = $1 and description ilike 'front brake pads' and is_active limit 1", [jobId]))[0];
+  const q1 = (await sql("select id, number, version, total_aed::float as total from public.quotations where job_id = $1 and kind = 'quotation' and status = 'approved' order by version desc limit 1", [jobId]))[0];
+  if (!part || !q1) throw new Error("seed has no approved part line");
+  // The BMW case on the seeded car: approved × 3, received (handed over), Abu Dhabi Motors at 185.00 each.
+  const line = (await sql("select id, quantity::float as qty, line_total::float as total from public.quotation_lines where quotation_id = $1 and part_item_id = $2 and is_active", [q1.id, part.id]))[0];
+  const each = line.total / (line.qty || 1);
+  const delta = each * (3 - (line.qty || 1));
+  await sql("update public.quotations set status = 'draft' where id = $1", [q1.id]);
+  await sql("update public.quotation_lines set quantity = 3, line_total = round(($2)::numeric, 2) where id = $1", [line.id, each * 3]);
+  await sql("update public.quotations set subtotal_aed = subtotal_aed + ($2)::numeric, vat_aed = vat_aed + round(($2)::numeric * 0.05, 2), total_aed = total_aed + round(($2)::numeric * 1.05, 2), rounded_total_aed = null where id = $1", [q1.id, delta]);
+  await sql("update public.quotations set status = 'approved' where id = $1", [q1.id]);
+  await sql("update public.part_items set description = 'REAR DIFFERENTIAL OIL', part_number = 'B83222471487', quantity = 3, confirmed_quantity = 3, received_qty = 3, cost_aed = 185, supplier = 'Abu Dhabi Motors', order_status = 'received' where id = $1", [part.id]);
+  const oldTotal = (await sql("select total_aed::float as t from public.quotations where id = $1", [q1.id]))[0].t;
+
+  /** Parts open the row's menu → Change the quantity… → new quantity, reason, extras when asked → save. */
+  async function changeQty(page, to, reason, extras, shotName) {
+    await go(page, `${base}/parts/${jobId}`);
+    const row = page.locator("[data-row-key]").filter({ has: page.locator("[data-part-name]", { hasText: /rear differential oil/i }) }).first();
+    await row.scrollIntoViewIfNeeded().catch(() => null);
+    await row.locator("button[aria-label='More for this part']").click();
+    await page.getByRole("button", { name: "Change the quantity…" }).click();
+    const dlg = page.locator("[data-qty-dialog]");
+    await dlg.waitFor({ timeout: 10000 });
+    await dlg.locator("[data-qty-new]").fill(String(to));
+    await dlg.locator(`[data-qty-reason="${reason}"]`).click();
+    await dlg.locator("[data-qty-save]").click();
+    await dlg.locator("[data-qty-done], [data-qty-extras], [data-qty-error]").first().waitFor({ timeout: 40000 });
+    if (extras && (await dlg.locator("[data-qty-extras]").count())) {
+      await dlg.locator(`[data-qty-extras-choice="${extras}"]`).click();
+      await dlg.locator("[data-qty-save]").click();
+      await dlg.locator("[data-qty-done], [data-qty-error]").first().waitFor({ timeout: 40000 });
+    }
+    if (shotName) await dlg.screenshot({ path: `${proof}/${shotName}.png` }).catch(() => null);
+    const words = ((await dlg.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+    return { dlg, words };
+  }
+
+  // z1. Down, no payment yet: 3 → 2, bought fewer, the extra piece to stock.
+  const desk = await browserForId(partsId, { viewport: { width: 1440, height: 900 } });
+  let m = await mark();
+  const z1 = await changeQty(desk.page, 2, "bought_fewer", "stock", "z1-parts-desk-3-to-2-1440");
+  check("z1: the window says 3 → 2 by <name>: bought fewer", /REAR DIFFERENTIAL OIL: 3 → 2 by .+: bought fewer/.test(z1.words), z1.words.slice(0, 300));
+  const p1 = (await sql("select confirmed_quantity::float as q, received_qty::float as r from public.part_items where id = $1", [part.id]))[0];
+  check(`z1: the part is 2 and 2 received (${p1?.q}, ${p1?.r})`, p1?.q === 2 && p1?.r === 2);
+  const ev1 = (await sql("select note from public.job_events where job_id = $1 and event_type = 'parts_quantity' order by created_at desc limit 1", [jobId]))[0];
+  check("z1: the job's history carries the line", /3 → 2 by .+bought fewer/.test(ev1?.note ?? ""), ev1?.note ?? "");
+  const st = (await sql("select count(*)::int as n from public.stock_movements where part_item_id = $1", [part.id]))[0];
+  check("z1: the extra piece went to stock", (st?.n ?? 0) >= 1, JSON.stringify(st));
+  await told("z1", m, jobId, [{ label: "the advisor", id: advisorId, type: "qty_reduced" }]);
+  await desk.page.locator("[data-qty-close]").click().catch(() => null);
+
+  // z2. The advisor reduces the customer's price: v2 approved at once, marked, the WhatsApp message offered.
+  const adv = await browserForId(advisorId, { viewport: { width: 1440, height: 900 } });
+  await go(adv.page, `${base}/jobs/${jobId}/quote/${q1.id}`);
+  const card = adv.page.locator("[data-qty-reduce]");
+  check("z2: the approved quotation shows Reduce the customer's price", (await card.count()) === 1);
+  await card.locator("[data-qty-reduce-go]").click();
+  await card.locator("[data-qty-reduced], [data-qty-reduce-error]").first().waitFor({ timeout: 60000 });
+  await card.screenshot({ path: `${proof}/z2-reduced-version-1440.png` }).catch(() => null);
+  const v2 = (await sql("select id, version, status, total_aed::float as total, approver_name from public.quotations where number = $1 and kind = 'quotation' and is_active order by version desc limit 1", [q1.number]))[0];
+  const old1 = (await sql("select status from public.quotations where id = $1", [q1.id]))[0];
+  check(`z2: v${v2?.version} approved, the old version superseded (${v2?.status}, ${old1?.status})`, v2?.status === "approved" && v2?.version === q1.version + 1 && old1?.status === "superseded");
+  check(`z2: the customer's price came down (${oldTotal} → ${v2?.total})`, v2 && v2.total < oldTotal - 0.01);
+  const ln2 = (await sql("select quantity::float as q from public.quotation_lines where quotation_id = $1 and part_item_id = $2 and is_active", [v2.id, part.id]))[0];
+  check("z2: the new version charges 2", ln2?.q === 2, JSON.stringify(ln2));
+  const ev2 = (await sql("select note from public.quotation_events where quotation_id = $1 and event_type = 'reduced_after_approval'", [v2.id]))[0];
+  check("z2: marked Reduced after approval – no customer approval needed", /Reduced after approval – no customer approval needed/.test(ev2?.note ?? ""), ev2?.note ?? "");
+  check("z2: the WhatsApp message is offered (information)", (await card.locator("[data-qty-reduce-send]").count()) === 1);
+
+  // z3. Down again with a payment already made for the full price: 2 → 1, extra to a purchase return → an advance.
+  const cust = (await sql("select customer_id, vehicle_id from public.jobs where id = $1", [jobId]))[0];
+  await sql("insert into public.payments (job_id, customer_id, vehicle_id, method, amount_aed, bank_charge_aed, is_deposit, status, received_by, created_by, updated_by, received_at) values ($1, $2, $3, 'cash', $4, 0, true, 'recorded', $5, $5, $5, now())", [jobId, cust.customer_id, cust.vehicle_id, v2.total, advisorId]);
+  const z3 = await changeQty(desk.page, 1, "used_fewer", "return", null);
+  check("z3: 2 → 1 saved", /2 → 1 by/.test(z3.words), z3.words.slice(0, 300));
+  await desk.page.locator("[data-qty-close]").click().catch(() => null);
+  await go(adv.page, `${base}/jobs/${jobId}/quote/${v2.id}`);
+  const card3 = adv.page.locator("[data-qty-reduce]");
+  await card3.locator("[data-qty-reduce-go]").click();
+  await card3.locator("[data-qty-reduced], [data-qty-reduce-error]").first().waitFor({ timeout: 60000 });
+  const over = ((await card3.locator("[data-qty-overpaid]").textContent().catch(() => "")) ?? "").trim();
+  check("z3: paid for more → an advance or refund due is shown", /more than the new total/.test(over), over || ((await card3.textContent()) ?? "").slice(0, 200));
+
+  // z4. Up: 1 → 2 → the existing re-approval flow (the owner asked for a revision, or a version to send).
+  const v3 = (await sql("select id, version from public.quotations where number = $1 and kind = 'quotation' and status = 'approved' and is_active order by version desc limit 1", [q1.number]))[0];
+  const z4 = await changeQty(desk.page, 2, "bought_fewer", null, null);
+  check("z4: 1 → 2 saved", /1 → 2 by/.test(z4.words), z4.words.slice(0, 300));
+  await desk.page.locator("[data-qty-close]").click().catch(() => null);
+  const rev = await until(async () => (await sql("select (select revision_requested_at is not null from public.quotations where id = $1) as asked, (select count(*)::int from public.quotations where number = $2 and kind = 'quotation' and version > $3 and is_active) as newer", [v3.id, q1.number, v3.version]))[0], 20, 500);
+  check(`z4: up goes to re-approval (asked ${rev?.asked}, newer versions ${rev?.newer})`, rev?.asked === true || (rev?.newer ?? 0) > 0);
+
+  // z5. After the tax invoice: refused, "Credit note for the difference" offered with the amount.
+  await sql("insert into public.invoices (number, kind, job_id, customer_id, vehicle_id, status, issued_at, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed, token, created_by, updated_by) values ('E2E-INV-Z5', 'tax_invoice', $1, $2, $3, 'issued', now(), 100, 0, 100, 5, 105, 'e2e-z5-inv', $4, $4)", [jobId, cust.customer_id, cust.vehicle_id, advisorId]);
+  const z5 = await changeQty(desk.page, 1, "used_fewer", null, "z5-after-tax-invoice-1440");
+  check("z5: refused after the tax invoice", /already issued/.test(z5.words), z5.words.slice(0, 300));
+  const cn = await z5.dlg.locator("[data-qty-credit-note]").getAttribute("href").catch(() => null);
+  check("z5: Credit note for the difference is offered", !!cn && cn.includes("#credit-notes"), cn ?? "");
+  const p5 = (await sql("select confirmed_quantity::float as q from public.part_items where id = $1", [part.id]))[0];
+  check("z5: the quantity did not change", p5?.q === 2, JSON.stringify(p5));
+  await desk.browser.close();
+  await adv.browser.close();
 });
 
 const failed = summary();

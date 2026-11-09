@@ -56,6 +56,8 @@ import { advisorPricePartsReady, belowCostReady, partUnitsReady } from "@/lib/sc
 import { loadPartsChanges } from "@/lib/parts-changes-data";
 import { recoveryElsewhere } from "@/lib/charges";
 import { costLimitsOf } from "@/lib/part-cost-check";
+import { reduceLinesOf } from "@/lib/qty-reduce";
+import { QtyReduceCard } from "@/components/QtyReduceCard";
 
 export const dynamic = "force-dynamic";
 
@@ -298,6 +300,14 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       {q.status === "pending_owner" ? <div data-owner-waiting><Notice tone="info">Waiting for the owner: {q.owner_approval_reason}. The quotation cannot be sent until he approves.</Notice></div> : null}
       {q.owner_approved_at && !approvalStands && q.status === "draft" ? <div data-owner-approval-stale><Notice tone="info">Changed since the owner approved it ({approvalNow.join("; ")}). Sending asks the owner again.</Notice></div> : null}
       {approvalStands && q.status === "draft" ? <div data-owner-approved><Notice tone="success">Approved by {approverName ?? "the owner"}, {formatDateTime(q.owner_approved_at)}. It can be sent.</Notice></div> : null}
+      {q.status === "approved" ? await (async () => {
+        const { data: red } = await createAdminClient().from("quotation_events").select("note, created_at").eq("quotation_id", q.id).eq("event_type", "reduced_after_approval").limit(1).maybeSingle();
+        return red ? <div data-reduced-mark><Notice tone="success">{String(red.note ?? "")} · {formatDateTime(red.created_at as string)}</Notice></div> : null;
+      })() : null}
+      {q.status === "approved" && ["owner", "service_advisor"].includes(role) ? await (async () => {
+        const reduce = await reduceLinesOf(q.id);
+        return reduce.length ? <QtyReduceCard jobId={id} quotationId={q.id} lines={reduce.map((l) => ({ lineId: l.lineId, words: l.words, asked: l.asked }))} isOwner={isOwner} viewOnly={!!staff.viewingAs} /> : null;
+      })() : null}
       {carry ? (
         <div className="flex flex-col gap-2 rounded-control border-2 border-red-bar bg-red-soft p-4" data-carry-mismatch>
           <p className="text-sm font-bold text-red">{carry.words}</p>

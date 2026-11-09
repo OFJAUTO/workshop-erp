@@ -177,7 +177,7 @@ export async function openReturnsOnPo(poId: string): Promise<PurchaseReturn[]> {
  * Opens the PR- record when a part is given "Return to supplier" (called after the ending is saved; a failure is
  * logged and never undoes the ending). One open return per part.
  */
-export async function openPurchaseReturn(partId: string, reason: string, by: { id: string; display_name: string }): Promise<string | null> {
+export async function openPurchaseReturn(partId: string, reason: string, by: { id: string; display_name: string }, opts: { /** Only some pieces go back (a quantity reduced after approval, 9 November 2026). */ quantity?: number } = {}): Promise<string | null> {
   if (!(await purchaseReturnsReady())) return null;
   const admin = createAdminClient();
   try {
@@ -187,7 +187,7 @@ export async function openPurchaseReturn(partId: string, reason: string, by: { i
     if (!p) return null;
     const { data: line } = p.po_line_id ? await admin.from("purchase_order_lines").select("unit_cost, invoice_unit_cost").eq("id", p.po_line_id).maybeSingle() : { data: null };
     const { data: po } = p.po_id ? await admin.from("purchase_orders").select("id, supplier_id, supplier_name, supplier_invoice_number").eq("id", p.po_id).maybeSingle() : { data: null };
-    const qty = Number(p.returned_qty) || Number(p.received_qty) || Number(p.confirmed_quantity ?? p.quantity) || 1;
+    const qty = opts.quantity ?? (Number(p.returned_qty) || Number(p.received_qty) || Number(p.confirmed_quantity ?? p.quantity) || 1);
     const unit = Number(line?.invoice_unit_cost ?? line?.unit_cost ?? p.cost_aed) || 0;
     const { data: made, error } = await admin
       .from("purchase_returns")

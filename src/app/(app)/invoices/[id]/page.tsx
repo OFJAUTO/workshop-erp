@@ -33,11 +33,11 @@ const m = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, m
 const KIND_LABELS = { tax_invoice: "Tax invoice", proforma: "Proforma invoice", credit_note: "Credit note" } as const;
 
 /** One invoice: Invoice, Paid, Balance on top; the lines; every receipt (voided ones struck through); record a payment in three taps. */
-export default async function InvoicePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
+export default async function InvoicePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string; cn_amount?: string; cn_note?: string }> }) {
   const staff = await requirePermission("viewInvoices");
   const role = staff.role_id as RoleId;
   const { id } = await params;
-  const { message, error } = await searchParams;
+  const { message, error, cn_amount, cn_note } = await searchParams;
   const [bundle, settings, site] = await Promise.all([loadInvoice(id), getSettings(), getSiteUrl()]);
   if (!bundle) return refuseRecord("invoice", id);
   const { invoice, lines, payments, customer, vehicle, job, creditNotes } = bundle;
@@ -273,7 +273,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
             </Card>
           ) : null}
           {isTax ? (
-            <Card className="flex flex-col gap-2">
+            <Card className="flex flex-col gap-2" id="credit-notes">
               <SectionLabel right={creditNotes.length ? `${creditNotes.length}` : undefined}>Credit notes</SectionLabel>
               {creditNotes.map((c) => (
                 <p key={c.id} className="text-sm"><Link href={`/invoices/${c.id}`} className="font-semibold underline underline-offset-4">{c.number}</Link> · AED {m(c.total_aed)} · {formatDate(c.issued_at)}</p>
@@ -281,8 +281,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               {credited ? <p className="text-xs text-muted">Credited so far AED {m(credited)} with VAT.</p> : null}
               {can(role, "approveCreditNotes") && !staff.viewingAs ? (
                 <form action={issueCreditNote.bind(null, invoice.id)} className="flex flex-col gap-2 border-t border-line pt-2">
-                  <Input name="amount" inputMode="decimal" placeholder="Amount before VAT" required />
-                  <Textarea name="description" rows={2} placeholder="What is corrected (shown on the credit note)" required />
+                  <Input name="amount" inputMode="decimal" placeholder="Amount before VAT" required defaultValue={cn_amount ?? undefined} />
+                  <Textarea name="description" rows={2} placeholder="What is corrected (shown on the credit note)" required defaultValue={cn_note ?? undefined} />
                   <ConfirmSubmit
                     label="Issue a credit note"
                     tone="secondary"

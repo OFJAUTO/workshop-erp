@@ -364,7 +364,7 @@ async function approverIds(): Promise<string[]> {
 }
 
 /** A main LPO's total and its supplier words, after lines came or went. */
-async function retotalPo(poId: string, by: string): Promise<{ total: number; lines: number; suppliers: string[] }> {
+export async function retotalPo(poId: string, by: string): Promise<{ total: number; lines: number; suppliers: string[] }> {
   const admin = createAdminClient();
   const { data: lines } = await admin.from("purchase_order_lines").select("quantity, unit_cost, part_item_id").eq("po_id", poId).eq("is_active", true);
   const partIds = (lines ?? []).map((l) => l.part_item_id).filter((x): x is string => !!x);

@@ -12,7 +12,7 @@ import { formatPlate } from "./types";
  * for a version after the first), the greeting, the car, the advisor and the short link. Used by the one send/resend
  * button wherever it is (the job card, the page headers, the lists' menus).
  */
-export async function quoteMessageFor(quotationId: string, advisorName: string): Promise<{ message: string; phoneDigits: string; token: string | null } | null> {
+export async function quoteMessageFor(quotationId: string, advisorName: string): Promise<{ message: string; phoneDigits: string; token: string | null; parts: { name: string; car: string; plate: string; link: string } } | null> {
   const admin = createAdminClient();
   // "How to address" (Section 7) is asked for only once its column exists (WAITING FOR APPLY until then).
   const addressCol = (await schemaReady("customers", "address_as")) ? ", address_as" : "";
@@ -31,13 +31,16 @@ export async function quoteMessageFor(quotationId: string, advisorName: string):
   const vehicle = (row.vehicle ?? null) as unknown as V | null;
   const base = row.kind === "estimate" ? settings.whatsapp_estimate_template : row.version > 1 ? settings.whatsapp_quote_revised_template : settings.whatsapp_quote_template;
   const link = row.token ? await shortFor(`${PRODUCTION_SITE_URL}/quote/${row.token}`) : null;
+  const name = greetingNameOf(customer);
+  const car = [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" ");
+  const plate = vehicle ? formatPlate(vehicle) : "";
   const message = String(base ?? "")
-    .replaceAll("[name]", greetingNameOf(customer))
-    .replaceAll("[make model]", [vehicle?.make?.name, vehicle?.model?.name].filter(Boolean).join(" "))
-    .replaceAll("[plate]", vehicle ? formatPlate(vehicle) : "")
+    .replaceAll("[name]", name)
+    .replaceAll("[make model]", car)
+    .replaceAll("[plate]", plate)
     .replaceAll("[advisor]", advisorName)
     .replaceAll("[link]", link ?? "");
-  return { message, phoneDigits: String(row.sent_to_phone ?? customer?.phone ?? "").replace(/[^\d]/g, ""), token: row.token ?? null };
+  return { message, phoneDigits: String(row.sent_to_phone ?? customer?.phone ?? "").replace(/[^\d]/g, ""), token: row.token ?? null, parts: { name, car, plate, link: link ?? "" } };
 }
 
 /** "Resent by Adarsh, 6 Nov 14:05" for each quotation that was resent (its newest resend). */

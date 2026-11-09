@@ -13,6 +13,7 @@ import { PART_TYPE_LABELS } from "@/lib/quotes";
 import { AVAILABILITY_CHOICES, OUR_STOCK, isOurStock, isPlaceholderSupplier, availabilityChoice, availabilityFromChoice, availabilityWords, daysComplete, NO_PART_NUMBER, realPartNumber, discountOf, netOf, pricingSummary, rowMissing, rowState, sameCost, supplierDiscount, type AvailabilityChoice, type RowState, type RowValues, type SupplierOption } from "@/lib/parts-rows";
 import { StockItemPicker, type PickedStockItem } from "@/components/StockItemPicker";
 import { CorrectCostDialog } from "./CorrectCostDialog";
+import { QtyChangeDialog } from "./QtyChangeDialog";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { ReasonChips } from "@/components/ReasonChips";
 import { PartPicker } from "@/components/PartPicker";
@@ -505,6 +506,8 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
   const supplierRef = useRef<HTMLSelectElement>(null);
   // "Correct the cost…" for a part already ordered or received.
   const [correcting, setCorrecting] = useState(false);
+  // Section 1 (9 November 2026): an approved part's quantity changed after approval (the BMW differential oil 3 → 2).
+  const [qtyChanging, setQtyChanging] = useState(false);
   // "Remove: not needed": which kind of row is being removed, and the few seconds of Undo after it.
   const [removing, setRemoving] = useState<null | "part" | "request" | "ordered">(null);
   const [undo, setUndo] = useState(false);
@@ -887,6 +890,7 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
                   {estimate ? null : <>
                   {partId && !row.locked ? <MenuItem label="Split into separate parts" onClick={() => { setMenu(null); setSplit(true); }} /> : null}
                   {partId && complete && !row.locked ? <MenuItem label="Add an option for this part" onClick={() => { setMenu(null); onAddOption(); }} /> : null}
+                  {partId && (row.locked || row.approvedNotOrdered) && !row.removed && !row.ended ? <MenuItem label="Change the quantity…" onClick={() => { setMenu(null); setQtyChanging(true); }} /> : null}
                   {row.labelHref ? <MenuItem label="Print the QR label" onClick={() => { setMenu(null); window.open(row.labelHref!, "_blank", "noopener"); }} /> : null}
                   {partId ? <MenuItem label="Attach diagram" onClick={() => { setMenu(null); fileRef.current?.click(); }} /> : null}
                   {partId && (!row.question || row.answer) ? <MenuItem label="Ask the workshop manager" onClick={() => { setMenu(null); const q = window.prompt("Your question for the workshop manager", "Is this the right part?"); if (q !== null) { const fd = new FormData(); fd.set("question", q); run(() => askManager(partId, fd)); } }} /> : null}
@@ -973,6 +977,7 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
         <span className={`max-w-full break-words ${tag.cls}`} data-row-tag>{tag.text}</span>
       </div>
       {split && partId ? <SplitDialog name={name} qty={qty} onClose={() => setSplit(false)} onSplit={(lines) => { setSplit(false); const fd = new FormData(); fd.set("lines", JSON.stringify(lines)); run(() => splitPart(jobId, partId, fd)); }} /> : null}
+      {qtyChanging && partId ? <QtyChangeDialog jobId={jobId} partId={partId} name={name} qty={num(v.qty) || 1} unitWords={unitsReady && v.unit && v.unit !== "pc" ? ` ${v.unit === "l" ? "L" : v.unit}` : ""} onClose={() => setQtyChanging(false)} onDone={() => { setQtyChanging(false); start(() => refreshWhenIdle(() => router.refresh())); }} /> : null}
       {correcting && partId ? <CorrectCostDialog jobId={jobId} partId={partId} name={name} why={row.settledFix ?? ""} onLpo={!!row.onLpo} suppliers={suppliers} onClose={() => setCorrecting(false)} onDone={() => { setCorrecting(false); start(() => refreshWhenIdle(() => router.refresh())); }} /> : null}
       {removing === "ordered" ? <EndDialog name={name} endings={row.endings ?? null} options={removeReasons} onClose={() => setRemoving(null)} onEnd={endNow} /> : null}
       {removing === "part" || removing === "request" ? <RemoveDialog kind={removing} name={name} options={removeReasons} onClose={() => setRemoving(null)} onConfirm={(reason) => { const kind = removing; setRemoving(null); doRemove(kind, reason); }} /> : null}
