@@ -31,11 +31,11 @@ export function MoneyTilesRow({ t }: { t: MoneyTiles }) {
     { label: "Supplier invoices to check", value: String(t.supplierInvoicesToCheck), sub: "new, waiting for invoice or price differs", href: "/supplier-invoices", tone: t.supplierInvoicesToCheck ? "border-amber-bar" : "", amount: "", count: t.supplierInvoicesToCheck },
   ];
   return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-3" data-money-tiles>
+    <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-3" data-money-tiles>
       {tiles.map((x) => (
-        <a key={x.label} href={x.href} className={`rounded-card border bg-white px-4 py-3 flex flex-col gap-0.5 hover:border-ink ${x.tone || "border-line"}`} data-tile={x.label} data-tile-amount={x.amount} data-tile-count={x.count}>
+        <a key={x.label} href={x.href} className={`min-w-0 rounded-card border bg-white px-4 py-3 flex flex-col gap-0.5 hover:border-ink ${x.tone || "border-line"}`} data-tile={x.label} data-tile-amount={x.amount} data-tile-count={x.count}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{x.label}</span>
-          <span className="text-xl font-extrabold">{x.value}</span>
+          <span className="text-xl font-extrabold whitespace-nowrap">{x.value}</span>
           <span className="text-xs text-muted">{x.sub}</span>
         </a>
       ))}

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { seesCustomers } from "@/lib/customer-data";
+import { Words } from "@/components/Words";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { Badge, Button, Card, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -168,7 +169,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
                     {p.fixed_asset ? <Badge tone="red">Fixed asset</Badge> : null}
                     {p.parent_id && numberOf.get(p.parent_id) ? <span className="text-xs text-muted">from {numberOf.get(p.parent_id)}</span> : null}
                     <span className="font-semibold">{p.supplier_name}</span>
-                    {c ? <span className="text-sm text-muted">{c.plate} · {c.car} · {c.job}</span> : p.kind === "stock" ? <span className="text-sm text-muted">for the shelf</span> : null}
+                    {c ? <Words className="text-sm text-muted" text={`${c.plate} · ${c.car} · ${c.job}`} /> : p.kind === "stock" ? <span className="text-sm text-muted">for the shelf</span> : null}
                     <Badge tone={tone(p)}>{PO_STATUS_LABELS[p.status]}</Badge>
                     {supplierStatesOf.get(p.id)?.length ? <span className="text-xs font-semibold" data-lpo-row-suppliers>{supplierStatesOf.get(p.id)!.map((x) => `${x.supplier} ${x.state === "approved" ? "✓" : x.state === "refused" ? "refused" : "waiting"}`).join(" · ")}</span> : null}
                     {late && p.status !== "cancelled" ? <Badge tone="red">{late} line{late === 1 ? "" : "s"} late</Badge> : null}

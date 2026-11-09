@@ -8,12 +8,12 @@ export function QuoteVersionSelect({ jobId, base, versions, selectedId, label = 
   const newest = Math.max(...versions.map((v) => v.version));
   if (versions.length < 2) return <span className="inline-flex min-h-11 items-center text-sm font-semibold text-muted" data-quote-versions={versions.length}>v{versions[0]?.version ?? 1}</span>;
   return (
-    <label className="inline-flex items-center gap-1.5 text-sm font-semibold" data-quote-versions={versions.length}>
+    <label className="inline-flex min-w-0 max-w-full items-center gap-1.5 text-sm font-semibold" data-quote-versions={versions.length}>
       <span className="sr-only">{label}</span>
       <select
         value={selectedId}
         onChange={(e) => router.push(`${base ?? `/jobs/${jobId}/quote/`}${e.target.value}`)}
-        className="min-h-11 rounded-control border border-line-strong bg-white px-2 text-sm font-semibold"
+        className="min-h-11 min-w-0 max-w-[13rem] sm:max-w-none rounded-control border border-line-strong bg-white px-2 text-sm font-semibold"
         data-version-select
       >
         {[...versions].sort((a, b) => a.version - b.version).map((v) => (

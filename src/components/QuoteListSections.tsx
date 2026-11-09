@@ -106,7 +106,7 @@ export function QuoteListSections({ rows, me, ownerName, noun, acceptedWords }: 
                 {r.money?.badge ? <Badge tone={r.money.tone === "green" ? "green" : "amber"} data-em-list-badge={r.money.badge}>{r.money.badge}</Badge> : null}
                 {r.status === "cancelled" && r.cancelReason ? <span className="text-xs font-semibold text-muted" data-cancel-reason>{r.cancelReason}</span> : null}
                 <span className="ml-auto text-sm font-semibold">{aed(r.total)}</span>
-                <span className="pointer-events-auto flex items-center gap-1">
+                <span className="pointer-events-auto flex min-w-0 max-w-full items-center gap-1">
                   {r.versions.length > 1 ? <QuoteVersionSelect base={r.versionBase} versions={r.versions} selectedId={r.id} /> : null}
                   {r.menu ?? null}
                 </span>

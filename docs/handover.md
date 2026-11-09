@@ -1,17 +1,16 @@
-# Handover – 8 November 2026 (night)
+# Handover – 9 November 2026
 
 **NEEDS OMAR:**
-1. **Backup key copy:** `OFJ-BACKUP-KEY.txt` is on your Desktop (same key as GitHub, fingerprint ecfbe604). Put it in your password manager, print it for the safe, then delete the file.
-2. **Move the PC's 20 GB `backups/` folder off-site:** the Backblaze key is only in GitHub (unreadable). Either paste the three B2 values into `.env.local` as `B2_KEY_ID`, `B2_APP_KEY`, `B2_BUCKET` and reply "local key saved", or leave the folder on the PC.
-3. Read (clear) the three old "Off-site … FAILED: B2_KEY_ID is not set" bells; no new ones will come.
-4. Supabase dashboard → Usage → Image transformations: note the count on 9 Nov evening (should stay where it is).
-5. Reply **"apply"** for the WAITING FOR APPLY list below.
-6. From before: Mathew sets both Zoho orgs' time zone to Asia/Dubai; LPO-00045-1 "Check again in Zoho"; one real supplier payment through Sync to Zoho; passkeys for everyone; Network International on STL-00012 (now estimated at 2.25%); Peter's test label.
+1. **Backup key copy:** `OFJ-BACKUP-KEY.txt` is on your Desktop (same key as GitHub). Put it in your password manager, print it for the safe, then delete the file.
+2. **The PC's 20 GB `backups/` folder:** paste the three B2 values into `.env.local` (`B2_KEY_ID`, `B2_APP_KEY`, `B2_BUCKET`) and reply "local key saved", or leave it on the PC.
+3. Read the three old "Off-site … FAILED: B2_KEY_ID is not set" bells (no new ones come).
+4. Reply **"apply"** for the WAITING FOR APPLY list below.
+5. From before: Mathew sets both Zoho orgs to Asia/Dubai; LPO-00045-1 "Check again in Zoho"; one real supplier payment through Sync to Zoho; passkeys for everyone; Network International on STL-00012; Peter's test label.
 
-**Live (8 Nov night):** off-site backups (database backup + restore test proven) · pre-made photo sizes (f3c07b2) · send LPO for selected parts (3b8a704) · settlement date with no default · approve each supplier separately · technician on parts pages · purchase returns (code; switches on with apply #5) · link fee worst case (code default; the stored setting moves with apply #4). Note: `docs/8-nov-batch-note.md`.
+**Live (9 Nov):** the morning's five "apply" items (photo sizes backfill 1,330 photos, 0 failed) · the owner's list of 8 Nov: 1 softer look (one theme file), 2 urgent only for money / promised date / customer waiting over 4 working hours, 3 promised date required at release with reasons logged, 4 the bell counts open actions only (e064dd8, layout fixes after it). Note: `docs/9-nov-batch-note.md`.
 
-**WAITING FOR APPLY** (`docs/waiting-for-apply.md`): #1 photo sizes backfill (1,330 photos, ~0.21 GB) · #2 parts-desk bells (J-00990, J-00016, J-00343) · #3 five missing advisors · #4 link fee setting 1.75 → 2.25 · #5 purchase returns table (backup first).
+**WAITING FOR APPLY** (`docs/waiting-for-apply.md`): #1 `jobs.promised_time` · #2 `notifications.cleared_at/archived_at` (30-day archive) · #3 one promised-date bell per advisor (11 cars).
 
-**Queued next (owner's message of 8 Nov):** 1 softer whites, logo, small print · 2 "urgent" must mean urgent · 3 promised date on every approved job · 4 the bell only counts what is still open.
+**Queue:** empty.
 
-**Tests:** layout clean, security passed, simulation 341/0, check:live 33/33; the queued test fixes are done. Backups: database copy, storage copy (1,995 files, 2.15 GB) and restore test all green.
+**Tests:** security passed, simulation 341/0, test-nov9 15/15, full layout check (33 findings from the bigger small text, fixed and re-checked).

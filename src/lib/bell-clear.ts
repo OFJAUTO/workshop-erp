@@ -17,7 +17,7 @@ type Notice = { id: number; staff_id: string; type: string; job_id: string | nul
  * once per run; marks the notices read (and cleared_at once the column exists). dryRun counts without writing.
  * Returns how many were cleared.
  */
-export async function clearDoneNotices(opts: { dryRun?: boolean; sinceDays?: number } = {}): Promise<{ cleared: number; checked: number }> {
+export async function clearDoneNotices(opts: { dryRun?: boolean; sinceDays?: number } = {}): Promise<{ cleared: number; checked: number; doneIds?: number[] }> {
   const admin = createAdminClient();
   const types = Object.keys(ACTION_RULES).filter((t) => ACTION_RULES[t].open !== "manual");
   const since = new Date(Date.now() - (opts.sinceDays ?? 120) * 86400000).toISOString();
@@ -106,7 +106,7 @@ export async function clearDoneNotices(opts: { dryRun?: boolean; sinceDays?: num
       if (error) logAppError("bell-clear/update", error);
     }
   }
-  return { cleared: done.length, checked: notices.length };
+  return { cleared: done.length, checked: notices.length, ...(opts.dryRun ? { doneIds: done } : {}) };
 }
 
 /** Archives read and cleared notices older than 30 days (they leave the panel; nothing is deleted). */

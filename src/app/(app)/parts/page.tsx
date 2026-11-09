@@ -27,6 +27,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { chargesByPo } from "@/lib/supplier-charges";
 import { formatPlate } from "@/lib/types";
+import { Words } from "@/components/Words";
 import { WaitingPanel } from "@/components/WaitingPanel";
 import { PartsSteps } from "@/components/PartsSteps";
 import { realPartNumber } from "@/lib/parts-rows";
@@ -128,7 +129,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   const jobLine = (id: string) => {
     const j = jobs.get(id);
     if (!j) return null;
-    return `${j.vehicle ? formatPlate(j.vehicle) : ""} · ${[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · ${j.job_number}${j.assignee ? ` · ${j.assignee.display_name}` : ""}`;
+    return <Words text={`${j.vehicle ? formatPlate(j.vehicle) : ""} · ${[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · ${j.job_number}${j.assignee ? ` · ${j.assignee.display_name}` : ""}`} />;
   };
   /** The five steps of a car's parts as dots (the same rule as the car's parts page). */
   const dotsOf = (jobId: string) => {

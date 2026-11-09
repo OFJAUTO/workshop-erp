@@ -33,7 +33,7 @@ export default async function OverridesPage() {
                 <Link href={`/jobs/${e.job_id}`} className="font-semibold underline underline-offset-4 sm:w-20 shrink-0">
                   {e.job?.job_number ?? "job"}
                 </Link>
-                <span className="flex-1">
+                <span className="flex-1 min-w-0 break-words">
                   <span className="font-semibold">{e.by?.display_name ?? "System"}</span> · {e.note}
                 </span>
               </li>

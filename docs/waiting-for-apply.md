@@ -27,7 +27,7 @@ The owner replied "apply" (07:09 Dubai). A fresh backup was taken first: `backup
 | 2 | `2026-11-08-missing-advisors.sql` | J-00343, J-00470, J-00492, J-00974 → Adarsh; J-00992 → Anas (5 jobs, 5 history lines). |
 | 3 | `2026-11-08-link-fee-worst-case.sql` | Payment-link fee setting 1.75% → 2.25%. |
 | 4 | `20261209090000_purchase_returns.sql` | The `purchase_returns` table: RLS on, no policies, no access for anon or logged-in users. Purchase returns switched on by themselves. |
-| 5 | `scripts/photo-sizes-backfill.mjs --apply` | BACKFILL_RESULT |
+| 5 | `scripts/photo-sizes-backfill.mjs --apply` | Made the 400 px and 1600 px copies of all 1,330 existing photos (0.26 GB added), 0 failed, nothing changed or deleted. The count afterwards: 0 photos without sizes. |
 
 ## Applied on 8 November 2026, morning (passkeys)
 

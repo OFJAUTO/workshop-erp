@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
+import { Words } from "@/components/Words";
 import { requireStaff } from "@/lib/auth";
 import { loadCommissions, type CommissionRow } from "@/lib/commissions";
 import { formatDate, formatDayTime } from "@/lib/format";
@@ -18,7 +19,7 @@ function Line({ r, isOwner, proofUrl }: { r: CommissionRow; isOwner: boolean; pr
     <li className="py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm" data-commission-row={r.quotation}>
       <span className="font-bold">{r.recipient}</span>
       {r.phone ? <a href={`https://wa.me/${r.phone.replace(/[^\d]/g, "")}`} target="_blank" rel="noreferrer" className="text-xs font-semibold underline underline-offset-4">{r.phone}</a> : null}
-      <span className="text-muted">{r.jobNumber} · {r.plate}{r.carTitle ? ` · ${r.carTitle}` : ""}</span>
+      <Words className="text-muted" text={`${r.jobNumber} · ${r.plate}${r.carTitle ? ` · ${r.carTitle}` : ""}`} />
       <span className="text-xs text-muted">{r.quotation} v{r.version}{r.invoiceNumber ? ` · ${r.invoiceNumber}` : ""}</span>
       {r.status !== "paid" ? <Badge tone={r.customerPaid ? "green" : "amber"}>{r.customerPaid ? "Customer paid" : r.customerPaidWhy}</Badge> : null}
       {r.creditNotes ? <Badge tone="red">Credit note on this job</Badge> : null}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Words } from "@/components/Words";
 import { Input } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 
@@ -32,7 +33,7 @@ export function PayPanel({ rows, action, today, isOwner }: { rows: ReadyRow[]; a
                 <input type="checkbox" name="ids" value={r.quotationId} checked={ticked.has(r.quotationId)} disabled={off} onChange={() => toggle(r.quotationId)} className="h-5 w-5 accent-ink" data-pay-tick={r.quotationId} />
                 <span className="font-bold">{r.recipient}</span>
               </label>
-              <span className="text-muted">{r.sub}</span>
+              <Words className="text-muted" text={r.sub} />
               <span className="ml-auto font-extrabold">{aed(r.amount)}</span>
             </li>
           );
