@@ -2,50 +2,37 @@
 import "server-only";
 import { Document, Image, Page, Text, View, renderToBuffer } from "@react-pdf/renderer";
 import type { PartLabel } from "../part-labels";
+import { fitName, labelBoxes } from "../label-fit";
+import { loadLogoMark } from "./images";
 import { qrPng } from "./qr";
 
 const MM = 72 / 25.4;
 
 /**
- * THE part label PDF (6 November 2026, Section 8): every page exactly the label (50 × 25 mm by default, from Settings),
- * zero margins, one label per page, so the label printer feeds one label per page with nothing scaled. The QR on the
- * left (21 mm, readable from a phone at arm's length); on the right the job number, the plate (or STOCK), the part with
- * its side, the make and model, the LPO number with "1 OF 2", and the day it was received. `border` draws the label's
- * outline (the test label: it shows at once whether the label sits square on the roll).
+ * THE part sticker (9 November 2026, Section 5; was the 6 November label): ONLY three things, nothing within 2.5 mm of
+ * an edge. The QR on the left (19 mm, solid black) opens that part's page for signed-in staff; top right the OFJ mark
+ * (no "AUTOMOTIVE" line, 14 mm wide, solid black); under it the PART NAME exactly as on the part line, large and bold,
+ * shrinking or wrapping to fit and never cut. Every page is exactly the label (50 × 25 mm by default, from Settings),
+ * one label per piece. `border` draws the label's outline (the test label).
  */
 export async function renderPartLabelsPdf(labels: PartLabel[], size: { w: number; h: number }, opts: { border?: boolean } = {}): Promise<Buffer> {
   const w = size.w * MM;
   const h = size.h * MM;
-  const u = (size.h / 25) * MM;
-  const inset = 1.2 * u;
-  const qrSide = Math.min(h - 2 * inset, 0.46 * w);
-  const qrs = await Promise.all(labels.map((l) => qrPng(l.qr, 360)));
+  const box = labelBoxes(size.w, size.h);
+  const [qrs, mark] = await Promise.all([Promise.all(labels.map((l) => qrPng(l.qr, 480))), loadLogoMark()]);
   const doc = (
     <Document title="Part labels" author="OFJ Automotive">
       {labels.map((l, i) => {
-        const nameLine = [l.name.toUpperCase(), l.side].filter(Boolean).join(" · ");
-        const nameSize = (nameLine.length > 48 ? 1.8 : nameLine.length > 30 ? 2.1 : 2.4) * u;
+        const fit = fitName(l.name, box.rightW * MM, box.nameH * MM, 13, 4.5);
         return (
           <Page key={l.key} size={[w, h]} style={{ margin: 0, padding: 0, backgroundColor: "#fff", color: "#000", fontFamily: "Helvetica" }}>
             {opts.border ? <View fixed style={{ position: "absolute", left: 0.3 * MM, top: 0.3 * MM, width: w - 0.6 * MM, height: h - 0.6 * MM, borderWidth: 0.25 * MM, borderColor: "#000", borderStyle: "solid" }} /> : null}
-            <View style={{ flexDirection: "row", width: w, height: h, padding: inset, alignItems: "center" }}>
-              <Image src={{ data: qrs[i], format: "png" }} style={{ width: qrSide, height: qrSide }} />
-              <View style={{ flex: 1, height: "100%", marginLeft: inset, justifyContent: "space-between" }}>
-                <View>
-                  <Text style={{ fontSize: 4.4 * u, fontFamily: "Helvetica-Bold", lineHeight: 1 }}>{l.jobNumber}</Text>
-                  {l.plate && l.plate !== l.jobNumber ? <Text style={{ fontSize: 2.5 * u, fontFamily: "Helvetica-Bold", marginTop: 0.4 * u }}>{l.plate}</Text> : null}
-                </View>
-                <Text style={{ fontSize: nameSize, fontFamily: "Helvetica-Bold", lineHeight: 1.05, maxLines: 2, textOverflow: "ellipsis" }}>
-                  {nameLine}
-                </Text>
-                <View>
-                  {l.car ? <Text style={{ fontSize: 1.9 * u, maxLines: 1 }}>{l.car.toUpperCase()}</Text> : null}
-                  <Text style={{ fontSize: 1.8 * u, marginTop: 0.2 * u, maxLines: 1 }}>
-                    {[l.lpo, `${l.index} OF ${l.count}`].filter(Boolean).join(" · ")}
-                  </Text>
-                  {l.received ? <Text style={{ fontSize: 1.8 * u, marginTop: 0.2 * u }}>Received {l.received}</Text> : null}
-                </View>
-              </View>
+            <Image src={{ data: qrs[i], format: "png" }} style={{ position: "absolute", left: box.edge * MM, top: ((size.h - box.qr) / 2) * MM, width: box.qr * MM, height: box.qr * MM }} />
+            {mark ? <Image src={{ data: mark, format: "png" }} style={{ position: "absolute", left: (box.rightX + box.rightW - box.logoW) * MM, top: box.edge * MM, width: box.logoW * MM, height: box.logoH * MM }} /> : <Text style={{ position: "absolute", right: box.edge * MM, top: box.edge * MM, fontSize: 4 * MM, fontFamily: "Helvetica-Bold" }}>OFJ</Text>}
+            <View style={{ position: "absolute", left: box.rightX * MM, top: box.nameTop * MM, width: box.rightW * MM, height: box.nameH * MM, justifyContent: "center" }}>
+              {fit.lines.map((line, k) => (
+                <Text key={k} style={{ fontSize: fit.size, fontFamily: "Helvetica-Bold", lineHeight: 1.08, textAlign: "left" }}>{line}</Text>
+              ))}
             </View>
           </Page>
         );

@@ -13,7 +13,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -2216,7 +2216,8 @@ await section("v", "part labels: exact 50 x 25 mm PDF pages, one per piece, fewe
   if (t.ok) {
     fs.writeFileSync(`${proof}/sample-label.pdf`, t.buf);
     fs.writeFileSync(`${proof}/sample-label.png`, t.doc.loadPage(0).toPixmap(mupdf.Matrix.scale(8, 8), mupdf.ColorSpace.DeviceRGB, false, true).asPNG());
-    check("v2: the test label carries every field: job, plate, part with side, make and model, LPO, 1 OF 2, received", ["J-00000", "DUBAI A 12345", "FRONT BRAKE PADS SET · FRONT LEFT", "MERCEDES-BENZ S 580", "LPO-00000-1 · 1 OF 2", "Received"].every((x) => t.text.includes(x)), t.text.slice(0, 160));
+    // 9 November 2026, Section 5: ONLY the QR, the OFJ mark and the part name (no job, plate, LPO, 1 OF n, date).
+    check("v2: the test label carries only the part name", /FRONT BRAKE PADS SET/.test(t.text.replace(/\s+/g, " ")) && !["J-00000", "DUBAI", "LPO", " OF ", "Received", "MERCEDES"].some((x) => t.text.includes(x)), t.text.slice(0, 160));
   }
   // A real car: one part received twice = two labels; fewer on request; no price anywhere.
   const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
@@ -2231,12 +2232,12 @@ await section("v", "part labels: exact 50 x 25 mm PDF pages, one per piece, fewe
   const job = (await sql("select job_number from public.jobs where id = $1", [seed.jobId]))[0];
   const all = await pdfOf(`/api/pdf/part-labels?job=${seed.jobId}&parts=${part.id}`);
   check(`v3: two pieces = two labels, each page 50 x 25 mm (${all.ok ? all.pages : all.status})`, all.ok && all.pages === 2 && mm(all.w) === 50 && mm(all.h) === 25);
-  check("v4: the car's label shows its job number, the LPO, 1 OF 2 and 2 OF 2, the day received, and no price", all.ok && all.text.includes(job.job_number) && all.text.includes("E2E-LBL-1 · 1 OF 2") && all.text.includes("2 OF 2") && all.text.includes("Received") && !/AED|100\.00/.test(all.text), all.ok ? all.text.slice(0, 200) : "");
+  check("v4: the car's label shows the part name only (no job number, LPO, 1 OF n, date or price)", all.ok && all.text.replace(/\s+/g, " ").toUpperCase().includes(String(part.description).toUpperCase().split(" ")[0]) && !all.text.includes(job.job_number) && !all.text.includes("E2E-LBL-1") && !/ OF 2|Received|AED|100\.00/.test(all.text), all.ok ? all.text.slice(0, 200) : "");
   if (all.ok) fs.writeFileSync(`${proof}/car-labels.pdf`, all.buf);
   const fewer = await pdfOf(`/api/pdf/part-labels?job=${seed.jobId}&keys=${part.id}-2`);
-  check("v5: fewer on request: only label 2 of 2", fewer.ok && fewer.pages === 1 && fewer.text.includes("2 OF 2") && !fewer.text.includes("1 OF 2"));
+  check("v5: fewer on request: one label", fewer.ok && fewer.pages === 1);
   const today = await pdfOf("/api/pdf/part-labels?today=1");
-  check("v6: today's labels include the part received today", today.ok && today.text.includes(job.job_number));
+  check("v6: today's labels include the part received today", today.ok && today.pages >= 1 && today.text.toUpperCase().includes(String(part.description).toUpperCase().split(" ")[0]));
   // The print points.
   const { browser, page } = await browserFor("parts", { viewport: { width: 1440, height: 900 } });
   await go(page, `${base}/parts/arrivals`);
@@ -2895,6 +2896,68 @@ await section("sec4", "passkey rules", async () => {
   const ev = await sql("select method, ok from public.sign_in_events where staff_id = $1 and method = 'owner_code' order by at desc limit 2", [person.id]);
   check("p3: both tries are logged", ev.length === 2, JSON.stringify(ev));
   await owner.browser.close();
+});
+
+/* ================================================================================================= */
+/* Path sec5 — 9 November 2026, Section 5: the simple part sticker. J-00940's REAR MAIN SEAL label      */
+/* rendered at 203 dpi: 50 x 25 mm, nothing within 2.5 mm of an edge, the QR read back opens that part's */
+/* page for staff, and the sign-in page for anyone else.                                                 */
+/* ================================================================================================= */
+await section("sec5", "simple part sticker", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-09-simple-sticker";
+  mkdirSync(proof, { recursive: true });
+  const mupdf = await import("mupdf");
+  const jsQR = (await import("jsqr")).default;
+  let part = (await sql("select p.id, p.job_id, p.description from public.part_items p join public.jobs j on j.id = p.job_id where j.job_number = 'J-00940' and p.description ilike '%rear main seal%' and p.is_active limit 1"))[0];
+  if (!part) {
+    const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+    part = (await sql("select id, job_id, description from public.part_items where job_id = $1 and is_active order by created_at limit 1", [seed.jobId]))[0];
+    await sql("update public.part_items set description = 'REAR MAIN SEAL' where id = $1", [part.id]);
+    part.description = "REAR MAIN SEAL";
+  }
+  const cookie = await cookieHeader("parts");
+  const res = await fetch(`${base}/api/pdf/part-labels?job=${part.job_id}&parts=${part.id}`, { headers: { cookie } });
+  const buf = Buffer.from(await res.arrayBuffer());
+  check(`k1: the label PDF prints (${res.status})`, res.ok && /pdf/.test(res.headers.get("content-type") ?? ""));
+  const doc = mupdf.Document.openDocument(buf, "application/pdf");
+  const b = doc.loadPage(0).getBounds();
+  const mmOf = (pt) => Math.round((pt / 72) * 25.4 * 10) / 10;
+  check(`k1: 50 x 25 mm landscape (${mmOf(b[2] - b[0])} x ${mmOf(b[3] - b[1])})`, mmOf(b[2] - b[0]) === 50 && mmOf(b[3] - b[1]) === 25);
+  const text = doc.loadPage(0).toStructuredText().asText().replace(/\s+/g, " ").trim();
+  check(`k2: only the part name on the face ("${text}")`, /REAR MAIN SEAL/.test(text) && !/J-\d|LPO|OF \d|Received|DUBAI/.test(text));
+  const pix = doc.loadPage(0).toPixmap(mupdf.Matrix.scale(203 / 72, 203 / 72), mupdf.ColorSpace.DeviceRGB, false, true);
+  fs.writeFileSync(`${proof}/k-rear-main-seal-203dpi.png`, pix.asPNG());
+  const W = pix.getWidth();
+  const H = pix.getHeight();
+  const px = pix.getPixels();
+  const n = pix.getNumberOfComponents();
+  const rgba = new Uint8ClampedArray(W * H * 4);
+  for (let i = 0; i < W * H; i++) { rgba[i * 4] = px[i * n]; rgba[i * 4 + 1] = px[i * n + 1]; rgba[i * 4 + 2] = px[i * n + 2]; rgba[i * 4 + 3] = 255; }
+  // Nothing within 2.5 mm of an edge (20 pixels at 203 dpi): every pixel there is white.
+  const edge = Math.floor((2.5 / 25.4) * 203) - 1;
+  let inked = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (x >= edge && x < W - edge && y >= edge && y < H - edge) continue;
+    const i = (y * W + x) * 4;
+    if (rgba[i] < 200 || rgba[i + 1] < 200 || rgba[i + 2] < 200) inked++;
+  }
+  check(`k3: nothing within 2.5 mm of an edge (${inked} dark pixels there)`, inked === 0);
+  const qr = jsQR(rgba, W, H);
+  check(`k4: the QR reads at 203 dpi (${qr?.data ?? "no read"})`, !!qr?.data && /\/s\/[A-Z0-9]+$/.test(qr.data));
+  const path = qr?.data ? qr.data.slice(qr.data.indexOf("/s/")) : "/s/NONE";
+  // k5. Staff land on the part's page; anyone else on the sign-in page.
+  const { browser, page } = await browserFor("parts", { viewport: { width: 1440, height: 900 } });
+  await go(page, `${base}${path}`);
+  check(`k5: staff open that part's page (${page.url().replace(base, "")})`, page.url().includes(`/parts/label/${part.id}`));
+  const body = ((await page.locator("[data-part-label-page]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check("k5: the page has part, part number, side, quantity, job, plate, car, LPO, supplier, received, advisor, technician", ["Part", "Part number", "Side", "Quantity", "Job", "Plate", "Car", "LPO", "Supplier", "Received", "Advisor", "Technician"].every((k) => body.includes(k)) && /REAR MAIN SEAL/.test(body), body.slice(0, 200));
+  await page.screenshot({ path: `${proof}/k-qr-opens-part-page-1440.png` }).catch(() => null);
+  await browser.close();
+  const anon = await (await import("playwright-core")).chromium.launch({ executablePath: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", headless: true });
+  const pa = await anon.newPage();
+  await pa.goto(`${base}${path}`);
+  check(`k6: not signed in sees nothing but the sign-in page (${pa.url().replace(base, "")})`, pa.url().includes("/login"));
+  await anon.close();
 });
 
 const failed = summary();

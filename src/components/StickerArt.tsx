@@ -7,7 +7,7 @@
  * Battery warranty sticker and oil service sticker (50 × 100 mm portrait by default): logo, title, the facts, a black
  * band with the date that matters, the VIN, a QR. The oil sticker's QR opens WhatsApp to book the next service.
  */
-import { FitText } from "./FitText";
+import { fitName, labelBoxes } from "@/lib/label-fit";
 export type PartStickerData = { qr: string; jobNumber: string; name: string; index: number; count: number; date?: string | null; /** Where this unit goes (FRONT LEFT, or ALL 4 + SPARE). */ pos?: string | null };
 export type BatteryStickerData = { qr: string; installed: string; until: string; months: number; vin: string; title: string; valid: string; /** Which battery: "Main battery · Varta AGM 95Ah" or "Auxiliary battery". */ line: string };
 
@@ -21,28 +21,23 @@ export type ServiceStickerData = { qr: string; servicedOn: string; mileage: stri
 const base = (w: number, h: number): React.CSSProperties => ({ width: `${w}mm`, height: `${h}mm`, boxSizing: "border-box", overflow: "hidden", background: "#fff", color: "#000", fontFamily: "Arial, Helvetica, sans-serif", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", padding: "1mm", pageBreakAfter: "always", breakAfter: "page" });
 
 /**
- * 50 × 25 mm landscape (the owner's layout of 4 November 2026): the QR fills the left (about 21 mm),
- * and the right column stacks the OFJ logo, the job number BIG, the position (FRONT LEFT) and the
- * black bar with the part name and "1 OF 2". Scales by height to other sizes; the date is in the ERP
- * behind the QR, not on the face.
+ * THE part sticker (9 November 2026, Section 5): ONLY three things, nothing within 2.5 mm of an edge - the QR on the
+ * left (19 mm, solid black), the OFJ mark top right (no "AUTOMOTIVE" line, 14 mm wide) and under it the PART NAME,
+ * large and bold, shrinking or wrapping to fit and never cut. The same geometry and name size as the PDF label
+ * (src/lib/label-fit.ts), so the preview in Settings is exactly what prints. The job, plate, LPO and the rest are on
+ * the part's page behind the QR (staff only).
  */
-export function PartSticker({ w, h, logoUrl, d }: { w: number; h: number; logoUrl: string; d: PartStickerData }) {
-  const u = h / 25;
-  const pad = 1.2 * u;
-  const qr = Math.min(21 * u, h - 2 * pad, w * 0.5);
+export function PartSticker({ w, h, d }: { w: number; h: number; logoUrl?: string; d: PartStickerData }) {
+  const box = labelBoxes(w, h);
+  const fit = fitName(d.name, box.rightW, box.nameH, 4.6, 1.6);
   return (
-    <div style={{ ...base(w, h), padding: `${pad}mm`, flexDirection: "row", alignItems: "stretch", gap: `${1.4 * u}mm` }} data-part-sticker>
+    <div style={{ ...base(w, h), position: "relative", padding: 0, display: "block" }} data-part-sticker>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={d.qr} alt="" style={{ width: `${qr}mm`, height: `${qr}mm`, flex: "none", alignSelf: "center" }} data-sticker-qr />
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "space-between", gap: `${0.5 * u}mm` }}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={logoUrl} alt="" style={{ height: `${4 * u}mm`, maxWidth: "100%", objectFit: "contain", flex: "none" }} />
-        <FitText text={d.jobNumber} maxMm={5.8 * u} minOneLineMm={3 * u} minMm={3 * u} allowWrap={false} lineHeight={1} style={{ fontWeight: 800, letterSpacing: "0.3px", textAlign: "right", width: "100%" }} />
-        {d.pos ? <div style={{ fontSize: `${2.7 * u}mm`, fontWeight: 800, textTransform: "uppercase", lineHeight: 1.05, textAlign: "right", width: "100%" }} data-sticker-pos>{d.pos}</div> : null}
-        <div style={{ width: "100%", flex: "none", background: "#000", color: "#fff", padding: `${0.8 * u}mm ${1 * u}mm`, fontWeight: 800, textTransform: "uppercase", display: "flex", justifyContent: "space-between", alignItems: "center", gap: `${1.2 * u}mm`, lineHeight: 1.1, letterSpacing: "0.2px" }}>
-          <span style={{ flex: 1, minWidth: 0 }}><FitText text={d.name} maxMm={2.6 * u} minOneLineMm={2 * u} minMm={1.7 * u} maxLines={3} lineHeight={1.1} style={{ fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.2px" }} /></span>
-          <span style={{ whiteSpace: "nowrap", flex: "none", fontSize: `${1.8 * u}mm` }}>{d.index} OF {d.count}</span>
-        </div>
+      <img src={d.qr} alt="" style={{ position: "absolute", left: `${box.edge}mm`, top: `${(h - box.qr) / 2}mm`, width: `${box.qr}mm`, height: `${box.qr}mm` }} data-sticker-qr />
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/logo-mark.svg" alt="" style={{ position: "absolute", left: `${box.rightX + box.rightW - box.logoW}mm`, top: `${box.edge}mm`, width: `${box.logoW}mm`, height: `${box.logoH}mm` }} data-sticker-logo />
+      <div style={{ position: "absolute", left: `${box.rightX}mm`, top: `${box.nameTop}mm`, width: `${box.rightW}mm`, height: `${box.nameH}mm`, display: "flex", flexDirection: "column", justifyContent: "center" }} data-sticker-name>
+        {fit.lines.map((line, k) => <div key={k} style={{ fontSize: `${fit.size}mm`, fontWeight: 800, lineHeight: 1.08, textTransform: "uppercase", whiteSpace: "nowrap" }}>{line}</div>)}
       </div>
     </div>
   );

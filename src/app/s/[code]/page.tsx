@@ -19,9 +19,9 @@ function Plain({ title, lines }: { title: string; lines: string[] }) {
 }
 
 /**
- * The short link behind every sticker's QR. Logged-in staff land on the record (a part on the job's parts trail with
- * its invoice number); anyone else sees a plain page with nothing about the customer or the car: for a part,
- * "OFJ Automotive: genuine part, fitted on <date>".
+ * The short link behind every sticker's QR. Logged-in staff land on the record (a part: its own page, 9 November 2026);
+ * anyone else sees a plain page with nothing about the customer or the car - except a PART, which shows nothing at
+ * all without a sign-in (the battery and service stickers stay public: they are the customer's).
  */
 export default async function QrPage({ params }: { params: Promise<{ code: string }> }) {
   const { code } = await params;
@@ -29,6 +29,12 @@ export default async function QrPage({ params }: { params: Promise<{ code: strin
   const { data: link } = await admin.from("qr_links").select("code, kind, job_id, vehicle_id, ref_id").eq("code", code.toUpperCase()).maybeSingle();
   if (!link) return <Plain title="OFJ Automotive" lines={["This code is not known."]} />;
   const staff = await getCurrentStaff();
+  // 9 November 2026, Section 5: a PART sticker's QR is for staff only. Signed in: the part's own page with everything
+  // the sticker no longer carries. Not signed in: the sign-in page, nothing else.
+  if (link.kind === "part") {
+    if (!staff) redirect(`/login?next=${encodeURIComponent(`/s/${link.code}`)}`);
+    if (link.ref_id) redirect(`/parts/label/${link.ref_id}`);
+  }
   if (staff) {
     if (link.kind === "part" || link.kind === "battery") redirect(`/parts/trail/${link.job_id}${link.ref_id ? `?part=${link.ref_id}#part-${link.ref_id}` : ""}`);
     if (link.kind === "service") redirect(`/vehicles/${link.vehicle_id}`);
