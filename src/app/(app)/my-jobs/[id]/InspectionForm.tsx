@@ -91,9 +91,9 @@ export type Suggestions = Record<string, { parts?: string[]; remarks?: string[] 
 export type ScanState = { gate: boolean; readAt: string | null; notPossibleReason: string | null; approvedAt: string | null };
 
 const STATUS_CLASS: Record<ItemStatus, string> = {
-  good: "border-green bg-green text-white",
-  average: "border-amber-bar bg-amber-bar text-white",
-  bad: "border-red-bar bg-red-bar text-white",
+  good: "border-green bg-green text-on-dark",
+  average: "border-amber-bar bg-amber-bar text-on-dark",
+  bad: "border-red-bar bg-red-bar text-on-dark",
   na: "border-line-strong bg-chip text-muted",
 };
 
@@ -206,7 +206,7 @@ function Chips({ options, value, onPick, disabled, danger = false, small = false
       {options.map((o) => {
         const on = value === o.value;
         return (
-          <button key={o.value} type="button" disabled={disabled} onClick={() => onPick(o.value)} aria-pressed={on} className={`${small ? "min-h-9 px-2 text-xs" : "min-h-11 px-3 text-sm"} rounded-control border-2 font-bold ${on ? (danger ? "border-red-bar bg-red-bar text-white" : "border-ink bg-ink text-white") : "border-line-strong bg-white"} ${disabled ? "opacity-60" : ""}`}>
+          <button key={o.value} type="button" disabled={disabled} onClick={() => onPick(o.value)} aria-pressed={on} className={`${small ? "min-h-9 px-2 text-xs" : "min-h-11 px-3 text-sm"} rounded-control border-2 font-bold ${on ? (danger ? "border-red-bar bg-red-bar text-on-dark" : "border-ink bg-ink text-on-dark") : "border-line-strong bg-white"} ${disabled ? "opacity-60" : ""}`}>
             {o.label}
           </button>
         );
@@ -217,7 +217,7 @@ function Chips({ options, value, onPick, disabled, danger = false, small = false
 
 /** Green tick when complete. Before Submit was tapped an open section shows a grey dot; after, red. */
 function Dot({ ok, attempted }: { ok: boolean; attempted: boolean }) {
-  if (ok) return <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-green text-white text-xs font-bold" aria-label="complete">✓</span>;
+  if (ok) return <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-green text-on-dark text-xs font-bold" aria-label="complete">✓</span>;
   return <span className={`inline-block h-3 w-3 rounded-full ${attempted ? "bg-red-bar" : "bg-line-strong"}`} aria-label="incomplete" />;
 }
 
@@ -554,7 +554,7 @@ export function InspectionForm({
   const total = items.filter((i) => i.sectionKey !== ROAD_TEST_SECTION_KEY).length;
   const tyresOk = !problems.some((p) => p.key.startsWith("m-tyre"));
   const numbersOk = !problems.some((p) => p.key.startsWith("m-") && !p.key.startsWith("m-tyre"));
-  const tyreBtn = (on: boolean, danger = false) => `min-h-11 rounded-control border-2 px-2 text-xs font-bold ${on ? (danger ? "border-red-bar bg-red-bar text-white" : "border-green bg-green-soft text-green") : "border-line-strong bg-white"} ${locked ? "opacity-60" : ""}`;
+  const tyreBtn = (on: boolean, danger = false) => `min-h-11 rounded-control border-2 px-2 text-xs font-bold ${on ? (danger ? "border-red-bar bg-red-bar text-on-dark" : "border-green bg-green-soft text-green-text") : "border-line-strong bg-white"} ${locked ? "opacity-60" : ""}`;
   const prescanFiles = filesFor({ isPrescan: true });
   const yearOptions = tyreYearOptions(thisYear, limits.tyre_years);
   const mergedParts = mergePartsList(partsList);
@@ -599,7 +599,7 @@ export function InspectionForm({
       .filter(([, words]) => Array.isArray(words) && requests.some((r) => words.some((w) => w && r.text.toLowerCase().includes(String(w).toLowerCase()))))
       .map(([k]) => k),
   );
-  const complaintTag = (sectionKey: string) => (complaintSections.has(sectionKey) ? <span className="rounded-control border border-ink px-2 py-0.5 text-[11px] font-bold">Customer complaint</span> : null);
+  const complaintTag = (sectionKey: string) => (complaintSections.has(sectionKey) ? <span className="rounded-control border border-ink px-2 py-0.5 text-xs font-bold">Customer complaint</span> : null);
 
   /** The submit itself: the problems first, then everything typed is saved, so the server checks what the screen shows. */
   const trySubmit = () => {
@@ -673,18 +673,18 @@ export function InspectionForm({
               <Dot ok={scanGateOpen} attempted={attempted} />
             </div>
             {scanGateOpen ? (
-              <p className="text-sm text-green font-semibold">{scanState.readAt ? "Scan report read. The checklist is open." : "Scan not possible, approved by the workshop manager. The checklist is open."}</p>
+              <p className="text-sm text-green-text font-semibold">{scanState.readAt ? "Scan report read. The checklist is open." : "Scan not possible, approved by the workshop manager. The checklist is open."}</p>
             ) : (
               <p className="text-sm text-muted">Open the scan report and tick that you have read it. The checklist opens after that. No report? Attach it here, or say why a scan is not possible; the manager approves that.</p>
             )}
             <InspectionMedia inspectionId={inspectionId} files={prescanFiles} where={{ isPrescan: true }} accept="pdf" disabled={disabled && !canAddPrescan} onAdded={addFile({ isPrescan: true })} onRemoved={removeFile} />
             {!scanGateOpen && !disabled ? (
               <div className="flex flex-col gap-3 border-t border-line pt-3">
-                <button type="button" disabled={!prescanFiles.length} onClick={() => { save({ inspection: { scan_read: true } }); setScanState((s) => (s ? { ...s, readAt: new Date().toISOString() } : s)); }} className={`min-h-14 rounded-control border-2 text-base font-extrabold ${prescanFiles.length ? "border-ink bg-ink text-white" : "border-line bg-chip text-muted"}`}>
+                <button type="button" disabled={!prescanFiles.length} onClick={() => { save({ inspection: { scan_read: true } }); setScanState((s) => (s ? { ...s, readAt: new Date().toISOString() } : s)); }} className={`min-h-14 rounded-control border-2 text-base font-extrabold ${prescanFiles.length ? "border-ink bg-ink text-on-dark" : "border-line bg-chip text-muted"}`}>
                   I have read the scan report
                 </button>
                 {scanState.notPossibleReason ? (
-                  <p className="text-sm font-semibold text-amber">Scan not possible: {scanState.notPossibleReason}. Waiting for the workshop manager&apos;s approval.</p>
+                  <p className="text-sm font-semibold text-amber-text">Scan not possible: {scanState.notPossibleReason}. Waiting for the workshop manager&apos;s approval.</p>
                 ) : (
                   <div className="flex flex-wrap items-end gap-2">
                     <label className="flex flex-col gap-1 flex-1 min-w-48">
@@ -745,7 +745,7 @@ export function InspectionForm({
               </span>
               {!locked && open ? (
                 <span className="flex gap-2">
-                  <button type="button" onClick={() => allGood(section.key)} className="min-h-11 rounded-control border border-green bg-green-soft px-4 text-sm font-bold text-green">
+                  <button type="button" onClick={() => allGood(section.key)} className="min-h-11 rounded-control border border-green bg-green-soft px-4 text-sm font-bold text-green-text">
                     {allJobs ? "All OK" : "All good"}
                   </button>
                   <button type="button" onClick={() => allNa(section.key)} className="min-h-11 rounded-control border border-line-strong bg-chip px-4 text-sm font-bold text-muted">
@@ -773,8 +773,8 @@ export function InspectionForm({
                   <p className="font-semibold flex flex-wrap items-center gap-2">
                     {it.label}
                     {/* The tick keeps its place whether shown or not, so the line never changes width while typing. */}
-                    <span className={`inline-block w-4 text-center text-xs font-bold ${state === "saving" ? "text-muted" : state === "offline" ? "text-amber" : "text-green"}`} title={!touchedKeys.has(it.key) ? undefined : state === "saving" ? "Saving…" : state === "offline" ? "Not saved yet: no connection" : "Saved"} data-item-saved={touchedKeys.has(it.key) ? state : undefined} aria-hidden={!touchedKeys.has(it.key)}>{!touchedKeys.has(it.key) ? "" : state === "saving" ? "…" : state === "offline" ? "!" : "✓"}</span>
-                    {it.dangerous ? <span className="rounded-control bg-red-bar px-2 py-0.5 text-xs font-extrabold text-white">DANGEROUS</span> : null}
+                    <span className={`inline-block w-4 text-center text-xs font-bold ${state === "saving" ? "text-muted" : state === "offline" ? "text-amber-text" : "text-green-text"}`} title={!touchedKeys.has(it.key) ? undefined : state === "saving" ? "Saving…" : state === "offline" ? "Not saved yet: no connection" : "Saved"} data-item-saved={touchedKeys.has(it.key) ? state : undefined} aria-hidden={!touchedKeys.has(it.key)}>{!touchedKeys.has(it.key) ? "" : state === "saving" ? "…" : state === "offline" ? "!" : "✓"}</span>
+                    {it.dangerous ? <span className="rounded-control bg-red-bar px-2 py-0.5 text-xs font-extrabold text-on-dark">DANGEROUS</span> : null}
                     {it.editedBy ? <span className="text-xs font-medium text-muted">edited by {it.editedBy}</span> : null}
                   </p>
                   {hintOf(it) ? <p className="-mt-2 text-xs text-muted" data-item-hint={it.key}>{hintOf(it)}</p> : null}
@@ -798,7 +798,7 @@ export function InspectionForm({
                       <span className="text-xs font-semibold text-muted">Thickness (mm) · at or under {limits.pads_bad_max} = Bad · under {limits.pads_good_min} = Average · from {limits.pads_good_min} = Good</span>
                       <div className="flex flex-wrap items-center gap-1.5">
                         {PAD_MM_CHIPS.map((c) => (
-                          <button key={c} type="button" disabled={locked} aria-pressed={(measurements[padKey] ?? "") === c} onClick={() => setPadMm(it, c, true)} className={`min-h-11 min-w-11 rounded-control border px-2 text-sm font-bold ${(measurements[padKey] ?? "") === c ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-pad-chip={c}>{c}</button>
+                          <button key={c} type="button" disabled={locked} aria-pressed={(measurements[padKey] ?? "") === c} onClick={() => setPadMm(it, c, true)} className={`min-h-11 min-w-11 rounded-control border px-2 text-sm font-bold ${(measurements[padKey] ?? "") === c ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-pad-chip={c}>{c}</button>
                         ))}
                         <Input value={measurements[padKey] ?? ""} onChange={(e) => setPadMm(it, e.target.value)} inputMode="decimal" disabled={locked} aria-label={`${it.label} thickness in mm`} style={{ width: "5rem" }} className={outOfRange(padKey) ? "border-red-bar" : ""} data-pad-mm={padKey} />
                         <span className="text-xs text-muted">mm</span>
@@ -818,7 +818,7 @@ export function InspectionForm({
                       {(quickRemarks.length || sug.remarks?.length) && !locked ? (
                         <div className="flex flex-wrap gap-1.5">
                           {Array.from(new Set([...quickRemarks, ...(sug.remarks ?? [])])).slice(0, 12).map((r) => (
-                            <button key={r} type="button" aria-pressed={it.remarks.includes(r)} onClick={() => patchItem(it.key, { remarks: it.remarks.includes(r) ? it.remarks.split(" · ").filter((x) => x.trim() !== r).join(" · ").trim() : it.remarks.trim() ? `${it.remarks.trim()} · ${r}` : r })} className={`min-h-9 rounded-control border px-2 text-xs font-semibold ${it.remarks.includes(r) ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{it.remarks.includes(r) ? "✓ " : ""}{r}</button>
+                            <button key={r} type="button" aria-pressed={it.remarks.includes(r)} onClick={() => patchItem(it.key, { remarks: it.remarks.includes(r) ? it.remarks.split(" · ").filter((x) => x.trim() !== r).join(" · ").trim() : it.remarks.trim() ? `${it.remarks.trim()} · ${r}` : r })} className={`min-h-9 rounded-control border px-2 text-xs font-semibold ${it.remarks.includes(r) ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`}>{it.remarks.includes(r) ? "✓ " : ""}{r}</button>
                           ))}
                         </div>
                       ) : null}
@@ -829,7 +829,7 @@ export function InspectionForm({
                     <div className="flex flex-wrap items-center gap-2" data-service-due={it.key}>
                       <span className="text-xs font-semibold text-muted">Service due?</span>
                       {[{ v: false, l: "No" }, { v: true, l: "Yes, due" }].map((o) => (
-                        <button key={o.l} type="button" disabled={locked} aria-pressed={!!it.service_due === o.v} onClick={() => patchItem(it.key, { service_due: o.v })} className={`min-h-10 rounded-control border px-3 text-sm font-bold ${!!it.service_due === o.v ? (o.v ? "border-ink bg-ink text-white" : "border-green bg-green-soft text-green") : "border-line-strong bg-white"}`} data-service-due-choice={o.v ? "yes" : "no"}>{o.l}</button>
+                        <button key={o.l} type="button" disabled={locked} aria-pressed={!!it.service_due === o.v} onClick={() => patchItem(it.key, { service_due: o.v })} className={`min-h-10 rounded-control border px-3 text-sm font-bold ${!!it.service_due === o.v ? (o.v ? "border-ink bg-ink text-on-dark" : "border-green bg-green-soft text-green-text") : "border-line-strong bg-white"}`} data-service-due-choice={o.v ? "yes" : "no"}>{o.l}</button>
                       ))}
                     </div>
                   ) : null}
@@ -849,7 +849,7 @@ export function InspectionForm({
                       <span className="text-xs font-semibold text-muted">Quantity (grams)</span>
                       <div className="flex flex-wrap items-center gap-1.5">
                         {AC_GRAM_CHIPS.map((c) => (
-                          <button key={c} type="button" disabled={locked} aria-pressed={it.fluid_qty === c} onClick={() => setAc(it, { fluid_qty: it.fluid_qty === c ? "" : c })} className={`min-h-11 min-w-12 rounded-control border px-2 text-sm font-bold ${it.fluid_qty === c ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-ac-grams={c}>{c}</button>
+                          <button key={c} type="button" disabled={locked} aria-pressed={it.fluid_qty === c} onClick={() => setAc(it, { fluid_qty: it.fluid_qty === c ? "" : c })} className={`min-h-11 min-w-12 rounded-control border px-2 text-sm font-bold ${it.fluid_qty === c ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-ac-grams={c}>{c}</button>
                         ))}
                         <Input value={it.fluid_qty} onChange={(e) => setAc(it, { fluid_qty: e.target.value })} inputMode="numeric" disabled={locked} aria-label="A/C gas in grams" style={{ width: "6rem" }} data-ac-grams-box />
                         <span className="text-xs text-muted">g</span>
@@ -862,7 +862,7 @@ export function InspectionForm({
                       <Chips options={LEAK_SEVERITIES} value={it.leak_severity} onPick={(v) => setLeak(it, "leak_severity", v)} disabled={locked} small />
                       <span className="text-xs font-semibold text-muted">Repair</span>
                       <Chips options={LEAK_REPAIRS} value={it.leak_repair} onPick={(v) => setLeak(it, "leak_repair", v)} disabled={locked} small />
-                      <span className="text-[11px] text-muted">Tapping these writes the remark and adds the part.</span>
+                      <span className="text-xs text-muted">Tapping these writes the remark and adds the part.</span>
                     </div>
                   ) : null}
                   {needsDetail && fluid ? (
@@ -881,7 +881,7 @@ export function InspectionForm({
                       <span className="text-xs font-semibold text-muted">Labour hours (internal, never shown to the customer)</span>
                       <div className="flex flex-wrap items-center gap-1.5">
                         {LABOUR_HOUR_CHIPS.map((c) => (
-                          <button key={c} type="button" disabled={locked} aria-pressed={it.labour_hours === c} onClick={() => patchItem(it.key, { labour_hours: it.labour_hours === c ? "" : c })} className={`min-h-11 min-w-11 rounded-control border px-2 text-sm font-bold ${it.labour_hours === c ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-hour-chip={c}>{c}</button>
+                          <button key={c} type="button" disabled={locked} aria-pressed={it.labour_hours === c} onClick={() => patchItem(it.key, { labour_hours: it.labour_hours === c ? "" : c })} className={`min-h-11 min-w-11 rounded-control border px-2 text-sm font-bold ${it.labour_hours === c ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-hour-chip={c}>{c}</button>
                         ))}
                         <Input value={it.labour_hours} onChange={(e) => patchItem(it.key, { labour_hours: e.target.value }, false)} inputMode="decimal" disabled={locked} aria-label={`${it.label} labour hours`} style={{ width: "5rem" }} data-labour-box />
                         <span className="text-xs text-muted">h</span>
@@ -910,7 +910,7 @@ export function InspectionForm({
                   {it.status === "bad" && !isJob ? (
                     <div className={`flex flex-col gap-2 rounded-control p-2 ${it.dangerous ? "bg-red-soft" : "bg-chip"}`}>
                       <div className="flex flex-wrap items-center gap-2">
-                        <button type="button" disabled={locked} onClick={() => patchItem(it.key, { dangerous: !it.dangerous })} aria-pressed={it.dangerous} className={`min-h-11 rounded-control border-2 px-3 text-sm font-extrabold ${it.dangerous ? "border-red-bar bg-red-bar text-white" : "border-line-strong bg-white"}`}>
+                        <button type="button" disabled={locked} onClick={() => patchItem(it.key, { dangerous: !it.dangerous })} aria-pressed={it.dangerous} className={`min-h-11 rounded-control border-2 px-3 text-sm font-extrabold ${it.dangerous ? "border-red-bar bg-red-bar text-on-dark" : "border-line-strong bg-white"}`}>
                           {it.dangerous ? "DANGEROUS TO DRIVE: ON" : "Dangerous to drive?"}
                         </button>
                         <span className="text-xs text-muted">Optional. When on: the manager, advisor and owner are told at once; the line is Urgent and the customer sees a safety warning.</span>
@@ -961,7 +961,7 @@ export function InspectionForm({
           return (
             <div key={p.key} className={`rounded-card border p-3 flex flex-col gap-3 ${danger ? "border-red-bar border-2" : "border-line"}`}>
               <p className="font-semibold flex flex-wrap items-center gap-2">
-                {p.label}{danger ? <span className="rounded-control bg-red-bar px-2 py-0.5 text-xs font-extrabold text-white">DANGEROUS</span> : null}
+                {p.label}{danger ? <span className="rounded-control bg-red-bar px-2 py-0.5 text-xs font-extrabold text-on-dark">DANGEROUS</span> : null}
                 <InspectionMedia inspectionId={inspectionId} files={filesFor({ itemKey: `tyre.${p.key}` })} where={{ itemKey: `tyre.${p.key}` }} disabled={locked} iconOnly label={`${p.label} tyre: photo`} onAdded={addFile({ itemKey: `tyre.${p.key}` })} onRemoved={removeFile} />
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -978,7 +978,7 @@ export function InspectionForm({
                     </Select>
                     {p.key !== "fl" && measurements.tyre_fl_year && !locked ? <button type="button" onClick={() => { for (const f of ["year", "tread", "brand", "model"]) setMeasurement(`tyre_${p.key}_${f}`, measurements[`tyre_fl_${f}`] ?? "", true); if ((p.key === "rl" || p.key === "rr") && measurements.tyre_size_front) setMeasurement("tyre_size_rear", tyreSizeText(measurements.tyre_size_front ?? ""), true); }} className="min-h-11 rounded-control border border-line-strong bg-white px-2 text-xs font-bold whitespace-nowrap" title="Copies the year, size, brand, model and tread">Same as front left</button> : null}
                   </div>
-                  {age !== null && age > limits.tyre_years ? <span className="text-xs font-bold text-red">Older than {limits.tyre_years} years</span> : age !== null && age >= 6 ? <span className="text-xs font-bold text-amber">{age} years old</span> : null}
+                  {age !== null && age > limits.tyre_years ? <span className="text-xs font-bold text-red">Older than {limits.tyre_years} years</span> : age !== null && age >= 6 ? <span className="text-xs font-bold text-amber-text">{age} years old</span> : null}
                 </div>
                 <label id={`item-m-tyre_${p.key}_brand`} className="flex flex-col gap-1">
                   <span className="text-xs font-semibold text-muted">Brand</span>
@@ -1046,7 +1046,7 @@ export function InspectionForm({
                   {m.kind === "choice" ? (
                     <div className="grid grid-cols-3 gap-1">
                       {m.choices!.map((c) => (
-                        <button key={c.value} type="button" disabled={locked} onClick={() => setMeasurement(m.key, c.value, true)} aria-pressed={measurements[m.key] === c.value} className={`min-h-11 rounded-control border text-xs font-bold ${measurements[m.key] === c.value ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                        <button key={c.value} type="button" disabled={locked} onClick={() => setMeasurement(m.key, c.value, true)} aria-pressed={measurements[m.key] === c.value} className={`min-h-11 rounded-control border text-xs font-bold ${measurements[m.key] === c.value ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
                           {c.label}
                         </button>
                       ))}
@@ -1099,7 +1099,7 @@ export function InspectionForm({
                 <li key={line.key} className="py-2 flex flex-wrap items-center gap-2 text-sm">
                   <span className="flex flex-col"><span className="font-semibold">{line.name}</span><PositionsLine positions={line.positions} /></span>
                   <span className="text-xs text-muted">· {fromLabel(line)}</span>
-                  {dupPositions(line).length ? <span className="text-[11px] font-semibold text-amber">Appears twice for {dupPositions(line).join(", ")}: check the quantity</span> : null}
+                  {dupPositions(line).length ? <span className="text-xs font-semibold text-amber-text">Appears twice for {dupPositions(line).join(", ")}: check the quantity</span> : null}
                   <span className="ml-auto inline-flex items-center rounded-control border border-line-strong bg-white">
                     <button type="button" disabled={locked || auto} aria-label={`One less ${line.name}`} onClick={() => setList(partsRef.current.map((e) => (e.id === first.id ? { ...e, qty: Math.max(1, e.qty - 1) } : e)))} className="min-h-10 w-10 text-lg font-bold disabled:text-faint">−</button>
                     <span className="w-8 text-center text-sm font-bold">{line.qty}</span>
@@ -1132,7 +1132,7 @@ export function InspectionForm({
       <Card className="flex flex-col gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <SectionLabel right={`${items.filter((i) => i.status === "bad" && i.style !== "job").length}`}>Marked Bad</SectionLabel>
-          <button type="button" onClick={() => setShowAverage((s) => !s)} aria-pressed={showAverage} className={`min-h-8 rounded-control border px-2 text-xs font-semibold ${showAverage ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{showAverage ? "✓ " : ""}Show Average</button>
+          <button type="button" onClick={() => setShowAverage((s) => !s)} aria-pressed={showAverage} className={`min-h-8 rounded-control border px-2 text-xs font-semibold ${showAverage ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`}>{showAverage ? "✓ " : ""}Show Average</button>
         </div>
         {items.filter((i) => i.style !== "job" && (i.status === "bad" || (showAverage && i.status === "average"))).length === 0 ? (
           <p className="text-xs text-muted">Nothing marked Bad{showAverage ? " or Average" : ""} yet.</p>
@@ -1149,12 +1149,12 @@ export function InspectionForm({
                     {i.remarks ? <span className="block text-xs text-muted truncate">{i.remarks}</span> : null}
                   </span>
                   {has ? (
-                    <span className="inline-flex items-center gap-1 rounded-control border border-green bg-green-soft px-2 py-1 text-xs font-bold text-green">✓ Part listed</span>
+                    <span className="inline-flex items-center gap-1 rounded-control border border-green bg-green-soft px-2 py-1 text-xs font-bold text-green-text">✓ Part listed</span>
                   ) : none ? (
                     <button type="button" disabled={locked} onClick={() => toggleNoPart(i.key)} className="min-h-9 rounded-control border border-line-strong bg-white px-2 text-xs font-semibold text-muted">No part needed · undo</button>
                   ) : (
                     <>
-                      <span className="rounded-control bg-amber-soft px-2 py-1 text-xs font-bold text-amber">No part listed</span>
+                      <span className="rounded-control bg-amber-soft px-2 py-1 text-xs font-bold text-amber-text">No part listed</span>
                       {!locked ? <button type="button" onClick={() => setPickerFor({ itemKey: i.key, label: i.label })} className="min-h-9 rounded-control border border-dashed border-line-strong px-2 text-xs font-bold">+ Add part</button> : null}
                       {!locked ? <button type="button" onClick={() => toggleNoPart(i.key)} className="min-h-9 rounded-control px-2 text-xs font-semibold text-muted underline underline-offset-4">No part needed</button> : null}
                     </>
@@ -1176,7 +1176,7 @@ export function InspectionForm({
         {bigJobTags.length ? (
           <div className="flex flex-wrap gap-1.5">
             {bigJobTags.map((t) => (
-              <button key={t} type="button" disabled={locked} onClick={() => toggleTag(t)} aria-pressed={tags.includes(t)} className={`min-h-11 rounded-control border-2 px-3 text-sm font-bold ${tags.includes(t) ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{tags.includes(t) ? "✓ " : ""}{t}</button>
+              <button key={t} type="button" disabled={locked} onClick={() => toggleTag(t)} aria-pressed={tags.includes(t)} className={`min-h-11 rounded-control border-2 px-3 text-sm font-bold ${tags.includes(t) ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`}>{tags.includes(t) ? "✓ " : ""}{t}</button>
             ))}
           </div>
         ) : null}
@@ -1258,7 +1258,7 @@ export function InspectionForm({
       {!disabled ? (
         <>
           {state !== "saved" ? (
-            <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 rounded-full bg-ink/85 px-3 py-1 text-[11px] font-bold text-white pointer-events-none">
+            <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-30 rounded-full bg-ink/85 px-3 py-1 text-xs font-bold text-on-dark pointer-events-none">
               {state === "saving" ? "Saving…" : "No connection · changes kept, will save"}
             </div>
           ) : null}

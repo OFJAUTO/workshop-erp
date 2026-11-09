@@ -48,7 +48,7 @@ export function ProblemsBar({
           {more > 0 ? <span className="text-sm font-bold text-red">+{more} more</span> : null}
         </>
       ) : problems.length === 0 ? (
-        <span className="text-xs font-bold text-green mr-1">Everything is filled in</span>
+        <span className="text-xs font-bold text-green-text mr-1">Everything is filled in</span>
       ) : progress ? (
         <span className="text-xs font-bold text-muted mr-1">
           {progress.done} of {progress.total} done
@@ -58,7 +58,7 @@ export function ProblemsBar({
       )}
       {error ? <span className="basis-full text-sm font-bold text-red">{error}</span> : null}
       {onSubmit ? (
-        <button type="button" onClick={onSubmit} disabled={submitting} aria-busy={submitting} className={`ml-auto min-h-12 rounded-control px-5 text-sm font-bold text-white ${showRed ? "bg-ink/40" : submitting ? "bg-ink/70" : "bg-ink"}`}>
+        <button type="button" onClick={onSubmit} disabled={submitting} aria-busy={submitting} className={`ml-auto min-h-12 rounded-control px-5 text-sm font-bold text-on-dark ${showRed ? "bg-ink/40" : submitting ? "bg-ink/70" : "bg-ink"}`}>
           {submitting ? "Submitting…" : submitLabel}
         </button>
       ) : null}

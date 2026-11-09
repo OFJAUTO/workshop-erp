@@ -107,11 +107,11 @@ function QueuedTile({ p, onRetry, onRemove }: { p: PendingFile; onRetry: () => v
         // eslint-disable-next-line @next/next/no-img-element
         <img src={p.previewUrl} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />
       ) : (
-        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded bg-white text-[11px] font-bold">{p.kind === "pdf" ? "PDF" : "FILE"}</span>
+        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded bg-white text-xs font-bold">{p.kind === "pdf" ? "PDF" : "FILE"}</span>
       )}
       <span className="flex min-w-0 flex-1 flex-col">
         {p.name ? <span className="truncate text-xs font-semibold text-ink">{p.name}</span> : null}
-        <span className={`text-xs ${stopped ? "font-semibold text-red" : "text-amber"}`}>{pendingWords(p)}</span>
+        <span className={`text-xs ${stopped ? "font-semibold text-red" : "text-amber-text"}`}>{pendingWords(p)}</span>
       </span>
       {stopped ? (
         <span className="flex gap-1.5">
@@ -200,7 +200,7 @@ export function QueuedProofView({
       ))}
       {proof.waiting && waitingHint ? <span className="text-xs text-muted">{waitingHint}</span> : null}
       {proof.ready ? (
-        <span className="inline-flex flex-wrap items-center gap-2 text-xs font-bold text-green" data-queued-sent>
+        <span className="inline-flex flex-wrap items-center gap-2 text-xs font-bold text-green-text" data-queued-sent>
           <span>✓ {readyWords}</span>
           {proof.ready.url ? (
             <a href={proof.ready.url} target="_blank" rel="noreferrer" className="underline underline-offset-4">{proof.ready.name ?? (proof.ready.kind === "pdf" ? "the PDF" : "the photo")}</a>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Words } from "@/components/Words";
 import { Card, SectionLabel } from "@/components/ui";
 import type { PriceToFix } from "@/lib/part-cost-history";
 
@@ -40,12 +41,10 @@ function Row({ r }: { r: PriceToFix }) {
       <Link href={r.href} className="flex min-h-11 flex-wrap items-baseline gap-x-2 gap-y-0.5">
         <span className="font-bold uppercase">{r.part}</span>
         {r.partNumber ? <span className="text-xs text-muted">{r.partNumber}</span> : null}
-        <span className="text-sm font-semibold text-amber">{r.why}</span>
+        <span className="text-sm font-semibold text-amber-text">{r.why}</span>
         <span className="ml-auto whitespace-nowrap text-xs font-bold underline underline-offset-4">{r.settled ? "Correct the cost" : "Fix the price"}</span>
       </Link>
-      <span className="text-xs text-muted">
-        {[r.plate, r.car, r.jobNumber].filter(Boolean).join(" · ")} · cost {money(r.cost)}{r.supplier ? ` · ${r.supplier}` : ""}{r.lpo ? ` · ${r.lpo}` : ""}{r.quotation ? ` · ${r.quotation}` : ""}{r.selling !== null ? ` · selling ${money(r.selling)}` : ""}
-      </span>
+      <Words className="text-xs text-muted" text={`${[r.plate, r.car, r.jobNumber].filter(Boolean).join(" · ")} · cost ${money(r.cost)}${r.supplier ? ` · ${r.supplier}` : ""}${r.lpo ? ` · ${r.lpo}` : ""}${r.quotation ? ` · ${r.quotation}` : ""}${r.selling !== null ? ` · selling ${money(r.selling)}` : ""}`} />
     </li>
   );
 }

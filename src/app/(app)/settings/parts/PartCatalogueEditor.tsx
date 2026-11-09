@@ -22,7 +22,7 @@ export function PartCatalogueEditor({ action, initial }: { action: FormAction; i
   const small = "min-h-9 min-w-9 rounded-control border border-line-strong bg-white px-2 text-xs font-bold";
   const live = rows.filter((r) => !r.remove);
   const update = (key: string, patch: Partial<EditRow>) => setRows((p) => p.map((r) => (r.key === key ? { ...r, ...patch } : r)));
-  const toggleBtn = (on: boolean) => `min-h-9 whitespace-nowrap rounded-control border px-2 text-xs font-bold ${on ? "border-green bg-green-soft text-green" : "border-line-strong bg-white text-muted"}`;
+  const toggleBtn = (on: boolean) => `min-h-9 whitespace-nowrap rounded-control border px-2 text-xs font-bold ${on ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white text-muted"}`;
 
   return (
     <ActionForm action={action} className="flex flex-col gap-4">

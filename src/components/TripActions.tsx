@@ -40,7 +40,7 @@ export function TripActions({ kind, driverName, driverPhone, customerPhone = nul
 
   return (
     <div className="flex flex-col gap-2" data-trip-actions data-trip-kind={kind}>
-      <span className={`text-[13px] font-bold ${deliveredAt ? "text-green" : loadedAt || sentAt ? "" : "text-muted"}`} data-trip-state>{status}</span>
+      <span className={`text-[13px] font-bold ${deliveredAt ? "text-green-text" : loadedAt || sentAt ? "" : "text-muted"}`} data-trip-state>{status}</span>
       {!deliveredAt ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" size="md" tone={sentAt ? "secondary" : "primary"} disabled={pending}

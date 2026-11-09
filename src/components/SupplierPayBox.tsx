@@ -109,9 +109,9 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
           <ChoiceButtons name="excess_kind" columns={2} defaultValue="advance" options={[{ value: "advance", label: `Advance with ${supplierName}` }, { value: "fee", label: "Fee / charge (an expense)" }]} />
         </div>
       ) : null}
-      {short > 0.004 && excess <= 0.004 ? <p className="text-sm font-semibold text-amber" data-supplier-pay-short>Part paid · balance AED {fmt(short)} stays owed.</p> : null}
+      {short > 0.004 && excess <= 0.004 ? <p className="text-sm font-semibold text-amber-text" data-supplier-pay-short>Part paid · balance AED {fmt(short)} stays owed.</p> : null}
       {state?.error ? <p className="text-sm font-bold text-red" data-supplier-pay-error>{state.error}</p> : null}
-      {state?.ok ? <p className="text-sm font-bold text-green" data-supplier-pay-done>{state.message}</p> : null}
+      {state?.ok ? <p className="text-sm font-bold text-green-text" data-supplier-pay-done>{state.message}</p> : null}
       <div>
         <ConfirmSubmit
           label="Record the payment"

@@ -36,11 +36,11 @@ export function QuotationList({ jobId, families, canQuote, jobOpen, kind = "quot
             <li key={f.number} className="flex flex-col gap-1.5 px-3 py-2.5" data-quote-row={f.number} data-quote-role={f.role} data-quote-status={c.status}>
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="text-sm font-extrabold whitespace-nowrap">{f.number}</span>
-                {chip ? <span className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold tracking-[0.08em] whitespace-nowrap ${f.role === "original" ? "bg-ink text-white" : "border border-ink text-ink"}`}>{chip}</span> : null}
+                {chip ? <span className={`rounded-full px-2 py-0.5 text-xs font-extrabold tracking-[0.08em] whitespace-nowrap ${f.role === "original" ? "bg-ink text-on-dark" : "border border-ink text-ink"}`}>{chip}</span> : null}
                 {f.addsTo ? <span className="text-xs font-semibold text-muted whitespace-nowrap" data-quote-adds-to={f.addsTo}>in addition to {f.addsTo}</span> : null}
                 <span className="ml-auto text-sm font-extrabold whitespace-nowrap" data-quote-amount>{aed(f.amount)}</span>
               </div>
-              <span className={`text-xs font-semibold ${approved ? "text-green" : c.status === "declined" || c.status === "expired" || c.status === "cancelled" ? "text-red" : "text-muted"}`} data-quote-words>
+              <span className={`text-xs font-semibold ${approved ? "text-green-text" : c.status === "declined" || c.status === "expired" || c.status === "cancelled" ? "text-red" : "text-muted"}`} data-quote-words>
                 {estimates && approved ? statusWords(c).replace(/^Approved/, "Accepted") : statusWords(c)}
                 {f.versions.length > 1 ? ` · v${c.version} of ${f.versions.length}` : ""}
                 {f.carriedTo ? (
@@ -73,9 +73,9 @@ export function QuotationList({ jobId, families, canQuote, jobOpen, kind = "quot
         })}
       </ul>
       <p className="text-xs font-semibold" data-quote-money>
-        <span className="text-green">{estimates ? "Accepted" : "Approved"} so far {aed(money.approved)}</span>
+        <span className="text-green-text">{estimates ? "Accepted" : "Approved"} so far {aed(money.approved)}</span>
         <span className="text-muted"> · </span>
-        <span className={money.waiting > 0 ? "text-amber" : "text-muted"}>Waiting for {estimates ? "the customer" : "approval"} {aed(money.waiting)}</span>
+        <span className={money.waiting > 0 ? "text-amber-text" : "text-muted"}>Waiting for {estimates ? "the customer" : "approval"} {aed(money.waiting)}</span>
         <span className="text-muted"> · </span>
         <span className={money.declined > 0 ? "text-red" : "text-muted"}>Declined {aed(money.declined)}</span>
       </p>

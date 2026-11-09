@@ -45,7 +45,7 @@ export default async function ZohoClosePage({ searchParams }: { searchParams: Pr
 
       <div className="flex flex-wrap gap-1 text-xs font-bold" data-close-months>
         {months.map((m) => (
-          <Link key={m} href={`/zoho/close?month=${m}`} className={`min-h-9 inline-flex items-center rounded-control px-3 ${m === month ? "bg-ink text-white" : "bg-chip"}`}>{m}</Link>
+          <Link key={m} href={`/zoho/close?month=${m}`} className={`min-h-9 inline-flex items-center rounded-control px-3 ${m === month ? "bg-ink text-on-dark" : "bg-chip"}`}>{m}</Link>
         ))}
       </div>
 

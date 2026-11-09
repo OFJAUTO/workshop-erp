@@ -9,7 +9,7 @@ import type { StageBoxState } from "@/lib/stage-style";
  */
 const NOW: Record<Timing["tone"], string> = { green: "bg-green", amber: "bg-amber-bar", red: "bg-red-bar", neutral: "bg-ink" };
 
-/** Short labels for narrow cards; every one fits a ninth of a phone card at 10 px. */
+/** Short labels for narrow cards; staggered on two lines there, so each has two steps of room at 13 to 14 px. */
 export const STAGE_SHORT: Record<Stage, string> = {
   gate_in: "Gate",
   inspection: "Insp.",
@@ -35,9 +35,13 @@ export function StageBar({ stage, timing, skip, states = null }: { stage: Stage;
           return (
             <li key={s} className="flex min-w-0 flex-col gap-1.5" data-stage-step={s} data-state={now ? "current" : state}>
               <span className={`h-1.5 rounded-full ${bar}`} />
-              <span className={`whitespace-nowrap text-center text-[10px] leading-tight @[30rem]:text-[11px] ${now ? "font-extrabold text-ink" : state === "done" ? "font-semibold text-muted" : "font-medium text-[#8A8E96]"}`} title={STAGE_LABELS[s]}>
-                <span className="@[34rem]:hidden">{STAGE_SHORT[s]}</span>
-                <span className="hidden @[34rem]:inline">{STAGE_LABELS[s]}</span>
+              {/* 9 November 2026 (no text under 13 px): on a narrow card every other label sits one line lower, so each
+                  label may use the room of two steps and two labels never touch. The label is centred on its step. */}
+              <span className={`flex justify-center ${i % 2 ? "@max-[34rem]:pt-[1.15rem]" : ""}`}>
+                <span className={`shrink-0 whitespace-nowrap text-center text-xs leading-tight ${now ? "font-extrabold text-ink" : state === "done" ? "font-semibold text-muted" : "font-medium text-faint"}`} title={STAGE_LABELS[s]}>
+                  <span className="@[34rem]:hidden">{STAGE_SHORT[s]}</span>
+                  <span className="hidden @[34rem]:inline">{STAGE_LABELS[s]}</span>
+                </span>
               </span>
             </li>
           );

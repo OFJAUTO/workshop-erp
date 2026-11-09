@@ -136,14 +136,14 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
         </form>
         <div className="flex flex-wrap gap-1 text-xs font-bold" data-lpo-tabs>
           {TABS.map((t) => (
-            <Link key={t.key} href={keep({ tab: t.key })} className={`min-h-9 inline-flex items-center rounded-control px-3 ${tab === t.key ? "bg-ink text-white" : "bg-chip"}`} data-lpo-tab={t.key}>{t.label} · {counts[t.key]}</Link>
+            <Link key={t.key} href={keep({ tab: t.key })} className={`min-h-9 inline-flex items-center rounded-control px-3 ${tab === t.key ? "bg-ink text-on-dark" : "bg-chip"}`} data-lpo-tab={t.key}>{t.label} · {counts[t.key]}</Link>
           ))}
         </div>
         {suppliers.length > 1 ? (
           <div className="flex flex-wrap items-center gap-1 text-xs font-bold" data-lpo-suppliers>
             <span className="text-muted mr-1">Supplier:</span>
-            <Link href={keep({ supplier: "" })} className={`min-h-9 inline-flex items-center rounded-control px-3 ${!supplier ? "bg-ink text-white" : "bg-chip"}`}>All</Link>
-            {suppliers.map(([id, name]) => <Link key={id} href={keep({ supplier: id })} className={`min-h-9 inline-flex items-center rounded-control px-3 ${supplier === id ? "bg-ink text-white" : "bg-chip"}`}>{name}</Link>)}
+            <Link href={keep({ supplier: "" })} className={`min-h-9 inline-flex items-center rounded-control px-3 ${!supplier ? "bg-ink text-on-dark" : "bg-chip"}`}>All</Link>
+            {suppliers.map(([id, name]) => <Link key={id} href={keep({ supplier: id })} className={`min-h-9 inline-flex items-center rounded-control px-3 ${supplier === id ? "bg-ink text-on-dark" : "bg-chip"}`}>{name}</Link>)}
           </div>
         ) : null}
       </Card>

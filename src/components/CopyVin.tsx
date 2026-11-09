@@ -22,7 +22,7 @@ export function CopyVin({ vin }: { vin: string | null | undefined }) {
       aria-label="Copy the VIN"
     >
       <span className="tracking-[0.04em]">{vin}</span>
-      <span className={`text-[11px] font-bold ${copied ? "text-green" : "text-muted"}`}>{copied ? "Copied" : "Copy"}</span>
+      <span className={`text-xs font-bold ${copied ? "text-green-text" : "text-muted"}`}>{copied ? "Copied" : "Copy"}</span>
     </button>
   );
 }

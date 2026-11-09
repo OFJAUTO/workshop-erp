@@ -186,8 +186,8 @@ export function DriveClient({ token, kind, loadedAt = null, officePhone = null }
     <div className="mx-auto flex w-full max-w-md flex-col gap-5 p-5">
       {kind === "pickup" ? (
         <div className="flex items-center gap-2 text-sm font-extrabold" data-drive-steps>
-          <span className={`rounded-full px-3 py-1 ${step === "loaded" ? "bg-[#111113] text-white" : "bg-[#E8F5EC] text-[#1b6b2f]"}`}>1 · Car loaded{loaded ? " ✓" : ""}</span>
-          <span className={`rounded-full px-3 py-1 ${step === "final" ? "bg-[#111113] text-white" : "bg-[#F4F4F5] text-[#5F6368]"}`}>2 · Delivered to OFJ</span>
+          <span className={`rounded-full px-3 py-1 ${step === "loaded" ? "bg-[#111113] text-on-dark" : "bg-[#E8F5EC] text-[#1b6b2f]"}`}>1 · Car loaded{loaded ? " ✓" : ""}</span>
+          <span className={`rounded-full px-3 py-1 ${step === "final" ? "bg-[#111113] text-on-dark" : "bg-[#F4F4F5] text-[#5F6368]"}`}>2 · Delivered to OFJ</span>
         </div>
       ) : null}
       {waiting && !linkDead ? (
@@ -206,7 +206,7 @@ export function DriveClient({ token, kind, loadedAt = null, officePhone = null }
       {linkDead ? (
         <div className="flex flex-col gap-2 rounded-2xl border-2 border-[#B3261E] bg-[#FDECEA] px-4 py-3 text-center" data-drive-link-dead>
           <span className="text-lg font-extrabold text-[#B3261E]">{problem?.words}</span>
-          {officePhone ? <a href={`tel:${officePhone.replace(/[^\d+]/g, "")}`} className="flex min-h-14 items-center justify-center rounded-xl bg-[#111113] px-4 text-xl font-extrabold text-white">Call OFJ</a> : null}
+          {officePhone ? <a href={`tel:${officePhone.replace(/[^\d+]/g, "")}`} className="flex min-h-14 items-center justify-center rounded-xl bg-[#111113] px-4 text-xl font-extrabold text-on-dark">Call OFJ</a> : null}
           <span className="text-sm font-semibold text-[#5F6368]">Your photo is kept on this phone.</span>
         </div>
       ) : null}
@@ -216,7 +216,7 @@ export function DriveClient({ token, kind, loadedAt = null, officePhone = null }
         <>
           <input ref={fileRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => { const f = e.target.files?.[0] ?? null; setPhoto(f); setPreview(f ? URL.createObjectURL(f) : null); setError(null); }} data-drive-file />
           {!photo ? (
-            <button type="button" onClick={() => fileRef.current?.click()} className="flex min-h-40 w-full items-center justify-center rounded-2xl bg-[#111113] px-6 text-center text-3xl font-extrabold leading-tight text-white" data-drive-photo>
+            <button type="button" onClick={() => fileRef.current?.click()} className="flex min-h-40 w-full items-center justify-center rounded-2xl bg-[#111113] px-6 text-center text-3xl font-extrabold leading-tight text-on-dark" data-drive-photo>
               {word}:<br />TAKE PHOTO
             </button>
           ) : (
@@ -230,7 +230,7 @@ export function DriveClient({ token, kind, loadedAt = null, officePhone = null }
                   <input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" placeholder="0" className="min-h-16 rounded-xl border-2 border-[#111113] px-4 text-3xl font-extrabold" data-drive-price />
                 </label>
               ) : null}
-              <button type="button" disabled={preparing} onClick={send} className="min-h-16 rounded-2xl bg-[#111113] px-6 text-2xl font-extrabold text-white disabled:opacity-50" data-drive-send>
+              <button type="button" disabled={preparing} onClick={send} className="min-h-16 rounded-2xl bg-[#111113] px-6 text-2xl font-extrabold text-on-dark disabled:opacity-50" data-drive-send>
                 {preparing ? "SAVING…" : "SEND"}
               </button>
             </>

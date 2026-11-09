@@ -198,7 +198,7 @@ export function VideoPlayer({ video, signedAt, freshen, poster: storedPoster = n
       ) : (
         <video src={`${src}#t=0.5`} muted playsInline preload="metadata" className="pointer-events-none h-full w-full object-cover" />
       )}
-      <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/30 text-white" data-play>
+      <span className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/30 text-on-dark" data-play>
         <span className="flex h-16 w-16 items-center justify-center rounded-full bg-white/90 pl-1 text-2xl font-bold text-ink">{loading ? "…" : "▶"}</span>
         <span className="text-xs font-semibold">{loading ? "Loading…" : "Tap to play"}</span>
       </span>

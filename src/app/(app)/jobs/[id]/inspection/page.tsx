@@ -318,7 +318,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
                 ) : (
                   <p className="text-sm text-muted">No parts on this report.</p>
                 )}
-                {insp.parts_list_confirmed_at ? <p className="text-xs text-green font-semibold">✓ Checked by {tickName ?? "the workshop manager"}, {formatDateTime(insp.parts_list_confirmed_at)}.{insp.status === "approved" ? " Sent to Parts for pricing." : ""}</p> : <p className="text-xs text-muted">The workshop manager ticks the list under it when approving the report.</p>}
+                {insp.parts_list_confirmed_at ? <p className="text-xs text-green-text font-semibold">✓ Checked by {tickName ?? "the workshop manager"}, {formatDateTime(insp.parts_list_confirmed_at)}.{insp.status === "approved" ? " Sent to Parts for pricing." : ""}</p> : <p className="text-xs text-muted">The workshop manager ticks the list under it when approving the report.</p>}
               </Card>
 
 
@@ -414,7 +414,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
                 )}
                 {road.good.length ? (
                   <p className="text-xs text-muted" data-road-good>
-                    <span className="font-semibold text-green">Good:</span> {road.good.join(", ")}
+                    <span className="font-semibold text-green-text">Good:</span> {road.good.join(", ")}
                   </p>
                 ) : null}
               </>

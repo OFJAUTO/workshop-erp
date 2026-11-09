@@ -62,14 +62,14 @@ function Fields({ v, customers, vehicles, advisors, jobs, submitLabel }: { v: Re
               type="button"
               onClick={() => setKind(k)}
               aria-pressed={kind === k}
-              className={`min-h-16 rounded-control border px-3 py-2 text-left flex items-center gap-3 ${kind === k ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}
+              className={`min-h-16 rounded-control border px-3 py-2 text-left flex items-center gap-3 ${kind === k ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}
             >
               <span className="shrink-0">
                 <BookingIcon kind={k} size={22} />
               </span>
               <span className="flex flex-col">
                 <span className="text-sm font-bold">{BOOKING_KIND_LABELS[k]}</span>
-                <span className={`text-[11px] ${kind === k ? "text-white/70" : "text-muted"}`}>{BOOKING_KIND_HINTS[k]}</span>
+                <span className={`text-xs ${kind === k ? "text-on-dark/70" : "text-muted"}`}>{BOOKING_KIND_HINTS[k]}</span>
               </span>
             </button>
           ))}
@@ -107,7 +107,7 @@ function Fields({ v, customers, vehicles, advisors, jobs, submitLabel }: { v: Re
                       type="button"
                       onClick={() => setMode(m)}
                       aria-pressed={mode === m}
-                      className={`min-h-12 rounded-control border px-3 text-sm font-semibold ${mode === m ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}
+                      className={`min-h-12 rounded-control border px-3 text-sm font-semibold ${mode === m ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}
                     >
                       {m === "existing" ? "Existing customer" : "New customer"}
                     </button>

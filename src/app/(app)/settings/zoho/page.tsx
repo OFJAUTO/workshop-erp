@@ -104,7 +104,7 @@ export default async function ZohoSettingsPage({ searchParams }: { searchParams:
         ) : conn ? (
           <>
             <p className="text-sm" data-zoho-status>
-              <span className="font-bold text-green">Connected ✓</span> · by {conn.connected_by_name ?? "the owner"} on {formatDate(conn.connected_at)} · one-way, ERP → Zoho only
+              <span className="font-bold text-green-text">Connected ✓</span> · by {conn.connected_by_name ?? "the owner"} on {formatDate(conn.connected_at)} · one-way, ERP → Zoho only
             </p>
             {conn.last_error ? <Notice tone="error">Zoho problem: {conn.last_error}</Notice> : null}
             <div className="flex flex-wrap gap-2">

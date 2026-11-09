@@ -6,7 +6,7 @@ import { Logo } from "@/components/Logo";
  * number and the status. On a phone the panel itself opens the warranty page (a screen cannot scan itself).
  */
 export function WarrantyCardPanel({ href, qr, certificateNo, car, status }: { href: string; qr: string | null; certificateNo: string; car: string; status: { kind: string; title: string } }) {
-  const tone = status.kind === "active" ? "bg-green-soft text-green" : status.kind === "not_activated" ? "bg-red-soft text-red" : status.kind === "pending" ? "bg-amber-soft text-amber" : "bg-[#F4F4F5] text-[#5F6368]";
+  const tone = status.kind === "active" ? "bg-green-soft text-green-text" : status.kind === "not_activated" ? "bg-red-soft text-red" : status.kind === "pending" ? "bg-amber-soft text-amber-text" : "bg-[#F4F4F5] text-[#5F6368]";
   return (
     <a href={href} className="block rounded-xl border-2 border-[#111113] bg-white p-1" data-warranty-panel>
       <div className="flex flex-col items-center gap-4 rounded-lg border border-[#A1A1AA] px-5 py-5 sm:flex-row">

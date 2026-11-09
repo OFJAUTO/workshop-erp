@@ -266,10 +266,10 @@ export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car
           ) : null}
           <span className="flex flex-col min-w-0">
             <span className="font-bold">{label}</span>
-            <span className={`text-xs ${stopped ? "font-semibold text-red" : onDevice ? "font-semibold text-amber" : "text-muted"}`} data-media-words>{text}</span>
+            <span className={`text-xs ${stopped ? "font-semibold text-red" : onDevice ? "font-semibold text-amber-text" : "text-muted"}`} data-media-words>{text}</span>
           </span>
         </span>
-        <span className={`text-2xl font-bold ${finished ? "text-green" : red ? "text-red" : onDevice ? "text-amber" : "text-faint"}`}>{finished ? "✓" : red ? "!" : onDevice ? "↑" : "+"}</span>
+        <span className={`text-2xl font-bold ${finished ? "text-green-text" : red ? "text-red" : onDevice ? "text-amber-text" : "text-faint"}`}>{finished ? "✓" : red ? "!" : onDevice ? "↑" : "+"}</span>
       </button>
       {sending ? (
         <div className="h-2 rounded-full bg-track overflow-hidden">
@@ -281,7 +281,7 @@ export function CarPictureCrop({ jobId, token, done, currentUrl, label = "1. Car
       {open ? (
         <div className="rounded-card border border-ink p-3 flex flex-col gap-3" data-car-crop>
           <div className="flex flex-wrap gap-2">
-            <PhotoButton source="camera" className="inline-flex min-h-11 items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-white" title="Car picture" onFiles={onFiles} onProblem={(m) => reportUploadFailure({ jobId, kind: "car_picture", step: "camera", error: m, token })}>
+            <PhotoButton source="camera" className="inline-flex min-h-11 items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-on-dark" title="Car picture" onFiles={onFiles} onProblem={(m) => reportUploadFailure({ jobId, kind: "car_picture", step: "camera", error: m, token })}>
               Take a photo
             </PhotoButton>
             <PhotoButton source="gallery" className="inline-flex min-h-11 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" title="Car picture" onFiles={onFiles}>

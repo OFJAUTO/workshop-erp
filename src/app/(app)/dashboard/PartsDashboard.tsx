@@ -93,8 +93,8 @@ export async function PartsDashboard({ staff }: { staff: CurrentStaff }) {
                   <span className="text-sm text-muted">{[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ")} · {j.job_number}</span>
                   <PartsSteps steps={steps} size="dots" />
                   <span className="ml-auto">
-                    {allDone ? <span className="text-xs font-bold text-green" data-parts-done>All done</span> : action ? (
-                      <Link href={action.href(j.id)} className="inline-flex min-h-10 items-center rounded-control bg-ink px-3.5 text-sm font-bold text-white" data-parts-action={current?.key}>
+                    {allDone ? <span className="text-xs font-bold text-green-text" data-parts-done>All done</span> : action ? (
+                      <Link href={action.href(j.id)} className="inline-flex min-h-10 items-center rounded-control bg-ink px-3.5 text-sm font-bold text-on-dark" data-parts-action={current?.key}>
                         {action.label}
                       </Link>
                     ) : null}

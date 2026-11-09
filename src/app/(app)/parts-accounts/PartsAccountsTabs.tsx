@@ -29,7 +29,7 @@ export function Shown({ total, shown }: { total: number; shown: number }) {
 
 function Dot({ on, label }: { on: boolean; label: string }) {
   return (
-    <span className={`inline-flex items-center gap-1 text-[11px] font-bold ${on ? "text-green" : "text-muted"}`} data-pa-dot={label} data-on={on ? "1" : "0"}>
+    <span className={`inline-flex items-center gap-1 text-xs font-bold ${on ? "text-green-text" : "text-muted"}`} data-pa-dot={label} data-on={on ? "1" : "0"}>
       <span className={`inline-block h-2.5 w-2.5 rounded-full ${on ? "bg-green" : "border border-line-strong bg-white"}`} aria-hidden />
       {label}
     </span>
@@ -116,16 +116,16 @@ export function LposTab({ rows, redDays }: { rows: LpoRow[]; redDays: number }) 
               {r.approvedAt ? <span data-pa-approved>Approved {formatDateTime(r.approvedAt)}{r.approvedBy ? ` by ${r.approvedBy}` : ""}</span> : null}
               {r.orderedAt ? <span>Ordered {formatDateTime(r.orderedAt)}{r.expected && r.step === "ordered" ? `, expected ${formatDate(r.expected)}` : ""}</span> : null}
               {r.receivedAt ? <span>Received {formatDateTime(r.receivedAt)}</span> : null}
-              {r.paidAt ? <span className="font-semibold text-green" data-pa-paid>Paid {formatDateTime(r.paidAt)}{r.paidMethod ? ` · ${r.paidMethod}` : ""}{r.paidReference ? ` · ref ${r.paidReference}` : ""}</span> : null}
+              {r.paidAt ? <span className="font-semibold text-green-text" data-pa-paid>Paid {formatDateTime(r.paidAt)}{r.paidMethod ? ` · ${r.paidMethod}` : ""}{r.paidReference ? ` · ref ${r.paidReference}` : ""}</span> : null}
             </div>
             {r.invoice || bill || pay ? (
               <div className="flex flex-wrap items-center gap-2" data-pa-invoice>
                 {r.invoice ? <Link href={`/parts-accounts?tab=invoices&open=${encodeURIComponent(r.invoice.key)}`} className={`${LINK} whitespace-nowrap text-sm`}>{invWords(r.invoice.number)}</Link> : null}
                 {r.invoice ? <Badge tone="outline">{STATUS_WORDS[r.invoice.status as keyof typeof STATUS_WORDS] ?? r.invoice.statusWords}</Badge> : null}
-                {r.invoice?.match.map((m, i) => <span key={m} className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${m === "matches" ? "bg-green-soft text-green" : "border border-amber-bar bg-amber-soft text-amber"}`} data-pa-match={m}>{r.invoice!.matchWords[i]}</span>)}
-                {r.invoice?.duplicateOf ? <span className="rounded-full border border-red-bar bg-white px-2 py-0.5 text-[11px] font-bold text-red">Possible duplicate of {r.invoice.duplicateOf}</span> : null}
-                {bill ? <span className={`text-[11px] font-bold ${r.zohoBill === "failed" ? "text-red" : "text-muted"}`}>Bill: {bill}</span> : null}
-                {pay ? <span className={`text-[11px] font-bold ${r.zohoPayment === "failed" ? "text-red" : "text-muted"}`}>Payment: {pay}</span> : null}
+                {r.invoice?.match.map((m, i) => <span key={m} className={`rounded-full px-2 py-0.5 text-xs font-bold ${m === "matches" ? "bg-green-soft text-green-text" : "border border-amber-bar bg-amber-soft text-amber-text"}`} data-pa-match={m}>{r.invoice!.matchWords[i]}</span>)}
+                {r.invoice?.duplicateOf ? <span className="rounded-full border border-red-bar bg-white px-2 py-0.5 text-xs font-bold text-red">Possible duplicate of {r.invoice.duplicateOf}</span> : null}
+                {bill ? <span className={`text-xs font-bold ${r.zohoBill === "failed" ? "text-red" : "text-muted"}`}>Bill: {bill}</span> : null}
+                {pay ? <span className={`text-xs font-bold ${r.zohoPayment === "failed" ? "text-red" : "text-muted"}`}>Payment: {pay}</span> : null}
               </div>
             ) : null}
           </Card>
@@ -161,7 +161,7 @@ export function PaymentsTab({ rows, canPay, advances = {} }: { rows: SupplierBal
             {b.proofMissingCount ? <Badge tone="red" data-pa-proof-missing>{b.proofMissingCount} paid without proof</Badge> : null}
             {b.terms ? <span className="text-xs text-muted">Terms: {b.terms}</span> : null}
             {(advances[b.supplierId ?? ""] ?? advances[b.supplier.toUpperCase()]) ? <Badge tone="green" data-pa-advance>{advanceWords(b.supplier, advances[b.supplierId ?? ""] ?? advances[b.supplier.toUpperCase()])}</Badge> : null}
-            <span className={`ml-auto whitespace-nowrap text-sm font-extrabold ${b.unpaid > 0 ? "" : "text-green"}`} data-pa-unpaid={b.unpaid.toFixed(2)}>{b.unpaid > 0 ? `Unpaid ${money(b.unpaid)} (${b.unpaidCount})` : "Nothing unpaid ✓"}</span>
+            <span className={`ml-auto whitespace-nowrap text-sm font-extrabold ${b.unpaid > 0 ? "" : "text-green-text"}`} data-pa-unpaid={b.unpaid.toFixed(2)}>{b.unpaid > 0 ? `Unpaid ${money(b.unpaid)} (${b.unpaidCount})` : "Nothing unpaid ✓"}</span>
           </div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
             <span>Invoiced <b className="whitespace-nowrap">{money(b.invoiced)}</b> <span className="text-xs text-muted">({b.invoicedCount})</span></span>
@@ -221,7 +221,7 @@ export function ReturnsTab({ rows, waitDays, canDecide }: { rows: ReturnRow[]; w
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
             {r.returnedAt ? <span>{r.state === "credit_due" ? "Cancelled" : "Returned"} {formatDateTime(r.returnedAt)}</span> : null}
             {r.creditNote.number ? <span className="font-semibold text-ink">Credit note {r.creditNote.number}{r.creditNote.date ? ` · ${formatDate(r.creditNote.date)}` : ""}{r.creditNote.amount !== null ? ` · ${money(r.creditNote.amount)}` : ""}</span> : null}
-            {r.creditNote.scan ? <span className="font-semibold text-green">Credit note scan on file ✓</span> : null}
+            {r.creditNote.scan ? <span className="font-semibold text-green-text">Credit note scan on file ✓</span> : null}
             {r.note ? <span>Note: {r.note}</span> : null}
             {r.zoho ? <span className={r.zoho === "failed" ? "font-bold text-red" : ""}>Vendor credit: {zohoWords(r.zoho)}</span> : null}
           </div>
@@ -239,7 +239,7 @@ export function ReturnsTab({ rows, waitDays, canDecide }: { rows: ReturnRow[]; w
 export function ProblemsTab({ rows }: { rows: PartsProblem[] }) {
   return (
     <section className="flex flex-col gap-2" data-pa-list="problems">
-      {rows.length === 0 ? <Card><p className="text-sm font-semibold text-green" data-pa-no-problems>No problems ✓</p></Card> : null}
+      {rows.length === 0 ? <Card><p className="text-sm font-semibold text-green-text" data-pa-no-problems>No problems ✓</p></Card> : null}
       {rows.map((p) => (
         <Card key={p.key} className={`flex flex-col gap-1.5 !p-4 ${p.severity === "red" ? "!border-red-bar" : "!border-amber-bar"}`} data-pa-row={p.key} data-pa-state={p.rule} data-pa-problem={p.rule} data-pa-severity={p.severity}>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">

@@ -72,7 +72,7 @@ export function SendLinkDialog({
           children
         ) : shown ? (
           <>
-            {note ? <p className="text-sm font-semibold text-amber" data-pay-note>{note}</p> : null}
+            {note ? <p className="text-sm font-semibold text-amber-text" data-pay-note>{note}</p> : null}
             {above}
             <p className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Message to the customer</p>
             <textarea readOnly value={shown} rows={6} className="w-full rounded-control border border-line bg-canvas p-3 text-sm" onFocus={(e) => e.currentTarget.select()} data-send-message />
@@ -82,12 +82,12 @@ export function SendLinkDialog({
                 target="_blank"
                 rel="noreferrer"
                 onClick={() => onSent?.("whatsapp")}
-                className="inline-flex w-full items-center justify-center min-h-16 rounded-control bg-ink text-white text-lg font-extrabold"
+                className="inline-flex w-full items-center justify-center min-h-16 rounded-control bg-ink text-on-dark text-lg font-extrabold"
               >
                 Open WhatsApp
               </a>
             ) : (
-              <p className="text-sm font-semibold text-amber">No phone number on file: copy the message and send it by hand.</p>
+              <p className="text-sm font-semibold text-amber-text">No phone number on file: copy the message and send it by hand.</p>
             )}
             <button type="button" onClick={copy} className="min-h-12 w-full rounded-control border border-line-strong bg-white text-sm font-bold">
               {copied ? "Copied message and link" : "Copy message and link"}

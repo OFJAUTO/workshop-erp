@@ -111,13 +111,13 @@ export default async function MySectionPage({ searchParams }: { searchParams: Pr
             <Link href={`/bodyshop/${c.job.id}`} className="text-lg font-extrabold tracking-[0.03em] hover:underline underline-offset-4">{v ? formatPlate(v) : c.job.job_number} <span className="text-sm font-semibold text-muted">· {[v?.make?.name, v?.model?.name].filter(Boolean).join(" ")}</span></Link>
             <div className="text-sm">{isComing ? <span className="text-muted">Coming: </span> : null}<span className="font-semibold">{stage?.label ?? "Waiting"}</span>{c.job.promised_at ? <span className="text-muted"> · handover {formatDate(c.job.promised_at)}</span> : null}</div>
           </div>
-          <span className={`text-sm font-bold ${tone === "red" ? "text-red" : tone === "amber" ? "text-amber" : "text-muted"}`}>{due ? (tone === "red" ? `Late · ${formatDate(due)}` : tone === "amber" ? "Due today" : `Due ${formatDate(due)}`) : ""}</span>
+          <span className={`text-sm font-bold ${tone === "red" ? "text-red" : tone === "amber" ? "text-amber-text" : "text-muted"}`}>{due ? (tone === "red" ? `Late · ${formatDate(due)}` : tone === "amber" ? "Due today" : `Due ${formatDate(due)}`) : ""}</span>
         </div>
         <div className="flex flex-wrap items-center gap-2" data-mine-people>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">On it</span>
           <StaffPicker mode="chips" people={mine} sides={["bodyshop"]} on={onIds} action={assignAction.bind(null, c.job.id)} field="staff_id" fields={{ from: "mine" }} disabled={!canAct} />
           {c.people.filter((p) => !mine.some((m) => m.id === p.id)).map((p) => (
-            <span key={p.id} className="inline-flex min-h-11 items-center gap-2 rounded-control border border-green bg-green-soft px-2.5 text-sm font-bold text-green" title="From another team">✓ {p.name}</span>
+            <span key={p.id} className="inline-flex min-h-11 items-center gap-2 rounded-control border border-green bg-green-soft px-2.5 text-sm font-bold text-green-text" title="From another team">✓ {p.name}</span>
           ))}
         </div>
         {clocked.length ? <p className="text-xs text-muted" data-clocked-on>Clocked on: {clocked.map((id) => everyone.find((p) => p.id === id)?.display_name ?? "someone").join(", ")}</p> : null}

@@ -58,7 +58,7 @@ export function SupplierChargesStrip({ jobId, charges, canEdit }: { jobId: strin
         </span>
       ))}
       {error ? <span className="text-xs font-semibold text-red" role="alert" data-charge-error>{error}</span> : null}
-      {message ? <span className="text-xs font-semibold text-green" data-charge-message>{message}</span> : null}
+      {message ? <span className="text-xs font-semibold text-green-text" data-charge-message>{message}</span> : null}
     </div>
   );
 }

@@ -49,7 +49,7 @@ export function EndingResultHost() {
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onClick={() => showEndingResult(null)}>
       <div className="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-3" role="dialog" aria-modal="true" aria-label="Saved" onClick={(e) => e.stopPropagation()} data-ending-result>
         <span className="text-lg font-extrabold">Saved ✓</span>
-        <p className="text-sm font-semibold text-green break-words" data-ending-result-message>{s.message}</p>
+        <p className="text-sm font-semibold text-green-text break-words" data-ending-result-message>{s.message}</p>
         {s.supplierCopy ? (
           <div className="flex flex-col gap-2 rounded-control border border-line bg-chip p-3" data-ending-result-copy>
             <span className="text-xs font-bold">Tell {s.supplierCopy.supplier}:</span>
@@ -133,7 +133,7 @@ export function PartActions({ partId, back, canExchange, canNotNeeded, exchangeA
         <span className="text-sm font-semibold">What is wrong with it?</span>
         <div className="flex flex-wrap gap-1.5">
           {EXCHANGE_REASONS.map((r) => (
-            <button key={r.value} type="button" onClick={() => setReason(r.value)} aria-pressed={reason === r.value} className={`min-h-10 rounded-control border px-3 text-sm font-bold ${reason === r.value ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{reason === r.value ? "✓ " : ""}{r.label}</button>
+            <button key={r.value} type="button" onClick={() => setReason(r.value)} aria-pressed={reason === r.value} className={`min-h-10 rounded-control border px-3 text-sm font-bold ${reason === r.value ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`}>{reason === r.value ? "✓ " : ""}{r.label}</button>
           ))}
         </div>
         <input type="hidden" name="reason" value={reason} />
@@ -187,14 +187,14 @@ export function EndingForm({ partId, back, action, endings = null }: { partId: s
         <span className="text-sm font-semibold">Its ending</span>
         <div className="flex flex-wrap gap-1.5">
           {endings.options.map((o) => (
-            <button key={o.key} type="button" disabled={!o.allowed} onClick={() => setChoice(valueOf(o.key))} aria-pressed={choice === valueOf(o.key)} title={o.allowed ? o.help : (o.why ?? "")} className={`min-h-11 rounded-control border px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${choice === valueOf(o.key) ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`} data-ending-choice={o.key}>{choice === valueOf(o.key) ? "✓ " : ""}{o.label}</button>
+            <button key={o.key} type="button" disabled={!o.allowed} onClick={() => setChoice(valueOf(o.key))} aria-pressed={choice === valueOf(o.key)} title={o.allowed ? o.help : (o.why ?? "")} className={`min-h-11 rounded-control border px-3 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${choice === valueOf(o.key) ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`} data-ending-choice={o.key}>{choice === valueOf(o.key) ? "✓ " : ""}{o.label}</button>
           ))}
           {extra.map((d) => (
-            <button key={d.value} type="button" onClick={() => setChoice(d.value)} aria-pressed={choice === d.value} className={`min-h-11 rounded-control border px-3 text-sm font-bold ${choice === d.value ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{choice === d.value ? "✓ " : ""}{d.label}</button>
+            <button key={d.value} type="button" onClick={() => setChoice(d.value)} aria-pressed={choice === d.value} className={`min-h-11 rounded-control border px-3 text-sm font-bold ${choice === d.value ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`}>{choice === d.value ? "✓ " : ""}{d.label}</button>
           ))}
         </div>
         <span className="text-xs text-muted">{endings.options.find((o) => valueOf(o.key) === choice)?.help ?? (choice === "fit_pending" ? "The owner approves it as goodwill; the part then goes to the technician as usual." : choice === "scrap" ? "It is thrown away: say why." : "")}</span>
-        {endings.partly ? <span className="text-xs font-semibold text-amber">{endings.partly}</span> : null}
+        {endings.partly ? <span className="text-xs font-semibold text-amber-text">{endings.partly}</span> : null}
         <input type="hidden" name="disposition" value={choice} />
         {choice === "fit_pending" || choice === "scrap" ? (
           <>
@@ -225,7 +225,7 @@ export function EndingForm({ partId, back, action, endings = null }: { partId: s
       <span className="text-sm font-semibold">Where does it go?</span>
       <div className="flex flex-wrap gap-1.5">
         {DISPOSITIONS.map((d) => (
-          <button key={d.value} type="button" onClick={() => setChoice(d.value)} aria-pressed={choice === d.value} className={`min-h-10 rounded-control border px-3 text-sm font-bold ${choice === d.value ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{choice === d.value ? "✓ " : ""}{d.label}</button>
+          <button key={d.value} type="button" onClick={() => setChoice(d.value)} aria-pressed={choice === d.value} className={`min-h-10 rounded-control border px-3 text-sm font-bold ${choice === d.value ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`}>{choice === d.value ? "✓ " : ""}{d.label}</button>
         ))}
       </div>
       <input type="hidden" name="disposition" value={choice} />
@@ -279,7 +279,7 @@ function ReturnedFields({ partId, optional = false, requireOne = false, submitLa
           />
         </div>
       </div>
-      {waitForScan ? <span className="text-xs font-semibold text-amber" data-credit-note-wait>{scan.stopped ? "The scan could not be sent: type the credit note number, or remove the scan and add it again." : "Type the credit note number, or wait for the scan to finish sending."}</span> : null}
+      {waitForScan ? <span className="text-xs font-semibold text-amber-text" data-credit-note-wait>{scan.stopped ? "The scan could not be sent: type the credit note number, or remove the scan and add it again." : "Type the credit note number, or wait for the scan to finish sending."}</span> : null}
       {errorBox}
       <div><Button type="submit" size="md" disabled={waitForScan || nothing || pending} data-ending-save>{pending ? "Saving…" : submitLabel}</Button></div>
     </>

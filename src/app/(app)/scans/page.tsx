@@ -108,7 +108,7 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
         {connection && lastCheck?.at ? <span className="text-muted">Last checked {formatDateTime(lastCheck.at)}{lastCheck.ok ? ` · ${lastCheck.checked} new, ${lastCheck.stored} file${lastCheck.stored === 1 ? "" : "s"} kept` : `: ${lastCheck.error ?? ""}`}</span> : null}
         {!configured && role === "owner" ? <span className="text-muted">Add GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET and SCANS_MAILBOX in Vercel (the steps are in the delivery note).</span> : null}
         {configured && !connection && role !== "owner" ? <span className="text-muted">The owner connects it once.</span> : null}
-        {configured && ownerHere && (!connection || connection.last_error) ? <a href="/api/google/mailbox/connect" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white" data-connect-mailbox>Connect {mailbox || "the scans mailbox"}</a> : null}
+        {configured && ownerHere && (!connection || connection.last_error) ? <a href="/api/google/mailbox/connect" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-on-dark" data-connect-mailbox>Connect {mailbox || "the scans mailbox"}</a> : null}
         {connection && ownerHere ? <form action={disconnectMailboxAction}><Button type="submit" tone="ghost" size="md" data-disconnect-mailbox>Disconnect</Button></form> : null}
       </div>
       {message ? <Notice tone="success">{message}</Notice> : null}
@@ -138,7 +138,7 @@ export default async function ScansPage({ searchParams }: { searchParams: Promis
           </Card>
           <Card className="flex flex-col gap-3">
             <SectionLabel>Where the reports come from</SectionLabel>
-            <p className="text-xs text-muted">The system reads {mailbox || "scans@ofjauto.com"} through a one-time Google sign-in as that account (Connect, above): read only, and Google limits the permission to that one mailbox. Nothing is moved or deleted. It checks every five minutes and on &quot;Check the mailbox now&quot;. Point the Autel scanner&apos;s email at that address. The Google Cloud steps and the three Vercel variable names are in the delivery note (docs/16-oct-note.md).</p>
+            <p className="text-xs text-muted">The system reads {mailbox || "scans@ofjauto.com"} through a one-time Google sign-in as that account (Connect, above): read only, and Google limits the permission to that one mailbox. Nothing is moved or deleted. It checks every five minutes and on &quot;Check the mailbox now&quot;. Point the Autel scanner&apos;s email at that address. The Google Cloud steps and the three Vercel variable names are in the 16 October delivery note.</p>
           </Card>
         </>
       ) : null}

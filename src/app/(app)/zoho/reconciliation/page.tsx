@@ -83,7 +83,7 @@ export default async function ZohoReconciliationPage({ searchParams }: { searchP
                       {(["card", "link"] as const).map((k) => {
                         const c = r.details!.clearing![k];
                         return (
-                          <span key={k} className={`mr-3 ${c.count ? "font-semibold text-amber" : "text-muted"}`}>
+                          <span key={k} className={`mr-3 ${c.count ? "font-semibold text-amber-text" : "text-muted"}`}>
                             {k === "card" ? "Card machine clearing" : "Payment link clearing"} at day end: {c.count ? `${aed(c.total)} in ${c.count} payment${c.count === 1 ? "" : "s"} not settled yet (oldest ${c.oldest})` : "zero"}
                           </span>
                         );

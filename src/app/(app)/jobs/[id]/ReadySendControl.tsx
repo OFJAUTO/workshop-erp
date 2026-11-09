@@ -121,9 +121,9 @@ export function ReadySendControl({
                 <p className="text-xs font-bold uppercase tracking-[0.08em] text-muted">How will the customer pay?</p>
                 <div className="grid grid-cols-2 gap-2">
                   {EXPECTED_METHODS.map((m) => (
-                    <button key={m} type="button" onClick={() => setExpected(m)} aria-pressed={expected === m} data-expected={m} className={`min-h-12 rounded-control border-2 px-2 text-sm font-bold flex flex-col items-center justify-center ${expected === m ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                    <button key={m} type="button" onClick={() => setExpected(m)} aria-pressed={expected === m} data-expected={m} className={`min-h-12 rounded-control border-2 px-2 text-sm font-bold flex flex-col items-center justify-center ${expected === m ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
                       <span>{EXPECTED_METHOD_LABELS[m]}</span>
-                      {feeRuleWords(charges[m]) !== "no bank fee" ? <span className={`text-[11px] font-semibold ${expected === m ? "text-white/80" : "text-muted"}`}>fee {feeRuleWords(charges[m])}</span> : null}
+                      {feeRuleWords(charges[m]) !== "no bank fee" ? <span className={`text-xs font-semibold ${expected === m ? "text-on-dark/80" : "text-muted"}`}>fee {feeRuleWords(charges[m])}</span> : null}
                     </button>
                   ))}
                 </div>

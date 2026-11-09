@@ -82,7 +82,7 @@ function RemoveX({ onRemove, label }: { onRemove: () => void; label: string }) {
     <div className="absolute inset-x-1 top-1 z-10 flex items-center justify-between gap-1 rounded-control border border-line bg-white/95 px-2 py-1 text-xs shadow" data-remove-ask>
       <span className="font-semibold">Remove?</span>
       <span className="flex gap-1">
-        <button type="button" className="min-h-9 rounded-control bg-ink px-2 py-1 font-bold text-white disabled:opacity-50" disabled={busy} onClick={() => { setBusy(true); onRemove(); }} data-remove-yes>
+        <button type="button" className="min-h-9 rounded-control bg-ink px-2 py-1 font-bold text-on-dark disabled:opacity-50" disabled={busy} onClick={() => { setBusy(true); onRemove(); }} data-remove-yes>
           Yes
         </button>
         <button type="button" className="min-h-9 rounded-control border border-line px-2 py-1 font-bold" onClick={() => setAsk(false)} data-remove-no>
@@ -122,7 +122,7 @@ function Thumb({
       ) : (
         <div className={`${aspect} rounded-card bg-chip`} />
       )}
-      <figcaption className={`${small ? "text-[11px] leading-tight" : "text-xs"} text-muted`}>{caption}</figcaption>
+      <figcaption className={`${small ? "text-xs leading-tight" : "text-xs"} text-muted`}>{caption}</figcaption>
     </figure>
   );
 }
@@ -230,7 +230,7 @@ export function MediaGallery({
                 {url ? (
                   <ViewerThumb src={url} kind="video" label={KIND_LABEL[v.kind]} detail={captionFor(v, compact)} viewerKey={v.id} className="relative block w-full overflow-hidden rounded-card">
                     <VideoPreview url={url} />
-                    <span className="absolute inset-0 flex items-center justify-center text-white text-3xl drop-shadow">▶</span>
+                    <span className="absolute inset-0 flex items-center justify-center text-on-dark text-3xl drop-shadow">▶</span>
                   </ViewerThumb>
                 ) : <div className="aspect-video rounded-card bg-chip" />}
                 <figcaption className="text-xs font-semibold">

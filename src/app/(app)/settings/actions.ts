@@ -588,6 +588,9 @@ export async function saveMoneyLimits(formData: FormData) {
   // Payment hand-over (2 November 2026, section 3): a payment an advisor sent and not recorded within these working hours reminds accounts and the owner.
   const reportHours = formData.has("payment_report_reminder_hours") ? num("payment_report_reminder_hours", 1, 24) : undefined;
   if (reportHours === null) redirect(`/settings?error=${encodeURIComponent("Reported payments: remind after 1 to 24 working hours.")}#money-limits`);
+  // "Urgent" must mean urgent (9 November 2026): a customer waiting longer than this makes a task urgent.
+  const waitHours = formData.has("urgent_customer_wait_hours") ? num("urgent_customer_wait_hours", 0.5, 48) : undefined;
+  if (waitHours === null) redirect(`/settings?error=${encodeURIComponent("Urgent: a customer waiting 0.5 to 48 working hours.")}#money-limits`);
   // Parts accounts (3 November 2026, section 12): a returned part waiting for the supplier's credit note turns red after these days.
   const creditDays = formData.has("supplier_credit_wait_days") ? num("supplier_credit_wait_days", 1, 365) : undefined;
   if (creditDays === null) redirect(`/settings?error=${encodeURIComponent("Supplier credit notes: red after 1 to 365 days.")}#money-limits`);
@@ -606,6 +609,7 @@ export async function saveMoneyLimits(formData: FormData) {
     ...(similar !== undefined ? [{ key: "part_cost_similar_percent", label: "Parts: a cheap cost bought before within this percent is not asked again", value: similar }] : []),
     ...(markupWarn !== undefined ? [{ key: "part_markup_warn_percent", label: "Quotations: warn on a part markup over (%)", value: markupWarn }] : []),
     ...(reportHours !== undefined && reportHours !== null ? [{ key: "payment_report_reminder_hours", label: "Payment reported by an advisor and not recorded: remind accounts and the owner after (working hours)", value: Math.round(reportHours) }] : []),
+    ...(waitHours !== undefined && waitHours !== null ? [{ key: "urgent_customer_wait_hours", label: "Waiting on you: a customer waiting longer than this is urgent (working hours)", value: waitHours }] : []),
     ...(creditDays !== undefined && creditDays !== null ? [{ key: "supplier_credit_wait_days", label: "Supplier credit note: days to wait", value: Math.round(creditDays) }] : []),
     ...(roundDown !== undefined && roundDown !== null ? [{ key: "roundoff_down_limit_aed", label: "Round-off: advisors may round DOWN up to (AED per document)", value: roundDown }] : []),
     ...(roundUp !== undefined && roundUp !== null ? [{ key: "roundoff_up_limit_aed", label: "Round-off: rounding UP capped at (AED per document)", value: roundUp }] : []),

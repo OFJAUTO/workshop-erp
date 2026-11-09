@@ -30,7 +30,7 @@ export function AnswerBox({ questionId, again }: { questionId: number; again: bo
         <Textarea value={text} onChange={(e) => setText(e.target.value)} rows={3} maxLength={1000} data-ask-answer-text />
       </Field>
       {answer?.error ? <p className="text-sm font-bold text-red" data-ask-answer-error>{answer.error}</p> : null}
-      {answer?.message ? <p className="text-sm font-bold text-green" data-ask-answer-sent>{answer.message}</p> : null}
+      {answer?.message ? <p className="text-sm font-bold text-green-text" data-ask-answer-sent>{answer.message}</p> : null}
       <div>
         <Button type="button" size="md" onClick={send} disabled={busy || !text.trim()} data-ask-answer-send>{busy ? "Sending…" : "Send the answer"}</Button>
       </div>

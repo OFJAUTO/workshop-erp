@@ -498,7 +498,7 @@ function Uploader({ jobId, kind, refId = null, files, accept = "photo", label, d
                 <span className={`${tile} inline-flex items-center justify-center rounded-control bg-chip text-xs font-semibold text-muted`} data-file-no-preview>{isVideo(f) ? "Video" : "Photo"}</span>
               )}
               {removable && !disabled ? (
-                <button type="button" onClick={() => void removeOne(f)} aria-label="Remove this file" data-remove-file={f.id} className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-full bg-ink/80 text-sm font-bold text-white">×</button>
+                <button type="button" onClick={() => void removeOne(f)} aria-label="Remove this file" data-remove-file={f.id} className="absolute right-1 top-1 inline-flex h-7 w-7 items-center justify-center rounded-full bg-ink/80 text-sm font-bold text-on-dark">×</button>
               ) : null}
             </span>
           ))}
@@ -551,7 +551,7 @@ function PendingRow({ p, compact, canRemove, onRetry, onRemove }: { p: PendingFi
   const stopped = p.state === "stopped";
   const waiting = p.state === "waiting";
   const box = stopped ? "border-red-bar bg-red-soft" : waiting ? "border-amber-bar bg-amber-soft" : "border-line bg-white";
-  const words = stopped ? "text-red" : waiting ? "text-amber" : "text-muted";
+  const words = stopped ? "text-red" : waiting ? "text-amber-text" : "text-muted";
   const btnH = compact ? "min-h-10" : "min-h-11";
   return (
     <li className={`flex flex-wrap items-center gap-2 rounded-control border px-2 py-1.5 ${box}`} data-pending-file={p.id} data-pending-state={p.state}>
@@ -560,7 +560,7 @@ function PendingRow({ p, compact, canRemove, onRetry, onRemove }: { p: PendingFi
           // eslint-disable-next-line @next/next/no-img-element
           <img src={p.previewUrl} alt="Waiting to send" className="h-full w-full object-cover opacity-80" />
         ) : (
-          <span className="flex h-full w-full items-center justify-center text-[10px] font-bold uppercase text-muted">{p.kind === "pdf" ? "PDF" : p.kind === "video" ? "Video" : "File"}</span>
+          <span className="flex h-full w-full items-center justify-center text-xs font-bold uppercase text-muted">{p.kind === "pdf" ? "PDF" : p.kind === "video" ? "Video" : "File"}</span>
         )}
         {p.state === "sending" ? <span className="absolute bottom-0 left-0 h-1 bg-amber-bar" style={{ width: `${Math.max(4, Math.round(p.progress * 100))}%` }} aria-hidden /> : null}
       </span>
@@ -569,7 +569,7 @@ function PendingRow({ p, compact, canRemove, onRetry, onRemove }: { p: PendingFi
         {pendingWords(p)}
       </span>
       {stopped || waiting ? (
-        <button type="button" onClick={onRetry} className={`${btnH} shrink-0 rounded-control bg-ink px-3 text-xs font-bold text-white`} data-retry>
+        <button type="button" onClick={onRetry} className={`${btnH} shrink-0 rounded-control bg-ink px-3 text-xs font-bold text-on-dark`} data-retry>
           Try again
         </button>
       ) : null}

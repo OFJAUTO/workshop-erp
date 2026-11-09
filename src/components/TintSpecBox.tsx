@@ -132,7 +132,7 @@ export function TintSpecBox({
           {lastTime ? (
             <button type="button" onClick={() => change(copyOf(lastTime.spec))} title={tintSummary(lastTime.spec) ?? ""} className="flex min-h-11 flex-col items-start justify-center rounded-control border border-line-strong bg-white px-3 text-left" data-tint-last-time>
               <span className="text-xs font-bold">Same as last time</span>
-              <span className="text-[10px] text-muted">{lastTime.from}</span>
+              <span className="text-xs text-muted">{lastTime.from}</span>
             </button>
           ) : null}
           <button type="button" onClick={() => change(emptyTintSpec())} className="min-h-11 rounded-control px-2 text-xs font-semibold underline underline-offset-4" data-tint-clear>Clear all</button>
@@ -147,18 +147,18 @@ export function TintSpecBox({
           </div>
           {ws.on && (wsCoverage === "strip" || wsCoverage === "full") ? (
             <div className="flex flex-wrap items-center gap-1.5 pl-0 sm:pl-4">
-              <span className="text-[11px] font-semibold text-muted">{wsCoverage === "strip" ? "Strip darkness %" : "Darkness %"}</span>
+              <span className="text-xs font-semibold text-muted">{wsCoverage === "strip" ? "Strip darkness %" : "Darkness %"}</span>
               <ShadeChips k="windshield" row={ws} withClear={false} limit={limit} disabled={readOnly} onPick={(s) => pickShade("windshield", s)} />
               <DoubleTick k="windshield" row={ws} disabled={readOnly} onChange={(v) => setRow("windshield", { double: v })} />
             </div>
           ) : null}
-          {wsMissing ? <span className="text-xs font-semibold text-amber">Choose the windshield darkness.</span> : null}
+          {wsMissing ? <span className="text-xs font-semibold text-amber-text">Choose the windshield darkness.</span> : null}
         </div>
         {TINT_WINDOWS.filter((w) => w.key !== "windshield" && w.key !== "roof").map((w) => {
           const row = spec.rows[w.key];
           return (
             <div key={w.key} className="flex flex-col gap-1.5 py-2" data-tint-row={w.key}>
-              <span className="text-sm font-bold">{w.label} <span className="text-[11px] font-semibold text-muted">darkness %</span></span>
+              <span className="text-sm font-bold">{w.label} <span className="text-xs font-semibold text-muted">darkness %</span></span>
               <div className="flex flex-wrap items-center gap-1.5">
                 <Chip on={!row.on} label="Not needed" data={`${w.key}:none`} disabled={readOnly} onClick={() => setRow(w.key, { on: false, shade: null, double: false })} />
                 <ShadeChips k={w.key} row={row} withClear limit={limit} disabled={readOnly} onPick={(s) => pickShade(w.key, s)} />
@@ -186,7 +186,7 @@ export function TintSpecBox({
       </div>
 
       <div className="flex flex-col gap-1 rounded-control bg-chip px-3 py-2">
-        <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">On the documents</span>
+        <span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">On the documents</span>
         <span className="text-sm font-semibold" data-tint-summary>{summary ?? "No window tint chosen yet."}</span>
         {doubled ? <span className="text-xs text-muted" data-tint-double-note>{doubled} window{doubled === 1 ? "" : "s"} double layer: double film and {Math.round(doubled * doubleLayerHours * 100) / 100} h more fitting.</span> : null}
       </div>
@@ -198,7 +198,7 @@ export function TintSpecBox({
 
       {mode === "sent" && !readOnly ? (
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" disabled={!dirty || state.kind === "saving"} onClick={() => persist(spec)} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-white disabled:opacity-40" data-tint-save>Save tint change</button>
+          <button type="button" disabled={!dirty || state.kind === "saving"} onClick={() => persist(spec)} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-on-dark disabled:opacity-40" data-tint-save>Save tint change</button>
           {dirty ? <button type="button" onClick={() => { setSpec(saved ? copyOf(saved) : emptyTintSpec()); setState({ kind: "idle" }); }} className="min-h-11 px-2 text-xs font-semibold underline underline-offset-4">Undo</button> : null}
           {dirty ? <span className="text-xs text-muted">The customer already has this quotation: the change is written down and a message is prepared.</span> : null}
         </div>
@@ -209,7 +209,7 @@ export function TintSpecBox({
           <span className="text-xs font-bold">Tell the customer</span>
           <p className="whitespace-pre-wrap text-xs" data-tint-message>{whatsapp.message}</p>
           <div className="flex flex-wrap gap-2">
-            <a href={`https://wa.me/${whatsapp.phone ?? ""}?text=${encodeURIComponent(whatsapp.message)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white" data-tint-whatsapp>Send on WhatsApp</a>
+            <a href={`https://wa.me/${whatsapp.phone ?? ""}?text=${encodeURIComponent(whatsapp.message)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-on-dark" data-tint-whatsapp>Send on WhatsApp</a>
             <CopyText text={whatsapp.message} />
           </div>
         </div>
@@ -221,7 +221,7 @@ export function TintSpecBox({
         ) : (
           <div className="flex flex-wrap items-center gap-2">
             <Input value={presetName} onChange={(e) => setPresetName(e.target.value)} placeholder="Preset name, for example Dark rear" aria-label="Preset name" className="min-w-56" style={{ width: "16rem" }} data-tint-preset-name />
-            <button type="button" onClick={async () => { const r = await addTintPreset(presetName, spec); if (r.error) setState({ kind: "error", text: r.error }); else { setPresets(r.presets ?? presets); setPresetName(null); setState({ kind: "saved", text: "Preset saved" }); } }} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-white" data-tint-preset-save>Save preset</button>
+            <button type="button" onClick={async () => { const r = await addTintPreset(presetName, spec); if (r.error) setState({ kind: "error", text: r.error }); else { setPresets(r.presets ?? presets); setPresetName(null); setState({ kind: "saved", text: "Preset saved" }); } }} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-on-dark" data-tint-preset-save>Save preset</button>
             <button type="button" onClick={() => setPresetName(null)} className="min-h-11 px-2 text-xs font-semibold underline underline-offset-4">Cancel</button>
           </div>
         )
@@ -239,7 +239,7 @@ function Chip({ on, label, data, disabled, warn = false, limit = 0, onClick }: {
       onClick={onClick}
       data-tint-chip={data}
       title={warn ? `Above the legal limit (${limit}% darkness)` : undefined}
-      className={`min-h-11 min-w-11 rounded-control border px-2.5 text-xs font-bold ${on ? "border-ink bg-ink text-white" : warn ? "border-dashed border-line-strong bg-white" : "border-line-strong bg-white"} disabled:opacity-60`}
+      className={`min-h-11 min-w-11 rounded-control border px-2.5 text-xs font-bold ${on ? "border-ink bg-ink text-on-dark" : warn ? "border-dashed border-line-strong bg-white" : "border-line-strong bg-white"} disabled:opacity-60`}
     >
       {label}
     </button>

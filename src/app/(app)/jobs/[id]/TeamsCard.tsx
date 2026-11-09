@@ -37,12 +37,12 @@ export function TeamsCard({ department, canChange, onDepartment, lines, linesRea
     <Card id="teams" className="flex flex-col gap-3" data-teams-card data-department={department}>
       <div className="flex flex-wrap items-center gap-2">
         <SectionLabel right={workWords || undefined}>Department and teams</SectionLabel>
-        {withCar ? <span className="rounded-full bg-ink px-2.5 py-0.5 text-xs font-bold text-white" data-team-with-car>With {withCar} now</span> : null}
+        {withCar ? <span className="rounded-full bg-ink px-2.5 py-0.5 text-xs font-bold text-on-dark" data-team-with-car>With {withCar} now</span> : null}
       </div>
       <form action={onDepartment} className="flex flex-wrap items-center gap-2" data-department-form>
         <span className="text-sm font-semibold">Department</span>
         {DEPARTMENTS.map((d) => (
-          <button key={d.value} type="submit" name="department" value={d.value} disabled={!canChange || d.value === department} aria-pressed={d.value === department} className={`min-h-11 rounded-control border px-4 text-sm font-bold ${d.value === department ? "border-ink bg-ink text-white" : "border-line-strong bg-white"} disabled:cursor-default`} data-department-choice={d.value}>
+          <button key={d.value} type="submit" name="department" value={d.value} disabled={!canChange || d.value === department} aria-pressed={d.value === department} className={`min-h-11 rounded-control border px-4 text-sm font-bold ${d.value === department ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"} disabled:cursor-default`} data-department-choice={d.value}>
             {d.label}
           </button>
         ))}
@@ -52,7 +52,7 @@ export function TeamsCard({ department, canChange, onDepartment, lines, linesRea
           {lines.map((l) => (
             <li key={l.id} className="flex flex-wrap items-center gap-2 py-2" data-team-line={l.id} data-team={l.team}>
               <span className="min-w-0 flex-1 text-sm font-semibold uppercase">{l.title}</span>
-              {!l.chosen ? <span className="text-[11px] text-muted">default</span> : null}
+              {!l.chosen ? <span className="text-xs text-muted">default</span> : null}
               {canChange && linesReady ? <TeamSelect row={l} disabled={false} /> : <span className="rounded-full border border-line-strong px-2.5 py-0.5 text-xs font-bold">{LINE_TEAM_LABELS[l.team]}</span>}
             </li>
           ))}

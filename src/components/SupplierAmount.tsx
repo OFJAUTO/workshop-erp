@@ -20,7 +20,7 @@ export function SupplierAmount({ money, cancelled = false, align = "end", size =
       data-cancelled={cancelled ? "1" : undefined}
     >
       <span className={`whitespace-nowrap font-extrabold ${main} ${cancelled ? "text-muted line-through" : ""}`} {...(hook ? { [`data-${hook}`]: "" } : {})}>{w.main}</span>
-      <span className="text-[11px] font-semibold text-muted">
+      <span className="text-xs font-semibold text-muted">
         {cancelled ? <span className="mr-1 rounded-full border border-line-strong px-1.5 font-extrabold uppercase tracking-[0.06em] text-ink" data-supplier-cancelled>Cancelled</span> : null}
         <span className={cancelled ? "line-through" : undefined}>{w.sub}</span>
       </span>

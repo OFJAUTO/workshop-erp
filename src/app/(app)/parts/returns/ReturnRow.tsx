@@ -52,8 +52,8 @@ export function ReturnRow({ r, today, canParts, canMoney, isOwner }: { r: Purcha
         <span className="text-muted"> · {r.supplier}{r.poNumber ? ` · ${r.poNumber}` : ""}{r.invoiceNumber ? ` · their invoice ${r.invoiceNumber}` : ""}{r.jobNumber ? ` · ${r.jobNumber}` : ""}</span>
       </div>
       <p className="text-xs text-muted">Reason: {r.reason}{r.sentAt ? ` · sent back ${r.sentAt.slice(0, 10)} with ${r.sentWith ?? ""}` : ""}{r.creditNumber ? ` · credit note ${r.creditNumber} ${aed((r.creditNet ?? 0) + (r.creditVat ?? 0))}` : ""}{r.refund !== null ? ` · refund ${aed(r.refund)} (${r.refundMethod})` : ""}{r.restockFee ? ` · restocking fee ${aed(r.restockFee)} to ${r.costTo === "job" ? "the job" : "overhead"}` : ""}{r.outcomeNote ? ` · ${r.outcomeNote}` : ""}</p>
-      {r.lpoPaid && (r.status === "credited") ? <p className="text-xs font-semibold text-green" data-return-advance>The LPO was already paid: this credit is money {r.supplier} owes us – take it off the next payment.</p> : null}
-      {r.status === "refused" && r.writeOffStatus === "pending" ? <p className="text-xs font-semibold text-amber" data-return-writeoff-pending>Write-off waiting for the owner.</p> : null}
+      {r.lpoPaid && (r.status === "credited") ? <p className="text-xs font-semibold text-green-text" data-return-advance>The LPO was already paid: this credit is money {r.supplier} owes us – take it off the next payment.</p> : null}
+      {r.status === "refused" && r.writeOffStatus === "pending" ? <p className="text-xs font-semibold text-amber-text" data-return-writeoff-pending>Write-off waiting for the owner.</p> : null}
 
       <div className="flex flex-wrap gap-2">
         {r.status === "requested" && canParts ? tab("sent", "Sent back") : null}
@@ -126,7 +126,7 @@ export function ReturnRow({ r, today, canParts, canMoney, isOwner }: { r: Purcha
         </form>
       ) : null}
       {answer?.error ? <p className="text-sm font-semibold text-red" role="alert" data-return-error>{answer.error}</p> : null}
-      {answer?.message ? <p className="text-sm font-semibold text-green" data-return-done>{answer.message}</p> : null}
+      {answer?.message ? <p className="text-sm font-semibold text-green-text" data-return-done>{answer.message}</p> : null}
     </li>
   );
 }

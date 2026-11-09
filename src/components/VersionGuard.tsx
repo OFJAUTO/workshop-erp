@@ -97,7 +97,7 @@ export function VersionGuard() {
         window.dispatchEvent(new Event(BEFORE_RELOAD_EVENT));
         setTimeout(() => window.location.reload(), 600);
       }}
-      className="fixed left-1/2 top-2 z-[80] min-h-11 -translate-x-1/2 rounded-full bg-ink px-5 text-sm font-bold text-white shadow-xl"
+      className="fixed left-1/2 top-2 z-[80] min-h-11 -translate-x-1/2 rounded-full bg-ink px-5 text-sm font-bold text-on-dark shadow-xl"
       data-new-version
     >
       A new version is available – tap to refresh

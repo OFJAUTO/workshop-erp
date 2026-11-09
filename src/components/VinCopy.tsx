@@ -20,7 +20,7 @@ export function VinCopy({ vin }: { vin: string | null | undefined }) {
             // Clipboard not allowed here: the VIN is on screen to select by hand.
           }
         }}
-        className="min-h-11 rounded-control border border-line-strong bg-white px-3 text-[11px] font-bold hover:bg-chip"
+        className="min-h-11 rounded-control border border-line-strong bg-white px-3 text-xs font-bold hover:bg-chip"
         aria-label="Copy the VIN"
         data-vin-copy
       >

@@ -43,7 +43,7 @@ export async function GateInView({ staff }: { staff: CurrentStaff }) {
                 <span className="text-sm font-extrabold">{formatPlate(r.vehicle)}</span>
                 <span className="text-sm uppercase">{titleOf(r.vehicle)}</span>
                 <span className="text-xs text-muted">{r.job_number}</span>
-                <span className="rounded-full bg-chip px-2 py-0.5 text-[11px] font-bold" data-gatein-stage>{STATUS_LABELS[r.status as JobStatus] ?? r.status}</span>
+                <span className="rounded-full bg-chip px-2 py-0.5 text-xs font-bold" data-gatein-stage>{STATUS_LABELS[r.status as JobStatus] ?? r.status}</span>
                 {insp ? (
                   <Link href={`/jobs/${r.id}/inspection`} className="ml-auto text-sm font-bold underline underline-offset-4" data-gatein-report>
                     Inspection report{insp === "approved" ? "" : insp === "submitted" ? " (with the manager)" : " (being filled)"}

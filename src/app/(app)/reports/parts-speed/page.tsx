@@ -48,7 +48,7 @@ export default async function PartsSpeedPage() {
             ))}
           </ul>
         </Card>
-      ) : <Card><p className="text-sm font-bold text-green" data-over-target-empty>Nothing over target this week ✓</p></Card>}
+      ) : <Card><p className="text-sm font-bold text-green-text" data-over-target-empty>Nothing over target this week ✓</p></Card>}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" data-speed-tables>
         <SpeedTable title="Request → priced" rows={s.pricing} hint={`From the technician's request to the price on the row, per Parts person. Target ${h(s.targets.pricingMinutes)}.`} />
         <SpeedTable title="Customer approval → LPO sent" rows={s.approvalToLpo} hint="From the customer's approval to the LPO going for the owner's approval." />
@@ -63,7 +63,7 @@ export default async function PartsSpeedPage() {
                 <li key={r.who} className="py-1.5 flex items-center gap-3">
                   <span className="font-semibold">{r.who}</span>
                   <span className="text-xs text-muted">{r.n} deliver{r.n === 1 ? "y" : "ies"} · {Math.round(r.lateShare * 100)}% late</span>
-                  <span className={`ml-auto font-bold ${r.avgDays > 0 ? "text-red" : "text-green"}`}>{r.avgDays > 0 ? "+" : ""}{r.avgDays.toFixed(1)} days</span>
+                  <span className={`ml-auto font-bold ${r.avgDays > 0 ? "text-red" : "text-green-text"}`}>{r.avgDays > 0 ? "+" : ""}{r.avgDays.toFixed(1)} days</span>
                 </li>
               ))}
             </ul>

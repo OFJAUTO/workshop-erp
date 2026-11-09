@@ -1,5 +1,6 @@
 import { Avatar, Button, Card, Input, LinkButton, SectionLabel } from "@/components/ui";
 import { CopyText } from "@/components/CopyText";
+import { PromisedDateField } from "@/components/PromisedDateField";
 import { StaffPicker } from "@/components/StaffPicker";
 import { positionsWords } from "@/lib/parts-list";
 import { formatDate } from "@/lib/format";
@@ -20,7 +21,7 @@ const REMIND: Record<string, string> = { parts: "Parts", workshop: "the workshop
  * on them, green done) - Parts, then the manager of each side the car needs (Workshop, Bodyshop, or both on a mixed
  * car, released separately), then the advisor - and the form for whoever's turn it is. The owner can fill any circle.
  */
-export function PlanningCard({ jobId, job, status, plan, role, mySide, viewingAs, wt, people, customer, carText, advisorName, whatsapp }: { jobId: string; job: Pick<JobRow, "plan_released_at" | "plan_bodyshop_released_at">; status: JobStatus; plan: Planning; role: RoleId; mySide: Side | null; viewingAs: boolean; wt: WorkingTime; people: TechnicianLoad[]; customer: { name: string; phoneDigits: string } | null; carText: string; advisorName: string; whatsapp: boolean }) {
+export function PlanningCard({ jobId, job, status, plan, role, mySide, viewingAs, wt, people, customer, carText, advisorName, whatsapp, promisedTime = null, timeReady = false }: { jobId: string; job: Pick<JobRow, "plan_released_at" | "plan_bodyshop_released_at" | "promised_at">; /** The promised time, once jobs.promised_time exists. */ promisedTime?: string | null; timeReady?: boolean; status: JobStatus; plan: Planning; role: RoleId; mySide: Side | null; viewingAs: boolean; wt: WorkingTime; people: TechnicianLoad[]; customer: { name: string; phoneDigits: string } | null; carText: string; advisorName: string; whatsapp: boolean }) {
   const owner = role === "owner";
   const canParts = !viewingAs && (owner || role === "parts");
   const canRelease = (side: Side) => !viewingAs && (owner || (role === "workshop_manager" && (!mySide || mySide === side)));
@@ -46,11 +47,11 @@ export function PlanningCard({ jobId, job, status, plan, role, mySide, viewingAs
           <li key={c.key} className="flex flex-col items-center gap-1.5 text-center" data-circle={c.key} data-state={c.state}>
             <span className={`relative inline-flex h-16 w-16 items-center justify-center rounded-full ring-4 ${RING[c.state]}`}>
               <Avatar name={c.person?.name ?? c.title} photoUrl={c.person?.photoUrl ?? null} size={56} />
-              <span className="absolute -top-1 -left-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-ink text-white text-xs font-extrabold">{c.n}</span>
+              <span className="absolute -top-1 -left-1 inline-flex h-6 w-6 items-center justify-center rounded-full bg-ink text-on-dark text-xs font-extrabold">{c.n}</span>
             </span>
             <span className="text-sm font-bold">{c.title}</span>
             <span className="text-xs text-muted">{c.person?.name ?? ""}</span>
-            <span className={`text-xs ${c.state === "amber" ? "font-semibold text-amber" : c.state === "green" ? "text-green font-semibold" : "text-muted"}`}>
+            <span className={`text-xs ${c.state === "amber" ? "font-semibold text-amber-text" : c.state === "green" ? "text-green-text font-semibold" : "text-muted"}`}>
               {c.state === "amber" && c.since ? `Waiting ${formatWait(workingMinutesSince(c.since, wt), wt)} · ` : ""}{c.line}
             </span>
           </li>
@@ -80,6 +81,8 @@ export function PlanningCard({ jobId, job, status, plan, role, mySide, viewingAs
               <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Start day</span><Input type="date" name="start_date" defaultValue={plan.partsReadyDate ?? ""} required className="w-44" /></label>
               <span className="text-xs text-muted">{plan.missing.length ? `Parts all here by ${plan.partsReadyDate ?? "a date Parts still have to give"}.` : plan.parts.length ? "Every part is here." : "No parts needed."} {side === "bodyshop" ? "Bodyshop stages" : "Hours estimate"} {plan.hoursBySide[side] ? `${plan.hoursBySide[side]} h` : "not set"}.</span>
             </div>
+            {/* 9 November 2026: every released job carries the promised date (required here). */}
+            <PromisedDateField existing={job.promised_at ?? null} suggested={plan.suggestedFinish ?? plan.partsReadyDate ?? null} partsDate={plan.missing.length ? plan.partsReadyDate : null} timeReady={timeReady} existingTime={promisedTime} />
             <div className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">{side === "bodyshop" ? "Bodyshop team (tick one or more; the leaders are at the top of each team)" : "Technicians (tick one or more)"}</span>
               <StaffPicker mode="tick" people={people.filter((p) => p.side === side)} sides={[side]} />
@@ -100,7 +103,7 @@ export function PlanningCard({ jobId, job, status, plan, role, mySide, viewingAs
 
       {turn === "advisor" && canAdvisor ? (
         <form action={confirmPromisedDate.bind(null, jobId)} className="flex flex-wrap items-end gap-3 border-t border-line pt-3">
-          <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Finish date (suggested from the start day and the hours)</span><Input type="date" name="promised_at" defaultValue={plan.suggestedFinish ?? ""} required className="w-44" /></label>
+          <PromisedDateField existing={job.promised_at ?? null} suggested={plan.suggestedFinish ?? null} partsDate={plan.missing.length ? plan.partsReadyDate : null} timeReady={timeReady} existingTime={promisedTime} label="Finish date (suggested from the start day and the hours)" />
           <Button type="submit" size="lg">Confirm the date</Button>
           <span className="w-full text-xs text-muted">This is the promised date on the dashboard. The work has already started; this never holds it up.</span>
         </form>

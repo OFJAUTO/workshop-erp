@@ -201,7 +201,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const balanceDue = live ? (bal?.balance ?? 0) : (jobMoney?.balance ?? 0);
   const chequeClearing = live ? (bal?.pendingAmount ?? 0) : (jobMoney?.pendingCheque ?? 0);
   const atMoneyStage = !!live || ["ready", "pending_payment", "in_delivery"].includes(job.status);
-  const balTone = balanceDue <= 0.005 && paidSoFar > 0 ? "text-green" : balanceDue > 0.005 && atMoneyStage ? "text-red" : "";
+  const balTone = balanceDue <= 0.005 && paidSoFar > 0 ? "text-green-text" : balanceDue > 0.005 && atMoneyStage ? "text-red" : "";
   const outstandingDeposit = Math.max(0, Math.round((dep.required - dep.received) * 100) / 100);
   const depositPanel = { jobId: id, plate: formatPlate(vehicle), car: vehicleTitle(vehicle), customer: customerName, quote: dep.quotationNumbers.join(", "), requested: dep.required, received: dep.received, outstanding: outstandingDeposit };
   const depositRequestMessage = String(settings.whatsapp_deposit_request_template ?? "")
@@ -260,7 +260,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
           <Card className="flex flex-col gap-2" data-money-bar>
             <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${barSteps.length}, minmax(0, 1fr))` }}>
               {barSteps.map((b) => (
-                <div key={b.key} data-step={b.key} data-state={b.state} title={b.info} className={`min-h-11 rounded-control px-1 py-1 flex items-center justify-center gap-1 text-center text-[11px] leading-tight ${STAGE_BOX_CLASS[b.state]} ${STAGE_BOX_TITLE[b.state]} ${b.state === "current" ? "font-bold" : "font-semibold"}`}>
+                <div key={b.key} data-step={b.key} data-state={b.state} title={b.info} className={`min-h-11 rounded-control px-1 py-1 flex items-center justify-center gap-1 text-center text-xs leading-tight ${STAGE_BOX_CLASS[b.state]} ${STAGE_BOX_TITLE[b.state]} ${b.state === "current" ? "font-bold" : "font-semibold"}`}>
                   <span>{b.state === "done" ? "✓ " : ""}{b.label}</span>
                   <span aria-hidden className="opacity-50">ⓘ</span>
                 </div>
@@ -270,14 +270,14 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
 
           <Card className="flex flex-col gap-2" data-money-summary>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" data-money-figures>
-              <div className="flex flex-col"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Total incl. VAT</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(totalDue)}</span></div>
+              <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Total incl. VAT</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(totalDue)}</span></div>
               {depRequested ? (
-                <div className="flex flex-col"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Deposit</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(dep.received)}<span className="text-sm font-semibold text-muted"> of {m(dep.required)}</span></span></div>
+                <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Deposit</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(dep.received)}<span className="text-sm font-semibold text-muted"> of {m(dep.required)}</span></span></div>
               ) : null}
-              <div className="flex flex-col"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Paid so far</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(paidSoFar)}</span></div>
-              <div className="flex flex-col"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Balance due</span><span className={`text-xl sm:text-2xl font-extrabold ${balTone}`} data-balance>{live && !unpaid ? "Paid in full" : `AED ${m(balanceDue)}`}</span></div>
+              <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Paid so far</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(paidSoFar)}</span></div>
+              <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Balance due</span><span className={`text-xl sm:text-2xl font-extrabold ${balTone}`} data-balance>{live && !unpaid ? "Paid in full" : `AED ${m(balanceDue)}`}</span></div>
             </div>
-            {chequeClearing ? <p className="text-sm font-semibold text-amber">Cheque of AED {m(chequeClearing)} pending clearance.</p> : null}
+            {chequeClearing ? <p className="text-sm font-semibold text-amber-text">Cheque of AED {m(chequeClearing)} pending clearance.</p> : null}
             {bal?.credited ? <p className="text-sm font-semibold text-muted" data-credit-note-off>Credit notes AED {m(bal.credited)} taken off the balance.</p> : null}
             {proforma && !taxInvoice && acting && ["owner", "accounts", "service_advisor"].includes(role) ? (
               <div className="flex flex-wrap items-center gap-2 border-t border-line pt-2" data-invoice-roundoff>
@@ -285,8 +285,8 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                 <span className="text-xs text-muted">Adjusts the amount before VAT; VAT stays exactly {draft.vatPercent}%. The tax invoice is born from these figures.</span>
               </div>
             ) : null}
-            {live && !unpaid ? <p className="text-sm font-bold text-green">Paid in full{bal?.paidAt ? ` · ${formatDayTime(bal.paidAt)}` : ""}{taxInvoice && !taxInvoice.sent_at ? " · gate-out opens after the tax invoice is sent." : ""}</p> : null}
-            {taxInvoice && unpaid ? <p className="text-sm font-semibold text-amber">Tax invoice issued before full payment{taxInvoice.issue_reason ? `: ${taxInvoice.issue_reason}` : ""}. The balance is still due.</p> : null}
+            {live && !unpaid ? <p className="text-sm font-bold text-green-text">Paid in full{bal?.paidAt ? ` · ${formatDayTime(bal.paidAt)}` : ""}{taxInvoice && !taxInvoice.sent_at ? " · gate-out opens after the tax invoice is sent." : ""}</p> : null}
+            {taxInvoice && unpaid ? <p className="text-sm font-semibold text-amber-text">Tax invoice issued before full payment{taxInvoice.issue_reason ? `: ${taxInvoice.issue_reason}` : ""}. The balance is still due.</p> : null}
           </Card>
 
           <Card className="flex flex-col gap-2 border-ink" data-what-now>

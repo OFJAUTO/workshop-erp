@@ -134,7 +134,7 @@ export function PendingThumb({ p, src, className = "h-12 w-12" }: { p: PendingFi
     return <img src={url} alt="" className={`${className} shrink-0 rounded-md object-cover ${p.state === "stopped" ? "opacity-70" : ""}`} data-pending-thumb />;
   }
   return (
-    <span className={`${className} shrink-0 rounded-md bg-ink text-white flex items-center justify-center text-base font-bold`} aria-hidden data-pending-thumb>
+    <span className={`${className} shrink-0 rounded-md bg-ink text-on-dark flex items-center justify-center text-base font-bold`} aria-hidden data-pending-thumb>
       {p.kind === "video" ? "▶" : "↑"}
     </span>
   );
@@ -189,7 +189,7 @@ export function PendingRows({
             ) : null}
             {stuck ? (
               <span className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => onRetry(p.id)} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-white" data-retry>
+                <button type="button" onClick={() => onRetry(p.id)} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-on-dark" data-retry>
                   {p.state === "stopped" ? "Try again" : "Send now"}
                 </button>
                 <button type="button" onClick={() => { if (confirmRemove(what)) onRemove(p.id); }} className="min-h-11 rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-remove-queued>
@@ -347,13 +347,13 @@ export function MediaCapture({
             ) : null}
             <span className="flex flex-col min-w-0">
               <span className="font-bold">{label}</span>
-              <span className={`text-xs ${stopped.length ? "font-semibold text-red" : onDevice ? "font-semibold text-amber" : "text-muted"}`} data-media-words>{text}</span>
+              <span className={`text-xs ${stopped.length ? "font-semibold text-red" : onDevice ? "font-semibold text-amber-text" : "text-muted"}`} data-media-words>{text}</span>
             </span>
           </span>
-          <span className={`text-2xl font-bold ${green ? "text-green" : red ? "text-red" : onDevice ? "text-amber" : "text-faint"}`}>{green ? "✓" : red ? "!" : onDevice ? "↑" : "+"}</span>
+          <span className={`text-2xl font-bold ${green ? "text-green-text" : red ? "text-red" : onDevice ? "text-amber-text" : "text-faint"}`}>{green ? "✓" : red ? "!" : onDevice ? "↑" : "+"}</span>
         </PhotoButton>
         {!disabled ? (
-          <PhotoButton source="gallery" multiple={multiple} className="shrink-0 w-20 rounded-card border-2 border-line bg-white text-[11px] font-bold leading-tight px-1" title={label} onFiles={onFiles}>
+          <PhotoButton source="gallery" multiple={multiple} className="shrink-0 w-20 rounded-card border-2 border-line bg-white text-xs font-bold leading-tight px-1" title={label} onFiles={onFiles}>
             From gallery
           </PhotoButton>
         ) : null}

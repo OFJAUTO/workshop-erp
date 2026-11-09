@@ -543,14 +543,14 @@ export function ZohoSyncButton({ waiting }: { waiting: number }) {
 
                 {posted.length ? (
                   <details className="rounded-control border border-green px-3 py-1" data-zoho-sync-posted={posted.length}>
-                    <summary className="cursor-pointer min-h-11 inline-flex items-center text-sm font-extrabold tracking-[0.08em] uppercase text-green">Posted ✓ · {posted.length}</summary>
+                    <summary className="cursor-pointer min-h-11 inline-flex items-center text-sm font-extrabold tracking-[0.08em] uppercase text-green-text">Posted ✓ · {posted.length}</summary>
                     <ul className="flex flex-col divide-y divide-line pb-2">
                       {posted.map((i) => (
                         <li key={i.id} className="py-1.5 flex flex-col" data-zoho-sync-item="posted" data-outbox-id={i.id}>
                           <span className="text-sm">
                             <span className="font-bold">{kindWord(i.kind)}</span> {i.name ?? ""}
                           </span>
-                          {i.words ? <span className="text-xs font-semibold text-green break-words">{i.words}</span> : null}
+                          {i.words ? <span className="text-xs font-semibold text-green-text break-words">{i.words}</span> : null}
                         </li>
                       ))}
                     </ul>

@@ -155,9 +155,9 @@ export function GateInForm({
               <input type="hidden" name="visit_type" value={visit} />
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {([["normal", "Normal visit", "Inspection, quotation, the customer approves"], ["recheck", "PPF RECHECK (FREE)", "The 10-day final check of a PPF job: no fee, no quotation, no invoice"]] as const).map(([key, title, hint]) => (
-                  <button key={key} type="button" onClick={() => setVisit(key)} aria-pressed={visit === key} data-visit={key} className={`min-h-20 rounded-card border-2 px-4 py-3 text-left flex flex-col gap-1 ${visit === key ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                  <button key={key} type="button" onClick={() => setVisit(key)} aria-pressed={visit === key} data-visit={key} className={`min-h-20 rounded-card border-2 px-4 py-3 text-left flex flex-col gap-1 ${visit === key ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
                     <span className="text-base font-extrabold">{title}</span>
-                    <span className={`text-xs ${visit === key ? "text-white/80" : "text-muted"}`}>{hint}</span>
+                    <span className={`text-xs ${visit === key ? "text-on-dark/80" : "text-muted"}`}>{hint}</span>
                   </button>
                 ))}
               </div>
@@ -314,7 +314,7 @@ export function GateInForm({
                   </Field>
                 ) : null}
                 {recheck ? (
-                  <p className="text-sm font-semibold text-green" data-recheck-no-fee>No inspection fee: the PPF final check is free.</p>
+                  <p className="text-sm font-semibold text-green-text" data-recheck-no-fee>No inspection fee: the PPF final check is free.</p>
                 ) : inspectionFee && !inspectionFee.locked ? (
                   // 30 October 2026: THE fee choice (Inspection fee with the amount, or No inspection fee with the reason).
                   <div data-inspection-fee>

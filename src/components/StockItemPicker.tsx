@@ -56,7 +56,7 @@ export function StockItemPicker({ anchor, onPick, onClose, suggest = "", need = 
         <span className="text-sm font-extrabold">From our stock</span>
         {note ? (
           <div className="flex flex-col gap-2 rounded-control border border-amber-bar bg-amber-soft p-2" data-stock-note>
-            <span className="text-xs font-semibold text-amber">{note.text}</span>
+            <span className="text-xs font-semibold text-amber-text">{note.text}</span>
             <div className="flex flex-wrap gap-2">
               <Button type="button" size="md" onClick={() => onPick(note.item)} data-stock-note-use>Use it</Button>
               <Button type="button" size="md" tone="ghost" onClick={() => setNote(null)}>Back</Button>
@@ -88,7 +88,7 @@ export function StockItemPicker({ anchor, onPick, onClose, suggest = "", need = 
               {shown.slice(0, 40).map((i) => (
                 <button key={i.id} type="button" onClick={() => (i.unitCost > 0 ? onPick(i) : setForm({ id: i.id, name: i.name, partNumber: i.partNumber ?? "", unit: i.unit, cost: "", shelf: "" }))} className="min-h-11 rounded-control px-2 py-1 text-left hover:bg-chip" data-stock-item={i.id}>
                   <span className="block text-sm font-bold uppercase leading-tight">{i.name}{i.partNumber ? <span className="font-normal text-muted"> · {i.partNumber}</span> : null}</span>
-                  <span className={`block text-xs ${i.unitCost > 0 && i.onHand + 1e-9 >= need ? "text-muted" : "font-semibold text-amber"}`} data-stock-item-short={i.onHand + 1e-9 < need ? "1" : "0"}>{i.onHand.toLocaleString("en-GB")} {i.unit} on hand{i.onHand + 1e-9 < need ? ` (needs ${need.toLocaleString("en-GB")}: count it, or order more)` : ""} · {i.unitCost > 0 ? `AED ${i.unitCost.toFixed(2)} each (average)` : "no cost yet: tap to type it"}</span>
+                  <span className={`block text-xs ${i.unitCost > 0 && i.onHand + 1e-9 >= need ? "text-muted" : "font-semibold text-amber-text"}`} data-stock-item-short={i.onHand + 1e-9 < need ? "1" : "0"}>{i.onHand.toLocaleString("en-GB")} {i.unit} on hand{i.onHand + 1e-9 < need ? ` (needs ${need.toLocaleString("en-GB")}: count it, or order more)` : ""} · {i.unitCost > 0 ? `AED ${i.unitCost.toFixed(2)} each (average)` : "no cost yet: tap to type it"}</span>
                 </button>
               ))}
             </div>

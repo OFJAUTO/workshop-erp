@@ -67,7 +67,7 @@ export function MobileTopBar({ nav, account, searchCustomers = true, search = tr
 
   return (
     <>
-      <header className="sticky top-0 z-40 flex min-h-16 items-center gap-2 bg-sidebar px-2 py-2 text-white nav:hidden" data-top-bar>
+      <header className="sticky top-0 z-40 flex min-h-16 items-center gap-2 bg-sidebar px-2 py-2 text-on-dark nav:hidden" data-top-bar>
         <button type="button" onClick={openMenu} aria-label="Open the menu" aria-expanded={open} className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-control text-2xl hover:bg-white/10" data-menu-open>
           ☰
         </button>
@@ -82,7 +82,7 @@ export function MobileTopBar({ nav, account, searchCustomers = true, search = tr
       {open ? (
         <div className="fixed inset-0 z-[70] nav:hidden" data-menu-drawer>
           <div className="absolute inset-0 bg-black/50" onClick={close} data-menu-backdrop />
-          <nav className="absolute inset-y-0 left-0 flex w-[min(20rem,85vw)] flex-col gap-4 overflow-y-auto bg-sidebar px-4 py-4 text-white shadow-2xl" aria-label="Menu">
+          <nav className="absolute inset-y-0 left-0 flex w-[min(20rem,85vw)] flex-col gap-4 overflow-y-auto bg-sidebar px-4 py-4 text-on-dark shadow-2xl" aria-label="Menu">
             <div className="flex items-center justify-between gap-2">
               <Logo onDark className="h-10" />
               <button type="button" onClick={close} aria-label="Close the menu" className="inline-flex h-11 w-11 items-center justify-center rounded-control text-2xl hover:bg-white/10" data-menu-close>

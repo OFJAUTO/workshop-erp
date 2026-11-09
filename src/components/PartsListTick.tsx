@@ -26,7 +26,7 @@ export function PartsListTick({ action, confirmedAt, confirmedByName, count, can
   const label = count ? "I have checked the parts list" : "I confirm no parts are needed";
   if (state) {
     return (
-      <p className="inline-flex min-h-11 items-center gap-2 self-start rounded-control border border-green bg-green-soft px-3 text-sm font-bold text-green" data-parts-tick="on">
+      <p className="inline-flex min-h-11 items-center gap-2 self-start rounded-control border border-green bg-green-soft px-3 text-sm font-bold text-green-text" data-parts-tick="on">
         ✓ {label} · {state.by ?? "the workshop manager"}, {formatDateTime(state.at)}
       </p>
     );
@@ -34,7 +34,7 @@ export function PartsListTick({ action, confirmedAt, confirmedByName, count, can
   if (!canTick) return <p className="text-xs text-muted">The workshop manager ticks the list when approving the report.</p>;
   return (
     <div className="flex flex-col gap-1 self-start" data-parts-tick={changed ? "changed" : "off"}>
-      {changed ? <span className="text-xs font-bold text-amber" data-parts-tick-changed>Parts list changed: check again.</span> : null}
+      {changed ? <span className="text-xs font-bold text-amber-text" data-parts-tick-changed>Parts list changed: check again.</span> : null}
       <button
         type="button"
         disabled={pending}

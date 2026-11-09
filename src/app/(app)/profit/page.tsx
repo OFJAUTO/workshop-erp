@@ -137,7 +137,7 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
     return `/profit?${p.toString()}`;
   };
   const sortLink = (key: string) => qs({ sort: key, dir: sortKey === key && sp.dir !== "asc" ? "asc" : "desc" });
-  const pill = (m: number) => (m >= 30 ? "bg-green-soft text-green border border-green" : m >= 20 ? "bg-amber-soft text-ink border border-amber-bar" : "bg-white text-red border border-red-bar");
+  const pill = (m: number) => (m >= 30 ? "bg-green-soft text-green-text border border-green" : m >= 20 ? "bg-amber-soft text-ink border border-amber-bar" : "bg-white text-red border border-red-bar");
   const monthBehind = today.carry;
 
   return (
@@ -151,12 +151,12 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
               <LinkButton key={k} href={`/profit?period=${k}`} tone={period === k ? "primary" : "secondary"} size="md">{l}</LinkButton>
             ))}
             <details className="relative">
-              <summary className={`inline-flex min-h-11 cursor-pointer items-center rounded-control border px-4 text-sm font-bold ${period === "custom" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Custom</summary>
+              <summary className={`inline-flex min-h-11 cursor-pointer items-center rounded-control border px-4 text-sm font-bold ${period === "custom" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>Custom</summary>
               <form className="absolute right-0 z-10 mt-1 flex w-72 flex-col gap-2 rounded-card border border-line bg-white p-3 shadow-xl" action="/profit">
                 <input type="hidden" name="period" value="custom" />
                 <label className="flex items-center gap-2 text-xs font-semibold">From <input type="date" name="from" defaultValue={sp.from} required className="min-h-10 flex-1 rounded-control border border-line-strong px-2" /></label>
                 <label className="flex items-center gap-2 text-xs font-semibold">To <input type="date" name="to" defaultValue={sp.to} className="min-h-10 flex-1 rounded-control border border-line-strong px-2" /></label>
-                <button type="submit" className="min-h-10 rounded-control bg-ink text-sm font-bold text-white">Show</button>
+                <button type="submit" className="min-h-10 rounded-control bg-ink text-sm font-bold text-on-dark">Show</button>
               </form>
             </details>
             <a href={`/api/export/profit?from=${encodeURIComponent(range.from)}${range.to ? `&to=${encodeURIComponent(range.to)}` : ""}`} className="inline-flex min-h-11 items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-export-profit>Export to Excel</a>
@@ -165,14 +165,14 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3" data-profit-kpis>
-        <Card className="flex flex-col gap-0.5"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Revenue (before VAT)</span><span className="text-2xl font-extrabold">{aed0(revenue)}</span><span className="text-xs text-muted">{rows.length} invoice{rows.length === 1 ? "" : "s"} · {range.label}</span></Card>
-        <Card className="flex flex-col gap-0.5"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Job costs</span><span className="text-2xl font-extrabold">{aed0(jobCosts)}</span><span className="text-xs text-muted">parts, labour, bank, commission…</span></Card>
-        <Card className="flex flex-col gap-0.5"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Profit</span><span className="text-2xl font-extrabold text-green" data-profit-total>{aed0(costs.profit)}</span><span className="text-xs text-muted">{margin.toFixed(1)}% margin</span></Card>
-        <Card className="flex flex-col gap-0.5"><span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Daily target</span><span className="text-2xl font-extrabold">{aed0(today.invoicedProfit)} <span className="text-sm font-semibold text-muted">/ {n0(today.target)} today</span></span><span className="text-xs text-muted">Month: {monthBehind >= 0 ? "ahead" : "behind"} by {aed0(Math.abs(monthBehind))}</span></Card>
+        <Card className="flex flex-col gap-0.5"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Revenue (before VAT)</span><span className="text-2xl font-extrabold">{aed0(revenue)}</span><span className="text-xs text-muted">{rows.length} invoice{rows.length === 1 ? "" : "s"} · {range.label}</span></Card>
+        <Card className="flex flex-col gap-0.5"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Job costs</span><span className="text-2xl font-extrabold">{aed0(jobCosts)}</span><span className="text-xs text-muted">parts, labour, bank, commission…</span></Card>
+        <Card className="flex flex-col gap-0.5"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Profit</span><span className="text-2xl font-extrabold text-green-text" data-profit-total>{aed0(costs.profit)}</span><span className="text-xs text-muted">{margin.toFixed(1)}% margin</span></Card>
+        <Card className="flex flex-col gap-0.5"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Daily target</span><span className="text-2xl font-extrabold">{aed0(today.invoicedProfit)} <span className="text-sm font-semibold text-muted">/ {n0(today.target)} today</span></span><span className="text-xs text-muted">Month: {monthBehind >= 0 ? "ahead" : "behind"} by {aed0(Math.abs(monthBehind))}</span></Card>
       </div>
 
       <Card className="flex flex-col gap-2" data-money-went>
-        <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Where the money went</span>
+        <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Where the money went</span>
         <div className="flex h-4 w-full overflow-hidden rounded-full bg-chip">
           {SEGMENTS.map((s) => {
             const v = costs[s.key as keyof typeof costs];
@@ -192,13 +192,13 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
           <span className="text-sm font-extrabold uppercase tracking-[0.08em]">Invoices</span>
           <span className="ml-auto flex gap-1.5 text-xs">
             {[["all", "All"], ["provisional", "Provisional"], ["low", "Low margin"]].map(([k, l]) => (
-              <Link key={k} href={qs({ filter: k })} className={`inline-flex min-h-9 items-center rounded-control border px-3 font-bold ${filter === k ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{l}</Link>
+              <Link key={k} href={qs({ filter: k })} className={`inline-flex min-h-9 items-center rounded-control border px-3 font-bold ${filter === k ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>{l}</Link>
             ))}
           </span>
         </div>
         <table className="w-full min-w-[920px] text-sm">
           <thead>
-            <tr className="text-[11px] uppercase tracking-[0.08em] text-muted">
+            <tr className="text-xs uppercase tracking-[0.08em] text-muted">
               {[["invoice", "Invoice", "left"], ["date", "Date", "left"], ["car", "Car", "left"], ["revenue", "Revenue", "right"], ["parts", "Parts", "right"], ["labour", "Labour", "right"], ["other", "Other", "right"], ["bank", "Bank", "right"], ["profit", "Profit", "right"], ["margin", "Margin", "right"]].map(([k, l, align]) => (
                 <th key={k} className={`px-3 py-2 font-bold ${align === "right" ? "text-right" : "text-left"} ${k === "invoice" ? "pl-5" : ""}`}>
                   {k === "car" ? l : <Link href={sortLink(k)} className="underline-offset-4 hover:underline">{l}{sortKey === k ? (sp.dir === "asc" ? " ↑" : " ↓") : ""}</Link>}
@@ -235,7 +235,7 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
                   <td className="px-3 py-2 align-top text-right">{n0(r.partsCost)}</td>
                   <td className="px-3 py-2 align-top text-right whitespace-nowrap">{n0(r.labourCost)} <span className="text-xs text-muted">({(r.labourMinutes / 60).toFixed(1)} h)</span></td>
                   <td className="px-3 py-2 align-top text-right">{n0(other)}</td>
-                  <td className="px-3 py-2 align-top text-right whitespace-nowrap">{n0(r.bankCharges)}{r.bankCharges > 0 ? <span className={`ml-1 text-xs font-semibold ${r.bankChargesActual ? "text-green" : "text-muted"}`} data-fee-mark={r.bankChargesActual ? "actual" : "estimate"}>{r.bankChargesActual ? "actual" : "est."}</span> : null}</td>
+                  <td className="px-3 py-2 align-top text-right whitespace-nowrap">{n0(r.bankCharges)}{r.bankCharges > 0 ? <span className={`ml-1 text-xs font-semibold ${r.bankChargesActual ? "text-green-text" : "text-muted"}`} data-fee-mark={r.bankChargesActual ? "actual" : "estimate"}>{r.bankChargesActual ? "actual" : "est."}</span> : null}</td>
                   <td className={`px-3 py-2 align-top text-right font-extrabold ${r.profit < 0 ? "text-red" : ""}`}>{n0(r.profit)}</td>
                   <td className="px-3 py-2 align-top text-right"><span className={`inline-flex min-h-6 items-center rounded-full px-2 text-xs font-bold ${pill(m)}`} data-margin-pill>{m.toFixed(1)}%</span></td>
                 </tr>

@@ -60,7 +60,7 @@ export function CorrectCostDialog({ jobId, partId, name, why, onLpo, suppliers, 
         <p className="text-xs text-muted">Already {onLpo ? "ordered" : "ordered or received"}: put the cost that really stands, before the invoice is made. Only our records change; the customer sees nothing. It is written on the job.</p>
         {done ? (
           <>
-            <p className="rounded-control border border-green bg-green-soft px-3 py-2 text-sm font-bold text-green" data-correct-message>{done}</p>
+            <p className="rounded-control border border-green bg-green-soft px-3 py-2 text-sm font-bold text-green-text" data-correct-message>{done}</p>
             <div><Button type="button" size="md" onClick={onDone} data-correct-close>Close</Button></div>
           </>
         ) : (
@@ -83,7 +83,7 @@ export function CorrectCostDialog({ jobId, partId, name, why, onLpo, suppliers, 
                 </label>
                 {ask ? (
                   <div className="flex flex-wrap items-center gap-2 rounded-control border-2 border-amber-bar bg-amber-soft px-3 py-2" data-correct-ask>
-                    <span className="min-w-0 flex-1 text-sm font-bold text-amber">{ask.words}</span>
+                    <span className="min-w-0 flex-1 text-sm font-bold text-amber-text">{ask.words}</span>
                     <Button type="button" size="md" disabled={busy} onClick={() => void send({ kind: "supplier", supplier, cost, confirmCost: ask.cost })} data-correct-confirm>Yes, real price</Button>
                   </div>
                 ) : null}

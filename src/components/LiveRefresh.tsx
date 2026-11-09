@@ -123,7 +123,7 @@ export function LiveRefresh({ tables, jobId, pollMs = FALLBACK_POLL_MS, alwaysPo
 
   return (
     <>
-      {showUpdated && updatedWords ? <span className="pointer-events-none fixed bottom-2 right-3 z-30 text-[11px] font-semibold text-muted" data-live-updated>{updatedWords}</span> : null}
+      {showUpdated && updatedWords ? <span className="pointer-events-none fixed bottom-2 right-3 z-30 text-xs font-semibold text-muted" data-live-updated>{updatedWords}</span> : null}
       {offline ? <span className="fixed bottom-2 left-3 z-50 inline-flex items-center rounded-control bg-chip px-3 py-1 text-xs font-semibold text-muted" data-live-offline>Offline – reconnecting…</span> : null}
     </>
   );

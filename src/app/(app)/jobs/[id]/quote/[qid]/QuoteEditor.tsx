@@ -239,8 +239,8 @@ type Suggestion = { id: string; title: string; hint: string; service: Service | 
 const HANDCUT_SURCHARGE_TITLE = "Hand-cut surcharge";
 const num = (v: number | null | undefined) => (v === null || v === undefined ? "" : String(v));
 const finishedLine = (l: QuoteLine) => (isComplimentary(l) ? !!l.title.trim() : l.line_type === "labour" ? !!l.title.trim() && (l.hours ?? 0) > 0 : l.line_type === "package" ? !!l.title.trim() && (l.unit_price ?? 0) > 0 : !!l.title.trim());
-const chip = (on: boolean, extra = "") => `min-h-9 rounded-control border px-2.5 text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"} ${extra}`;
-const boxLabel = "flex flex-col gap-0.5 text-[11px] font-semibold text-muted";
+const chip = (on: boolean, extra = "") => `min-h-9 rounded-control border px-2.5 text-xs font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"} ${extra}`;
+const boxLabel = "flex flex-col gap-0.5 text-xs font-semibold text-muted";
 /** One job on several positions: front, rear, both; a pair or all four for paired jobs (control arms, discs); or one side. */
 const POSITION_CHOICES: string[][] = [["Front"], ["Rear"], ["Front", "Rear"], ["Front left", "Front right"], ["Rear left", "Rear right"], ["Front left", "Front right", "Rear left", "Rear right"], ["Left"], ["Right"]];
 const positionChoiceLabel = (ps: string[]) => {
@@ -586,7 +586,7 @@ export function QuoteEditor({
     const ops = failedOf(lineId);
     if (!ops.length) return null;
     return (
-      <div className="flex flex-wrap items-center gap-2 px-2 py-0.5 text-[11px] font-semibold text-red" data-line-not-saved={lineId}>
+      <div className="flex flex-wrap items-center gap-2 px-2 py-0.5 text-xs font-semibold text-red" data-line-not-saved={lineId}>
         <span>Not saved{(ops[0] as { failMessage?: string }).failMessage ? ` – ${(ops[0] as { failMessage?: string }).failMessage}` : ""}</span>
         <button type="button" onClick={() => ops.forEach((o) => retryFailed(o))} className="min-h-7 rounded-control border border-red-bar px-2 font-bold" data-line-retry={lineId}>Retry</button>
       </div>
@@ -808,16 +808,16 @@ export function QuoteEditor({
     const info = belowInfo.get(l.id);
     const held = belowHeld.get(l.id);
     if (held) return (
-      <div className="flex flex-wrap items-center gap-2 rounded-control border border-red-bar bg-red-soft px-2 py-1 text-[11px] font-bold text-red" data-below-cost-held={l.id}>
+      <div className="flex flex-wrap items-center gap-2 rounded-control border border-red-bar bg-red-soft px-2 py-1 text-xs font-bold text-red" data-below-cost-held={l.id}>
         <span>Not saved: {held.words}. Raise the price – only the owner can sell below cost.</span>
         {disabled ? null : <button type="button" onClick={() => putBack(l.id, null)} className="min-h-9 rounded-control border border-red-bar bg-white px-2.5 font-bold" data-below-cost-put-back={l.id}>Put back the saved price</button>}
       </div>
     );
     const b = belowMap.get(l.id) ?? null;
-    if (!b) return info ? <div className="px-1 text-[11px] font-semibold text-muted" data-below-cost-info={l.id}>{info}</div> : null;
-    if (b.approved) return <div className="px-1 text-[11px] font-semibold text-red" data-below-cost-line={l.id} data-below-cost-approved>Below cost: {aed(b.sell)} against a cost of {aed(b.cost)} · approved by {b.byName ?? "the owner"}{b.reason ? `: ${b.reason}` : ""}</div>;
+    if (!b) return info ? <div className="px-1 text-xs font-semibold text-muted" data-below-cost-info={l.id}>{info}</div> : null;
+    if (b.approved) return <div className="px-1 text-xs font-semibold text-red" data-below-cost-line={l.id} data-below-cost-approved>Below cost: {aed(b.sell)} against a cost of {aed(b.cost)} · approved by {b.byName ?? "the owner"}{b.reason ? `: ${b.reason}` : ""}</div>;
     return (
-      <div className="flex flex-wrap items-center gap-2 rounded-control border border-red-bar bg-red-soft px-2 py-1 text-[11px] font-bold text-red" data-below-cost-line={l.id}>
+      <div className="flex flex-wrap items-center gap-2 rounded-control border border-red-bar bg-red-soft px-2 py-1 text-xs font-bold text-red" data-below-cost-line={l.id}>
         <span>Below cost: sells at {aed(b.sell)}, costs {aed(b.cost)} ({aed(b.short)} under).</span>
         {disabled ? null : isOwner ? (
           settings.belowCostReady ? <button type="button" onClick={() => setBelowAsks((a) => [...a, { lineId: l.id, title: l.title, below: b, more: 0, op: null, reason: "" }])} className="min-h-9 rounded-control border border-red-bar bg-white px-2.5 font-bold" data-below-cost-approve={l.id}>Approve below cost…</button> : <span className="font-semibold">Raise the price (approving below cost opens once the database update is applied).</span>
@@ -1229,8 +1229,8 @@ export function QuoteEditor({
               ⋮⋮
             </span>
           ) : null}
-          <span className="w-5 shrink-0 text-right text-[11px] font-bold text-muted" aria-hidden>{index + 1}</span>
-          <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${done ? "bg-green text-white" : "border border-line-strong text-transparent"}`} aria-label={done ? "done" : "not done"}>✓</span>
+          <span className="w-5 shrink-0 text-right text-xs font-bold text-muted" aria-hidden>{index + 1}</span>
+          <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${done ? "bg-green text-on-dark" : "border border-line-strong text-transparent"}`} aria-label={done ? "done" : "not done"}>✓</span>
           <div className="flex-1 min-w-[12rem] flex flex-col gap-0.5">
             <NameBox
               id={`name-${l.id}`}
@@ -1245,20 +1245,20 @@ export function QuoteEditor({
               onNext={() => setFocusTarget({ id: l.id, field: "amount" })}
             />
             <PositionsLine positions={positions} />
-            {positionsWarningOf(l) ? <div className="px-1 text-[11px] font-bold text-red" data-positions-mismatch>{positionsWarningOf(l)}</div> : null}
+            {positionsWarningOf(l) ? <div className="px-1 text-xs font-bold text-red" data-positions-mismatch>{positionsWarningOf(l)}</div> : null}
             {svc?.bodyshop_kind === "coloured_ppf" || svc?.bodyshop_kind === "tint" || (isService && svc?.bodyshop_kind && !l.unit_price && settings.lastPrices?.[svc.id]) ? (
-              <span className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted" data-bodyshop-detail>
+              <span className="flex flex-wrap items-center gap-1.5 px-1 text-xs text-muted" data-bodyshop-detail>
                 {svc?.bodyshop_kind === "coloured_ppf" ? (<><Input value={l.film_colour ?? ""} onChange={(e) => patch(l.id, { film_colour: e.target.value })} placeholder="Film colour" disabled={disabled} className="min-h-8 w-32 text-xs" textCase="title" aria-label="Film colour" data-film-colour /><Input value={l.film_code ?? ""} onChange={(e) => patch(l.id, { film_code: e.target.value })} placeholder="Code" disabled={disabled} className="min-h-8 w-24 text-xs" textCase="upper" aria-label="Film code" data-film-code /></>) : null}
                 {svc?.bodyshop_kind === "tint" ? <button type="button" onClick={() => document.querySelector("[data-tint-box]")?.scrollIntoView({ behavior: "smooth", block: "center" })} className="min-h-8 font-semibold underline underline-offset-4" data-tint-goto>Darkness per window: Tint specification below</button> : null}
                 {isService && svc?.bodyshop_kind && !l.unit_price && settings.lastPrices?.[svc.id] ? <span data-last-price>Last time {aed(settings.lastPrices[svc.id])}</span> : null}
               </span>
             ) : null}
-            {l.side === "bodyshop" ? <span className="self-start rounded-full bg-chip px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-[0.08em]" data-side-badge="bodyshop">Bodyshop · bodyshop rate{l.details ? ` · ${l.details}` : ""}</span> : null}
+            {l.side === "bodyshop" ? <span className="self-start rounded-full bg-chip px-2 py-0.5 text-xs font-extrabold uppercase tracking-[0.08em]" data-side-badge="bodyshop">Bodyshop · bodyshop rate{l.details ? ` · ${l.details}` : ""}</span> : null}
             {l.package_items ? <PackageItemsToggle raw={l.package_items} disabled={!!disabled} onChange={(next) => patch(l.id, { package_items: next } as Partial<QuoteLine>, true)} /> : null}
             {ppfInstallLine(l, svc?.bodyshop_kind ?? null) ? (
               // Section 10: the PPF cutting method, approved with the quotation and printed under the PPF item.
               <span className="flex flex-wrap items-center gap-1.5 px-1 pt-0.5" data-cut-method={l.cut_method ?? "hand"}>
-                <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-muted">PPF cut</span>
+                <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">PPF cut</span>
                 {CUT_METHODS.map((c) => {
                   const on = (l.cut_method ?? "hand") === c.key;
                   return (
@@ -1268,17 +1268,17 @@ export function QuoteEditor({
                   );
                 })}
                 {(l.cut_method ?? "hand") === "mixed" ? <Input value={l.cut_note ?? ""} onChange={(e) => patch(l.id, { cut_note: e.target.value })} placeholder="Which panels are pre-cut?" disabled={disabled} className="min-h-8 text-xs" style={{ width: "14rem" }} aria-label="Mixed cut note" data-cut-note-box /> : null}
-                {(settings.handcutSurcharge ?? 0) > 0 && (l.cut_method ?? "hand") === "hand" && !lines.some((x) => x.is_active && x.title === HANDCUT_SURCHARGE_TITLE) ? <span className="text-[11px] text-amber">Hand-cut surcharge AED {settings.handcutSurcharge} not on the quotation yet: tap Hand-cut to add it.</span> : null}
+                {(settings.handcutSurcharge ?? 0) > 0 && (l.cut_method ?? "hand") === "hand" && !lines.some((x) => x.is_active && x.title === HANDCUT_SURCHARGE_TITLE) ? <span className="text-xs text-amber-text">Hand-cut surcharge AED {settings.handcutSurcharge} not on the quotation yet: tap Hand-cut to add it.</span> : null}
               </span>
             ) : null}
             {l.dangerous || l.urgency === "urgent" || l.details || perUnit || (l.discount_percent ?? 0) > 0 || estSuspect || internal ? (
-              <span className="flex flex-wrap items-center gap-1.5 px-1 text-[11px] text-muted">
+              <span className="flex flex-wrap items-center gap-1.5 px-1 text-xs text-muted">
                 {internal ? <span data-internal-badge><Badge tone="neutral">Internal cost only · not on the customer&apos;s documents</Badge></span> : null}
                 {perUnit ? <span>{aed(l.unit_price ?? 0)} per {l.price_per} × {l.quantity || 1}</span> : null}
                 {l.dangerous ? <Badge tone="red">Dangerous</Badge> : l.urgency === "urgent" ? <Badge tone="outline">Urgent</Badge> : null}
                 {l.details ? <span className="whitespace-pre-wrap break-words rounded-full border border-line-strong px-2 font-semibold" data-line-note>Note: {l.details}</span> : null}
                 {(l.discount_percent ?? 0) > 0 ? <span>Discount {l.discount_percent}%</span> : null}
-                {estSuspect ? <span className="font-semibold text-amber" data-estimate-warning>Check Est. h: {num(l.hours_estimate)} is not hours (the rate is {num(l.labour_rate)} AED/h). Labour at cost uses the quoted {hoursText(l.hours)} until it is fixed.</span> : null}
+                {estSuspect ? <span className="font-semibold text-amber-text" data-estimate-warning>Check Est. h: {num(l.hours_estimate)} is not hours (the rate is {num(l.labour_rate)} AED/h). Labour at cost uses the quoted {hoursText(l.hours)} until it is fixed.</span> : null}
               </span>
             ) : null}
           </div>
@@ -1288,31 +1288,31 @@ export function QuoteEditor({
                viewers only), and the hourly rate in AED/h. The estimate label never sits on the rate box. */
             <span className="inline-flex shrink-0 flex-wrap items-center gap-2" data-labour-boxes>
               <label className="inline-flex items-center gap-1 whitespace-nowrap" title="The hours quoted to the customer">
-                <span className="text-[10px] font-semibold text-muted">Hours</span>
+                <span className="text-xs font-semibold text-muted">Hours</span>
                 {/* The shared input style is full width, so each of the three boxes carries its own width. */}
                 <Input id={`amount-${l.id}`} data-amount value={num(l.hours)} onChange={(e) => patch(l.id, { hours: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => hoursBlur(l, e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); hoursBlur(l, e.currentTarget.value); focusNextAmount(e.currentTarget); } }} inputMode="decimal" disabled={disabled} aria-label="Hours" placeholder="0" style={{ width: "4.5rem" }} className={amountBox(blocked && !(l.hours && l.hours > 0) && !isComplimentary(l) ? "border-red-bar" : "")} />
-                <span className="text-[11px] font-semibold text-muted">h</span>
+                <span className="text-xs font-semibold text-muted">h</span>
               </label>
               {showProfit ? (
                 <label className="inline-flex items-center gap-1 whitespace-nowrap" title="Our internal estimate of the hours, never shown to the customer: labour at cost is worked out from it (then from the hours clocked)">
-                  <span className={`text-[10px] font-semibold ${estSuspect ? "text-amber" : "text-muted"}`}>Est. h</span>
-                  <Input value={num(l.hours_estimate ?? l.hours)} onChange={(e) => patch(l.id, { hours_estimate: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => { const v = e.target.value.replace(",", "."); if (v === "") return; const h = Math.max(0.1, Math.round(Number(v) * 100) / 100); if (h !== (l.hours_estimate ?? l.hours)) patch(l.id, { hours_estimate: h }, true); }} inputMode="decimal" disabled={disabled} aria-label="Estimated hours (internal)" style={{ width: "4.5rem", ...(estSuspect ? { borderColor: "var(--color-amber-bar)", backgroundColor: "var(--color-amber-soft)" } : {}) }} className={`text-right min-h-10 px-1 text-xs ${estSuspect ? "text-amber font-bold" : "text-muted"}`} data-estimate data-estimate-suspect={estSuspect ? "1" : undefined} />
+                  <span className={`text-xs font-semibold ${estSuspect ? "text-amber-text" : "text-muted"}`}>Est. h</span>
+                  <Input value={num(l.hours_estimate ?? l.hours)} onChange={(e) => patch(l.id, { hours_estimate: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => { const v = e.target.value.replace(",", "."); if (v === "") return; const h = Math.max(0.1, Math.round(Number(v) * 100) / 100); if (h !== (l.hours_estimate ?? l.hours)) patch(l.id, { hours_estimate: h }, true); }} inputMode="decimal" disabled={disabled} aria-label="Estimated hours (internal)" style={{ width: "4.5rem", ...(estSuspect ? { borderColor: "var(--color-amber-bar)", backgroundColor: "var(--color-amber-soft)" } : {}) }} className={`text-right min-h-10 px-1 text-xs ${estSuspect ? "text-amber-text font-bold" : "text-muted"}`} data-estimate data-estimate-suspect={estSuspect ? "1" : undefined} />
                 </label>
               ) : null}
               <label className="inline-flex items-center gap-1 whitespace-nowrap" title={`The hourly rate charged to the customer (standard AED ${settings.labourRate})`}>
                 <Input value={num(l.labour_rate)} onChange={(e) => patch(l.id, { labour_rate: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => rateBlur(l, e.target.value)} inputMode="decimal" disabled={disabled} aria-label="Rate per hour" placeholder={String(settings.labourRate)} style={{ width: "5rem" }} className={`text-right min-h-10 px-1 text-xs ${(l.labour_rate ?? 0) + 0.005 < settings.labourRate ? "border-red-bar text-red" : ""}`} data-rate />
-                <span className="text-[10px] font-semibold text-muted">AED/h</span>
+                <span className="text-xs font-semibold text-muted">AED/h</span>
               </label>
             </span>
           ) : (
             <>
               <span className="inline-flex items-center gap-1">
                 <Input id={`amount-${l.id}`} data-amount value={num(l.unit_price)} onChange={(e) => patch(l.id, { unit_price: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} onBlur={(e) => { const raw = e.target.value.trim(); if (raw !== "" && Number(raw.replace(",", ".")) === 0 && !isComplimentary(l) && l.fee_kind !== "bank_charge") setCompAsk(l.id); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); focusNextAmount(e.currentTarget); } }} inputMode="decimal" disabled={disabled} aria-label={perUnit ? `Price per ${l.price_per}` : "Price"} placeholder="0" className={`w-24 text-right min-h-10 px-1 ${blocked && !(l.unit_price && l.unit_price > 0) && !isComplimentary(l) ? "border-red-bar" : ""}`} />
-                <span className="text-[11px] font-semibold text-muted">AED</span>
+                <span className="text-xs font-semibold text-muted">AED</span>
               </span>
               {isService && !l.package_key && (showProfit || l.outside_work) ? (
                 <label className="inline-flex items-center gap-1" title={l.outside_work ? "What this outside work costs us: never shown to the customer, counted against profit" : "Our own cost on this service (film, materials, consumables): never shown to the customer, counted against profit"} data-our-cost>
-                  <span className="text-[10px] font-semibold text-muted">our cost</span>
+                  <span className="text-xs font-semibold text-muted">our cost</span>
                   <Input value={num(l.unit_cost)} placeholder="0" onChange={(e) => patch(l.id, { unit_cost: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} inputMode="decimal" disabled={disabled} aria-label="Our cost" className="w-16 text-right min-h-10 px-1 text-xs" data-our-cost />
                 </label>
               ) : null}
@@ -1320,7 +1320,7 @@ export function QuoteEditor({
                   (hours × the cost rate) - before, only bodyshop services showed the box, so typed lines had none. */}
               {isService && showProfit && !l.outside_work && (!l.package_key || svc?.bodyshop_kind || svc?.department === "bodyshop" || (l.installer_hours ?? 0) > 0) ? (
                 <label className="inline-flex items-center gap-1" title={`The hours this work takes us (internal, never on the customer's documents): counted at AED ${settings.bodyshopRate ?? 50} an hour in the profit until real clockings replace them`} data-installer-hours>
-                  <span className={`text-[10px] font-semibold ${hoursMissingIds.has(l.id) ? "text-red" : "text-muted"}`}>our hours</span>
+                  <span className={`text-xs font-semibold ${hoursMissingIds.has(l.id) ? "text-red" : "text-muted"}`}>our hours</span>
                   <Input value={num(l.installer_hours)} placeholder="0" onChange={(e) => patch(l.id, { installer_hours: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} inputMode="decimal" disabled={disabled} aria-label="Our hours (internal)" className={`w-14 text-right min-h-10 px-1 text-xs ${hoursMissingIds.has(l.id) ? "border-red-bar text-red" : "text-muted"}`} data-hours-box={hoursMissingIds.has(l.id) ? "missing" : "ok"} />
                 </label>
               ) : null}
@@ -1333,16 +1333,16 @@ export function QuoteEditor({
               ) : null}
             </>
           )}
-          {internal ? <span className="w-24 text-right text-[12px] font-extrabold uppercase tracking-wide text-muted" data-internal-line={l.id}>Internal</span> : isComplimentary(l) ? <span className="w-24 text-right text-[12px] font-extrabold uppercase tracking-wide text-green" data-complimentary={l.price_display}>{complimentaryWord(l)}</span> : <span className="w-24 text-right font-bold">{aed(total)}</span>}
+          {internal ? <span className="w-24 text-right text-xs font-extrabold uppercase tracking-wide text-muted" data-internal-line={l.id}>Internal</span> : isComplimentary(l) ? <span className="w-24 text-right text-xs font-extrabold uppercase tracking-wide text-green-text" data-complimentary={l.price_display}>{complimentaryWord(l)}</span> : <span className="w-24 text-right font-bold">{aed(total)}</span>}
           {!disabled && labourLines.length > 1 ? (
             <span className="inline-flex flex-col" aria-label="Move this line">
-              <button type="button" disabled={index === 0} onClick={() => moveLine(l, "up")} aria-label="Move up" data-move-up={l.id} className="h-5 w-7 rounded-t-control border border-line text-[10px] font-bold leading-none text-muted disabled:opacity-30">▲</button>
-              <button type="button" disabled={index === labourLines.length - 1} onClick={() => moveLine(l, "down")} aria-label="Move down" data-move-down={l.id} className="h-5 w-7 rounded-b-control border border-t-0 border-line text-[10px] font-bold leading-none text-muted disabled:opacity-30">▼</button>
+              <button type="button" disabled={index === 0} onClick={() => moveLine(l, "up")} aria-label="Move up" data-move-up={l.id} className="h-5 w-7 rounded-t-control border border-line text-xs font-bold leading-none text-muted disabled:opacity-30">▲</button>
+              <button type="button" disabled={index === labourLines.length - 1} onClick={() => moveLine(l, "down")} aria-label="Move down" data-move-down={l.id} className="h-5 w-7 rounded-b-control border border-t-0 border-line text-xs font-bold leading-none text-muted disabled:opacity-30">▼</button>
             </span>
           ) : null}
           {!disabled ? (
             <span className="relative" data-line-menu>
-              <button type="button" onClick={(e) => { if (menu) { setMenuFor(null); return; } setMenuAnchor(e.currentTarget); setMenuFor(l.id); }} aria-label="More for this line" aria-expanded={menu} className={`min-h-9 min-w-9 rounded-control border text-base font-bold ${menu ? "border-ink bg-ink text-white" : "border-line"}`}>
+              <button type="button" onClick={(e) => { if (menu) { setMenuFor(null); return; } setMenuAnchor(e.currentTarget); setMenuFor(l.id); }} aria-label="More for this line" aria-expanded={menu} className={`min-h-9 min-w-9 rounded-control border text-base font-bold ${menu ? "border-ink bg-ink text-on-dark" : "border-line"}`}>
                 ⋯
               </button>
               {menu ? (
@@ -1428,7 +1428,7 @@ export function QuoteEditor({
         {failChip(l.id)}
         {belowCostNote(l)}
         <div className="flex flex-wrap items-end gap-3 text-sm">
-          <span className="w-5 shrink-0 self-center text-right text-[11px] font-bold text-muted" aria-hidden>{index + 1}</span>
+          <span className="w-5 shrink-0 self-center text-right text-xs font-bold text-muted" aria-hidden>{index + 1}</span>
           <span className="font-bold self-center">Recovery</span>
           <span className={boxLabel}>Who pays?<span className="flex gap-1">
             <button type="button" disabled={disabled} onClick={() => setPaidBy("us")} className={chip(paidBy === "us")}>Us</button>
@@ -1479,7 +1479,7 @@ export function QuoteEditor({
         {failChip(l.id)}
         {belowCostNote(l)}
         <div className="flex flex-wrap items-end gap-3 text-sm">
-          <span className="w-5 shrink-0 self-center text-right text-[11px] font-bold text-muted" aria-hidden>{index + 1}</span>
+          <span className="w-5 shrink-0 self-center text-right text-xs font-bold text-muted" aria-hidden>{index + 1}</span>
           <label className={`${boxLabel} flex-1 min-w-48`}>Charge<Input value={l.title} onChange={(e) => patch(l.id, { title: e.target.value })} disabled={disabled} placeholder="What is it for?" aria-label="Charge" className={`min-h-9 font-semibold ${blocked && !l.title.trim() ? "border-red-bar" : ""}`} textCase="sentence" /></label>
           <label className={boxLabel}>Cost (optional)<Input value={num(l.unit_cost)} onChange={(e) => patch(l.id, { unit_cost: e.target.value === "" ? null : Number(e.target.value) })} inputMode="decimal" disabled={disabled} aria-label="Cost" className="w-24 text-right min-h-9" /></label>
           {costed ? (
@@ -1495,7 +1495,7 @@ export function QuoteEditor({
           <span className="ml-auto w-28 text-right font-bold self-center">{aed(total)}</span>
           {!disabled ? <button type="button" onClick={() => removeLine(l.id)} className="min-h-9 px-2 text-xs font-bold text-red self-center" aria-label="Remove">×</button> : null}
         </div>
-        {!disabled ? <button type="button" onClick={() => setOpenRows((s) => { const n = new Set(s); const k = `details-${l.id}`; if (n.has(k)) n.delete(k); else n.add(k); return n; })} className="self-start text-[11px] font-semibold text-muted underline underline-offset-4">{l.details ? "Note shown to the customer" : "Add a note for the customer"}</button> : null}
+        {!disabled ? <button type="button" onClick={() => setOpenRows((s) => { const n = new Set(s); const k = `details-${l.id}`; if (n.has(k)) n.delete(k); else n.add(k); return n; })} className="self-start text-xs font-semibold text-muted underline underline-offset-4">{l.details ? "Note shown to the customer" : "Add a note for the customer"}</button> : null}
         {openRows.has(`details-${l.id}`) ? <><Textarea value={l.details ?? ""} onChange={(e) => patch(l.id, { details: e.target.value })} rows={2} disabled={disabled} aria-label="Note for the customer" className="min-h-16" /><TextCounter length={(l.details ?? "").trim().length} /></> : null}
         {hidden ? <span className="text-xs text-muted">Internal cost only: never on the customer&apos;s documents; costs us {aed(lineCost(l))}, counted in the profit.</span> : null}
       </div>
@@ -1543,7 +1543,7 @@ export function QuoteEditor({
   const margin = totals.net > 0 ? (totals.profit / totals.net) * 100 : 0;
   // Own work with no hours (5 November 2026, E-00056): the profit is not reliable - red, never green.
   const tone3 = hoursMissing.length ? "red" : marginToneOf(totals.profit, totals.net, { yellow: settings.marginYellow ?? 30, red: settings.marginRed ?? 20 });
-  const marginTone = tone3 === "red" ? "text-red" : tone3 === "amber" ? "text-amber" : "text-green";
+  const marginTone = tone3 === "red" ? "text-red" : tone3 === "amber" ? "text-amber-text" : "text-green-text";
   const progressText = `${labourDone} of ${namedLabour.length} line${namedLabour.length === 1 ? "" : "s"} done${wait?.partsTotal ? ` · parts ${wait.partsPriced} of ${wait.partsTotal} priced` : ""}`;
   const scrollToFirstBlocker = () => {
     setAttempted(true);
@@ -1564,26 +1564,26 @@ export function QuoteEditor({
             <button type="button" onClick={toggleStrip} aria-expanded={stripOpen} className="flex w-full flex-col gap-1 px-4 py-2.5 text-left">
               <span className="flex flex-wrap items-center gap-2">
                 <span className="text-sm font-bold">From the inspection report</span>
-                <span className="rounded-full border border-line-strong bg-white px-2 py-0.5 text-[11px] font-semibold">{reference.requests.length} request{reference.requests.length === 1 ? "" : "s"}</span>
-                <span className="rounded-full border border-line-strong bg-white px-2 py-0.5 text-[11px] font-semibold">{reference.findings.length} finding{reference.findings.length === 1 ? "" : "s"}</span>
-                {reference.managerNote ? <span className="rounded-full border border-line-strong bg-white px-2 py-0.5 text-[11px] font-semibold">manager&apos;s note</span> : null}
-                {reference.roadTest.state === "done" ? <span className="rounded-full border border-line-strong bg-white px-2 py-0.5 text-[11px] font-semibold">road test: {reference.roadTest.flagged.length ? `${reference.roadTest.flagged.length} noted` : "all good"}</span> : null}
+                <span className="rounded-full border border-line-strong bg-white px-2 py-0.5 text-xs font-semibold">{reference.requests.length} request{reference.requests.length === 1 ? "" : "s"}</span>
+                <span className="rounded-full border border-line-strong bg-white px-2 py-0.5 text-xs font-semibold">{reference.findings.length} finding{reference.findings.length === 1 ? "" : "s"}</span>
+                {reference.managerNote ? <span className="rounded-full border border-line-strong bg-white px-2 py-0.5 text-xs font-semibold">manager&apos;s note</span> : null}
+                {reference.roadTest.state === "done" ? <span className="rounded-full border border-line-strong bg-white px-2 py-0.5 text-xs font-semibold">road test: {reference.roadTest.flagged.length ? `${reference.roadTest.flagged.length} noted` : "all good"}</span> : null}
                 <span className="ml-auto text-base font-bold" aria-hidden>{stripOpen ? "▴" : "▾"}</span>
               </span>
-              {unquotedLabels.length && !sent ? <span className="text-xs font-semibold text-amber">Nothing quoted yet for: {unquotedLabels.join(" · ")}</span> : null}
+              {unquotedLabels.length && !sent ? <span className="text-xs font-semibold text-amber-text">Nothing quoted yet for: {unquotedLabels.join(" · ")}</span> : null}
             </button>
             {stripOpen ? (
               <div className="flex flex-col gap-3 border-t border-line bg-white px-4 pb-3 pt-3 text-sm rounded-b-card">
                 {reference.requests.length ? (
                   <div className="flex flex-col gap-1">
-                    <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">The customer says</span>
+                    <span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">The customer says</span>
                     <ol className="list-decimal pl-5">{reference.requests.map((r, i) => <li key={i}>{r}</li>)}</ol>
                     {reference.requestsNote ? <p className="text-xs text-muted">Technician: {reference.requestsNote}</p> : null}
                   </div>
                 ) : null}
                 {reference.roadTest.state === "done" ? (
                   <div className="flex flex-col" data-road-strip>
-                    <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Road test</span>
+                    <span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">Road test</span>
                     {reference.roadTest.flagged.map((f) => {
                       const key = `road:${f.key}`;
                       const quoted = quotedKeys.has(`item:${key}`);
@@ -1592,17 +1592,17 @@ export function QuoteEditor({
                           <Badge tone={f.status === "bad" ? "red" : "amber"}>{f.statusLabel}</Badge>
                           <span className="font-semibold">{f.label}</span>
                           {f.remarks ? <span className="text-muted">{f.remarks}</span> : null}
-                          {quoted ? <span className="ml-auto text-xs font-semibold text-green">✓ Quoted</span> : !disabled ? <button type="button" onClick={() => setPicker({ kind: "both", sourceType: "item", sourceKey: key, label: `${f.label} (road test)` })} className="ml-auto min-h-9 rounded-control border border-line-strong bg-white px-2.5 text-xs font-bold" data-road-add>+ Add job</button> : null}
+                          {quoted ? <span className="ml-auto text-xs font-semibold text-green-text">✓ Quoted</span> : !disabled ? <button type="button" onClick={() => setPicker({ kind: "both", sourceType: "item", sourceKey: key, label: `${f.label} (road test)` })} className="ml-auto min-h-9 rounded-control border border-line-strong bg-white px-2.5 text-xs font-bold" data-road-add>+ Add job</button> : null}
                         </div>
                       );
                     })}
                     {!reference.roadTest.flagged.length ? <p className="border-t border-line pt-1.5 text-xs text-muted">Nothing noted on the road test.</p> : null}
-                    {reference.roadTest.good.length ? <p className="border-t border-line pt-1.5 text-xs text-muted" data-road-good><span className="font-semibold text-green">Good:</span> {reference.roadTest.good.join(", ")}</p> : null}
+                    {reference.roadTest.good.length ? <p className="border-t border-line pt-1.5 text-xs text-muted" data-road-good><span className="font-semibold text-green-text">Good:</span> {reference.roadTest.good.join(", ")}</p> : null}
                   </div>
                 ) : null}
                 {reference.findings.length ? (
                   <div className="flex flex-col">
-                    <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Findings</span>
+                    <span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">Findings</span>
                     {reference.findings.map((f) => {
                       const quoted = quotedKeys.has(`${f.sourceType}:${f.sourceKey}`);
                       return (
@@ -1610,13 +1610,13 @@ export function QuoteEditor({
                           <Badge tone={f.dangerous || f.status === "bad" ? "red" : "amber"}>{f.statusLabel}</Badge>
                           <span className="font-semibold">{f.label}</span>
                           {f.remark ? <span className="text-muted">{f.remark}</span> : null}
-                          {quoted ? <span className="ml-auto text-xs font-semibold text-green">✓ Quoted</span> : !disabled ? <button type="button" onClick={() => setPicker({ kind: "both", sourceType: f.sourceType, sourceKey: f.sourceKey, label: f.label })} className="ml-auto min-h-9 rounded-control border border-line-strong bg-white px-2.5 text-xs font-bold">+ Add job</button> : null}
+                          {quoted ? <span className="ml-auto text-xs font-semibold text-green-text">✓ Quoted</span> : !disabled ? <button type="button" onClick={() => setPicker({ kind: "both", sourceType: f.sourceType, sourceKey: f.sourceKey, label: f.label })} className="ml-auto min-h-9 rounded-control border border-line-strong bg-white px-2.5 text-xs font-bold">+ Add job</button> : null}
                         </div>
                       );
                     })}
                   </div>
                 ) : null}
-                {reference.managerNote ? <p><span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Workshop manager&apos;s note</span><br />{reference.managerNote}</p> : null}
+                {reference.managerNote ? <p><span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">Workshop manager&apos;s note</span><br />{reference.managerNote}</p> : null}
                 {reference.internalNote ? <p className="text-muted"><span className="font-semibold">For you, not the customer:</span> {reference.internalNote}</p> : null}
               </div>
             ) : null}
@@ -1652,7 +1652,7 @@ export function QuoteEditor({
               <Button type="button" size="md" onClick={() => setDraft("choose")} disabled={draft === "saving"}>+ Add line</Button>
               {(packages?.length ?? 0) > 0 ? <Button type="button" tone="secondary" size="md" onClick={() => setPackageAsk(true)} data-add-package>+ Add a package</Button> : null}
               <Button type="button" tone="secondary" size="md" onClick={() => setPartPicker(true)} data-add-part>+ Add a part</Button>
-              <Button type="button" tone="secondary" size="md" onClick={() => setDiscountOpen(true)} data-labour-discount className={header.discount_kind && Number(header.discount_value) > 0 ? "border-green bg-green-soft text-green" : ""}>
+              <Button type="button" tone="secondary" size="md" onClick={() => setDiscountOpen(true)} data-labour-discount className={header.discount_kind && Number(header.discount_value) > 0 ? "border-green bg-green-soft text-green-text" : ""}>
                 {header.discount_kind && Number(header.discount_value) > 0 ? `Discount ${header.discount_kind === "percent" ? `${header.discount_value}%` : aed(Number(header.discount_value))}` : "Discount"}
               </Button>
               {(() => {
@@ -1668,7 +1668,7 @@ export function QuoteEditor({
                 const approved = !byOwner && d.over && approvalStands && !pendingOwner;
                 const over = !byOwner && d.over && !approved;
                 return (
-                  <span className={`inline-flex items-center text-xs font-semibold ${over ? "text-amber-bar" : "text-green"}`} data-discount-status data-discount-over={over ? "" : undefined} data-discount-by={byOwner ? "owner" : "advisor"} data-discount-approved={approved ? "" : undefined}>
+                  <span className={`inline-flex items-center text-xs font-semibold ${over ? "text-amber-bar" : "text-green-text"}`} data-discount-status data-discount-over={over ? "" : undefined} data-discount-by={byOwner ? "owner" : "advisor"} data-discount-approved={approved ? "" : undefined}>
                     {byOwner
                       ? `${d.words} · given by the owner (no limit)`
                       : approved
@@ -1683,7 +1683,7 @@ export function QuoteEditor({
           ) : null}
           {totals.labourHours > 0 || totals.labourEstimateHours > 0 ? (
             /* The same two figures the internal box uses: the Est. h boxes added up (after the sanity checks) and the quoted hours. */
-            <p className={`text-xs ${totals.estimateTotalSuspect || totals.labourHours + 0.05 < totals.labourEstimateHours ? "font-semibold text-amber" : "text-muted"}`} data-estimate-footer>
+            <p className={`text-xs ${totals.estimateTotalSuspect || totals.labourHours + 0.05 < totals.labourEstimateHours ? "font-semibold text-amber-text" : "text-muted"}`} data-estimate-footer>
               Workshop estimate {hoursText(totals.labourEstimateHours)} · quoted {hoursText(totals.labourHours)}
               {totals.estimateTotalSuspect ? ` · the Est. h boxes add up to ${hoursText(totals.labourEstimateEntered)}, more than three times the quoted hours: check them (the quoted hours are used until then)` : totals.labourHours + 0.05 < totals.labourEstimateHours ? " · quoted lower than the workshop estimate" : ""}
               {workshopEstimate && workshopEstimate.hours !== null && Math.abs((workshopEstimate.managerHours ?? workshopEstimate.hours ?? 0) - totals.labourEstimateHours) > 0.05 ? ` · at approval the manager put ${workshopEstimate.managerHours ?? workshopEstimate.hours} h${workshopEstimate.agreed ? "" : " (not yet agreed)"}` : ""}
@@ -1708,7 +1708,7 @@ export function QuoteEditor({
                 <span className="flex items-center gap-1.5">
                   <span className="inline-flex overflow-hidden rounded-control border border-line-strong">
                     {(["percent", "aed"] as const).map((m) => (
-                      <button key={m} type="button" aria-pressed={allMode === m} onClick={() => setAllMode(m)} className={`min-h-9 min-w-11 px-2.5 text-xs font-bold ${allMode === m ? "bg-ink text-white" : "bg-white"}`} data-markup-all-mode={m}>{m === "percent" ? "%" : "AED"}</button>
+                      <button key={m} type="button" aria-pressed={allMode === m} onClick={() => setAllMode(m)} className={`min-h-9 min-w-11 px-2.5 text-xs font-bold ${allMode === m ? "bg-ink text-on-dark" : "bg-white"}`} data-markup-all-mode={m}>{m === "percent" ? "%" : "AED"}</button>
                     ))}
                   </span>
                   <Input key={allMode} id="markup-all" defaultValue={allMode === "percent" ? String(settings.minMarkup) : ""} placeholder={allMode === "percent" ? "%" : "AED per part"} inputMode="decimal" className="min-h-9" style={{ width: "7rem" }} aria-label={allMode === "percent" ? "Markup percent for every part" : "Markup in AED for every part"} data-markup-all-value />
@@ -1785,7 +1785,7 @@ export function QuoteEditor({
                                 <Input value={renamePart.value} onChange={(e) => setRenamePart({ ...renamePart, value: e.target.value })} className="min-h-9 flex-1 min-w-40 text-xs" textCase="title" aria-label="Customer name for this part" data-rename-part-input />
                                 <Button type="button" size="md" disabled={pending} onClick={saveCustomerName} data-rename-part-save>Save</Button>
                                 <Button type="button" tone="ghost" size="md" onClick={() => { setRenamePart(null); setRenameError(null); }}>Cancel</Button>
-                                {renameError ? <span className="w-full text-[11px] font-semibold text-red" data-rename-part-error>{renameError}</span> : null}
+                                {renameError ? <span className="w-full text-xs font-semibold text-red" data-rename-part-error>{renameError}</span> : null}
                               </span>
                             ) : (
                               est && !disabled ? (
@@ -1801,15 +1801,15 @@ export function QuoteEditor({
                           </div>
                           <PositionsLine positions={l.positions} />
                           {partTypeText(l) ? <div><Badge tone="outline">{partTypeText(l)}</Badge></div> : null}
-                          {positionsWarningOf(l) ? <div className="text-[11px] font-bold text-red" data-positions-mismatch>{positionsWarningOf(l)}</div> : null}
+                          {positionsWarningOf(l) ? <div className="text-xs font-bold text-red" data-positions-mismatch>{positionsWarningOf(l)}</div> : null}
                           {est ? (
-                            <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted" data-est-part-state={estState}>
+                            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted" data-est-part-state={estState}>
                               <Badge tone={estState === "draft" ? "outline" : estState === "with_desk" || estState === "advisor" ? "amber" : "green"}>{ESTIMATE_PART_WORDS[estState!]}</Badge>
                               {l.supplier_text ? <span data-est-part-supplier>{l.supplier_text}{realPartNumber(l.part_number) ? ` · ${realPartNumber(l.part_number)}` : ""} (internal)</span> : null}
                               {disabled && l.parts_note ? <span>Note: {l.parts_note}</span> : null}
                             </div>
                           ) : null}
-                          <div className="h-6 flex items-center gap-1.5 whitespace-nowrap overflow-hidden text-[11px] text-muted">
+                          <div className="h-6 flex items-center gap-1.5 whitespace-nowrap overflow-hidden text-xs text-muted">
                             {leftOff ? <Badge tone="neutral">Left off</Badge> : null}
                             {l.visible_to_customer === false ? <span data-internal-badge><Badge tone="neutral">Internal cost only</Badge></span> : null}
                             {part?.cost_aed === null && !leftOff ? <Badge tone="amber">Waiting for the price</Badge> : null}
@@ -1820,7 +1820,7 @@ export function QuoteEditor({
                                 {WARRANTY_CHOICES.map((m) => {
                                   const on = (warranty[part.id] ?? part.warranty_months ?? settings.batteryWarrantyMonths ?? 12) === m;
                                   return (
-                                    <button key={m} type="button" disabled={disabled} aria-pressed={on} onClick={() => pickWarranty(part.id, m)} className={`min-h-6 rounded-control border px-1.5 text-[11px] font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-warranty-months={m}>
+                                    <button key={m} type="button" disabled={disabled} aria-pressed={on} onClick={() => pickWarranty(part.id, m)} className={`min-h-6 rounded-control border px-1.5 text-xs font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-warranty-months={m}>
                                       {m} m
                                     </button>
                                   );
@@ -1844,7 +1844,7 @@ export function QuoteEditor({
                             {/* % or AED: switching keeps the selling price, only the way the markup is kept changes */}
                             <span className="inline-flex shrink-0 overflow-hidden rounded-control border border-line-strong" data-markup-mode={mode}>
                               {(["percent", "aed"] as const).map((m) => (
-                                <button key={m} type="button" disabled={disabled || unchosen} aria-pressed={mode === m} onClick={() => { if (mode === m) return; patch(l.id, m === "aed" ? { markup_mode: "aed", markup_aed: mb.aed } : { markup_mode: "percent", ...markupFromSell({ ...l, markup_mode: "percent" }, mb.sell) }, true); }} className={`min-h-9 min-w-10 px-2 text-xs font-bold disabled:opacity-50 ${mode === m ? "bg-ink text-white" : "bg-white"}`} data-markup-mode-chip={m}>{m === "percent" ? "%" : "AED"}</button>
+                                <button key={m} type="button" disabled={disabled || unchosen} aria-pressed={mode === m} onClick={() => { if (mode === m) return; patch(l.id, m === "aed" ? { markup_mode: "aed", markup_aed: mb.aed } : { markup_mode: "percent", ...markupFromSell({ ...l, markup_mode: "percent" }, mb.sell) }, true); }} className={`min-h-9 min-w-10 px-2 text-xs font-bold disabled:opacity-50 ${mode === m ? "bg-ink text-on-dark" : "bg-white"}`} data-markup-mode-chip={m}>{m === "percent" ? "%" : "AED"}</button>
                               ))}
                             </span>
                             {mode === "percent" ? (
@@ -1854,14 +1854,14 @@ export function QuoteEditor({
                             )}
                           </div>
                           {/* Whatever the mode, both forms of the markup show under it */}
-                          <span className="mt-1 block whitespace-nowrap text-right text-[11px] text-muted" data-markup-both>
+                          <span className="mt-1 block whitespace-nowrap text-right text-xs text-muted" data-markup-both>
                             <span data-markup-percent>{mb.percent === null ? "—" : `${mb.percent.toFixed(2)}%`}</span> · <span data-markup-aed>{aed(mb.aed)}</span>{(l.quantity || 1) > 1 ? " each" : ""}
                           </span>
-                          <span className={`block text-right text-[11px] font-bold text-red ${minFlags.has(l.id) ? "" : "hidden"}`} data-min-markup>Minimum {settings.minMarkup}%</span>
+                          <span className={`block text-right text-xs font-bold text-red ${minFlags.has(l.id) ? "" : "hidden"}`} data-min-markup>Minimum {settings.minMarkup}%</span>
                           {(() => {
                             // Placeholder costs (2 November 2026): a markup over the limit (500%) means the cost is probably not real.
                             const high = !unchosen ? markupTooHigh(l, settings.partMarkupWarn ?? DEFAULT_COST_LIMITS.markupWarnPercent) : null;
-                            return high !== null ? <span className="mt-0.5 block max-w-[14rem] text-right text-[11px] font-bold text-amber" data-markup-high>{markupTooHighWords(high, l.unit_cost, part?.supplier ?? null)}</span> : null;
+                            return high !== null ? <span className="mt-0.5 block max-w-[14rem] text-right text-xs font-bold text-amber-text" data-markup-high>{markupTooHighWords(high, l.unit_cost, part?.supplier ?? null)}</span> : null;
                           })()}
                         </td>
                         <td className="py-2 pr-2 align-top text-right" data-selling-cell>
@@ -1871,20 +1871,20 @@ export function QuoteEditor({
                         <td className="py-2 pr-2 align-top text-right font-bold">
                           {aed(total)}
                           {isOwner && !disabled && !unchosen ? (
-                            <details className="text-[11px] font-normal text-left">
+                            <details className="text-xs font-normal text-left">
                               <summary className="cursor-pointer text-muted">Owner discount{(l.discount_percent ?? 0) > 0 ? ` ${l.discount_percent}%` : ""}</summary>
                               <OwnerPartDiscount percent={l.discount_percent ?? 0} reason={l.discount_reason ?? ""} options={settings.reasons?.part_discount ?? []} onChange={(pct, reason) => patch(l.id, { discount_percent: pct, discount_reason: reason })} />
                             </details>
-                          ) : (l.discount_percent ?? 0) > 0 ? <span className="block text-[11px] font-normal text-muted">Discount {l.discount_percent}%</span> : null}
-                          <span className={`block text-[11px] font-bold text-red ${belowFloor ? "" : "invisible"}`}>Below the minimum</span>
+                          ) : (l.discount_percent ?? 0) > 0 ? <span className="block text-xs font-normal text-muted">Discount {l.discount_percent}%</span> : null}
+                          <span className={`block text-xs font-bold text-red ${belowFloor ? "" : "invisible"}`}>Below the minimum</span>
                         </td>
                         <td className="py-2 align-top text-right">
                           {est && !disabled ? (
                             <div className="mb-1 flex flex-col items-end gap-1" data-est-part-actions>
-                              {estState === "draft" ? <button type="button" disabled={!l.title.trim()} onClick={() => sendToDesk([l.id])} title={l.title.trim() ? undefined : "Type the name first"} className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-white whitespace-nowrap disabled:opacity-40" data-est-send={l.id}>Send to parts desk</button> : null}
+                              {estState === "draft" ? <button type="button" disabled={!l.title.trim()} onClick={() => sendToDesk([l.id])} title={l.title.trim() ? undefined : "Type the name first"} className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-on-dark whitespace-nowrap disabled:opacity-40" data-est-send={l.id}>Send to parts desk</button> : null}
                               {estState !== "priced" ? <button type="button" onClick={() => setPriceFor({ lineId: l.id, partId: null })} className="min-h-9 rounded-control border border-line-strong px-2.5 text-xs font-semibold whitespace-nowrap" data-est-own-price={l.id}>Enter price myself</button> : null}
                               {estState === "advisor" || estState === "checked" ? <button type="button" onClick={() => { setLines((prev) => prev.map((x) => (x.id === l.id ? { ...x, unit_cost: null, priced_by_advisor: false, priced_at: null, price_requested_at: new Date().toISOString() } : x))); setDirty((d) => new Set(d).add(l.id)); save({ backToDesk: { id: l.id } }); }} className="min-h-9 rounded-control border border-line px-2.5 text-xs font-semibold text-muted whitespace-nowrap" data-back-to-desk={l.id}>Send to parts desk instead</button> : null}
-                              {(estState === "advisor" || estState === "checked") && l.priced_at ? <span className="text-right text-[11px] font-semibold text-muted" data-priced-by={l.id}>Priced by {settings.staffNames?.[l.priced_by ?? ""] ?? "advisor"}, {formatDateTime(l.priced_at)}{estState === "checked" ? " · checked ✓" : ""}</span> : null}
+                              {(estState === "advisor" || estState === "checked") && l.priced_at ? <span className="text-right text-xs font-semibold text-muted" data-priced-by={l.id}>Priced by {settings.staffNames?.[l.priced_by ?? ""] ?? "advisor"}, {formatDateTime(l.priced_at)}{estState === "checked" ? " · checked ✓" : ""}</span> : null}
                               <button type="button" onClick={() => removeLine(l.id)} className="min-h-9 rounded-control border border-line px-2.5 text-xs font-semibold text-red whitespace-nowrap" data-est-remove={l.id}>Remove</button>
                             </div>
                           ) : null}
@@ -1898,18 +1898,18 @@ export function QuoteEditor({
                               <div className="mb-1 flex flex-col items-end gap-1" data-job-part-actions>
                                 <button type="button" onClick={() => setPriceFor({ lineId: l.id, partId: l.part_item_id ?? null })} className="min-h-9 rounded-control border border-line-strong px-2.5 text-xs font-semibold whitespace-nowrap" data-est-own-price={l.id}>Enter price myself</button>
                                 {pp?.advisor ? <button type="button" onClick={() => { setLines((prev) => prev.map((x) => (x.id === l.id ? { ...x, unit_cost: null } : x))); setDirty((d) => new Set(d).add(l.id)); save({ backToDesk: { id: l.id } }); }} className="min-h-9 rounded-control border border-line px-2.5 text-xs font-semibold text-muted whitespace-nowrap" data-back-to-desk={l.id}>Send to parts desk instead</button> : null}
-                                {pp?.advisor && pp.at ? <span className="text-right text-[11px] font-semibold text-muted" data-priced-by={l.id}>Priced by {pp.name ?? "advisor"}, {formatDateTime(pp.at)}{pp.checked ? " · checked ✓" : ""}</span> : null}
+                                {pp?.advisor && pp.at ? <span className="text-right text-xs font-semibold text-muted" data-priced-by={l.id}>Priced by {pp.name ?? "advisor"}, {formatDateTime(pp.at)}{pp.checked ? " · checked ✓" : ""}</span> : null}
                               </div>
                             );
                           })() : null}
                           {!disabled ? (
                             leftOff ? (
-                              <button type="button" onClick={() => patch(l.id, { left_off: false }, true)} className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-white whitespace-nowrap">Put back</button>
+                              <button type="button" onClick={() => patch(l.id, { left_off: false }, true)} className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-on-dark whitespace-nowrap">Put back</button>
                             ) : (
                               <button type="button" onClick={() => patch(l.id, { left_off: true }, true)} className="min-h-9 rounded-control border border-line px-2.5 text-xs font-semibold text-muted whitespace-nowrap">Leave off</button>
                             )
                           ) : null}
-                          {!disabled && !leftOff ? <button type="button" onClick={() => patch(l.id, { visible_to_customer: l.visible_to_customer === false }, true)} title={INTERNAL_ONLY_LABEL} className="mt-1 block min-h-9 w-full text-right text-[11px] font-semibold text-muted underline underline-offset-4 whitespace-nowrap" data-internal-toggle={l.id}>{l.visible_to_customer === false ? "Show to customer" : "Internal only"}</button> : null}
+                          {!disabled && !leftOff ? <button type="button" onClick={() => patch(l.id, { visible_to_customer: l.visible_to_customer === false }, true)} title={INTERNAL_ONLY_LABEL} className="mt-1 block min-h-9 w-full text-right text-xs font-semibold text-muted underline underline-offset-4 whitespace-nowrap" data-internal-toggle={l.id}>{l.visible_to_customer === false ? "Show to customer" : "Internal only"}</button> : null}
                         </td>
                       </tr>
                       </Fragment>
@@ -1936,7 +1936,7 @@ export function QuoteEditor({
                   </div>
                 ))}
                 {justNow.map((p) => (
-                  <div key={p.id} className="flex flex-wrap items-center gap-2 font-semibold text-green" data-job-priced-now={p.id}>
+                  <div key={p.id} className="flex flex-wrap items-center gap-2 font-semibold text-green-text" data-job-priced-now={p.id}>
                     <span className="min-w-0 flex-1 font-bold uppercase break-words">{p.description}</span>
                     <span>Priced by you · AED {aed(jobPriced[p.id].cost)} each · adding it to the quotation…</span>
                   </div>
@@ -2006,8 +2006,8 @@ export function QuoteEditor({
             <dt className="text-muted">Labour and services</dt><dd className="text-right">{aed(totals.labourSell)}</dd>
             <dt className="text-muted">Parts</dt><dd className="text-right">{aed(totals.partsSell)}</dd>
             <dt className="text-muted">Other charges</dt><dd className="text-right">{aed(totals.otherSell)}</dd>
-            {totals.discount ? <><dt className="font-bold text-green" data-labour-discount-row>{discountLabelOf(q, { hasPackage: hasPackageLine(lines) })}</dt><dd className="text-right font-bold text-green">− {aed(totals.discount)}</dd></> : null}
-            {totals.rounding ? <><dt className={totals.rounding < 0 ? "font-bold text-green" : "text-muted"} data-roundoff-row>Round-off</dt><dd className={`text-right ${totals.rounding < 0 ? "font-bold text-green" : ""}`}>{totals.rounding < 0 ? "− " : "+ "}{aed(Math.abs(totals.rounding))}</dd></> : null}
+            {totals.discount ? <><dt className="font-bold text-green-text" data-labour-discount-row>{discountLabelOf(q, { hasPackage: hasPackageLine(lines) })}</dt><dd className="text-right font-bold text-green-text">− {aed(totals.discount)}</dd></> : null}
+            {totals.rounding ? <><dt className={totals.rounding < 0 ? "font-bold text-green-text" : "text-muted"} data-roundoff-row>Round-off</dt><dd className={`text-right ${totals.rounding < 0 ? "font-bold text-green-text" : ""}`}>{totals.rounding < 0 ? "− " : "+ "}{aed(Math.abs(totals.rounding))}</dd></> : null}
             <dt className="text-muted border-t border-line pt-1">Subtotal before VAT</dt><dd className="text-right border-t border-line pt-1">{aed(totals.net)}</dd>
             <dt className="text-muted">VAT {quotation.vat_percent}%</dt><dd className="text-right">{aed(totals.vat)}</dd>
             <dt className="font-extrabold">Grand total</dt><dd className="text-right text-lg font-extrabold">{aed(totals.total)}</dd>
@@ -2043,15 +2043,15 @@ export function QuoteEditor({
                 <>
                   <div className="flex flex-wrap gap-1" data-deposit-chips>
                     {([["percent_parts", 50, "50% of parts"], ["percent_parts", 100, "100% of parts"], ["percent_total", 50, "50% of total"]] as const).map(([mode, v, label]) => (
-                      <button key={label} type="button" disabled={disabled} aria-pressed={header.deposit_mode === mode && Number(header.deposit_value) === v} onClick={() => setHeaderField({ deposit_mode: mode, deposit_value: v }, true)} className={`min-h-8 rounded-control border px-2.5 text-xs font-semibold ${header.deposit_mode === mode && Number(header.deposit_value) === v ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                      <button key={label} type="button" disabled={disabled} aria-pressed={header.deposit_mode === mode && Number(header.deposit_value) === v} onClick={() => setHeaderField({ deposit_mode: mode, deposit_value: v }, true)} className={`min-h-8 rounded-control border px-2.5 text-xs font-semibold ${header.deposit_mode === mode && Number(header.deposit_value) === v ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
                         {label}
                       </button>
                     ))}
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="inline-flex overflow-hidden rounded-control border border-line-strong" data-deposit-unit>
-                      <button type="button" disabled={disabled} aria-pressed={header.deposit_mode === "aed"} onClick={() => setHeaderField({ deposit_mode: "aed", deposit_value: totals.deposit || null }, true)} className={`min-h-9 px-3 text-xs font-bold ${header.deposit_mode === "aed" ? "bg-ink text-white" : "bg-white"}`}>AED</button>
-                      <button type="button" disabled={disabled} aria-pressed={header.deposit_mode !== "aed"} onClick={() => setHeaderField({ deposit_mode: header.deposit_mode === "percent_parts" ? "percent_parts" : "percent_total", deposit_value: header.deposit_mode === "aed" && totals.total > 0 && header.deposit_value ? Math.min(100, Math.round((Number(header.deposit_value) / totals.total) * 100)) : header.deposit_value ?? 50 }, true)} className={`min-h-9 px-3 text-xs font-bold ${header.deposit_mode !== "aed" ? "bg-ink text-white" : "bg-white"}`}>%</button>
+                      <button type="button" disabled={disabled} aria-pressed={header.deposit_mode === "aed"} onClick={() => setHeaderField({ deposit_mode: "aed", deposit_value: totals.deposit || null }, true)} className={`min-h-9 px-3 text-xs font-bold ${header.deposit_mode === "aed" ? "bg-ink text-on-dark" : "bg-white"}`}>AED</button>
+                      <button type="button" disabled={disabled} aria-pressed={header.deposit_mode !== "aed"} onClick={() => setHeaderField({ deposit_mode: header.deposit_mode === "percent_parts" ? "percent_parts" : "percent_total", deposit_value: header.deposit_mode === "aed" && totals.total > 0 && header.deposit_value ? Math.min(100, Math.round((Number(header.deposit_value) / totals.total) * 100)) : header.deposit_value ?? 50 }, true)} className={`min-h-9 px-3 text-xs font-bold ${header.deposit_mode !== "aed" ? "bg-ink text-on-dark" : "bg-white"}`}>%</button>
                     </span>
                     <Input value={header.deposit_value === null || header.deposit_value === undefined ? "" : String(header.deposit_value)} onChange={(e) => setHeaderField({ deposit_value: e.target.value === "" ? null : Number(e.target.value.replace(",", ".")) })} inputMode="decimal" disabled={disabled} aria-label="Deposit" className="w-28" style={{ width: "7rem" }} data-deposit-value />
                     {header.deposit_mode !== "aed" ? <span className="text-xs text-muted">of {header.deposit_mode === "percent_parts" ? "parts" : "total"}</span> : null}
@@ -2062,18 +2062,18 @@ export function QuoteEditor({
               ) : null}
             </div>
           ) : null}
-          {settings.discountLimit > 0 && totals.discountBase > 0 && !discountByOwnerNow && !approvalStands && discountAgainstLimit(totals, settings.discountLimit).over ? <p className="text-xs font-semibold text-amber" data-discount-limit-note>Above the {settings.discountLimit}% discount limit: the owner must approve before sending.</p> : null}
+          {settings.discountLimit > 0 && totals.discountBase > 0 && !discountByOwnerNow && !approvalStands && discountAgainstLimit(totals, settings.discountLimit).over ? <p className="text-xs font-semibold text-amber-text" data-discount-limit-note>Above the {settings.discountLimit}% discount limit: the owner must approve before sending.</p> : null}
           {showProfit ? (
             <div className="flex flex-col gap-1 rounded-control bg-chip p-3">
-              <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Internal (not shown to the customer)</span>
+              <span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">Internal (not shown to the customer)</span>
               <div className="flex flex-col gap-1 py-1">
-                <span className="text-[11px] font-semibold text-muted">Customer will pay by</span>
+                <span className="text-xs font-semibold text-muted">Customer will pay by</span>
                 <div className="flex flex-wrap gap-1">
                   {([["not_sure", "Not sure"], ["card", "Card"], ["link", "Payment link"], ["cash", "Cash"], ["cheque", "Cheque"], ["transfer", "Bank transfer"]] as const).map(([v, label]) => (
-                    <button key={v} type="button" disabled={disabled} onClick={() => setHeaderField({ expected_payment_method: v }, true)} aria-pressed={expectedMethod === v} className={`min-h-9 rounded-control border px-2 text-[11px] font-bold ${expectedMethod === v ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{label}</button>
+                    <button key={v} type="button" disabled={disabled} onClick={() => setHeaderField({ expected_payment_method: v }, true)} aria-pressed={expectedMethod === v} className={`min-h-9 rounded-control border px-2 text-xs font-bold ${expectedMethod === v ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>{label}</button>
                   ))}
                 </div>
-                <span className="text-[11px] text-muted">Sets the estimated bank charge only. The customer may still pay any way; the real charge replaces it at payment.</span>
+                <span className="text-xs text-muted">Sets the estimated bank charge only. The customer may still pay any way; the real charge replaces it at payment.</span>
               </div>
               <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 text-xs" data-internal-box>
                 {/* THE profit list (30 October 2026, section 3): one calculation, every cost once; the lines add up to the total cost. */}
@@ -2085,19 +2085,19 @@ export function QuoteEditor({
                     <Fragment key={p.key}>
                       <dt className="text-muted" data-profit-line={p.key}>
                         − {p.key === "bank" ? "Bank fee (excl. VAT)" : p.label}
-                        {p.key === "bank" ? <span className="block text-[11px]" data-bank-fee-label>{liveRate}%{liveFixed > 0 ? " + AED " + liveFixed.toFixed(2) : ""} of the total with VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""}</span> : p.detail ? <span className="block text-[11px]" data-profit-detail={p.key}>{p.detail}</span> : null}
-                        {p.key === "labour" && totals.labourCostBasis === "estimate" && (totals.estimateTotalSuspect || totals.estimateSuspectLineIds.length) ? <span className="block font-semibold text-amber" title="An Est. h box holds a figure that is not hours; the quoted hours are used for that line until it is fixed" data-estimate-cost-warning>Est. h flagged, quoted hours used</span> : null}
-                        {p.key === "labour" && settings.installerHistory && totals.installerHours > 0 ? <span className="block text-[11px]" data-installer-history>This model before: about {hoursText(settings.installerHistory.avgHours)} over {settings.installerHistory.jobs} job{settings.installerHistory.jobs === 1 ? "" : "s"}</span> : null}
+                        {p.key === "bank" ? <span className="block text-xs" data-bank-fee-label>{liveRate}%{liveFixed > 0 ? " + AED " + liveFixed.toFixed(2) : ""} of the total with VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""}</span> : p.detail ? <span className="block text-xs" data-profit-detail={p.key}>{p.detail}</span> : null}
+                        {p.key === "labour" && totals.labourCostBasis === "estimate" && (totals.estimateTotalSuspect || totals.estimateSuspectLineIds.length) ? <span className="block font-semibold text-amber-text" title="An Est. h box holds a figure that is not hours; the quoted hours are used for that line until it is fixed" data-estimate-cost-warning>Est. h flagged, quoted hours used</span> : null}
+                        {p.key === "labour" && settings.installerHistory && totals.installerHours > 0 ? <span className="block text-xs" data-installer-history>This model before: about {hoursText(settings.installerHistory.avgHours)} over {settings.installerHistory.jobs} job{settings.installerHistory.jobs === 1 ? "" : "s"}</span> : null}
                       </dt>
                       <dd className="text-right" data-profit-amount={p.key}>{aed(p.amount)}</dd>
                       {p.key === "materials" && (department === "bodyshop" || quotation.kind === "estimate" || Number(header.materials_cost_aed) > 0) ? (
                         <>
-                          <dt className="pl-3 text-[11px] text-muted">Typed materials (paint, extra film)</dt>
+                          <dt className="pl-3 text-xs text-muted">Typed materials (paint, extra film)</dt>
                           <dd className="text-right"><Input value={header.materials_cost_aed ? String(header.materials_cost_aed) : ""} onChange={(e) => setHeaderField({ materials_cost_aed: Number(e.target.value.replace(",", ".")) || 0 }, true)} inputMode="decimal" placeholder="0" disabled={disabled} aria-label="Materials cost" className="w-24 text-right min-h-8 text-xs" data-materials /></dd>
                         </>
                       ) : null}
                       {p.key === "materials" && settings.costing && hasPackageLine(lines) ? (
-                        <dd className="col-span-2 flex flex-wrap items-center justify-end gap-1 text-[11px]" data-film-rolls-box>
+                        <dd className="col-span-2 flex flex-wrap items-center justify-end gap-1 text-xs" data-film-rolls-box>
                           <span className="text-muted" data-film-rolls-why>Film rolls (usual {settings.costing.defaultRolls}: {settings.costing.rollsWhy})</span>
                           <Input value={rollsText} onChange={(e) => setRollsText(e.target.value)} inputMode="decimal" placeholder={String(settings.costing.defaultRolls)} disabled={disabled} aria-label="Film rolls for this job" className="w-16 text-right min-h-8 text-xs" style={{ width: "4rem" }} data-film-rolls />
                           {rollsLower ? <Input value={rollsNote} onChange={(e) => setRollsNote(e.target.value)} placeholder="Why fewer rolls? (required)" disabled={disabled} aria-label="Why fewer film rolls" className="min-h-8 text-xs" style={{ width: "14rem" }} data-film-rolls-note /> : null}
@@ -2108,10 +2108,10 @@ export function QuoteEditor({
                   ),
                 )}
                 <dt className="font-semibold border-t border-line pt-1">= Total cost</dt><dd className="text-right font-semibold border-t border-line pt-1" data-profit-total-cost>{aed(totals.totalCost)}</dd>
-                <dt className="font-bold">PROFIT{totals.commissionPending ? <span className="ml-1 font-semibold text-amber" data-profit-commission-pending>(commission counted, pending owner approval)</span> : null}</dt><dd className={"text-right font-bold " + marginTone} data-profit-total>{aed(totals.profit)} · {margin.toFixed(1)}%</dd>
-                {hoursMissing.length ? <dd className="col-span-2 text-right font-bold text-red" data-hours-missing={hoursMissing.length}>{HOURS_MISSING_WORDS}<span className="block text-[11px] font-semibold">{hoursMissing.length} line{hoursMissing.length === 1 ? "" : "s"} without hours: {hoursMissing.map((x) => x.title || "untitled line").join(", ")}. Type the hours in each line&apos;s &quot;Hours&quot; or &quot;our hours&quot; box.</span></dd> : null}
+                <dt className="font-bold">PROFIT{totals.commissionPending ? <span className="ml-1 font-semibold text-amber-text" data-profit-commission-pending>(commission counted, pending owner approval)</span> : null}</dt><dd className={"text-right font-bold " + marginTone} data-profit-total>{aed(totals.profit)} · {margin.toFixed(1)}%</dd>
+                {hoursMissing.length ? <dd className="col-span-2 text-right font-bold text-red" data-hours-missing={hoursMissing.length}>{HOURS_MISSING_WORDS}<span className="block text-xs font-semibold">{hoursMissing.length} line{hoursMissing.length === 1 ? "" : "s"} without hours: {hoursMissing.map((x) => x.title || "untitled line").join(", ")}. Type the hours in each line&apos;s &quot;Hours&quot; or &quot;our hours&quot; box.</span></dd> : null}
                 <dt className="text-muted">{hasPackageLine(lines) ? "Package margin" : "Labour margin"}</dt><dd className="text-right" data-labour-margin>{aed(totals.labourMargin)}</dd>
-                <dt className="text-muted">Parts margin</dt><dd className="text-right">{aed(totals.partsMargin)}{totals.partsUnpriced ? <span className="block text-[11px] font-semibold text-amber" data-margin-incomplete>{totals.partsUnpriced} part{totals.partsUnpriced === 1 ? "" : "s"} not priced yet, margin incomplete</span> : null}</dd>
+                <dt className="text-muted">Parts margin</dt><dd className="text-right">{aed(totals.partsMargin)}{totals.partsUnpriced ? <span className="block text-xs font-semibold text-amber-text" data-margin-incomplete>{totals.partsUnpriced} part{totals.partsUnpriced === 1 ? "" : "s"} not priced yet, margin incomplete</span> : null}</dd>
               </dl>
             </div>
           ) : null}
@@ -2123,7 +2123,7 @@ export function QuoteEditor({
             <SectionLabel>Parts</SectionLabel>
             {wait.unavailable?.length ? (
               <div className="rounded-control bg-amber-soft px-3 py-2 text-xs">
-                <span className="font-extrabold text-amber">Not available from Parts:</span>
+                <span className="font-extrabold text-amber-text">Not available from Parts:</span>
                 <ul className="mt-1 flex flex-col gap-0.5">{wait.unavailable.map((u, i) => <li key={i}><span className="font-semibold">{u.label}</span>{u.note ? <span className="text-muted"> · {u.note}</span> : null}</li>)}</ul>
                 <span className="text-muted">Offer the customer another way, or leave it off.</span>
               </div>
@@ -2138,7 +2138,7 @@ export function QuoteEditor({
                     <Button type="button" tone="secondary" size="md" disabled={pending || wait.waitingMinutes < wait.escalateAfter} onClick={() => run(() => escalateParts(quotation.id))}>Escalate to owner{wait.waitingMinutes < wait.escalateAfter ? ` (after ${wait.escalateAfter} min)` : ""}</Button>
                   </div>
                 ) : null}
-                {wait.remindedAt ? <p className="text-[11px] text-muted">Reminded {formatDayTime(wait.remindedAt)}{wait.escalatedAt ? ` · escalated ${formatDayTime(wait.escalatedAt)}` : ""}</p> : null}
+                {wait.remindedAt ? <p className="text-xs text-muted">Reminded {formatDayTime(wait.remindedAt)}{wait.escalatedAt ? ` · escalated ${formatDayTime(wait.escalatedAt)}` : ""}</p> : null}
               </>
             ) : null}
           </Card>
@@ -2169,14 +2169,14 @@ export function QuoteEditor({
               ))}
             </ul>
           ) : null}
-          {!sent && !completed && !blockers.length ? <p className="text-xs text-green font-semibold">✓ Nothing blocks it. Finish it in the bar below.</p> : null}
+          {!sent && !completed && !blockers.length ? <p className="text-xs text-green-text font-semibold">✓ Nothing blocks it. Finish it in the bar below.</p> : null}
           {canKeepUrgent ? (
             <button type="button" disabled={pending} onClick={() => { if (window.confirm("Keep only the lines marked Urgent, and their parts? The rest is removed from this version.")) run(() => keepUrgentOnly(quotation.id)); }} className="self-start text-xs font-semibold underline underline-offset-4">Keep urgent lines only</button>
           ) : null}
           {!sent && completed ? (
             <>
               <p className="text-xs text-muted">Complete {formatDayTime(completedAt)}. Any change reopens it.</p>
-              {!blockers.length && reasons.length && !isOwner && !approvalStands ? <p className="text-xs font-semibold text-amber">Needs the owner&apos;s approval: {reasons.join("; ")}</p> : null}
+              {!blockers.length && reasons.length && !isOwner && !approvalStands ? <p className="text-xs font-semibold text-amber-text">Needs the owner&apos;s approval: {reasons.join("; ")}</p> : null}
               {!disabled ? <button type="button" className="self-start text-xs font-semibold underline underline-offset-4" onClick={() => run(() => reopenQuotation(quotation.id))}>Reopen to change</button> : null}
             </>
           ) : null}
@@ -2445,7 +2445,7 @@ export function QuoteEditor({
       {!disabled || (sent && canSend) ? (
         <div className="fixed bottom-0 left-0 right-0 nav:left-60 z-40 border-t border-line bg-white px-4 py-2.5">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-1">
-            {!disabled ? <span className={`text-[11px] font-bold ${state === "offline" ? "text-amber" : "text-muted"}`}>{state === "saved" ? "Saved" : state === "saving" ? "Saving…" : "No connection · changes kept, will save"}</span> : null}
+            {!disabled ? <span className={`text-xs font-bold ${state === "offline" ? "text-amber-text" : "text-muted"}`}>{state === "saved" ? "Saved" : state === "saving" ? "Saving…" : "No connection · changes kept, will save"}</span> : null}
             {showProfit ? <span className={`text-xs font-extrabold ${marginTone}`} data-margin-chip data-margin-tone={tone3} data-hours-missing-chip={hoursMissing.length ? "1" : undefined}>Profit {margin.toFixed(0)}%{hoursMissing.length ? ` · ${HOURS_MISSING_WORDS}` : ""}</span> : null}
             {(() => {
               const hist = settings.packageCost ?? {};
@@ -2458,7 +2458,7 @@ export function QuoteEditor({
                 else if (l.unit_price < avg * 1.15 && worst !== "red") worst = "amber";
               }
               if (!worst) return null;
-              return <span className={`text-xs font-extrabold ${worst === "red" ? "text-red" : "text-amber"}`} data-package-warn={worst}>{worst === "red" ? "Package price below what this package usually costs us" : "Package price looks low against past jobs"}</span>;
+              return <span className={`text-xs font-extrabold ${worst === "red" ? "text-red" : "text-amber-text"}`} data-package-warn={worst}>{worst === "red" ? "Package price below what this package usually costs us" : "Package price looks low against past jobs"}</span>;
             })()}
             {!sent ? <span className="text-xs font-semibold">{progressText}</span> : <span className="text-xs font-semibold">{quotation.status === "sent" ? "Sent, not yet opened" : quotation.status === "opened" ? "Opened by the customer" : quotation.status === "approved" ? "Approved" : quotation.status === "declined" ? "Declined" : quotation.status === "expired" ? "Expired" : quotation.status === "urgent_requested" ? "Urgent work asked for" : "Sent"}</span>}
             <span className="ml-auto flex flex-wrap items-center gap-2">
@@ -2594,7 +2594,7 @@ function NameBox({ id, value, kind, items, disabled, blocked, onType, onPick, on
           {shown.map((j) => (
             <button key={j.id} type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => onPick(j)} className="flex w-full min-h-10 items-center justify-between gap-2 px-3 text-left text-sm hover:bg-canvas">
               <span className="font-semibold">{j.title}</span>
-              <span className="shrink-0 text-[11px] text-muted">{j.hint}</span>
+              <span className="shrink-0 text-xs text-muted">{j.hint}</span>
             </button>
           ))}
         </div>
@@ -2625,7 +2625,7 @@ function OwnerPartDiscount({ percent, reason, options = [], onChange }: { percen
     <div className="flex flex-col gap-2 text-xs mt-1">
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1"><span className="font-semibold text-muted">Discount %</span><Input value={pct} onChange={(e) => { setPct(e.target.value); send(e.target.value, why); }} inputMode="decimal" className="w-20" /></label>
-        {waiting ? <span className="text-amber font-semibold pb-3">Tap or write the reason to apply it.</span> : null}
+        {waiting ? <span className="text-amber-text font-semibold pb-3">Tap or write the reason to apply it.</span> : null}
       </div>
       <ReasonChips name="discount_reason" label="Reason (logged)" options={options} defaultValue={why} placeholder="required" onValue={(v) => { setWhy(v); send(pct, v); }} />
     </div>
@@ -2665,20 +2665,20 @@ function LabourDiscountDialog({ kind: initialKind, value: initialValue, scope: i
       <div ref={boxRef} className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-3" onClick={(e) => e.stopPropagation()} data-labour-discount-dialog>
         <span className="text-lg font-extrabold">Discount</span>
         <div className="flex flex-wrap gap-1.5" data-discount-scope>
-          <button type="button" onClick={() => setScope("labour")} aria-pressed={scope === "labour"} className={`min-h-11 rounded-control border px-3 text-sm font-bold ${scope === "labour" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Labour only</button>
-          <button type="button" onClick={() => setScope("labour_services")} aria-pressed={scope === "labour_services"} className={`min-h-11 rounded-control border px-3 text-sm font-bold ${scope === "labour_services" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Labour + services</button>
+          <button type="button" onClick={() => setScope("labour")} aria-pressed={scope === "labour"} className={`min-h-11 rounded-control border px-3 text-sm font-bold ${scope === "labour" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>Labour only</button>
+          <button type="button" onClick={() => setScope("labour_services")} aria-pressed={scope === "labour_services"} className={`min-h-11 rounded-control border px-3 text-sm font-bold ${scope === "labour_services" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>Labour + services</button>
         </div>
         <p className="text-xs text-muted">{scope === "labour" ? `On our own labour lines only (${aed(base)} of labour).` : `On our labour and our own services (${aed(base)}).`} Never on parts, outside work or other charges. Taken off before VAT, then the round-off.</p>
         <div className="flex flex-wrap items-center gap-2">
           <Input value={text} onChange={(e) => setText(e.target.value)} inputMode="decimal" placeholder="0" autoFocus aria-label="Discount amount" className="text-right min-h-11" style={{ width: "8rem" }} />
           <span className="inline-flex shrink-0 rounded-control border border-line-strong" data-discount-kind>
-            <button type="button" onClick={() => setKind("percent")} aria-pressed={kind === "percent"} className={`min-h-11 min-w-12 shrink-0 rounded-l-control px-4 text-sm font-bold ${kind === "percent" ? "bg-ink text-white" : "bg-white"}`}>%</button>
-            <button type="button" onClick={() => setKind("aed")} aria-pressed={kind === "aed"} className={`min-h-11 min-w-14 shrink-0 rounded-r-control px-4 text-sm font-bold whitespace-nowrap ${kind === "aed" ? "bg-ink text-white" : "bg-white"}`}>AED</button>
+            <button type="button" onClick={() => setKind("percent")} aria-pressed={kind === "percent"} className={`min-h-11 min-w-12 shrink-0 rounded-l-control px-4 text-sm font-bold ${kind === "percent" ? "bg-ink text-on-dark" : "bg-white"}`}>%</button>
+            <button type="button" onClick={() => setKind("aed")} aria-pressed={kind === "aed"} className={`min-h-11 min-w-14 shrink-0 rounded-r-control px-4 text-sm font-bold whitespace-nowrap ${kind === "aed" ? "bg-ink text-on-dark" : "bg-white"}`}>AED</button>
           </span>
         </div>
-        <p className="text-sm font-bold text-green" data-labour-discount-preview>{v > 0 ? `− ${aed(amount)} off ${scope === "labour" ? "the labour" : "labour and services"}${base > 0 ? ` (= ${((amount / base) * 100).toFixed(1)}% of ${aed(base)})` : ""}` : "No discount"}</p>
-        {kind === "aed" && v > base && base > 0 ? <p className="text-xs font-semibold text-amber" data-discount-capped>The {scope === "labour" ? "labour" : "labour and services"} come to {aed(base)}: the discount stops there.</p> : null}
-        {live || refused ? <p className={`text-xs font-bold ${live?.block || (!live && refused) ? "text-red" : "text-amber"}`} data-discount-below-cost>{live?.words ?? refused}</p> : null}
+        <p className="text-sm font-bold text-green-text" data-labour-discount-preview>{v > 0 ? `− ${aed(amount)} off ${scope === "labour" ? "the labour" : "labour and services"}${base > 0 ? ` (= ${((amount / base) * 100).toFixed(1)}% of ${aed(base)})` : ""}` : "No discount"}</p>
+        {kind === "aed" && v > base && base > 0 ? <p className="text-xs font-semibold text-amber-text" data-discount-capped>The {scope === "labour" ? "labour" : "labour and services"} come to {aed(base)}: the discount stops there.</p> : null}
+        {live || refused ? <p className={`text-xs font-bold ${live?.block || (!live && refused) ? "text-red" : "text-amber-text"}`} data-discount-below-cost>{live?.words ?? refused}</p> : null}
         <div className="flex flex-wrap gap-2">
           <Button type="button" size="md" onClick={() => apply(current())} data-discount-apply>Apply</Button>
           {initialValue ? <Button type="button" tone="secondary" size="md" onClick={() => onApply(kind, 0, scope)}>Remove the discount</Button> : null}

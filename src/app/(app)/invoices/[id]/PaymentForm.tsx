@@ -131,18 +131,18 @@ export function PaymentForm({
         {extra}
         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
           {methods.map((m) => (
-            <button key={m} type="button" onClick={() => setMethod(m)} aria-pressed={method === m} data-method={m} className={`min-h-12 rounded-control border-2 text-sm font-bold ${method === m ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+            <button key={m} type="button" onClick={() => setMethod(m)} aria-pressed={method === m} data-method={m} className={`min-h-12 rounded-control border-2 text-sm font-bold ${method === m ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
               {PAYMENT_METHOD_LABELS[m] ?? m}
-              {expected === m ? <span className={`block text-[10px] font-semibold ${method === m ? "text-white/80" : "text-muted"}`}>expected</span> : null}
+              {expected === m ? <span className={`block text-xs font-semibold ${method === m ? "text-on-dark/80" : "text-muted"}`}>expected</span> : null}
             </button>
           ))}
         </div>
         {balance && balance > 0 ? (
           <div className="grid grid-cols-2 gap-2">
-            <button type="button" onClick={() => setMode("full")} aria-pressed={mode === "full"} data-amount-full className={`min-h-12 rounded-control border-2 text-sm font-bold ${mode === "full" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+            <button type="button" onClick={() => setMode("full")} aria-pressed={mode === "full"} data-amount-full className={`min-h-12 rounded-control border-2 text-sm font-bold ${mode === "full" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
               Full amount · {money(balance)}
             </button>
-            <button type="button" onClick={() => setMode("partial")} aria-pressed={mode === "partial"} data-amount-partial className={`min-h-12 rounded-control border-2 text-sm font-bold ${mode === "partial" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+            <button type="button" onClick={() => setMode("partial")} aria-pressed={mode === "partial"} data-amount-partial className={`min-h-12 rounded-control border-2 text-sm font-bold ${mode === "partial" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
               Part payment
             </button>
           </div>
@@ -194,7 +194,7 @@ export function PaymentForm({
             // the server — unless the advisor's report already carries the slip (4 November 2026), which IS the proof.
             <label className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">{proofs.length ? "Proof: the advisor's slip is attached ✓ (add a clearer one if needed)" : method === "card" ? "Photo of the card slip (required)" : "Transfer proof: screenshot or photo (required)"}</span>
-              <input type="file" name="proof" accept="image/*,.pdf" required={proofs.length === 0} className="min-h-11 w-full max-w-72 rounded-control border border-line-strong bg-white px-3 py-2 text-sm file:mr-3 file:rounded-control file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white" data-proof-input {...(proofs.length ? { "data-proof-from-report": "1" } : {})} />
+              <input type="file" name="proof" accept="image/*,.pdf" required={proofs.length === 0} className="min-h-11 w-full max-w-72 rounded-control border border-line-strong bg-white px-3 py-2 text-sm file:mr-3 file:rounded-control file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-on-dark" data-proof-input {...(proofs.length ? { "data-proof-from-report": "1" } : {})} />
             </label>
           )
         ) : null}

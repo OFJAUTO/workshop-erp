@@ -67,7 +67,7 @@ export function PanelMarker({ title, hint, initial, save, canEdit, hook, footer 
     else copy[panel] = next;
     push(copy, slow);
   };
-  const chip = (on: boolean) => `min-h-10 rounded-control border px-3 text-sm font-bold disabled:opacity-60 ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`;
+  const chip = (on: boolean) => `min-h-10 rounded-control border px-3 text-sm font-bold disabled:opacity-60 ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`;
   const marked = Object.entries(marks);
   // Panels with photos on this device but nothing ticked yet, listed too (a photo is never out of sight).
   const unmarkedOnDevice = Object.keys(onDevice).filter((k) => !marks[k]);
@@ -121,7 +121,7 @@ export function PanelMarker({ title, hint, initial, save, canEdit, hook, footer 
                     <span className={`inline-block h-3 w-3 rounded-full ${toneOf(m) === "red" ? "bg-red-bar" : "bg-amber-bar"}`} aria-hidden />
                     <span className="font-bold">{panelLabel(k)}</span>
                     <span className="text-muted">{[damageWords(m.damage), m.note].filter(Boolean).join(" – ")}</span>
-                    {onDevice[k] ? <span className="text-xs font-semibold text-amber" data-marker-device={k}>↑ {deviceWords(onDevice[k])}</span> : null}
+                    {onDevice[k] ? <span className="text-xs font-semibold text-amber-text" data-marker-device={k}>↑ {deviceWords(onDevice[k])}</span> : null}
                   </button>
                 </li>
               ))}
@@ -130,7 +130,7 @@ export function PanelMarker({ title, hint, initial, save, canEdit, hook, footer 
                   <button type="button" onClick={() => setSelected(k)} className="flex flex-wrap items-center gap-2 text-left">
                     <span className="inline-block h-3 w-3 rounded-full border border-amber-bar" aria-hidden />
                     <span className="font-bold">{panelLabel(k)}</span>
-                    <span className="text-xs font-semibold text-amber" data-marker-device={k}>↑ {deviceWords(onDevice[k])}</span>
+                    <span className="text-xs font-semibold text-amber-text" data-marker-device={k}>↑ {deviceWords(onDevice[k])}</span>
                   </button>
                 </li>
               ))}

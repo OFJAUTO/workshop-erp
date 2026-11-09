@@ -9,7 +9,7 @@ export function CopyText({ text, label = "Copy", small = false }: { text: string
     <button
       type="button"
       data-copy-text
-      className={`inline-flex items-center justify-center rounded-control border border-line-strong bg-white font-bold ${small ? "min-h-9 px-3 text-xs" : "min-h-11 px-4 text-sm"} ${copied ? "text-green" : ""}`}
+      className={`inline-flex items-center justify-center rounded-control border border-line-strong bg-white font-bold ${small ? "min-h-9 px-3 text-xs" : "min-h-11 px-4 text-sm"} ${copied ? "text-green-text" : ""}`}
       onClick={async () => {
         try {
           await navigator.clipboard.writeText(text);

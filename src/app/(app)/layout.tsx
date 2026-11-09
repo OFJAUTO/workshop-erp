@@ -168,14 +168,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         footer={
           <div className="flex flex-col gap-2">
           {staff.login_type !== "pin" && pkReady ? (
-            <Link href="/account/sign-in" className="min-h-10 px-4 rounded-control border border-white/30 text-white text-sm font-bold hover:bg-white/10 flex items-center justify-center md:w-full" data-my-sign-in-link>
+            <Link href="/account/sign-in" className="min-h-10 px-4 rounded-control border border-white/30 text-on-dark text-sm font-bold hover:bg-white/10 flex items-center justify-center md:w-full" data-my-sign-in-link>
               My sign-in
             </Link>
           ) : null}
           <form method="post" action="/api/auth/signout">
             <button
               type="submit"
-              className="min-h-10 px-4 rounded-control border border-white/30 text-white text-sm font-bold hover:bg-white/10 cursor-pointer md:w-full"
+              className="min-h-10 px-4 rounded-control border border-white/30 text-on-dark text-sm font-bold hover:bg-white/10 cursor-pointer md:w-full"
             >
               {staff.login_type === "pin" ? "Lock" : "Sign out"}
             </button>

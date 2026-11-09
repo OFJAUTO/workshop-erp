@@ -41,7 +41,7 @@ export function ProfitPanel({ live, target, data }: { live: boolean; target: num
           {card.costs ? (
             <>
               {" → "}
-              {card.costs.kind === "short" ? <span className="font-extrabold text-red">short by {fmt(card.costs.amount)}</span> : <span className="font-extrabold text-green">{fmt(card.costs.amount)} above</span>}
+              {card.costs.kind === "short" ? <span className="font-extrabold text-red">short by {fmt(card.costs.amount)}</span> : <span className="font-extrabold text-green-text">{fmt(card.costs.amount)} above</span>}
             </>
           ) : null}
         </span>

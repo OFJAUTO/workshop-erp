@@ -234,16 +234,16 @@ export function VideoCapture({
           </span>
           {attempted && !finished && !onDevice && !checking ? <span className="text-xs font-semibold text-red">Missing. Record it below.</span> : null}
         </span>
-        <span className={`text-2xl font-bold ${green ? "text-green" : red ? "text-red" : onDevice ? "text-amber" : "text-faint"}`}>{green ? "✓" : red ? "!" : onDevice ? "↑" : "●"}</span>
+        <span className={`text-2xl font-bold ${green ? "text-green-text" : red ? "text-red" : onDevice ? "text-amber-text" : "text-faint"}`}>{green ? "✓" : red ? "!" : onDevice ? "↑" : "●"}</span>
       </div>
 
       {!checking ? (
         <>
           <input ref={inputRef} type="file" accept="video/*" capture="environment" onChange={onFile} className="sr-only" tabIndex={-1} aria-hidden />
-          <button type="button" onClick={() => { const el = inputRef.current; if (el) { el.value = ""; el.click(); } }} className={`inline-flex min-h-14 w-full items-center justify-center rounded-control px-5 text-base font-bold ${finished || onDevice ? "border border-line-strong bg-white" : "bg-ink text-white"}`}>
+          <button type="button" onClick={() => { const el = inputRef.current; if (el) { el.value = ""; el.click(); } }} className={`inline-flex min-h-14 w-full items-center justify-center rounded-control px-5 text-base font-bold ${finished || onDevice ? "border border-line-strong bg-white" : "bg-ink text-on-dark"}`}>
             {finished || onDevice ? "Record again" : "Record with the camera"}
           </button>
-          {ios ? <p className="text-[11px] text-muted">iPhone or iPad: Settings › Camera › Formats › Most Compatible, so the customer&apos;s phone can play the video.</p> : null}
+          {ios ? <p className="text-xs text-muted">iPhone or iPad: Settings › Camera › Formats › Most Compatible, so the customer&apos;s phone can play the video.</p> : null}
         </>
       ) : null}
 
@@ -260,7 +260,7 @@ export function VideoCapture({
         </div>
       ) : null}
 
-      {green ? <p className="text-sm font-semibold text-green">Video uploaded.</p> : null}
+      {green ? <p className="text-sm font-semibold text-green-text">Video uploaded.</p> : null}
       {error ? <p className="text-sm font-semibold text-red" data-media-problem>{error}</p> : null}
     </div>
   );

@@ -21,6 +21,9 @@ import { assignPerson, extendBodyshopStages, startBodyshopWork } from "@/lib/bod
 import { sideOfDepartment } from "@/lib/inspection";
 import { unassignPerson } from "@/lib/bodyshop";
 import { workSidesOf } from "@/lib/staff-picker";
+import { promiseEventWords, readPromise, type PromiseInput } from "@/lib/promise-dates";
+import { schemaReady } from "@/lib/schema-ready";
+import { dbWords } from "@/lib/app-errors";
 
 function refresh(jobId: string) {
   revalidatePath(`/jobs/${jobId}`);
@@ -100,7 +103,7 @@ export async function allInStock(jobId: string, formData: FormData) {
  * Checks shared by both releases: the job is open and in planning (or, on a mixed car, the other side already went),
  * this side is still to release, the person is this side's manager (or the owner), the start day, the parts.
  */
-async function releaseChecks(jobId: string, formData: FormData, side: Side, staff: { id: string; role_id: string; department_id?: string | null }) {
+async function releaseChecks(jobId: string, formData: FormData, side: Side, staff: { id: string; role_id: string; display_name: string; department_id?: string | null }) {
   const job = await jobOf(jobId);
   const fail = (m: string): never => redirect(`/jobs/${jobId}?error=${encodeURIComponent(m)}#planning`);
   if (!job || !job.is_open) return fail("This job is closed.");
@@ -118,12 +121,29 @@ async function releaseChecks(jobId: string, formData: FormData, side: Side, staf
   const start = String(formData.get("start_date") ?? "").trim();
   const force = formData.get("force") === "on";
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return fail("Pick the start day.");
+  // 9 November 2026: the promised date is required at the release; a change of an existing one needs its reason.
+  const promise = readPromise(formData, job.promised_at, dubaiDate());
+  if (promise.error) return fail(promise.error);
+  if (promise.value!.date < start) return fail("The promised date is before the start day.");
   if (!job.plan_parts_done_at && staff.role_id !== "owner") return fail("Parts have not planned the parts yet. Remind Parts, or the owner can release anyway.");
   if (plan.missing.length && !force) return fail(`${plan.missing.length} part${plan.missing.length === 1 ? " is" : "s are"} not here yet (${plan.missing.map((p) => `${p.description}${p.expected_date ?? p.delivery_date ? ` · ${p.expected_date ?? p.delivery_date}` : ""}`).join(", ")}). Tick "Start with available parts" to release anyway.`);
   // Each line only by its own team (1 November 2026): a coding line by the electricians, paint by the painters.
   const picked = await checkPickable(formData.getAll("technician").map(String), [side], plan.teams.map((t) => t.key));
   if (picked.error) return fail(picked.error);
-  return { job, plan, settings, start, force, people: picked.people, fail };
+  await savePromise(jobId, job, promise.value!, staff, `release to ${words}`);
+  return { job: { ...job, promised_at: promise.value!.date }, plan, settings, start, force, people: picked.people, fail };
+}
+
+/** Writes the promised date (and its time once the column exists) and logs it with its reason when it changed. */
+async function savePromise(jobId: string, job: JobRow, p: PromiseInput, staff: { id: string; display_name?: string }, where: string) {
+  const admin = createAdminClient();
+  const timeReady = await schemaReady("jobs", "promised_time");
+  const beforeTime = (job as unknown as { promised_time?: string | null }).promised_time ?? null;
+  const same = job.promised_at === p.date && (!timeReady || (beforeTime ?? null)?.slice(0, 5) === (p.time ?? null));
+  if (same) return;
+  const { error } = await admin.from("jobs").update({ promised_at: p.date, ...(timeReady ? { promised_time: p.time } : {}), updated_by: staff.id }).eq("id", jobId);
+  if (error) redirect(`/jobs/${jobId}?error=${encodeURIComponent(dbWords(error, "planning/promise"))}#planning`);
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "promised_date", note: promiseEventWords(job.promised_at, p, staff.display_name ?? "", where), created_by: staff.id });
 }
 const partsStateOf = (plan: Awaited<ReturnType<typeof loadPlanning>>) => (plan.missing.length ? (plan.parts.some((p) => p.order_status === "ordered" || p.order_status === "partly_received") ? "ordered" : "ordering") : plan.parts.length ? "received" : "none");
 
@@ -202,12 +222,14 @@ export async function confirmPromisedDate(jobId: string, formData: FormData) {
   const job = await jobOf(jobId);
   const fail = (m: string) => redirect(`/jobs/${jobId}?error=${encodeURIComponent(m)}#planning`);
   if (!job || !job.is_open) fail("This job is closed.");
-  const date = String(formData.get("promised_at") ?? "").trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) fail("Pick the finish date.");
-  if (date < dubaiDate()) fail("The finish date cannot be in the past.");
+  // 9 November 2026: the same box as the release (a change of an existing date needs its reason, logged).
+  const promise = readPromise(formData, job!.promised_at, dubaiDate());
+  if (promise.error) fail(promise.error);
+  const date = promise.value!.date;
   const now = new Date().toISOString();
-  await admin.from("jobs").update({ promised_at: date, plan_date_confirmed_at: now, plan_date_confirmed_by: staff.id }).eq("id", jobId);
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "promised_date", note: `Finish date ${date} confirmed by ${staff.display_name}${job!.promised_at && job!.promised_at !== date ? ` (was ${job!.promised_at})` : ""}`, created_by: staff.id });
+  await savePromise(jobId, job!, promise.value!, staff, "advisor's confirmation");
+  await admin.from("jobs").update({ plan_date_confirmed_at: now, plan_date_confirmed_by: staff.id }).eq("id", jobId);
+  if (job!.promised_at === date) await admin.from("job_events").insert({ job_id: jobId, event_type: "promised_date", note: `Promised date ${date} confirmed by ${staff.display_name}`, created_by: staff.id });
   refresh(jobId);
   redirect(`/jobs/${jobId}?message=${encodeURIComponent(`Promised date ${date} saved. Tell the customer.`)}#planning`);
 }

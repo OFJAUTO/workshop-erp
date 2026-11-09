@@ -354,7 +354,7 @@ export function SettingsForm({
                 {DAYS.map((d) => (
                   <label key={d.id} className="cursor-pointer">
                     <input type="checkbox" name="working_days" value={d.id} defaultChecked={workingDays.includes(d.id)} className="peer sr-only" />
-                    <span className="inline-flex min-h-11 min-w-14 items-center justify-center rounded-control border border-line-strong bg-white px-3 text-sm font-semibold peer-checked:border-ink peer-checked:bg-ink peer-checked:text-white">
+                    <span className="inline-flex min-h-11 min-w-14 items-center justify-center rounded-control border border-line-strong bg-white px-3 text-sm font-semibold peer-checked:border-ink peer-checked:bg-ink peer-checked:text-on-dark">
                       {d.label}
                     </span>
                   </label>
@@ -561,7 +561,7 @@ export function SettingsForm({
               {DOC_KEYS.map((k) => (
                 <div key={k} className="flex flex-col gap-1 rounded-control border border-line p-3">
                   <span className="text-sm font-semibold">{DOC_LABELS[k]}</span>
-                  <span className="text-[11px] text-muted">Counted {DOC_HINTS[k]}.</span>
+                  <span className="text-xs text-muted">Counted {DOC_HINTS[k]}.</span>
                   <div className="grid grid-cols-2 gap-2">
                     <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Amber after (min)<Input name={`doc__${k}_amber`} defaultValue={v[`doc__${k}_amber`] ?? String(docLimits[k]?.amber ?? DEFAULT_DOC_LIMITS[k].amber)} inputMode="numeric" required /></label>
                     {k === "customer_reply" ? (

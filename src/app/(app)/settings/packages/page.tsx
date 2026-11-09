@@ -70,7 +70,7 @@ export default async function PackagesSettingsPage({ searchParams }: { searchPar
               {SHADES.filter((s): s is number => typeof s === "number").map((s) => (
                 <label key={s} className="cursor-pointer">
                   <input type="radio" name="tint_limit" value={s} defaultChecked={tintLimitOf(settings) === s} className="peer sr-only" data-tint-limit={s} />
-                  <span className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-control border border-line-strong bg-white px-2.5 text-xs font-bold peer-checked:border-ink peer-checked:bg-ink peer-checked:text-white">{s}</span>
+                  <span className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-control border border-line-strong bg-white px-2.5 text-xs font-bold peer-checked:border-ink peer-checked:bg-ink peer-checked:text-on-dark">{s}</span>
                 </label>
               ))}
             </div>

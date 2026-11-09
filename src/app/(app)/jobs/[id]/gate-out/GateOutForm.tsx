@@ -203,7 +203,7 @@ export function GateOutForm({
                 {dateChoice !== "pick" ? <input type="hidden" name="delivery_date" value={chipDate} data-chip-date /> : null}
                 <div className="flex flex-wrap items-center gap-2" data-date-chips>
                   {([["today", "Today", 0], ["tomorrow", "Tomorrow", 1], ["after", "Day after", 2], ["pick", "Pick date", -1]] as const).map(([vv, label, plus]) => (
-                    <button key={vv} type="button" onClick={() => { setDateChoice(vv); if (plus >= 0) setChipDate(new Date(Date.now() + 4 * 3600000 + plus * 86400000).toISOString().slice(0, 10)); }} aria-pressed={dateChoice === vv} className={`min-h-11 rounded-control border px-3 text-sm font-bold ${dateChoice === vv ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{label}</button>
+                    <button key={vv} type="button" onClick={() => { setDateChoice(vv); if (plus >= 0) setChipDate(new Date(Date.now() + 4 * 3600000 + plus * 86400000).toISOString().slice(0, 10)); }} aria-pressed={dateChoice === vv} className={`min-h-11 rounded-control border px-3 text-sm font-bold ${dateChoice === vv ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>{label}</button>
                   ))}
                   {dateChoice === "pick" ? <Input type="date" name="delivery_date" className="w-44" /> : null}
                 </div>
@@ -211,7 +211,7 @@ export function GateOutForm({
               <Field label="Time">
                 <div className="flex flex-wrap items-center gap-2" data-time-chips>
                   {([["morning", "Morning"], ["afternoon", "Afternoon"], ["evening", "Evening"], ["exact", "Exact time"]] as const).map(([vv, label]) => (
-                    <button key={vv} type="button" onClick={() => setSlotChoice(vv)} aria-pressed={slotChoice === vv} className={`min-h-11 rounded-control border px-3 text-sm font-bold ${slotChoice === vv ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{label}</button>
+                    <button key={vv} type="button" onClick={() => setSlotChoice(vv)} aria-pressed={slotChoice === vv} className={`min-h-11 rounded-control border px-3 text-sm font-bold ${slotChoice === vv ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>{label}</button>
                   ))}
                   {slotChoice === "exact" ? <Input type="time" name="slot_time" className="w-32" /> : <input type="hidden" name="slot_time" value="" />}
                   <input type="hidden" name="delivery_slot" value={slotChoice} />
@@ -321,7 +321,7 @@ export function GateOutForm({
 
           <div className="flex flex-col gap-1">
             <SubmitButton tone={(mismatch && !canOverride) || (blocked && !canApproveRelease) ? "secondary" : "primary"} disabled={odoSending} className="self-start">{method === "recovery" ? "Stamp: left the workshop" : "Gate out and close the job"}</SubmitButton>
-            {odoSending ? <p className="text-xs font-semibold text-amber" data-gate-out-waiting>Waiting for the dashboard photo to arrive – the car leaves once the server has it.</p> : null}
+            {odoSending ? <p className="text-xs font-semibold text-amber-text" data-gate-out-waiting>Waiting for the dashboard photo to arrive – the car leaves once the server has it.</p> : null}
           </div>
         </>
       )}

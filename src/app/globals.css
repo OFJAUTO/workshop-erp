@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./theme.css";
 
 /* Design tokens based on docs/workshop-erp-dashboard-design (1).html,
    with stronger contrast as agreed on 7 October 2026.

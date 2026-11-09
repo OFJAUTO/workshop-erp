@@ -132,11 +132,11 @@ export function PartPicker({
   }
 
   const tabBtn = (id: string, label: string) => (
-    <button key={id} type="button" onClick={() => { setTab(id); setQuery(""); }} className={`min-h-11 rounded-control px-3 py-1.5 text-left text-sm font-semibold leading-tight whitespace-nowrap sm:whitespace-normal ${tab === id && !q ? "bg-ink text-white" : "bg-chip"}`} data-category={id}>
+    <button key={id} type="button" onClick={() => { setTab(id); setQuery(""); }} className={`min-h-11 rounded-control px-3 py-1.5 text-left text-sm font-semibold leading-tight whitespace-nowrap sm:whitespace-normal ${tab === id && !q ? "bg-ink text-on-dark" : "bg-chip"}`} data-category={id}>
       {label}
     </button>
   );
-  const posBtn = (on: boolean, big = false) => `${big ? "min-h-11 px-3 text-sm" : "min-h-9 px-2 text-xs"} rounded-control border font-bold ${on ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`;
+  const posBtn = (on: boolean, big = false) => `${big ? "min-h-11 px-3 text-sm" : "min-h-9 px-2 text-xs"} rounded-control border font-bold ${on ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`;
 
   const row = (c: CatalogueRow | { id: string; name: string; needs_position: boolean; category: string; unit?: "each" | "set" | "l"; paired?: boolean }, entry: PartsListEntry | undefined) => {
     const key = entry ? keyOf(entry) : pickKey(c);
@@ -146,7 +146,7 @@ export function PartPicker({
     return (
       <div key={c.id} className={`rounded-control border ${entry ? "border-green bg-green-soft" : "border-line"} flex flex-col`} data-part-row={c.name}>
         <button type="button" onClick={() => toggle(c as CatalogueRow)} aria-pressed={renaming ? undefined : !!entry} className="min-h-12 flex items-center gap-3 px-3 py-2 text-left">
-          {!renaming ? <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 text-sm font-extrabold ${entry ? "border-green bg-green text-white" : "border-line-strong bg-white"}`}>{entry ? "✓" : ""}</span> : null}
+          {!renaming ? <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border-2 text-sm font-extrabold ${entry ? "border-green bg-green text-on-dark" : "border-line-strong bg-white"}`}>{entry ? "✓" : ""}</span> : null}
           <span className="font-semibold">{c.name}</span>
           <span className="ml-auto text-xs text-muted">{c.category}</span>
         </button>
@@ -227,7 +227,7 @@ export function PartPicker({
           {customOpen ? (
             <div className="flex flex-wrap items-center gap-2" data-custom-part>
               <input value={customText} onChange={(e) => setCustomText(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(customText); } }} placeholder="Part name, in your own words" autoFocus spellCheck={false} data-spell="" lang="en" className="min-h-11 flex-1 min-w-[12rem] rounded-control border border-line-strong px-3 text-sm outline-none focus:border-ink" aria-label="Custom part name" />
-              <button type="button" onClick={() => addCustom(customText)} disabled={!customText.trim()} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-white disabled:opacity-40">{renaming ? "Use this name" : "Add"}</button>
+              <button type="button" onClick={() => addCustom(customText)} disabled={!customText.trim()} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-on-dark disabled:opacity-40">{renaming ? "Use this name" : "Add"}</button>
               <button type="button" onClick={() => setCustomOpen(false)} className="min-h-11 rounded-control px-3 text-sm font-semibold text-muted">Cancel</button>
             </div>
           ) : null}
@@ -240,7 +240,7 @@ export function PartPicker({
             ) : (
               <>
                 <span className="text-sm text-muted ml-auto">{picked.size ? `${picked.size} part${picked.size === 1 ? "" : "s"} picked. Keep tapping, then Done.` : "Nothing picked yet"}</span>
-                <button type="button" onClick={() => onDone?.(splitSided(Array.from(picked.values())))} className="min-h-12 rounded-control bg-ink px-6 text-base font-bold text-white" data-picker-done>
+                <button type="button" onClick={() => onDone?.(splitSided(Array.from(picked.values())))} className="min-h-12 rounded-control bg-ink px-6 text-base font-bold text-on-dark" data-picker-done>
                   Done
                 </button>
               </>

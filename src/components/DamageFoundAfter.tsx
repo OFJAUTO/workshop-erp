@@ -12,7 +12,7 @@ import { afterCaption, captionAfter } from "@/lib/damage";
 import { reloadIfStale } from "@/lib/app-version";
 import { formatDayTime } from "@/lib/format";
 
-const chip = (on: boolean) => `min-h-10 rounded-control border px-3 text-sm font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`;
+const chip = (on: boolean) => `min-h-10 rounded-control border px-3 text-sm font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`;
 const photosWords = (n: number) => `${n} photo${n === 1 ? "" : "s"}`;
 
 /**
@@ -86,7 +86,7 @@ export function DamageFoundAfter({ jobId, entries, canAdd, canTell }: { jobId: s
               ) : waitingByEntry[e.id]?.n ? (
                 // The message links to the page that shows these photos: it waits until they have arrived.
                 <span className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-semibold text-amber" data-damage-after-send-wait={e.id}>Photos still sending from this device</span>
+                  <span className="text-xs font-semibold text-amber-text" data-damage-after-send-wait={e.id}>Photos still sending from this device</span>
                   <Button type="button" tone="secondary" disabled data-damage-after-send={e.id}>Tell the customer</Button>
                 </span>
               ) : (
@@ -100,7 +100,7 @@ export function DamageFoundAfter({ jobId, entries, canAdd, canTell }: { jobId: s
         <ul className="flex flex-col gap-1.5" data-damage-after-device={waitingEntries.reduce((n, [, w]) => n + w.n, 0)}>
           {waitingEntries.map(([id, w]) => (
             <li key={id} className={`flex flex-wrap items-center justify-between gap-2 rounded-control px-3 py-2 text-sm ${w.stopped ? "bg-red-soft" : "bg-amber-soft"}`} data-damage-after-waiting={id}>
-              <span className={`font-semibold ${w.stopped ? "text-red" : "text-amber"}`}>
+              <span className={`font-semibold ${w.stopped ? "text-red" : "text-amber-text"}`}>
                 {w.stopped ? "!" : "↑"} {labelOf(id) ? `${labelOf(id)}: ` : ""}
                 {photosWords(w.n)} of damage found after check-in still on this device
                 {w.stopped ? ` – ${w.stopped === 1 ? "one" : w.stopped} could not be sent` : w.n === 1 ? " – it sends by itself" : " – they send by themselves"}
@@ -149,7 +149,7 @@ export function DamageFoundAfter({ jobId, entries, canAdd, canTell }: { jobId: s
                     {photosWords(waitingByEntry[savedId].stopped)} could not be sent: tap Try again, or Remove, above.
                   </p>
                 ) : (
-                  <p className="text-xs font-semibold text-amber" data-damage-after-sending>
+                  <p className="text-xs font-semibold text-amber-text" data-damage-after-sending>
                     {photosWords(onThisEntry)} still on this device. You can press Done: {onThisEntry === 1 ? "it sends by itself" : "they send by themselves"} when the signal is there.
                   </p>
                 )

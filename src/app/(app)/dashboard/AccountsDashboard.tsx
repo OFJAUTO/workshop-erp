@@ -34,7 +34,7 @@ export function MoneyTilesRow({ t }: { t: MoneyTiles }) {
     <div className="grid grid-cols-2 md:grid-cols-5 gap-3" data-money-tiles>
       {tiles.map((x) => (
         <a key={x.label} href={x.href} className={`rounded-card border bg-white px-4 py-3 flex flex-col gap-0.5 hover:border-ink ${x.tone || "border-line"}`} data-tile={x.label} data-tile-amount={x.amount} data-tile-count={x.count}>
-          <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">{x.label}</span>
+          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{x.label}</span>
           <span className="text-xl font-extrabold">{x.value}</span>
           <span className="text-xs text-muted">{x.sub}</span>
         </a>

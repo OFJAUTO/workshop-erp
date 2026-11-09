@@ -40,11 +40,13 @@ export function Shell({
   children: ReactNode;
 }) {
   return (
-    <div className="min-h-screen flex flex-col nav:flex-row">
-      <aside className="hidden nav:flex bg-sidebar text-white flex-col items-stretch gap-6 px-5 py-6 w-60 shrink-0 h-screen sticky top-0 overflow-y-auto" data-sidebar>
-        <div className="flex items-center justify-center gap-2 shrink-0 mb-2">
-          <Link href="/home" className="shrink-0 flex items-center justify-center w-full" aria-label="Home">
-            <Logo onDark className="h-15" />
+    <div className="min-h-screen flex flex-col nav:flex-row" data-erp-staff>
+      <aside className="hidden nav:flex bg-sidebar text-sidebar-text flex-col items-stretch gap-6 px-5 py-6 w-60 shrink-0 h-screen sticky top-0 overflow-y-auto" data-sidebar>
+        {/* The logo starts where the menu text starts (the links' own 14 px padding), about 130 px wide, about
+            28 px above the first menu item (the aside's 24 px gap + 4 px). */}
+        <div className="flex items-center shrink-0 mb-1 pl-3.5" data-sidebar-logo>
+          <Link href="/home" className="shrink-0 flex items-center" aria-label="Home">
+            <Logo onDark className="!w-[130px] h-auto" />
           </Link>
         </div>
         {nav.length ? <SidebarNav items={nav} /> : null}
@@ -55,9 +57,9 @@ export function Shell({
               <Avatar name={user.name} photoUrl={user.photoUrl} size={40} />
               <span className="flex flex-col leading-tight min-w-0">
                 <span className="text-sm font-bold truncate">{user.name}</span>
-                <span className="text-xs text-white/70 truncate">{user.role}</span>
+                <span className="text-xs text-on-dark/70 truncate">{user.role}</span>
               </span>
-              <span className="ml-auto text-xs text-white/60" aria-hidden>▾</span>
+              <span className="ml-auto text-xs text-on-dark/60" aria-hidden>▾</span>
             </summary>
             <div className="absolute bottom-full left-0 right-0 mb-2 z-50 min-w-44 rounded-card border border-white/20 bg-sidebar p-2 shadow-xl">{footer}</div>
           </details>
@@ -74,7 +76,7 @@ export function Shell({
                 <Avatar name={user.name} photoUrl={user.photoUrl} size={40} />
                 <span className="flex min-w-0 flex-col leading-tight">
                   <span className="text-sm font-bold">{user.name}</span>
-                  <span className="text-xs text-white/70">{user.role}</span>
+                  <span className="text-xs text-on-dark/70">{user.role}</span>
                 </span>
               </div>
               {footer}
@@ -92,7 +94,7 @@ export function Shell({
           </div>
         ) : null}
         {actingAs && user ? (
-          <div className="bg-red-bar text-white px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+          <div className="bg-red-bar text-on-dark px-4 py-2 flex flex-wrap items-center justify-between gap-2 text-sm">
             <span className="font-bold">
               Acting as {actingAs.forName} ({user.role}) in this tab only. Everything you do is saved and logged as {actingAs.realName}, on behalf of {actingAs.forName}.
             </span>
@@ -122,9 +124,9 @@ export function Shell({
 export function PublicShell({ note, children }: { note?: ReactNode; children: ReactNode }) {
   return (
     <div className="min-h-screen flex flex-col nav:flex-row">
-      <aside className="bg-sidebar text-white flex flex-row nav:flex-col items-center gap-3 px-4 py-3 nav:px-5 nav:py-6 nav:w-60 nav:shrink-0 nav:h-screen nav:sticky nav:top-0">
+      <aside className="bg-sidebar text-on-dark flex flex-row nav:flex-col items-center gap-3 px-4 py-3 nav:px-5 nav:py-6 nav:w-60 nav:shrink-0 nav:h-screen nav:sticky nav:top-0">
         <Logo onDark className="h-11 nav:h-15" />
-        {note ? <span className="text-xs text-white/70 nav:mt-2">{note}</span> : null}
+        {note ? <span className="text-xs text-on-dark/70 nav:mt-2">{note}</span> : null}
       </aside>
       <main className="flex-1 min-w-0 flex flex-col pb-28">{children}</main>
     </div>

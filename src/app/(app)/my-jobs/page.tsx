@@ -87,7 +87,7 @@ export default async function MyJobsPage({ searchParams }: { searchParams: Promi
         staff={staff}
         actions={
           <span className="flex flex-wrap items-center gap-2">
-            {shift ? <span className="inline-flex items-center rounded-full bg-green-soft px-3 py-1.5 text-xs font-bold text-green">✓ Clocked in · {formatDateTime(shift.clock_in)}</span> : null}
+            {shift ? <span className="inline-flex items-center rounded-full bg-green-soft px-3 py-1.5 text-xs font-bold text-green-text">✓ Clocked in · {formatDateTime(shift.clock_in)}</span> : null}
             <form action={shift ? clockOut : clockIn}>
               <Button type="submit" size="lg" tone={shift ? "secondary" : "primary"}>{shift ? "Clock out" : "Clock in"}</Button>
             </form>
@@ -140,7 +140,7 @@ export default async function MyJobsPage({ searchParams }: { searchParams: Promi
                           {parts.length ? (
                             <span className="text-sm">
                               <span className="font-semibold">Parts: </span>
-                              <span className="text-green font-semibold">✓ {handed.length} of {parts.length} handed over</span>
+                              <span className="text-green-text font-semibold">✓ {handed.length} of {parts.length} handed over</span>
                               {coming.length ? <span className="text-muted"> · {coming.map((p) => `${p.description} coming ${p.expected_date ?? p.delivery_date ? formatDate((p.expected_date ?? p.delivery_date) + "T12:00:00+04:00") : "soon"}`).join(", ")}</span> : null}
                             </span>
                           ) : null}

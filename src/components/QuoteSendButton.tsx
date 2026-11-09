@@ -72,7 +72,7 @@ export function QuoteSendButton({ state, pageHref, resentWords = null, autoOpen 
       <Button type="button" size={size} onClick={open} disabled={busy} data-quote-send-open>
         {busy ? "Preparing…" : state.label}
       </Button>
-      {done ? <span className="text-xs font-bold text-green" data-quote-resent>Resent ✓</span> : resentWords ? <span className="text-xs text-muted" data-quote-resent-words>{resentWords}</span> : null}
+      {done ? <span className="text-xs font-bold text-green-text" data-quote-resent>Resent ✓</span> : resentWords ? <span className="text-xs text-muted" data-quote-resent-words>{resentWords}</span> : null}
       {error ? <span className="text-xs font-bold text-red" data-quote-send-error>{error}</span> : null}
       {win ? <SendLinkDialog title="Quotation to the customer" message={win.message} phoneDigits={win.phoneDigits} onSent={sentVia} onClose={() => setWin(null)} /> : null}
     </span>

@@ -82,8 +82,8 @@ export function SendQuoteControl({ quotationId, kind, siteUrl, messageTemplate, 
           {pending ? "Checking…" : status === "pending_owner" ? (isOwner ? "Approve and send" : "Waiting for the owner") : status === "expired" ? "Re-send" : label}
         </Button>
       )}
-      {pendingOwner ? <p className="text-xs font-semibold text-amber">Sent to the owner for approval: {pendingOwner.join("; ")}. You will be told when it is approved.</p> : null}
-      {warranty ? <p className="text-xs font-semibold text-green">Warranty repair: approved without the customer. Planning starts.</p> : null}
+      {pendingOwner ? <p className="text-xs font-semibold text-amber-text">Sent to the owner for approval: {pendingOwner.join("; ")}. You will be told when it is approved.</p> : null}
+      {warranty ? <p className="text-xs font-semibold text-green-text">Warranty repair: approved without the customer. Planning starts.</p> : null}
       {error ? <p className="text-xs font-semibold text-red">{error}</p> : null}
       {open ? <SendLinkDialog title={kind === "estimate" ? "Estimate to the customer" : "Quotation to the customer"} message={message} phoneDigits={phoneDigits} onSent={sent} onClose={() => setOpen(false)} /> : null}
     </div>

@@ -21,7 +21,7 @@ export function UndoButton({ at, minutes, done, action, onUndo, busy = false }: 
   if (!inBrowser || left <= 0) return null;
   const button = <button type={action ? "submit" : "button"} onClick={action ? undefined : onUndo} disabled={busy} className="min-h-11 rounded-control border-2 border-ink bg-white px-4 text-sm font-extrabold text-ink disabled:opacity-60" data-undo-money>{busy ? "Undoing…" : undoLabel(left)}</button>;
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-control bg-ink px-3 py-2 text-white" data-undo-bar>
+    <div className="flex flex-wrap items-center gap-2 rounded-control bg-ink px-3 py-2 text-on-dark" data-undo-bar>
       <span className="text-sm font-bold">{done}</span>
       {action ? <form action={action}>{button}</form> : button}
     </div>

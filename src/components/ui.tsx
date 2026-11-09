@@ -15,7 +15,7 @@ type Tone = "primary" | "secondary" | "ghost" | "danger";
 type Size = "md" | "lg";
 
 const toneClass: Record<Tone, string> = {
-  primary: "bg-ink text-white hover:bg-black disabled:bg-faint",
+  primary: "bg-ink text-on-dark hover:bg-black disabled:bg-faint",
   secondary: "bg-white text-ink border border-line-strong hover:bg-canvas disabled:text-faint",
   ghost: "bg-transparent text-ink hover:bg-chip disabled:text-faint",
   danger: "bg-red-soft text-red border border-red-soft hover:bg-[#fbd5d0] disabled:opacity-60",
@@ -123,17 +123,17 @@ type BadgeTone = "neutral" | "outline" | "green" | "amber" | "red" | "ink";
 const badgeClass: Record<BadgeTone, string> = {
   neutral: "bg-chip text-ink",
   outline: "border border-ink text-ink",
-  green: "bg-green-soft text-green",
-  amber: "bg-amber-soft text-amber",
+  green: "bg-green-soft text-green-text",
+  amber: "bg-amber-soft text-amber-text",
   red: "bg-red-soft text-red",
-  ink: "bg-ink text-white tracking-[0.08em]",
+  ink: "bg-ink text-on-dark tracking-[0.08em]",
 };
 
 export function Badge({ children, tone = "neutral", ...data }: { children: ReactNode; tone?: BadgeTone } & { [key: `data-${string}`]: string | number | boolean | undefined }) {
   return (
     <span
       {...data}
-      className={`inline-flex max-w-full items-center text-[11px] font-bold px-2.5 py-1 rounded-full ${badgeClass[tone]}`}
+      className={`inline-flex max-w-full items-center text-xs font-bold px-2.5 py-1 rounded-full ${badgeClass[tone]}`}
     >
       {children}
     </span>
@@ -239,7 +239,7 @@ export function ChoiceButtons({
             defaultChecked={defaultValue === o.value}
             className="peer sr-only"
           />
-          <span className="flex min-h-12 flex-col items-center justify-center rounded-control border border-line-strong bg-white px-3 py-2 text-center text-sm font-semibold peer-checked:border-ink peer-checked:bg-ink peer-checked:text-white peer-focus-visible:ring-2 peer-focus-visible:ring-ink/30">
+          <span className="flex min-h-12 flex-col items-center justify-center rounded-control border border-line-strong bg-white px-3 py-2 text-center text-sm font-semibold peer-checked:border-ink peer-checked:bg-ink peer-checked:text-on-dark peer-focus-visible:ring-2 peer-focus-visible:ring-ink/30">
             {o.label}
             {o.hint ? <span className="text-xs font-medium opacity-70">{o.hint}</span> : null}
           </span>
@@ -252,7 +252,7 @@ export function ChoiceButtons({
 export function Notice({ tone, children }: { tone: "error" | "success" | "info"; children: ReactNode }) {
   const cls = {
     error: "bg-red-soft text-red",
-    success: "bg-green-soft text-green",
+    success: "bg-green-soft text-green-text",
     info: "bg-chip text-ink",
   }[tone];
   // The last safety net (6 November 2026): database words never reach a screen, even from a path that forgot dbWords.

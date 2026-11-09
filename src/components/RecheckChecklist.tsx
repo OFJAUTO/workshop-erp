@@ -40,7 +40,7 @@ export function RecheckChecklist({ jobId, stageId, originalNumber, points: initi
     }
     setBusy(null);
   };
-  const chip = (on: boolean, tone: "ok" | "fix" | "na") => `min-h-11 rounded-control border-2 px-3 text-sm font-bold disabled:opacity-60 ${on ? (tone === "ok" ? "border-green bg-green text-white" : tone === "fix" ? "border-red-bar bg-red-bar text-white" : "border-ink bg-ink text-white") : "border-line-strong bg-white"}`;
+  const chip = (on: boolean, tone: "ok" | "fix" | "na") => `min-h-11 rounded-control border-2 px-3 text-sm font-bold disabled:opacity-60 ${on ? (tone === "ok" ? "border-green bg-green text-on-dark" : tone === "fix" ? "border-red-bar bg-red-bar text-on-dark" : "border-ink bg-ink text-on-dark") : "border-line-strong bg-white"}`;
   return (
     <Card id="recheck" className="flex flex-col gap-3" data-recheck-checklist>
       <SectionLabel right={done ? "Signed off" : recheckProgress(points)}>PPF final check · {originalNumber}</SectionLabel>
@@ -62,7 +62,7 @@ export function RecheckChecklist({ jobId, stageId, originalNumber, points: initi
               {p.status === "fix" ? (
                 <div className="flex flex-col gap-2 rounded-control border border-red-bar bg-white p-2.5">
                   <Textarea defaultValue={p.note ?? ""} rows={2} disabled={!canEdit || !!done} placeholder="What needed fixing, and what was done" onBlur={(e) => { if ((e.target.value || null) !== p.note) void run(p.key, { note: e.target.value || null }); }} data-recheck-note />
-                  <button type="button" disabled={!canEdit || !!done || busy === p.key} aria-pressed={!!p.fixedAt} onClick={() => run(p.key, { fixed: !p.fixedAt })} className={`self-start min-h-11 rounded-control border-2 px-4 text-sm font-bold ${p.fixedAt ? "border-green bg-green text-white" : "border-ink bg-white"}`} data-recheck-fixed>
+                  <button type="button" disabled={!canEdit || !!done || busy === p.key} aria-pressed={!!p.fixedAt} onClick={() => run(p.key, { fixed: !p.fixedAt })} className={`self-start min-h-11 rounded-control border-2 px-4 text-sm font-bold ${p.fixedAt ? "border-green bg-green text-on-dark" : "border-ink bg-white"}`} data-recheck-fixed>
                     {p.fixedAt ? "Fixed ✓" : "Tick when fixed"}
                   </button>
                 </div>

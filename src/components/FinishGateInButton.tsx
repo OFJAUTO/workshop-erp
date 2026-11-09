@@ -49,7 +49,7 @@ export function FinishGateInButton({ check: serverCheck, href, completeLabel, jo
     return (
       <div className="flex flex-col items-end gap-1" data-finish-gate-in data-complete="true" data-device-files={device.length}>
         <LinkButton href={href} tone="primary" size="lg">{completeLabel}</LinkButton>
-        {deviceNote ? <span className={`text-xs font-semibold ${stopped ? "text-red" : "text-amber"}`} data-finish-device>{deviceNote}</span> : null}
+        {deviceNote ? <span className={`text-xs font-semibold ${stopped ? "text-red" : "text-amber-text"}`} data-finish-device>{deviceNote}</span> : null}
       </div>
     );
   }
@@ -70,7 +70,7 @@ export function FinishGateInButton({ check: serverCheck, href, completeLabel, jo
 
   // Everything missing is on its way from this device: say that, not "missing".
   const label = uncovered.length ? `${missingButtonLabel(uncovered)}${device.length ? ` · ${device.length} still sending` : ""}` : stillSending;
-  const pressed = uncovered.length ? "border-red-bar text-red" : "border-amber-bar text-amber";
+  const pressed = uncovered.length ? "border-red-bar text-red" : "border-amber-bar text-amber-text";
 
   return (
     <div className="flex flex-col items-end gap-1.5" data-finish-gate-in data-device-files={device.length}>
@@ -80,7 +80,7 @@ export function FinishGateInButton({ check: serverCheck, href, completeLabel, jo
       {attempted ? (
         <div className="flex flex-wrap items-center justify-end gap-2" data-finish-result>
           {uncovered.length ? <span className="text-xs font-semibold text-red">{itemsLeftLine(uncovered)}</span> : null}
-          {deviceNote ? <span className={`text-xs font-semibold ${stopped ? "text-red" : "text-amber"}`} data-finish-device>{deviceNote}</span> : null}
+          {deviceNote ? <span className={`text-xs font-semibold ${stopped ? "text-red" : "text-amber-text"}`} data-finish-device>{deviceNote}</span> : null}
           <Button type="button" tone="secondary" size="md" onClick={jump}>Go to next</Button>
           <Link href={href} className="min-h-10 inline-flex items-center text-xs font-semibold underline underline-offset-4 text-muted">Leave it for now</Link>
         </div>

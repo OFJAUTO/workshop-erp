@@ -19,7 +19,7 @@ export function ReportTabs({ current, month, pdfHref }: { current: string; month
     <div className="flex flex-wrap items-center gap-2">
       <nav className="flex flex-wrap gap-1 rounded-control border border-line p-1">
         {TABS.map((t) => (
-          <Link key={t.href} href={`${t.href}?month=${month}`} className={`min-h-9 inline-flex items-center rounded-control px-3 text-sm font-bold ${t.href === current ? "bg-ink text-white" : "text-ink hover:bg-chip"}`}>{t.label}</Link>
+          <Link key={t.href} href={`${t.href}?month=${month}`} className={`min-h-9 inline-flex items-center rounded-control px-3 text-sm font-bold ${t.href === current ? "bg-ink text-on-dark" : "text-ink hover:bg-chip"}`}>{t.label}</Link>
         ))}
       </nav>
       <span className="flex items-center gap-1 ml-auto">

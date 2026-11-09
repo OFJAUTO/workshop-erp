@@ -34,7 +34,7 @@ export function DecideMoveForm({ action, currentStatus, reasons = [] }: { action
           </Select>
           <ReasonChips name="decision_reason" rows={2} options={reasons} defaultValue={v.decision_reason ?? ""} required placeholder="Your reason (required, stays on the job card)" />
           <div className="flex gap-2">
-            <button type="submit" name="decision" value="approved" className="min-h-11 flex-1 rounded-control bg-ink px-3 text-sm font-bold text-white">
+            <button type="submit" name="decision" value="approved" className="min-h-11 flex-1 rounded-control bg-ink px-3 text-sm font-bold text-on-dark">
               Approve and move
             </button>
             <button type="submit" name="decision" value="refused" className="min-h-11 flex-1 rounded-control border border-line-strong bg-white px-3 text-sm font-bold">

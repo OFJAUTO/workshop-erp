@@ -61,7 +61,7 @@ export function ModelYearSelect({
           ))}
           <option value="__other__">Older or other</option>
         </Select>
-        {fromVin && choice && choice !== "__other__" ? <span className="shrink-0 rounded-full bg-chip px-2.5 py-1 text-[11px] font-bold">from VIN</span> : null}
+        {fromVin && choice && choice !== "__other__" ? <span className="shrink-0 rounded-full bg-chip px-2.5 py-1 text-xs font-bold">from VIN</span> : null}
       </div>
       {choice === "__other__" ? (
         <Input

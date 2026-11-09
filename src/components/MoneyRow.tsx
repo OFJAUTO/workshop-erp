@@ -12,9 +12,9 @@ const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionD
 
 /** JOB DONE → PROFORMA SENT → PAYMENT → TAX INVOICE → RELEASED, done in green, the current step black, the rest grey. */
 export function MoneyStepLine({ state, compact = false }: { state: MoneyState; compact?: boolean }) {
-  const cls = (k: MoneyStepKey) => (state.done.includes(k) ? "text-green" : state.current === k ? "text-ink font-extrabold" : "text-faint");
+  const cls = (k: MoneyStepKey) => (state.done.includes(k) ? "text-green-text" : state.current === k ? "text-ink font-extrabold" : "text-faint");
   return (
-    <span className={`flex flex-wrap items-center gap-x-1 ${compact ? "text-[10px]" : "text-[11px]"} font-bold uppercase tracking-[0.06em]`} data-money-line={state.current}>
+    <span className={`flex flex-wrap items-center gap-x-1 ${compact ? "text-xs" : "text-xs"} font-bold uppercase tracking-[0.06em]`} data-money-line={state.current}>
       {MONEY_STEPS.map((s, i) => (
         <span key={s.key} className="flex items-center gap-1">
           <span className={cls(s.key)}>{state.done.includes(s.key) ? "✓ " : ""}{s.label}</span>
@@ -28,7 +28,7 @@ export function MoneyStepLine({ state, compact = false }: { state: MoneyState; c
 /** "Today AED 30,000.00" (and how many payments), green, on a row with money in today. */
 function TodayLine({ r }: { r: MoneyRowData }) {
   if (r.paidToday <= 0.005) return null;
-  return <span className="text-xs font-bold text-green" data-money-today-line>Today {money(r.paidToday)}{r.paidTodayCount > 1 ? ` · ${r.paidTodayCount} payments` : ""}</span>;
+  return <span className="text-xs font-bold text-green-text" data-money-today-line>Today {money(r.paidToday)}{r.paidTodayCount > 1 ? ` · ${r.paidTodayCount} payments` : ""}</span>;
 }
 
 /** Every tax invoice issued today on the row, when they are more than the one number the row already shows. */
@@ -120,7 +120,7 @@ export function MoneyRow({ r, href, canAddAuth = false }: { r: MoneyRowData; hre
         <div className="flex flex-col items-end text-right ml-auto">
           {r.total !== null ? <span className="font-semibold">{money(r.total)}</span> : null}
           {r.total !== null || r.paid > 0.005 ? <PaidSoFar m={r} showTotal={false} /> : <span className="text-xs text-muted">No approved total yet</span>}
-          {r.balance !== null && r.balance <= 0.005 && r.paidAt ? <span className="text-xs text-green">{formatDayTime(r.paidAt)}</span> : null}
+          {r.balance !== null && r.balance <= 0.005 && r.paidAt ? <span className="text-xs text-green-text">{formatDayTime(r.paidAt)}</span> : null}
           <TodayLine r={r} />
         </div>
       </Link>

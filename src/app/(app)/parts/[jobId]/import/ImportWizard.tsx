@@ -214,9 +214,9 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
   }
 
   const wayBtn = (w: Way, label: string) => (
-    <button key={w} type="button" onClick={() => setWay(w)} aria-pressed={way === w} className={`min-h-11 rounded-control px-4 text-sm font-bold ${way === w ? "bg-ink text-white" : "border border-line-strong bg-white"}`} data-way={w}>{label}</button>
+    <button key={w} type="button" onClick={() => setWay(w)} aria-pressed={way === w} className={`min-h-11 rounded-control px-4 text-sm font-bold ${way === w ? "bg-ink text-on-dark" : "border border-line-strong bg-white"}`} data-way={w}>{label}</button>
   );
-  const chip = (text: string, tone: "green" | "amber" | "grey") => <span className={`inline-flex h-5 items-center rounded-full px-2 text-[10px] font-bold whitespace-nowrap ${tone === "green" ? "bg-green-soft text-green" : tone === "amber" ? "bg-amber-soft text-amber" : "bg-chip text-muted"}`}>{text}</span>;
+  const chip = (text: string, tone: "green" | "amber" | "grey") => <span className={`inline-flex h-5 items-center rounded-full px-2 text-xs font-bold whitespace-nowrap ${tone === "green" ? "bg-green-soft text-green-text" : tone === "amber" ? "bg-amber-soft text-amber-text" : "bg-chip text-muted"}`}>{text}</span>;
   const availabilityChip = (l: ImportLine) => (l.availability ? (l.availability.kind === "same_day" ? chip("Same day", "green") : l.availability.kind === "days" ? chip(l.availability.days === 1 ? "Next day" : `${l.availability.days} days`, "grey") : l.availability.kind === "back_order" ? chip("Back order", "amber") : chip("Supplier to confirm", "amber")) : null);
 
   return (
@@ -300,7 +300,7 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
                       </th>
                     ))}
                   </tr>
-                  {named ? <tr>{cols.map((i) => <th key={i} className="px-2 py-1 text-left text-[11px] font-semibold text-muted border-b border-line whitespace-nowrap">{result.headings[i] ?? ""}</th>)}</tr> : null}
+                  {named ? <tr>{cols.map((i) => <th key={i} className="px-2 py-1 text-left text-xs font-semibold text-muted border-b border-line whitespace-nowrap">{result.headings[i] ?? ""}</th>)}</tr> : null}
                 </thead>
                 <tbody>
                   {result.rows.slice(0, 5).map((r, ri) => <tr key={ri} data-mapping-row>{cols.map((ci) => <td key={ci} className="px-2 py-1 whitespace-nowrap border-b border-line">{r[ci] ?? ""}</td>)}</tr>)}
@@ -348,13 +348,13 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
                     <span className="font-bold">The file is for VIN {result.vin}; this car is {vin}.</span>
                     <label className="flex items-center gap-2 cursor-pointer"><input type="checkbox" checked={vinOk} onChange={(e) => setVinOk(e.target.checked)} className="h-5 w-5 accent-ink" /> <span>I checked: apply these prices to this car anyway.</span></label>
                   </div>
-                ) : vin ? <p className="text-xs font-semibold text-green" data-vin-ok>✓ VIN {result.vin} matches the car.</p> : <p className="text-xs text-muted">VIN in the file: {result.vin}</p>
+                ) : vin ? <p className="text-xs font-semibold text-green-text" data-vin-ok>✓ VIN {result.vin} matches the car.</p> : <p className="text-xs text-muted">VIN in the file: {result.vin}</p>
               ) : null}
               {(() => {
                 const vatFound = result.totals.found.find((f) => /^(vat|tax)/i.test(f.label))?.value ?? null;
                 const what = `${lines.length} part${lines.length === 1 ? "" : "s"}${chargeLines.length ? ` + ${chargeLines.map((c) => (c.description ?? "charge").toLowerCase()).join(", ")}` : ""}`;
                 return (
-                  <div data-totals-check data-totals-state={totalsBad ? "bad" : result.totals.match ? "ok" : "none"} className={`rounded-control px-3 py-2 text-sm font-semibold flex flex-col gap-1 ${totalsBad ? "bg-red-soft text-red border border-red-bar" : result.totals.match ? "bg-green-soft text-green" : "bg-chip text-muted"}`}>
+                  <div data-totals-check data-totals-state={totalsBad ? "bad" : result.totals.match ? "ok" : "none"} className={`rounded-control px-3 py-2 text-sm font-semibold flex flex-col gap-1 ${totalsBad ? "bg-red-soft text-red border border-red-bar" : result.totals.match ? "bg-green-soft text-green-text" : "bg-chip text-muted"}`}>
                     <span>Lines ({what}): <span data-totals-sum>AED {money(result.totals.sumLines)}</span>{vatFound !== null ? ` · VAT AED ${money(vatFound)}` : ""}{vatFound !== null && result.totals.sumLines !== null ? ` · Total AED ${money(Math.round((result.totals.sumLines + vatFound) * 100) / 100)}` : ""}</span>
                     {totalsBad ? (
                       <span data-totals-message>✗ Lines add up to {shortAed(result.totals.sumLines)} but the {sourceWord} total is {shortAed(result.totals.expected)} – check the red lines. Apply stays locked.</span>
@@ -376,11 +376,11 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
                   </div>
                 );
               })()}
-              {result.warnings.map((w) => <p key={w} className="text-xs font-semibold text-amber">{w}</p>)}
+              {result.warnings.map((w) => <p key={w} className="text-xs font-semibold text-amber-text">{w}</p>)}
             </div>
 
             <div className="rounded-card border border-line bg-white p-2 flex flex-col gap-1.5" data-import-lines>
-              <div className="hidden md:grid grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_7rem] gap-2 px-2 pb-1 text-[11px] font-bold uppercase tracking-[0.06em] text-muted border-b border-line">
+              <div className="hidden md:grid grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_7rem] gap-2 px-2 pb-1 text-xs font-bold uppercase tracking-[0.06em] text-muted border-b border-line">
                 <span>Imported line</span><span>On the car&apos;s list</span><span />
               </div>
               {lines.map((l) => {
@@ -394,7 +394,7 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
                   <div key={l.key} data-import-line={l.key} data-decided={d.confirmed ? "confirmed" : skipped ? "skipped" : "open"} data-duplicate={dup ? "true" : undefined} data-line-state={red ? "red" : amber ? "amber" : "ok"} className={`grid grid-cols-1 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_7rem] gap-2 items-center rounded-control border px-2 py-1.5 ${dup || red ? "border-red-bar bg-red-soft" : amber ? "border-amber-bar bg-amber-soft" : d.confirmed ? "border-green bg-green-soft" : skipped ? "border-line bg-canvas opacity-70" : totalsBad ? "border-red-bar bg-white" : "border-line bg-white"}`}>
                     <div className="flex flex-col min-w-0 text-sm">
                       <span className="font-bold break-words">{l.serial ? <span className="mr-1.5 font-semibold text-muted" data-line-serial>{l.serial}</span> : null}{l.description ?? <span className="text-muted">No description</span>}</span>
-                      {l.flag && !l.problem ? <span className="text-xs font-semibold text-amber" data-line-flag>{l.flag}</span> : null}
+                      {l.flag && !l.problem ? <span className="text-xs font-semibold text-amber-text" data-line-flag>{l.flag}</span> : null}
                       <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
                         {dup ? <span className="font-semibold text-red">Same match as another line: change one</span> : null}
                         <span data-line-pn>{l.partNumber ? <span className="font-mono font-semibold text-ink">{l.partNumber}</span> : <span title="No part number on the supplier's paper: Parts can type it later">Part no. —</span>}</span>
@@ -406,7 +406,7 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
                         {availabilityChip(l)}
                       </span>
                       {!skipped && (l.problem || l.ask) ? (
-                        <span className={`mt-0.5 flex flex-wrap items-center gap-2 text-xs font-semibold ${l.problem ? "text-red" : "text-amber"}`} data-line-problem>
+                        <span className={`mt-0.5 flex flex-wrap items-center gap-2 text-xs font-semibold ${l.problem ? "text-red" : "text-amber-text"}`} data-line-problem>
                           {l.problem ?? l.ask}
                           <label className="inline-flex items-center gap-1.5 cursor-pointer text-ink font-semibold"><input type="checkbox" checked={!!d.checked} onChange={(e) => decide(l.key, { checked: e.target.checked })} className="h-5 w-5 accent-ink" data-line-checked /> Checked against the {sourceWord}</label>
                         </span>
@@ -423,7 +423,7 @@ export function ImportWizard({ jobId, vin, suppliers, targets, ocrEnabled, canAp
                       {skipped ? (
                         <span className="text-xs font-semibold text-muted">Skipped</span>
                       ) : (
-                        <button type="button" onClick={() => decide(l.key, { confirmed: !d.confirmed })} aria-pressed={d.confirmed} className={`min-h-10 w-full rounded-control border px-3 text-sm font-bold ${d.confirmed ? "border-green bg-green text-white" : "border-line-strong bg-white"}`} data-confirm-line>{d.confirmed ? "✓ Confirmed" : "Confirm"}</button>
+                        <button type="button" onClick={() => decide(l.key, { confirmed: !d.confirmed })} aria-pressed={d.confirmed} className={`min-h-10 w-full rounded-control border px-3 text-sm font-bold ${d.confirmed ? "border-green bg-green text-on-dark" : "border-line-strong bg-white"}`} data-confirm-line>{d.confirmed ? "✓ Confirmed" : "Confirm"}</button>
                       )}
                     </div>
                   </div>

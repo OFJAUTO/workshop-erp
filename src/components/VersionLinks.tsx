@@ -14,7 +14,7 @@ export function VersionLinks({ versions, currentId, hrefOf }: { versions: { id: 
         <span key={v.id} className="inline-flex items-center gap-1">
           {i > 0 ? <span className="text-muted" aria-hidden>|</span> : null}
           {v.id === currentId ? (
-            <span className="rounded-control bg-ink px-2 py-0.5 text-white" aria-current="page" data-version-link={v.version} data-version-current>v{v.version}</span>
+            <span className="rounded-control bg-ink px-2 py-0.5 text-on-dark" aria-current="page" data-version-link={v.version} data-version-current>v{v.version}</span>
           ) : (
             <Link href={hrefOf(v.id)} className="rounded-control px-2 py-0.5 underline underline-offset-4 hover:bg-chip" data-version-link={v.version}>v{v.version}</Link>
           )}

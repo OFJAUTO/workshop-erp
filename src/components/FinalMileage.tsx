@@ -40,7 +40,7 @@ export function FinalMileage({ jobId, unit, inReading, alertKm, initial, onSendi
       ) : null}
       {lower ? <p className="text-sm font-bold text-red" data-mileage-lower>{(check as { error: string }).error}</p> : null}
       {driven !== null ? (
-        <p className={`text-sm font-bold ${drivenKm !== null && drivenKm > alertKm ? "text-amber" : ""}`} data-mileage-driven>
+        <p className={`text-sm font-bold ${drivenKm !== null && drivenKm > alertKm ? "text-amber-text" : ""}`} data-mileage-driven>
           Driven while with us: {formatThousands(driven)} {unit}
           {unit === "mi" ? ` (${formatThousands(drivenKm)} km)` : ""}
           {drivenKm !== null && drivenKm > alertKm ? ` – more than ${alertKm} km: the owner is told` : ""}
@@ -54,7 +54,7 @@ export function FinalMileage({ jobId, unit, inReading, alertKm, initial, onSendi
         <div className="flex flex-col gap-2" data-mileage-reasons>
           <div className="flex flex-wrap gap-2">
             {UNREADABLE_REASONS.map((r) => (
-              <button key={r.key} type="button" aria-pressed={reason === r.key} onClick={() => setReason(r.key)} className={`min-h-11 rounded-control border px-3 text-sm font-semibold ${reason === r.key ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-mileage-reason={r.key}>
+              <button key={r.key} type="button" aria-pressed={reason === r.key} onClick={() => setReason(r.key)} className={`min-h-11 rounded-control border px-3 text-sm font-semibold ${reason === r.key ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-mileage-reason={r.key}>
                 {r.label}
               </button>
             ))}
@@ -82,11 +82,11 @@ export function FinalMileage({ jobId, unit, inReading, alertKm, initial, onSendi
         />
       </Field>
       {wait.count ? (
-        <p className={`text-xs font-semibold ${wait.stopped ? "text-red" : "text-amber"}`} data-mileage-photo-sending {...(!photo ? { "data-mileage-photo-missing": "" } : {})}>
+        <p className={`text-xs font-semibold ${wait.stopped ? "text-red" : "text-amber-text"}`} data-mileage-photo-sending {...(!photo ? { "data-mileage-photo-missing": "" } : {})}>
           {wait.stopped ? "The photo could not be sent – try again, or remove it and take it again." : "The photo is still sending – the car can leave once it has arrived."}
         </p>
       ) : !photo ? (
-        <p className="text-xs font-semibold text-amber" data-mileage-photo-missing>The photo is required before the car can leave.</p>
+        <p className="text-xs font-semibold text-amber-text" data-mileage-photo-missing>The photo is required before the car can leave.</p>
       ) : null}
     </div>
   );

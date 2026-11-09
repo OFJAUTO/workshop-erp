@@ -51,7 +51,7 @@ export function WashForms({ jobId, atWash, canAct, from = null, washState = null
                     ) : null}
                   </div>
                 ) : (
-                  <p className="text-sm font-bold text-green" data-wash-free>Wash is free</p>
+                  <p className="text-sm font-bold text-green-text" data-wash-free>Wash is free</p>
                 )}
                 <div className="flex flex-wrap gap-2">
                   <Button type="submit" size="lg" data-wash-yes>Yes, send to wash</Button>

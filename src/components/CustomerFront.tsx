@@ -44,14 +44,14 @@ export function CustomerFront({ company, header = "full", title, titleAr, meta, 
             <header className="flex items-center justify-between gap-4 border-b-[3px] border-[#111113] pt-6 pb-4 sm:pt-[30px] sm:pb-[18px]">
               <Logo className="h-12 sm:h-16 w-auto" alt={company.tradingName} />
               {/* The legal name is never broken over two lines: on a phone the tax number moves under it instead. */}
-              <div className="flex min-w-0 flex-col items-start gap-1 sm:flex-row sm:items-stretch sm:gap-3 text-[10px] sm:text-[10.5px] leading-[1.6]">
+              <div className="flex min-w-0 flex-col items-start gap-1 sm:flex-row sm:items-stretch sm:gap-3 text-xs sm:text-xs leading-[1.6]">
                 <div className="flex flex-col">
-                  <span className="text-[11px] sm:text-xs font-bold tracking-[0.02em]">{unbroken(company.legalName)}</span>
+                  <span className="text-xs sm:text-xs font-bold tracking-[0.02em]">{unbroken(company.legalName)}</span>
                   {company.address.map((a) => <Words key={a} text={a} className="text-[#5F6368]" />)}
                 </div>
                 {company.trn ? (
                   <div className="sm:border-l sm:border-[#D4D4D8] sm:pl-3 flex flex-col justify-center gap-0.5">
-                    <span className="text-[9px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">Tax registration no.</span>
+                    <span className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]">Tax registration no.</span>
                     <span className="text-sm font-extrabold tracking-[0.03em] leading-[1.2]">{company.trn}</span>
                   </div>
                 ) : null}
@@ -71,7 +71,7 @@ export function CustomerFront({ company, header = "full", title, titleAr, meta, 
               <div className="flex flex-wrap justify-end gap-x-5 gap-y-1 text-right">
                 {meta.map((m) => (
                   <div key={m.label} className="flex flex-col">
-                    <span className="text-[9.5px] font-semibold tracking-[0.08em] uppercase text-[#5F6368]">{m.label}</span>
+                    <span className="text-xs font-semibold tracking-[0.08em] uppercase text-[#5F6368]">{m.label}</span>
                     <span className="text-[13px] font-bold">{m.value}</span>
                   </div>
                 ))}
@@ -81,7 +81,7 @@ export function CustomerFront({ company, header = "full", title, titleAr, meta, 
               <section className={`grid grid-cols-1 gap-3 ${boxes.length === 3 ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
                 {boxes.map((b) => (
                   <div key={b.title} className="rounded-lg bg-[#F4F4F5] px-4 py-3 flex flex-col gap-[3px] text-xs">
-                    <span className="text-[9.5px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{b.title}</span>
+                    <span className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]">{b.title}</span>
                     <span className="text-sm font-bold uppercase">{b.strong}</span>
                     {b.rows.filter(([, v]) => v).map(([k, v]) => (
                       <span key={k || String(v)}><span className="text-[#5F6368]">{k}{k ? " " : ""}</span>{typeof v === "string" ? <Words text={v} /> : v}</span>
@@ -107,7 +107,7 @@ export function ContactButtons({ phone, label = null }: { phone: string | null; 
   return (
     <div className="flex flex-col gap-2" data-call-ofj>
       {label ? <span className="text-sm font-bold">{label}</span> : null}
-      <a href={`tel:${phone.replace(/[^\d+]/g, "")}`} className="flex min-h-14 items-center justify-center rounded-lg bg-[#111113] px-4 text-base font-extrabold text-white">Call OFJ · {phone}</a>
+      <a href={`tel:${phone.replace(/[^\d+]/g, "")}`} className="flex min-h-14 items-center justify-center rounded-lg bg-[#111113] px-4 text-base font-extrabold text-on-dark">Call OFJ · {phone}</a>
     </div>
   );
 }

@@ -13,10 +13,10 @@ export function MessageSendButton({ label, title, message, phoneDigits, what, ta
   const [sent, setSent] = useState(false);
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white" data-message-send={hook ?? ""} {...(hook ? { [`data-${hook}`]: "" } : {})}>
+      <button type="button" onClick={() => setOpen(true)} className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-on-dark" data-message-send={hook ?? ""} {...(hook ? { [`data-${hook}`]: "" } : {})}>
         {sent ? `${label} again` : label}
       </button>
-      {sent ? <span className="text-xs font-semibold text-green" data-message-sent={hook ?? ""}>Sent ✓ (written on the history)</span> : null}
+      {sent ? <span className="text-xs font-semibold text-green-text" data-message-sent={hook ?? ""}>Sent ✓ (written on the history)</span> : null}
       {open ? (
         <SendLinkDialog
           title={title}

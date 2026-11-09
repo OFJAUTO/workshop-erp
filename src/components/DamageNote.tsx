@@ -94,7 +94,7 @@ export function DamageNote({ jobId, initial, token, chips = [] }: { jobId: strin
       {chips.length ? (
         <div className="flex flex-wrap gap-1.5" data-damage-chips>
           {chips.map((c) => (
-            <button key={c} type="button" onClick={() => toggle(c)} aria-pressed={picked.has(c.toLowerCase())} className={`min-h-10 rounded-control border px-3 text-xs font-bold uppercase tracking-wide ${picked.has(c.toLowerCase()) ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-damage-chip={c}>
+            <button key={c} type="button" onClick={() => toggle(c)} aria-pressed={picked.has(c.toLowerCase())} className={`min-h-10 rounded-control border px-3 text-xs font-bold uppercase tracking-wide ${picked.has(c.toLowerCase()) ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-damage-chip={c}>
               {c}
             </button>
           ))}
@@ -102,7 +102,7 @@ export function DamageNote({ jobId, initial, token, chips = [] }: { jobId: strin
       ) : null}
       <Textarea value={value} onChange={(e) => change(e.target.value)} onBlur={() => { if (timer.current) clearTimeout(timer.current); void saveNow(latest.current); }} rows={2} maxLength={500} placeholder="For example: scratches and dents all around" aria-label="Damage note" />
       <span className="min-h-5 text-xs font-semibold" data-damage-status aria-live="polite">
-        {state === "saving" ? <span className="text-muted">Saving…</span> : state === "saved" ? <span className="text-green">Saved</span> : state === "error" ? <span className="text-red">{error ?? "Could not save."}</span> : null}
+        {state === "saving" ? <span className="text-muted">Saving…</span> : state === "saved" ? <span className="text-green-text">Saved</span> : state === "error" ? <span className="text-red">{error ?? "Could not save."}</span> : null}
       </span>
     </div>
   );

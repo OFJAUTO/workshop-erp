@@ -41,7 +41,7 @@ import { Collapsible } from "@/components/Collapsible";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { StageTrack } from "@/components/StageTrack";
-import { Badge, Button, Card, ChoiceButtons, Input, LinkButton, Notice, PageHeader, SectionLabel, Select, Textarea } from "@/components/ui";
+import { Badge, Button, Card, ChoiceButtons, LinkButton, Notice, PageHeader, SectionLabel, Select, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { INSPECTION_STATUS_LABELS, JOB_DEPARTMENTS, ROAD_TEST_SECTION_KEY, formatMinutes, jobConcernsSide, sideOfDepartment } from "@/lib/inspection";
 import { hasLabourChargesLine, tasksFromInspection,inspectionOverTarget, inspectionWorkingMinutes, loadInspection, inspectionDangerous } from "@/lib/inspection-data";
@@ -78,6 +78,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { formatPlate } from "@/lib/types";
 import { assignJob, decideInspectionFee, moveJob, ownerChangeInspectionFee, setJobPriority, setPromisedDate } from "../actions";
+import { PromisedDateField } from "@/components/PromisedDateField";
+import { PROMISE_NEEDED } from "@/lib/promise-dates";
+import { schemaReady } from "@/lib/schema-ready";
 import { decideRoadTest, remindManager, setAssignmentNote } from "../assignment-actions";
 import { decideMove, requestMove } from "../move-actions";
 import { remindManagerToConfirm } from "../work-actions";
@@ -174,6 +177,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const reportLink = (reportLinkRow as ReportLinkRow | null) ?? null;
   const laterStage = ["approved", "waiting_parts", "in_work", "pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"].includes(job.status);
   const aftercare = await aftercareOf(id);
+  // 9 November 2026: the optional promised time, once jobs.promised_time exists.
+  const promisedTimeReady = await schemaReady("jobs", "promised_time");
+  const promisedTime = promisedTimeReady ? (((await admin.from("jobs").select("promised_time").eq("id", id).maybeSingle()).data as { promised_time: string | null } | null)?.promised_time ?? null) : null;
   const [partsState, work, qc, wash, bal, plan, { data: comebackRows }] = await Promise.all([jobPartsState(id), laterStage ? loadWork(id) : Promise.resolve(null), laterStage ? latestQc(id) : Promise.resolve(null), laterStage ? loadWash(id) : Promise.resolve(null), laterStage ? jobBalance(id) : Promise.resolve(null), laterStage ? loadPlanning(job, settings) : Promise.resolve(null), admin.from("jobs").select("id, job_number, comeback_cause, comeback_free, gated_in_at").or(`comeback_of.eq.${id},id.eq.${job.comeback_of ?? id}`).neq("id", id)]);
   const comebackOriginal = job.comeback_of ? ((comebackRows ?? []).find((r) => r.id === job.comeback_of) ?? null) : null;
   const comebacksOfThis = (comebackRows ?? []).filter((r) => r.id !== job.comeback_of);
@@ -509,7 +515,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {job.department ? <Badge tone="outline">{JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label}</Badge> : null}
             {job.inspection_fee_due ? <Badge tone="red">{can(role, "viewInvoices") ? `Inspection fee due · AED ${Number(job.inspection_fee_aed ?? settings.inspection_fee_aed).toLocaleString("en-GB")}` : "Inspection fee due"}</Badge> : <Badge tone={job.inspection_fee_choice === "none" ? "green" : !job.inspection_fee_choice && !job.first_approval_at ? "amber" : "outline"} data-fee-badge={job.inspection_fee_choice ?? (job.first_approval_at ? "legacy" : "not_chosen")}>{job.inspection_fee_choice ? feeWords(job) : job.first_approval_at ? `Inspection fee: AED ${Number(job.inspection_fee_aed ?? settings.inspection_fee_aed).toLocaleString("en-GB")}` : "Inspection fee: not chosen yet"}{job.first_approval_at ? " · locked" : ""}</Badge>}
             <AdvisorBadge name={inChargeName} />
-            {jobCut ? <span className="inline-flex items-center rounded-control bg-ink px-3 py-1 text-sm font-extrabold tracking-[0.1em] text-white" title={jobCut.long} data-cut-badge={jobCut.badge}>{jobCut.badge}{jobCut.note ? ` · ${jobCut.note}` : ""}</span> : null}
+            {jobCut ? <span className="inline-flex items-center rounded-control bg-ink px-3 py-1 text-sm font-extrabold tracking-[0.1em] text-on-dark" title={jobCut.long} data-cut-badge={jobCut.badge}>{jobCut.badge}{jobCut.note ? ` · ${jobCut.note}` : ""}</span> : null}
             {tintWords ? <span className="inline-flex items-center rounded-control border border-ink px-3 py-1 text-sm font-semibold normal-case" data-tint-summary>Tint: {tintWords}</span> : null}
             {job.comeback_of ? <Badge tone={job.comeback_cause === "unrelated" || job.comeback_cause === "customer_caused" ? "outline" : "red"}>{job.comeback_cause === "unrelated" || job.comeback_cause === "customer_caused" ? "Return visit" : "Comeback"}{comebackOriginal ? ` of ${comebackOriginal.job_number}` : ""}{job.comeback_free ? " · free of charge" : ""}</Badge> : null}
             {comebacksOfThis.length ? <Badge tone="red">Came back: {comebacksOfThis.map((c) => c.job_number).join(", ")}</Badge> : null}
@@ -549,7 +555,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <div className="-mt-3 flex flex-wrap items-center gap-2 text-xs" data-advisor-control>
           <span className="font-semibold text-muted">Advisor in charge: {inChargeName ?? "not set"}</span>
           <details className="relative">
-            <summary className="inline-flex min-h-8 cursor-pointer items-center rounded-control px-1 text-[11px] font-bold text-muted underline underline-offset-4" data-advisor-change>{inChargeName ? "change" : "set advisor"}</summary>
+            <summary className="inline-flex min-h-8 cursor-pointer items-center rounded-control px-1 text-xs font-bold text-muted underline underline-offset-4" data-advisor-change>{inChargeName ? "change" : "set advisor"}</summary>
             <div className="absolute left-0 z-30 mt-1 w-72 rounded-card border border-line bg-white p-3 shadow-xl flex flex-col gap-2">
               <form action={setAdvisorInCharge.bind(null, id)} className="flex flex-wrap items-end gap-2">
                 <label className="flex flex-col gap-1 flex-1 min-w-40"><span className="text-xs font-semibold text-muted">Advisor in charge</span>
@@ -594,7 +600,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {wToken ? <a href={`/warranty/${wToken}`} target="_blank" rel="noreferrer" className="ml-auto text-sm font-semibold underline underline-offset-4" data-warranty-open>Open the warranty card</a> : null}
           </div>
           <p className="text-sm">{wCard.rows.map((r) => `${r.name}: ${r.coverage} (${r.period})`).join(" · ")}</p>
-          {staffFinalCheckWords(wCard.status) ? <p className={`text-sm font-bold ${wCard.status.checkDate ? "text-green" : "text-red"}`} data-final-check-staff>{staffFinalCheckWords(wCard.status)}</p> : null}
+          {staffFinalCheckWords(wCard.status) ? <p className={`text-sm font-bold ${wCard.status.checkDate ? "text-green-text" : "text-red"}`} data-final-check-staff>{staffFinalCheckWords(wCard.status)}</p> : null}
           {wCard.missing.length ? <p className="text-xs font-semibold text-red">Details still missing: {wCard.missing.join(", ")} (bodyshop page).</p> : null}
           {wMessage && (role === "owner" || role === "service_advisor") && !staff.viewingAs ? (
             <WarrantyCardSend jobId={id} message={wMessage} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={wCard.sentAt} />
@@ -681,7 +687,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           <SectionLabel>Next step</SectionLabel>
           {step.done ? (
             <p className="text-sm">
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-green text-white text-xs font-bold mr-2">✓</span>
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-green text-on-dark text-xs font-bold mr-2">✓</span>
               <span className="font-semibold">{step.done.label}</span>
               {step.done.by ? <span className="text-muted"> · {step.done.by}</span> : null}
             </p>
@@ -698,19 +704,22 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           {job.status === "in_work" && job.work_done_at && job.is_open && (role === "owner" || role === "service_advisor") && !staff.viewingAs ? (
             <form action={remindManagerToConfirm.bind(null, id)}><Button type="submit" tone="secondary" size="md" className="w-full">Remind {managerLabel}</Button></form>
           ) : null}
-          {job.promised_at ? (
-            <div className="flex flex-col gap-2 border-t border-ink/20 pt-3">
-              <p className="text-sm">
-                Promised date <span className="font-semibold">{formatPromised(job.promised_at)}</span>
-              </p>
+          {job.promised_at || (job.is_open && PROMISE_NEEDED.has(job.status)) ? (
+            <div className="flex flex-col gap-2 border-t border-ink/20 pt-3" data-promised-box>
+              {job.promised_at ? (
+                <p className="text-sm">
+                  Promised date <span className="font-semibold">{formatPromised(job.promised_at)}</span>{promisedTime ? <span className="font-semibold"> · {promisedTime.slice(0, 5)}</span> : null}
+                </p>
+              ) : (
+                <p className="text-sm font-bold text-red" data-promised-missing>No promised date yet: set it now.</p>
+              )}
               {can(role, "sendApproval") && job.is_open ? (
-                <details className="text-sm">
-                  <summary className="cursor-pointer text-xs font-semibold text-muted underline underline-offset-4">Change the promised date (with a reason)</summary>
-                  <form action={setPromisedDate.bind(null, id)} className="mt-2 flex flex-col gap-2">
-                    <Input name="promised_at" type="date" defaultValue={job.promised_at} required />
-                    <Textarea name="reason" rows={2} required placeholder="Why the date changes (logged)" />
-                    <Button type="submit" tone="secondary" size="md">
-                      Change promised date
+                <details className="text-sm" open={!job.promised_at}>
+                  <summary className="cursor-pointer text-xs font-semibold text-muted underline underline-offset-4">{job.promised_at ? "Change the promised date (with a reason)" : "Set the promised date"}</summary>
+                  <form action={setPromisedDate.bind(null, id)} className="mt-2 flex flex-col gap-2" data-promised-form>
+                    <PromisedDateField existing={job.promised_at} suggested={null} partsDate={null} timeReady={promisedTimeReady} existingTime={promisedTime} label="Promised date" />
+                    <Button type="submit" tone="secondary" size="md" data-promised-save>
+                      {job.promised_at ? "Change promised date" : "Save the promised date"}
                     </Button>
                   </form>
                 </details>
@@ -741,7 +750,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       {jobSupplierInvoices.length ? (
         <Card className="flex flex-col gap-2" data-job-supplier-invoices>
           <SectionLabel right={`${jobSupplierInvoices.length}`}>Supplier invoices</SectionLabel>
-          {profitChangeWords(priceChangeNet) ? <p className={`text-sm font-bold ${priceChangeNet > 0 ? "text-red" : "text-green"}`} data-job-price-change>{profitChangeWords(priceChangeNet)}</p> : null}
+          {profitChangeWords(priceChangeNet) ? <p className={`text-sm font-bold ${priceChangeNet > 0 ? "text-red" : "text-green-text"}`} data-job-price-change>{profitChangeWords(priceChangeNet)}</p> : null}
           <ul className="divide-y divide-line text-sm">
             {jobSupplierInvoices.map((r) => {
               const share = r.shares.filter((x) => x.jobId === id).reduce((acc, x) => acc + x.amount, 0);
@@ -761,7 +770,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <TeamsCard department={job.department ?? "mechanical"} canChange={mayChangeTeams} onDepartment={setJobDepartment.bind(null, id)} lines={teamLines.map((l) => ({ id: l.id, title: l.title, team: l.team!, chosen: !!l.chosen, onTeam: setLineTeam.bind(null, id, l.id) }))} linesReady={linesReady} misfits={misfits} workWords={teamsWords(jobTeams)} withCar={withCarTeam ? LINE_TEAM_LABELS[withCarTeam] : null} />
       ) : null}
       {plan && (plan.active || ["approved", "waiting_parts"].includes(job.status)) ? (
-        <PlanningCard jobId={id} status={job.status} plan={plan} role={role} viewingAs={!!staff.viewingAs} wt={wt} job={job} mySide={role === "owner" ? null : sideOfDepartment(staff.department_id)} people={people} customer={customer ? { name: customer.company_name ?? customer.full_name, phoneDigits: (customer.phone ?? "").replace(/[^\d]/g, "") } : null} carText={vehicleTitle(vehicle)} advisorName={staff.display_name} whatsapp={can(role, "sendApproval")} />
+        <PlanningCard jobId={id} status={job.status} plan={plan} role={role} viewingAs={!!staff.viewingAs} wt={wt} job={job} mySide={role === "owner" ? null : sideOfDepartment(staff.department_id)} people={people} customer={customer ? { name: customer.company_name ?? customer.full_name, phoneDigits: (customer.phone ?? "").replace(/[^\d]/g, "") } : null} carText={vehicleTitle(vehicle)} advisorName={staff.display_name} whatsapp={can(role, "sendApproval")} promisedTime={promisedTime} timeReady={promisedTimeReady} />
       ) : null}
       {job.comeback_of || comebacksOfThis.length ? (
         <ComebackCard jobId={id} job={job} role={role} viewingAs={!!staff.viewingAs} original={comebackOriginal} comebacks={comebacksOfThis} inspectionApproved={inspection?.inspection.status === "approved"} />
@@ -865,9 +874,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         ) : null}
         <Card className={tile(partsBox)} data-stage-card="parts" data-state={partsBox}>
           <span className="flex items-center gap-2"><span className={boxTitle(partsBox)}>{tick(partsBox)}Parts</span>{partsDots}</span>
-          {partsChanges?.words ? <Link href={`/parts/${id}#changes`} className={`text-xs font-bold underline underline-offset-4 ${partsChanges.needsApproval.length ? "text-amber" : ""}`} data-job-parts-changes>{partsChanges.words}{partsChanges.needsApproval.length ? " – Resend for approval" : ""}</Link> : null}
+          {partsChanges?.words ? <Link href={`/parts/${id}#changes`} className={`text-xs font-bold underline underline-offset-4 ${partsChanges.needsApproval.length ? "text-amber-text" : ""}`} data-job-parts-changes>{partsChanges.words}{partsChanges.needsApproval.length ? " – Resend for approval" : ""}</Link> : null}
           <span className="text-sm font-semibold">
-            {partItems.length === 0 ? (noPartsNeeded(partsStepList) && !quoteSummary.openRequests ? <span className="text-green" data-no-parts>No parts needed ✓</span> : quoteSummary.openRequests ? `${quoteSummary.openRequests} request${quoteSummary.openRequests === 1 ? "" : "s"} to price` : "Not started") : `${partItems.length} part${partItems.length === 1 ? "" : "s"}`}
+            {partItems.length === 0 ? (noPartsNeeded(partsStepList) && !quoteSummary.openRequests ? <span className="text-green-text" data-no-parts>No parts needed ✓</span> : quoteSummary.openRequests ? `${quoteSummary.openRequests} request${quoteSummary.openRequests === 1 ? "" : "s"} to price` : "Not started") : `${partItems.length} part${partItems.length === 1 ? "" : "s"}`}
           </span>
           {partItems.length ? (
             <span className="text-xs text-muted">
@@ -1048,8 +1057,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 <Button type="submit" disabled={!check.complete || (!job.first_approval_at && role !== "owner")}>
                   {job.assigned_to ? "Reassign" : "Assign"}
                 </Button>
-                {!check.complete ? <p className="text-xs text-amber font-semibold">Blocked until the gate-in media is complete.</p> : null}
-                {check.complete && !job.first_approval_at ? <p className="text-xs text-amber font-semibold">Blocked until the customer approves the job card.</p> : null}
+                {!check.complete ? <p className="text-xs text-amber-text font-semibold">Blocked until the gate-in media is complete.</p> : null}
+                {check.complete && !job.first_approval_at ? <p className="text-xs text-amber-text font-semibold">Blocked until the customer approves the job card.</p> : null}
               </form>
             </Card>
           ) : waitingForAssignment ? (

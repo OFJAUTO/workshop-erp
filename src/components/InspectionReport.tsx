@@ -28,13 +28,13 @@ export function reportBoxes(head: ReportHead): FrontBox[] {
 export function ReportChip({ chip, big = false }: { chip: Chip; big?: boolean }) {
   const c = TONE_COLOURS[chip.tone];
   return (
-    <span className={`inline-flex shrink-0 items-center rounded-full font-extrabold uppercase tracking-[0.06em] whitespace-nowrap ${big ? "px-3 py-1 text-[11px]" : "px-2 py-0.5 text-[10px]"}`} style={{ background: c.bg, color: c.fg }} data-chip={chip.tone}>
+    <span className={`inline-flex shrink-0 items-center rounded-full font-extrabold uppercase tracking-[0.06em] whitespace-nowrap ${big ? "px-3 py-1 text-xs" : "px-2 py-0.5 text-xs"}`} style={{ background: c.bg, color: c.fg }} data-chip={chip.tone}>
       {chip.text}
     </span>
   );
 }
 
-const SMALL_TITLE = "text-[10px] font-extrabold tracking-[0.12em] uppercase text-[#5F6368]";
+const SMALL_TITLE = "text-xs font-extrabold tracking-[0.12em] uppercase text-[#5F6368]";
 
 function Media({ keys, data, section, refreshUrl, signedAt }: { keys: string[]; data: ReportData; section: string; refreshUrl: string; signedAt: number }) {
   const places = keys.map((k) => data.media[k]).filter((p): p is ReportPlace => !!p && p.photos.length + p.videos.length > 0);
@@ -192,7 +192,7 @@ export function InspectionReport({ data, refreshUrl, signedAt, withHead = false 
           {layout.passedCount ? <a href="#checked-and-passed" className="text-xs font-semibold text-[#1B6B2F] underline-offset-2 hover:underline">✓ {layout.passedCount} items checked and passed (below)</a> : null}
         </header>
         {layout.dangers.length ? (
-          <div className="rounded-md bg-[#B3261E] px-3 py-2 text-sm text-white" data-report-danger>
+          <div className="rounded-md bg-[#B3261E] px-3 py-2 text-sm text-on-dark" data-report-danger>
             <p className="font-extrabold tracking-[0.04em]">DANGEROUS TO DRIVE</p>
             {data.dangerText ? <p className="text-[13px]">{data.dangerText}</p> : null}
           </div>
@@ -206,7 +206,7 @@ export function InspectionReport({ data, refreshUrl, signedAt, withHead = false 
                   <span className="font-bold">{f.title}</span>
                   {f.reason ? <span className="text-[#3F3F46]"> · {f.reason}</span> : null}
                 </p>
-                <span className="shrink-0 pt-0.5 text-[10px] font-bold tracking-[0.08em] text-[#5F6368]">{f.section}</span>
+                <span className="shrink-0 pt-0.5 text-xs font-bold tracking-[0.08em] text-[#5F6368]">{f.section}</span>
               </li>
             ))}
           </ul>

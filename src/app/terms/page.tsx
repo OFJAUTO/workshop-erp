@@ -35,14 +35,14 @@ export default async function TermsPage({ searchParams }: { searchParams: Promis
   }
   return (
     <div className="min-h-screen bg-canvas">
-      <header className="bg-sidebar text-white px-4 py-3 flex items-center justify-between gap-3">
+      <header className="bg-sidebar text-on-dark px-4 py-3 flex items-center justify-between gap-3">
         <Logo onDark className="h-9" alt={settings.company_name} />
         {backHref ? (
           <LinkButton href={backHref} tone="secondary" size="md">
             Back to approval
           </LinkButton>
         ) : (
-          <span className="text-xs text-white/70">{settings.company_name}</span>
+          <span className="text-xs text-on-dark/70">{settings.company_name}</span>
         )}
       </header>
       <main className="mx-auto max-w-2xl px-4 py-5 flex flex-col gap-4">

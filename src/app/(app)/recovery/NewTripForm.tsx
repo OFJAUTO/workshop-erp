@@ -41,7 +41,7 @@ export function NewTripForm({ ourDriver, companies, action }: { ourDriver: Drive
         <button type="button" onClick={() => setSide(null)} className="min-h-9 px-2 text-xs font-bold underline underline-offset-4 text-muted">Change</button>
         <div className="ml-auto flex gap-1" data-trip-kind>
           {(["pickup", "delivery"] as const).map((k) => (
-            <button key={k} type="button" onClick={() => setKind(k)} aria-pressed={kind === k} className={`min-h-10 rounded-control border-2 px-3 text-sm font-bold ${kind === k ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+            <button key={k} type="button" onClick={() => setKind(k)} aria-pressed={kind === k} className={`min-h-10 rounded-control border-2 px-3 text-sm font-bold ${kind === k ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
               {k === "pickup" ? "Pick-up" : "Delivery"}
             </button>
           ))}
@@ -51,7 +51,7 @@ export function NewTripForm({ ourDriver, companies, action }: { ourDriver: Drive
         <div className="flex flex-col gap-3" data-external-fields>
           <div className="flex flex-wrap gap-2">
             {([["flatbed", "Flatbed"], ["closed_box", "Closed box"]] as const).map(([v, label]) => (
-              <button key={v} type="button" onClick={() => setTruckType(v)} aria-pressed={truckType === v} data-truck-type={v} className={`min-h-12 rounded-control border-2 px-4 text-sm font-bold ${truckType === v ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+              <button key={v} type="button" onClick={() => setTruckType(v)} aria-pressed={truckType === v} data-truck-type={v} className={`min-h-12 rounded-control border-2 px-4 text-sm font-bold ${truckType === v ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
                 {label}
               </button>
             ))}

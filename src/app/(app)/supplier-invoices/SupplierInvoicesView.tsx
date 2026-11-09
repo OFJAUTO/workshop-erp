@@ -106,8 +106,8 @@ export async function SupplierInvoicesView({ sp, staff, place }: { sp: SiSearch;
 function MatchChips({ r }: { r: InvoiceRow }) {
   return (
     <>
-      {r.match.map((m) => <span key={m} className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${m === "matches" ? "bg-green-soft text-green" : "border border-amber-bar bg-amber-soft text-amber"}`} data-si-match={m}>{MATCH_WORDS[m]}</span>)}
-      {r.duplicateOf ? <span className="rounded-full border border-red-bar bg-white px-2 py-0.5 text-[11px] font-bold text-red" data-si-duplicate>Possible duplicate of {r.duplicateOf}</span> : null}
+      {r.match.map((m) => <span key={m} className={`rounded-full px-2 py-0.5 text-xs font-bold ${m === "matches" ? "bg-green-soft text-green-text" : "border border-amber-bar bg-amber-soft text-amber-text"}`} data-si-match={m}>{MATCH_WORDS[m]}</span>)}
+      {r.duplicateOf ? <span className="rounded-full border border-red-bar bg-white px-2 py-0.5 text-xs font-bold text-red" data-si-duplicate>Possible duplicate of {r.duplicateOf}</span> : null}
     </>
   );
 }
@@ -121,8 +121,8 @@ function InvoiceCard({ r, href, open }: { r: InvoiceRow; href: string; open: boo
         <span className="font-semibold">{invWords(r.number)}</span>
         {r.date ? <span className="text-sm text-muted">{formatDate(r.date)}</span> : null}
         <Badge tone={STATUS_TONE[r.status]}>{STATUS_WORDS[r.status]}</Badge>
-        {r.partlyPaid ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-[11px] font-bold text-amber" data-si-partly-paid>Partly paid · AED {money(r.unpaidAmount)} to pay</span> : null}
-        {r.proofMissing ? <span className="rounded-full border border-red-bar bg-white px-2 py-0.5 text-[11px] font-bold text-red" data-si-proof-missing-tag>Proof missing – upload</span> : null}
+        {r.partlyPaid ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text" data-si-partly-paid>Partly paid · AED {money(r.unpaidAmount)} to pay</span> : null}
+        {r.proofMissing ? <span className="rounded-full border border-red-bar bg-white px-2 py-0.5 text-xs font-bold text-red" data-si-proof-missing-tag>Proof missing – upload</span> : null}
         <MatchChips r={r} />
         <span className="ml-auto" data-si-total><SupplierAmount money={rowMoney(r)} size="sm" /></span>
         <span className="basis-full text-xs text-muted">
@@ -196,8 +196,8 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
                   return (
                     <li key={i} className="flex flex-wrap items-center gap-2 py-1.5" data-si-line>
                       <span className="min-w-0 flex-1 font-semibold uppercase">{l.description}</span>
-                      <span className={short ? "font-bold text-amber" : "text-muted"}>× {Number(l.quantity)}{short ? ` (received ${Number(l.received_qty)})` : ""}</span>
-                      <span className={diff ? "font-bold text-amber" : "text-muted"} data-si-prices>{changeWords({ quantity: Number(l.quantity), received_qty: Number(l.received_qty), unit_cost: Number(l.unit_cost), invoice_unit_cost: inv }) ?? `Approved ${money(Number(l.unit_cost))}${inv !== null ? ` · invoiced ${money(inv)}` : ""}`}</span>
+                      <span className={short ? "font-bold text-amber-text" : "text-muted"}>× {Number(l.quantity)}{short ? ` (received ${Number(l.received_qty)})` : ""}</span>
+                      <span className={diff ? "font-bold text-amber-text" : "text-muted"} data-si-prices>{changeWords({ quantity: Number(l.quantity), received_qty: Number(l.received_qty), unit_cost: Number(l.unit_cost), invoice_unit_cost: inv }) ?? `Approved ${money(Number(l.unit_cost))}${inv !== null ? ` · invoiced ${money(inv)}` : ""}`}</span>
                     </li>
                   );
                 })}
@@ -214,7 +214,7 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
                 const by = p.supplier_paid_by ? payerOf.get(p.supplier_paid_by) : null;
                 return (
                   <li key={s.poId} className="flex flex-col gap-1" data-si-share-paid={s.poId}>
-                    <span className="font-semibold text-green">{s.poNumber}: paid to supplier {formatDateTime(p.supplier_paid_at)}{p.supplier_paid_method ? ` · ${p.supplier_paid_method}` : ""}{p.supplier_paid_reference ? ` · ref ${p.supplier_paid_reference}` : ""}{by ? ` · by ${by}` : ""}</span>
+                    <span className="font-semibold text-green-text">{s.poNumber}: paid to supplier {formatDateTime(p.supplier_paid_at)}{p.supplier_paid_method ? ` · ${p.supplier_paid_method}` : ""}{p.supplier_paid_reference ? ` · ref ${p.supplier_paid_reference}` : ""}{by ? ` · by ${by}` : ""}</span>
                     {/* Fix 4 (4 November 2026): the PROOF OF PAYMENT, right where the invoice is checked. */}
                     {p.supplier_paid_proof_path ? (
                       <span className="inline-flex items-center gap-2 self-start rounded-control border border-line bg-chip px-2 py-1.5" data-si-proof={s.poId}>
@@ -223,7 +223,7 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
                       </span>
                     ) : (
                       <span className="flex flex-wrap items-center gap-2" data-si-proof-missing={s.poId}>
-                        <span className="rounded-full border border-red-bar px-2 py-0.5 text-[11px] font-bold text-red">Proof missing – upload</span>
+                        <span className="rounded-full border border-red-bar px-2 py-0.5 text-xs font-bold text-red">Proof missing – upload</span>
                         {acts ? <SupplierProofUpload poId={s.poId} /> : null}
                       </span>
                     )}

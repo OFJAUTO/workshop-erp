@@ -11,7 +11,7 @@ import { ROAD_TEST_ITEMS, roadTestProblems, type RoadTestItems } from "@/lib/roa
 import { chipSentence, type ChipRow } from "@/lib/road-test-chips";
 import type { PendingFile } from "@/lib/use-send-queue";
 
-const STATUS_CLASS: Record<CheckStatus, string> = { good: "border-green bg-green text-white", average: "border-amber-bar bg-amber-bar text-white", bad: "border-red-bar bg-red-bar text-white" };
+const STATUS_CLASS: Record<CheckStatus, string> = { good: "border-green bg-green text-on-dark", average: "border-amber-bar bg-amber-bar text-on-dark", bad: "border-red-bar bg-red-bar text-on-dark" };
 
 type RoadFile = InspectionFile & { itemKey: string | null };
 
@@ -121,10 +121,10 @@ export function RoadTestForm({ action, inspectionId, initial, initialFiles, init
           <Card className="flex flex-col gap-3">
             <SectionLabel>Can the car be road tested?</SectionLabel>
             <div className="grid grid-cols-2 gap-2">
-              <button type="button" disabled={readOnly} onClick={() => setNotPossible(false)} aria-pressed={!notPossible} className={`min-h-12 rounded-control border-2 text-sm font-bold ${!notPossible ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+              <button type="button" disabled={readOnly} onClick={() => setNotPossible(false)} aria-pressed={!notPossible} className={`min-h-12 rounded-control border-2 text-sm font-bold ${!notPossible ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
                 Yes, road test done
               </button>
-              <button type="button" disabled={readOnly} onClick={() => setNotPossible(true)} aria-pressed={notPossible} className={`min-h-12 rounded-control border-2 text-sm font-bold ${notPossible ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+              <button type="button" disabled={readOnly} onClick={() => setNotPossible(true)} aria-pressed={notPossible} className={`min-h-12 rounded-control border-2 text-sm font-bold ${notPossible ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
                 Road test not possible
               </button>
             </div>
@@ -148,7 +148,7 @@ export function RoadTestForm({ action, inspectionId, initial, initialFiles, init
                     <div id={`item-${it.key}`} className="flex items-center justify-between gap-2">
                       <span className="font-bold">{it.label}</span>
                       {done ? (
-                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-green text-white text-xs font-bold" aria-label="complete">✓</span>
+                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-green text-on-dark text-xs font-bold" aria-label="complete">✓</span>
                       ) : (
                         <span className={`inline-block h-3 w-3 rounded-full ${attempted ? "bg-red-bar" : "bg-line-strong"}`} aria-label="incomplete" />
                       )}
@@ -165,12 +165,12 @@ export function RoadTestForm({ action, inspectionId, initial, initialFiles, init
                       <div className="flex flex-col gap-2 rounded-control bg-chip p-2" data-chips={it.key}>
                         {rows.map((row, i) => (
                           <div key={row.label + i} className="flex flex-col gap-1">
-                            <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">{row.label}</span>
+                            <span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">{row.label}</span>
                             <div className="flex flex-wrap gap-1.5">
                               {row.chips.map((c) => {
                                 const on = (sel[i] ?? []).includes(c);
                                 return (
-                                  <button key={c} type="button" onClick={() => toggleChip(it.key, i, c)} aria-pressed={on} className={`min-h-9 rounded-control border px-2.5 text-xs font-semibold ${on ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>
+                                  <button key={c} type="button" onClick={() => toggleChip(it.key, i, c)} aria-pressed={on} className={`min-h-9 rounded-control border px-2.5 text-xs font-semibold ${on ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`}>
                                     {on ? "✓ " : ""}{c}
                                   </button>
                                 );

@@ -96,7 +96,7 @@ export function RoundOff({ docWords, baseTotal, baseNet, rounding, appliedTotal,
         <Button type="button" tone="secondary" size={size} disabled={disabled || pending} onClick={() => { setError(null); setNote(null); setOpen(true); }} data-roundoff-open>
           {has ? roundoffWords(rounding) : "Round off"}
         </Button>
-        {note && !open ? <span className="text-xs font-semibold text-amber" data-roundoff-owner-note>{note}</span> : null}
+        {note && !open ? <span className="text-xs font-semibold text-amber-text" data-roundoff-owner-note>{note}</span> : null}
       </span>
       {open ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label="Round off" onClick={() => setOpen(false)} onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }} data-roundoff-dialog>
@@ -142,7 +142,7 @@ export function RoundOff({ docWords, baseTotal, baseNet, rounding, appliedTotal,
             {typedPreview ? <p className={`text-xs font-semibold ${typedPreview.check.error ? "text-red" : "text-muted"}`} data-roundoff-preview>{typedPreview.check.error ?? typedPreview.words}</p> : null}
             {!isOwner ? <p className="text-xs text-muted">Down up to AED {limits.downMax.toLocaleString("en-GB")}{refuseOverLimit ? "" : " (more goes to the owner at Send)"} · up at most AED {limits.upMax.toLocaleString("en-GB")}.</p> : null}
             {error ? <p className="text-sm font-semibold text-red" data-roundoff-error>{error}</p> : null}
-            {note ? <p className="text-sm font-semibold text-amber" data-roundoff-note>{note}</p> : null}
+            {note ? <p className="text-sm font-semibold text-amber-text" data-roundoff-note>{note}</p> : null}
             <div className="flex flex-wrap gap-2">
               <Button type="button" size="lg" tone="secondary" onClick={() => setOpen(false)} data-roundoff-cancel>Cancel</Button>
               {has ? <Button type="button" size="lg" tone="danger" disabled={pending} onClick={() => go(null)} data-roundoff-remove>Remove round-off</Button> : null}

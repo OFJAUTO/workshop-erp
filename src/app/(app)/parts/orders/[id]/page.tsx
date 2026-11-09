@@ -338,7 +338,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                       {l.expected_date ? <Badge tone={late ? "red" : "neutral"}>{late ? "Late, " : ""}expected {formatDate(l.expected_date)}</Badge> : null}
                       {l.received_qty > 0 ? <Badge tone={l.received_qty >= l.quantity ? "green" : "amber"}>received {l.received_qty}</Badge> : null}
                       {l.flag ? <Badge tone="red">{l.flag === "wrong" ? "Wrong part" : "Damaged"}: {l.flag_note}</Badge> : null}
-                      {changeWords(l) ? <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${l.invoice_check === "mismatch" || l.invoice_check === "disputed" ? "border border-red-bar text-red" : "border border-amber-bar bg-amber-soft text-amber"}`} data-price-change>{changeWords(l)}{l.invoice_check === "accepted" ? " · accepted" : l.invoice_check === "disputed" ? " · queried with the supplier" : l.invoice_check === "mismatch" ? " · waits for the owner" : ""}</span> : null}
+                      {changeWords(l) ? <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${l.invoice_check === "mismatch" || l.invoice_check === "disputed" ? "border border-red-bar text-red" : "border border-amber-bar bg-amber-soft text-amber-text"}`} data-price-change>{changeWords(l)}{l.invoice_check === "accepted" ? " · accepted" : l.invoice_check === "disputed" ? " · queried with the supplier" : l.invoice_check === "mismatch" ? " · waits for the owner" : ""}</span> : null}
                       {l.invoice_check === "mismatch" && role === "owner" && !staff.viewingAs ? (
                         <form action={decideInvoiceCheck.bind(null, l.id)} className="flex gap-1" data-invoice-check={l.id}>
                           <Button type="submit" name="decision" value="accept" size="md" data-price-ok>OK</Button>
@@ -347,7 +347,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                       ) : null}
                       {part?.label_code ? <span className="ml-auto text-xs text-muted">label {part.label_code}</span> : null}
                       {part?.issue_status === "confirmed" ? <Badge tone="green">Issued</Badge> : null}
-                      {endedOfLine.get(l.id) ? <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${endedOfLine.get(l.id)!.state === "return_pending" ? "border-amber-bar bg-amber-soft text-amber" : "border-line-strong text-ink"}`} data-lpo-line-ended={endedOfLine.get(l.id)!.state}>{endedOfLine.get(l.id)!.words}</span> : null}
+                      {endedOfLine.get(l.id) ? <span className={`rounded-full border px-2 py-0.5 text-xs font-bold ${endedOfLine.get(l.id)!.state === "return_pending" ? "border-amber-bar bg-amber-soft text-amber-text" : "border-line-strong text-ink"}`} data-lpo-line-ended={endedOfLine.get(l.id)!.state}>{endedOfLine.get(l.id)!.words}</span> : null}
                     </li>
                   );
                 })}
@@ -356,7 +356,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                     <span className="font-semibold uppercase line-through">{e.description}</span>
                     {e.partNumber ? <span className="line-through">{e.partNumber}</span> : null}
                     <span className="line-through">× {e.quantity} at AED {e.unitCost.toFixed(2)}</span>
-                    <span className="rounded-full border border-line-strong px-2 py-0.5 text-[11px] font-bold text-ink">{e.words}</span>
+                    <span className="rounded-full border border-line-strong px-2 py-0.5 text-xs font-bold text-ink">{e.words}</span>
                   </li>
                 ))}
                 {bundle.charges.map((c) => (
@@ -383,7 +383,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                   <li key={r.id as string} className="py-1.5 flex flex-wrap items-center gap-2 opacity-70" data-refused-line>
                     <span className="font-semibold uppercase line-through">{r.description as string}</span>
                     {r.supplier ? <span className="text-muted">{r.supplier as string}</span> : null}
-                    <span className="rounded-full border border-red-bar px-2 py-0.5 text-[11px] font-bold text-red">Refused by {refusedBy.get(r.refused_by as string) ?? "the owner"}{r.refused_reason ? ` – ${r.refused_reason}` : ""}</span>
+                    <span className="rounded-full border border-red-bar px-2 py-0.5 text-xs font-bold text-red">Refused by {refusedBy.get(r.refused_by as string) ?? "the owner"}{r.refused_reason ? ` – ${r.refused_reason}` : ""}</span>
                     <span className="ml-auto text-xs text-muted">{r.replacement_part_id ? "Replacement added" : "Waiting for a replacement from Parts"}</span>
                   </li>
                 ))}

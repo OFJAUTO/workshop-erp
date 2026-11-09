@@ -18,11 +18,11 @@ export function SubmittedOverlay({ jobNumber }: { jobNumber: string }) {
   }, []);
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 bg-ink text-white flex flex-col items-center justify-center gap-6 p-8 text-center">
+    <div className="fixed inset-0 z-50 bg-ink text-on-dark flex flex-col items-center justify-center gap-6 p-8 text-center">
       <span className="inline-flex h-20 w-20 items-center justify-center rounded-full bg-green text-4xl font-bold">✓</span>
       <h1 className="text-3xl font-extrabold">Thank you.</h1>
       <p className="text-xl font-semibold">Inspection submitted{jobNumber ? ` for ${jobNumber}` : ""}.</p>
-      <p className="text-lg text-white/80">Waiting for the workshop manager.</p>
+      <p className="text-lg text-on-dark/80">Waiting for the workshop manager.</p>
       <button type="button" onClick={close} className="mt-4 min-h-14 rounded-control bg-white px-8 text-base font-bold text-ink">
         Back to my jobs
       </button>

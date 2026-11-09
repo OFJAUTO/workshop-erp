@@ -23,7 +23,7 @@ function SectionCar({ c, section, today }: { c: BoardCar; section: Section | nul
       title={carTitle(c)}
       sub={[c.job.vehicle?.colour ?? null, c.job.job_number]}
       status={{ line: doing, detail: c.people.length ? c.people.map((p) => p.name).join(", ") : null }}
-      alerts={due ? <span className={`text-xs ${tone === "red" ? "text-red font-bold" : tone === "amber" ? "text-amber font-bold" : "text-muted"}`} data-board-due>{tone === "red" ? `Late · ${formatDate(due)}` : tone === "amber" ? "Due today" : `Due ${formatDate(due)}`}</span> : null}
+      alerts={due ? <span className={`text-xs ${tone === "red" ? "text-red font-bold" : tone === "amber" ? "text-amber-text font-bold" : "text-muted"}`} data-board-due>{tone === "red" ? `Late · ${formatDate(due)}` : tone === "amber" ? "Due today" : `Due ${formatDate(due)}`}</span> : null}
       tone={tone === "red" ? "red" : tone === "amber" ? "amber" : "none"}
       data-board-car={c.job.id}
       data-tone={tone}
@@ -67,9 +67,9 @@ export function BodyshopBoard({ cars, goingOut, today, tomorrow }: { cars: Board
                     <span className="inline-flex flex-wrap items-center gap-1.5">
                       {c.signoff.needed.map((k) => {
                         const ok = c.signoff.signed.includes(k);
-                        return <span key={k} className={`inline-flex h-7 items-center rounded-full px-2.5 text-[11px] font-bold whitespace-nowrap ${ok ? "bg-green-soft text-green" : "bg-chip text-muted"}`} title={SIGNOFF_LABELS[k]} data-signoff-chip={k} data-signed={ok}>{ok ? "✓ " : ""}{SHORT_SIGN[k]}</span>;
+                        return <span key={k} className={`inline-flex h-7 items-center rounded-full px-2.5 text-xs font-bold whitespace-nowrap ${ok ? "bg-green-soft text-green-text" : "bg-chip text-muted"}`} title={SIGNOFF_LABELS[k]} data-signoff-chip={k} data-signed={ok}>{ok ? "✓ " : ""}{SHORT_SIGN[k]}</span>;
                       })}
-                      {c.signoff.waitingOn.length === 0 && c.signoff.needed.length ? <span className="text-[11px] font-bold text-green">Signed off</span> : null}
+                      {c.signoff.waitingOn.length === 0 && c.signoff.needed.length ? <span className="text-xs font-bold text-green-text">Signed off</span> : null}
                     </span>
                   }
                   data-going-out-car={c.job.id}
@@ -94,7 +94,7 @@ export function BodyshopBoard({ cars, goingOut, today, tomorrow }: { cars: Board
               {title(SECTION_LABELS[section], `${now.length} now · ${coming.length} coming`)}
               {now.length === 0 && coming.length === 0 ? <p className="text-muted text-sm">No cars.</p> : null}
               {now.map((c) => <SectionCar key={c.job.id} c={c} section={section} today={today} />)}
-              {coming.length ? <span className="text-[11px] text-muted font-bold uppercase tracking-[0.1em] pt-1">Coming</span> : null}
+              {coming.length ? <span className="text-xs text-muted font-bold uppercase tracking-[0.1em] pt-1">Coming</span> : null}
               {coming.map((c) => <SectionCar key={c.job.id} c={c} section={section} today={today} />)}
             </section>
           );

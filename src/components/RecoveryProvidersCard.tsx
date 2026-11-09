@@ -29,7 +29,7 @@ export function RecoveryProvidersCard({ providers }: { providers: RecoveryProvid
   const ordered = [...junk, ...list.filter((p) => !p.junk)];
   return (
     <div className="flex flex-col gap-2 rounded-card border border-line bg-white p-4" id="providers" data-recovery-providers-card>
-      <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-muted">Saved recovery companies · {list.length}</span>
+      <span className="text-xs font-bold uppercase tracking-[0.1em] text-muted">Saved recovery companies · {list.length}</span>
       {junk.length ? <p className="text-sm font-bold text-red" data-providers-junk>{junk.length} name{junk.length === 1 ? " looks" : "s look"} like a typing mistake: {junk.map((p) => p.name).join(", ")}. Remove {junk.length === 1 ? "it" : "them"} below.</p> : <p className="text-sm text-muted">The quotation&apos;s recovery line picks from this list; &quot;+ Add new&quot; asks the name and the phone.</p>}
       <ul className="flex flex-col divide-y divide-line">
         {ordered.map((p) => (

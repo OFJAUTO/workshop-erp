@@ -48,10 +48,10 @@ export function PaymentLinkSend({ jobId, balance, message, phoneDigits }: { jobI
           {!ready ? (
             <div className="flex flex-col gap-3" data-payment-link-amount>
               <div className="grid grid-cols-2 gap-2">
-                <button type="button" disabled={!balance || balance <= 0} onClick={() => setMode("full")} aria-pressed={mode === "full"} data-link-full className={`min-h-12 rounded-control border-2 text-sm font-bold disabled:opacity-50 ${mode === "full" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                <button type="button" disabled={!balance || balance <= 0} onClick={() => setMode("full")} aria-pressed={mode === "full"} data-link-full className={`min-h-12 rounded-control border-2 text-sm font-bold disabled:opacity-50 ${mode === "full" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
                   {balance && balance > 0 ? `Full balance · AED ${money(balance)}` : "Full balance (no total yet)"}
                 </button>
-                <button type="button" onClick={() => setMode("custom")} aria-pressed={mode === "custom"} data-link-custom className={`min-h-12 rounded-control border-2 text-sm font-bold ${mode === "custom" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                <button type="button" onClick={() => setMode("custom")} aria-pressed={mode === "custom"} data-link-custom className={`min-h-12 rounded-control border-2 text-sm font-bold ${mode === "custom" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
                   Custom amount
                 </button>
               </div>

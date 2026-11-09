@@ -10,7 +10,7 @@ export function CarThumb({ url, alt, size = "md", className = "" }: { url: strin
         // eslint-disable-next-line @next/next/no-img-element
         <img src={url} alt={alt} className="h-full w-full object-cover" />
       ) : (
-        <div className="h-full w-full flex items-center justify-center text-[10px] font-bold text-faint uppercase tracking-wide">{size === "sm" ? "" : "No photo"}</div>
+        <div className="h-full w-full flex items-center justify-center text-xs font-bold text-faint uppercase tracking-wide">{size === "sm" ? "" : "No photo"}</div>
       )}
     </div>
   );

@@ -35,12 +35,12 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
           ) : (
             <div className="flex flex-col gap-5 p-5 sm:p-8" data-pay-page>
               <div className="flex flex-col gap-1">
-                <span className="text-[11px] font-bold tracking-[0.12em] uppercase text-[#5F6368]">{d.carTitle}{d.plate ? ` · ${d.plate}` : ""}{d.number ? ` · ${d.number}` : ""}</span>
+                <span className="text-xs font-bold tracking-[0.12em] uppercase text-[#5F6368]">{d.carTitle}{d.plate ? ` · ${d.plate}` : ""}{d.number ? ` · ${d.number}` : ""}</span>
                 <h1 className="text-2xl font-extrabold">Dear {d.firstName},</h1>
                 <p className="text-sm text-[#5F6368]">{d.purpose}.</p>
               </div>
               <div className="rounded-lg border-2 border-[#111113] bg-[#F4F4F5] px-5 py-4 text-center">
-                <span className="block text-[11px] font-bold tracking-[0.12em] uppercase text-[#5F6368]">{d.paid ? "Received" : "Amount"}</span>
+                <span className="block text-xs font-bold tracking-[0.12em] uppercase text-[#5F6368]">{d.paid ? "Received" : "Amount"}</span>
                 <span className="block text-4xl font-extrabold" data-pay-amount>AED {m(d.amount)}</span>
               </div>
               {d.paid ? (
@@ -51,7 +51,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
               ) : (
                 <div className="flex flex-col gap-4">
                   {d.gatewayUrl ? (
-                    <a href={d.gatewayUrl} className="inline-flex min-h-16 w-full items-center justify-center rounded-md bg-[#111113] text-white text-lg font-extrabold" data-pay-now>
+                    <a href={d.gatewayUrl} className="inline-flex min-h-16 w-full items-center justify-center rounded-md bg-[#111113] text-on-dark text-lg font-extrabold" data-pay-now>
                       Pay now
                     </a>
                   ) : null}
@@ -74,7 +74,7 @@ export default async function PayPage({ params }: { params: Promise<{ token: str
                   </details>
                 </div>
               )}
-              <p className="text-[11px] text-[#5F6368]">OFJ Automotive · {d.address}</p>
+              <p className="text-xs text-[#5F6368]">OFJ Automotive · {d.address}</p>
             </div>
           )}
         </div>

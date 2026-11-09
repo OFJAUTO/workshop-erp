@@ -12,21 +12,21 @@ const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDig
 export function PackageCard({ doc, price, discount = null }: { doc: PackageDoc; price: number; discount?: { percent: number | null; amount: number } | null }) {
   return (
     <section className="overflow-hidden rounded-lg border-2 border-[#111113] bg-white" data-package-doc>
-      <div className="bg-[#111113] px-4 py-2 text-[11px] font-extrabold uppercase tracking-[0.14em] text-white">Protection package</div>
+      <div className="bg-[#111113] px-4 py-2 text-xs font-extrabold uppercase tracking-[0.14em] text-on-dark">Protection package</div>
       <div className="flex items-start justify-between gap-3 px-4 pb-3 pt-4">
         <div className="min-w-0">
           <div className="text-xl font-extrabold leading-tight" data-package-title>{doc.title}</div>
           {doc.subtitle ? <div className="mt-0.5 text-sm text-[#5F6368]" data-package-subtitle>{doc.subtitle}</div> : null}
         </div>
         <div className="shrink-0 text-right">
-          <div className="text-[10px] font-bold uppercase tracking-[0.1em] text-[#5F6368]">Package price</div>
+          <div className="text-xs font-bold uppercase tracking-[0.1em] text-[#5F6368]">Package price</div>
           <div className="text-lg font-extrabold" data-package-price>{aed(price)}</div>
-          {discount && discount.amount > 0.004 ? <div className="text-xs font-extrabold text-green">Discount{discount.percent ? ` ${discount.percent}%` : ""}: −{aed(discount.amount)}</div> : null}
+          {discount && discount.amount > 0.004 ? <div className="text-xs font-extrabold text-green-text">Discount{discount.percent ? ` ${discount.percent}%` : ""}: −{aed(discount.amount)}</div> : null}
         </div>
       </div>
       {doc.items.length ? (
         <div className="px-4">
-          <div className="flex justify-between border-b-2 border-[#111113] pb-1 text-[10px] font-bold uppercase tracking-[0.1em] text-[#5F6368]">
+          <div className="flex justify-between border-b-2 border-[#111113] pb-1 text-xs font-bold uppercase tracking-[0.1em] text-[#5F6368]">
             <span>What&apos;s included</span>
             <span>Warranty</span>
           </div>
@@ -34,7 +34,7 @@ export function PackageCard({ doc, price, discount = null }: { doc: PackageDoc; 
             {doc.items.map((i) => (
               <li key={i.label} className="flex items-start justify-between gap-3 border-b border-[#E4E4E7] py-2.5 text-[15px]" data-package-item-doc>
                 <span className="flex min-w-0 items-start gap-2">
-                  <span className="font-extrabold text-green" aria-hidden>✓</span>
+                  <span className="font-extrabold text-green-text" aria-hidden>✓</span>
                   <span className="flex min-w-0 flex-col">
                     <span>{i.label}</span>
                     {i.note ? (
@@ -59,7 +59,7 @@ export function PackageCard({ doc, price, discount = null }: { doc: PackageDoc; 
       {doc.complimentary.length ? (
         <div className="flex flex-wrap gap-2 px-4 pt-3">
           {doc.complimentary.map((c) => (
-            <span key={c} className="inline-flex items-center gap-1 rounded-full bg-green-soft px-3 py-1 text-xs font-bold text-green" data-package-badge>✓ {c}</span>
+            <span key={c} className="inline-flex items-center gap-1 rounded-full bg-green-soft px-3 py-1 text-xs font-bold text-green-text" data-package-badge>✓ {c}</span>
           ))}
         </div>
       ) : null}

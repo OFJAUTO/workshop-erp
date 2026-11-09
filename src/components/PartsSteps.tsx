@@ -17,7 +17,7 @@ export function PartsSteps({ steps, hrefs = {}, size = "bar" }: { steps: PartsSt
   return (
     <ol className="flex flex-wrap items-center gap-1" data-parts-steps>
       {steps.map((s, i) => {
-        const tone = s.state === "done" ? "border-green bg-green-soft text-green" : s.state === "current" ? "border-ink bg-ink text-white" : "border-line bg-chip text-muted";
+        const tone = s.state === "done" ? "border-green bg-green-soft text-green-text" : s.state === "current" ? "border-ink bg-ink text-on-dark" : "border-line bg-chip text-muted";
         const href = s.state !== "later" ? hrefs[s.key] : undefined;
         const inner = (
           <span className={`inline-flex min-h-11 items-center gap-1.5 rounded-control border px-3 text-xs font-extrabold uppercase tracking-wide ${tone}`}>

@@ -27,7 +27,7 @@ export function ReportUpload({ action, canSave }: { action: (s: FormState, f: Fo
   return (
     <form action={formAction} className="flex flex-col gap-2" data-report-upload>
       <div className="flex flex-wrap items-center gap-3">
-        <input type="file" name="report" accept=".pdf,.csv,.xlsx,.xls,application/pdf,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" required className="min-h-11 w-full max-w-96 rounded-control border border-line-strong bg-white px-3 py-2 text-sm file:mr-3 file:rounded-control file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-white" data-report-file />
+        <input type="file" name="report" accept=".pdf,.csv,.xlsx,.xls,application/pdf,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" required className="min-h-11 w-full max-w-96 rounded-control border border-line-strong bg-white px-3 py-2 text-sm file:mr-3 file:rounded-control file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-on-dark" data-report-file />
         <Button type="submit" size="md" disabled={!canSave || pending} data-report-upload-button>{pending ? "Reading…" : "Upload settlement report"}</Button>
       </div>
       <span className="text-xs text-muted">Network International&apos;s Merchant Transaction Report, as PDF, CSV or Excel - the payment link and the card machine alike. Nothing is recorded until you check the lines and press Record.</span>
@@ -129,10 +129,10 @@ export function ReportReview({ reportId, report, matches, payments, today, recor
                     ) : done ? (
                       <span className="text-xs font-semibold">{picked ? `${picked.number} · ${picked.plate}${settledPick ? ` · already settled in ${picked.settledIn}` : ""}` : "Not ours"}</span>
                     ) : settledAuto ? (
-                      <span className="text-xs font-bold text-green" data-report-settled={l.index}>Already settled in {picked?.settledIn ?? "a settlement"} ✓ {picked?.number} · {picked?.plate}{answer?.ok ? ` · ${answer.message}` : ""}</span>
+                      <span className="text-xs font-bold text-green-text" data-report-settled={l.index}>Already settled in {picked?.settledIn ?? "a settlement"} ✓ {picked?.number} · {picked?.plate}{answer?.ok ? ` · ${answer.message}` : ""}</span>
                     ) : (
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                        {exact ? <span className="text-xs font-bold text-green" data-report-matched>Matched ✓ {picked?.number} · {picked?.plate}{answer?.ok ? ` · ${answer.message}` : ""}</span> : settledPick ? <span className="w-full text-xs font-bold text-green" data-report-settled-pick={l.index}>Already settled in {picked?.settledIn ?? "a settlement"} ✓ {picked?.number} · {picked?.plate}: nothing new is recorded for this line.</span> : !pick && m?.status !== "suggested" ? <span className="text-xs font-semibold text-amber">{m?.why ?? "Not matched"}</span> : null}
+                        {exact ? <span className="text-xs font-bold text-green-text" data-report-matched>Matched ✓ {picked?.number} · {picked?.plate}{answer?.ok ? ` · ${answer.message}` : ""}</span> : settledPick ? <span className="w-full text-xs font-bold text-green-text" data-report-settled-pick={l.index}>Already settled in {picked?.settledIn ?? "a settlement"} ✓ {picked?.number} · {picked?.plate}: nothing new is recorded for this line.</span> : !pick && m?.status !== "suggested" ? <span className="text-xs font-semibold text-amber-text">{m?.why ?? "Not matched"}</span> : null}
                         {!pick && m?.status === "suggested" && m.paymentId ? (
                           // 3 November 2026: a payment saved with its auth code missing fits this line - one tap saves the bank's code on it.
                           // Words above the button: on a narrow screen the table scrolls sideways, and the button must stay in sight.
@@ -174,13 +174,13 @@ export function ReportReview({ reportId, report, matches, payments, today, recor
         <span>BNPL / instalment fees: {fig(s.instalmentFees)}</span>
         <span className="font-extrabold">Net payable: AED {fig(s.netPayable)}</span>
       </div>
-      <p className={`text-sm font-semibold ${report.totals.agrees ? "text-green" : "text-red"}`} data-report-check>
+      <p className={`text-sm font-semibold ${report.totals.agrees ? "text-green-text" : "text-red"}`} data-report-check>
         Lines: AED {fig(report.totals.gross)} − MSF {fig(report.totals.msf)} − fee {fig(report.totals.txn)} − VAT {fig(report.totals.vat)} = net AED {fig(report.totals.net)}
         {report.totals.agrees ? " = the net payable ✓" : report.totals.agrees === false ? ` ≠ the net payable AED ${fig(report.totals.netPayable)}` : " (the net payable could not be read)"}
       </p>
       {report.flags.length ? (
         <ul className="flex flex-col gap-1 text-sm" data-report-flags>
-          {report.flags.map((f, i) => <li key={i} className={`font-semibold ${f.tone === "red" ? "text-red" : "text-amber"}`} data-report-flag={f.tone}>{f.tone === "red" ? "⚠ " : ""}{f.text}</li>)}
+          {report.flags.map((f, i) => <li key={i} className={`font-semibold ${f.tone === "red" ? "text-red" : "text-amber-text"}`} data-report-flag={f.tone}>{f.tone === "red" ? "⚠ " : ""}{f.text}</li>)}
         </ul>
       ) : null}
 

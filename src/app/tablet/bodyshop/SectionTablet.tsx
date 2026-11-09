@@ -14,7 +14,7 @@ export type TabletPerson = { id: string; name: string; photoUrl: string | null; 
 type SendingPhoto = PendingFile & { plate: string; by: string };
 type Note = { text: string; tone: "ok" | "bad" | "wait" };
 
-const NOTE_CLASS: Record<Note["tone"], string> = { ok: "bg-green-soft text-green", bad: "bg-red-soft text-red", wait: "bg-amber-soft text-amber" };
+const NOTE_CLASS: Record<Note["tone"], string> = { ok: "bg-green-soft text-green-text", bad: "bg-red-soft text-red", wait: "bg-amber-soft text-amber-text" };
 
 /** The tablet's own photos in the queue (the tint photo after fitting), as they come back after a reload. */
 const isTabletPhoto = (r: Pick<SendRecord, "target" | "fields">) => r.target === "job_file" && r.fields.tablet === "tint";
@@ -200,7 +200,7 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
                 ) : <span className="h-14 w-14 shrink-0 rounded-control bg-chip" />}
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="text-base font-bold">Tint photo{s.plate ? ` · ${s.plate}` : ""}{s.by ? ` · ${s.by}` : ""}</span>
-                  <span className={`text-sm ${stopped ? "font-semibold text-red" : "text-amber"}`}>{pendingWords(s)}</span>
+                  <span className={`text-sm ${stopped ? "font-semibold text-red" : "text-amber-text"}`}>{pendingWords(s)}</span>
                 </span>
                 {stopped ? (
                   <span className="flex gap-2">
@@ -224,11 +224,11 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
               ) : <span className="h-16 w-24 shrink-0 rounded-control bg-chip" />}
               <span className="flex-1 min-w-0 flex flex-col">
                 <span className="text-xl font-extrabold tracking-[0.03em]">{c.plate} <span className="text-base font-semibold text-muted">· {c.title}{c.colour ? ` · ${c.colour}` : ""}</span></span>
-                {c.cut ? <span className="inline-flex w-fit items-center rounded-control bg-ink px-3 py-1 text-base font-extrabold tracking-[0.08em] text-white" data-cut-badge={c.cut.badge}>{c.cut.badge}{c.cut.note ? ` · ${c.cut.note}` : ""}</span> : null}
+                {c.cut ? <span className="inline-flex w-fit items-center rounded-control bg-ink px-3 py-1 text-base font-extrabold tracking-[0.08em] text-on-dark" data-cut-badge={c.cut.badge}>{c.cut.badge}{c.cut.note ? ` · ${c.cut.note}` : ""}</span> : null}
                 {c.tint ? <span className="text-base font-bold" data-tint-summary>Tint: {c.tint}</span> : null}
                 <span className="text-base text-muted">{c.coming ? `Coming: ${c.stage}` : c.stage}{c.onCar.length ? ` · ${c.onCar.map((p) => `${p.name}${p.clocked ? " ●" : ""}`).join(", ")}` : ""}</span>
               </span>
-              <span className={`text-base font-bold ${c.tone === "red" ? "text-red" : c.tone === "amber" ? "text-amber" : "text-muted"}`}>{c.tone === "red" ? "Late" : c.tone === "amber" ? "Due today" : c.due ?? ""}</span>
+              <span className={`text-base font-bold ${c.tone === "red" ? "text-red" : c.tone === "amber" ? "text-amber-text" : "text-muted"}`}>{c.tone === "red" ? "Late" : c.tone === "amber" ? "Due today" : c.due ?? ""}</span>
             </button>
           ))}
         </div>
@@ -244,7 +244,7 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
               <button key={p.id} type="button" onClick={() => setPersonId(p.id)} className={`flex flex-col items-center gap-2 rounded-card border-2 bg-white p-3 min-h-28 ${p.clockedOn === car.jobId ? "border-green" : "border-line-strong"}`} data-tablet-person={p.id}>
                 <Avatar name={p.name} photoUrl={p.photoUrl} size={64} />
                 <span className="text-base font-bold text-center leading-tight">{p.name}</span>
-                {p.clockedOn === car.jobId ? <span className="text-[11px] font-bold text-green">On this car · tap to clock out</span> : p.clockedOn ? <span className="text-[11px] text-muted">On another car</span> : null}
+                {p.clockedOn === car.jobId ? <span className="text-xs font-bold text-green-text">On this car · tap to clock out</span> : p.clockedOn ? <span className="text-xs text-muted">On another car</span> : null}
               </button>
             ))}
           </div>
@@ -276,7 +276,7 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
                 const on = !unticked.has(p.id);
                 return (
                   <button key={p.id} type="button" onClick={() => setUnticked((u) => { const n = new Set(u); if (n.has(p.id)) n.delete(p.id); else n.add(p.id); return n; })} aria-pressed={on} className={`flex w-full min-h-12 items-center gap-3 rounded-control px-2 text-left ${on ? "bg-chip" : ""}`}>
-                    <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong text-transparent"}`}>✓</span>
+                    <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong text-transparent"}`}>✓</span>
                     <span className="flex-1 font-semibold">{p.description}</span>
                     <span>× {p.quantity}</span>
                   </button>

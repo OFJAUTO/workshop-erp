@@ -24,10 +24,10 @@ export function ReadyForm({ parts, action }: { parts: DeskPart[]; action: (formD
           return (
             <li key={p.id}>
               <button type="button" onClick={() => toggle(p.id)} aria-pressed={on} className={`flex w-full min-h-12 items-center gap-3 rounded-control px-2 text-left ${on ? "bg-chip" : ""}`}>
-                <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong text-transparent"}`}>✓</span>
+                <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong text-transparent"}`}>✓</span>
                 <span className="flex-1 font-semibold">{p.description}{realPartNumber(p.part_number) ? <span className="text-muted font-normal"> · {realPartNumber(p.part_number)}</span> : null}</span>
                 <span>× {p.quantity}</span>
-                {p.notReceived ? <span className="text-xs font-semibold text-amber">Was not received last time</span> : null}
+                {p.notReceived ? <span className="text-xs font-semibold text-amber-text">Was not received last time</span> : null}
               </button>
             </li>
           );

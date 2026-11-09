@@ -168,7 +168,7 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
                     {nowWord === "posted" ? <Badge tone="green">Posted ✓</Badge> : nowWord === "failed" ? <Badge tone="red">Failed</Badge> : nowWord === "waiting" ? <Badge tone="amber">Waiting</Badge> : null}
                   </div>
                   {i.outcome === "removed" ? <Badge tone="outline">Removed from Zoho</Badge> : i.outcome === "skipped" ? <Badge tone="outline">Nothing sent</Badge> : null}
-                  {i.words ? <p className={`text-sm ${i.outcome === "failed" && nowWord !== "posted" ? "font-semibold text-red" : i.outcome === "posted" || i.outcome === "removed" ? "font-semibold text-green" : "text-muted"}`}>{i.words}</p> : null}
+                  {i.words ? <p className={`text-sm ${i.outcome === "failed" && nowWord !== "posted" ? "font-semibold text-red" : i.outcome === "posted" || i.outcome === "removed" ? "font-semibold text-green-text" : "text-muted"}`}>{i.words}</p> : null}
                   {nowWord === "failed" && i.outcome !== "posted" && now?.last_error && now.last_error !== i.words ? <p className="text-sm font-semibold text-red">Now: {now.last_error}</p> : null}
                   {nowWord === "failed" && retryRefusal(now?.zoho_result) ? (
                     <p className="text-sm font-semibold" data-zoho-retry-refused>{retryRefusal(now?.zoho_result)}</p>
@@ -221,7 +221,7 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
               <Card className="flex flex-wrap items-center gap-3" data-golive-review>
                 <SectionLabel>Go-live review</SectionLabel>
                 {reviewed.at ? (
-                  <p className="text-sm font-semibold text-green" data-golive-reviewed>Reviewed side by side by {reviewed.name ?? "accounts"} on {formatDate(String(reviewed.at))}.</p>
+                  <p className="text-sm font-semibold text-green-text" data-golive-reviewed>Reviewed side by side by {reviewed.name ?? "accounts"} on {formatDate(String(reviewed.at))}.</p>
                 ) : (
                   <form action={tickGoLiveReview} className="flex flex-wrap items-center gap-2">
                     <span className="text-sm text-muted">Once OFJ TEST matches the ERP side by side, tick it here — the owner&apos;s go-live checklist turns green.</span>
@@ -235,7 +235,7 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
 
       <div className="flex flex-wrap gap-1 text-xs font-bold" data-zoho-filters>
         {FILTERS.map((f) => (
-          <Link key={f.key} href={`/zoho?show=${f.key}`} className={`min-h-9 inline-flex items-center rounded-control px-3 ${show === f.key ? "bg-ink text-white" : "bg-chip"}`} data-filter={f.key}>
+          <Link key={f.key} href={`/zoho?show=${f.key}`} className={`min-h-9 inline-flex items-center rounded-control px-3 ${show === f.key ? "bg-ink text-on-dark" : "bg-chip"}`} data-filter={f.key}>
             {f.label} · {counts[f.key]}
           </Link>
         ))}
@@ -272,7 +272,7 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
                     {r.synced_at ? ` · posted ${formatDateTime(r.synced_at)}` : ""}
                     {r.attempts > 1 ? ` · ${r.attempts} tries` : ""}
                   </p>
-                  {words ? <p className={`text-sm font-semibold ${differs ? "text-muted" : "text-green"}`} data-zoho-result><Words text={words} /></p> : null}
+                  {words ? <p className={`text-sm font-semibold ${differs ? "text-muted" : "text-green-text"}`} data-zoho-result><Words text={words} /></p> : null}
                   {differs ? (
                     <div className="flex flex-wrap items-center gap-2" data-zoho-differs>
                       <span className="text-sm font-bold text-red"><Words text={differs} /></span>

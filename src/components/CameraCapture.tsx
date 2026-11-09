@@ -163,7 +163,7 @@ export function CameraCapture({ multiple = false, title = "Take a photo", onCapt
   const steps = problem?.kind === "denied" ? cameraPermissionSteps() : [];
 
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-black text-white" role="dialog" aria-modal="true" aria-label={title} data-camera>
+    <div className="fixed inset-0 z-[70] flex flex-col bg-black text-on-dark" role="dialog" aria-modal="true" aria-label={title} data-camera>
       <div className="flex items-center justify-between gap-3 px-4 py-3">
         <span className="text-sm font-bold">{title}{multiple && shots.length ? ` · ${shots.length} taken` : ""}</span>
         <button type="button" onClick={() => { stop(); onClose(); }} className="min-h-11 min-w-11 rounded-control border border-white/30 px-3 text-sm font-bold" aria-label="Close the camera">✕</button>
@@ -171,7 +171,7 @@ export function CameraCapture({ multiple = false, title = "Take a photo", onCapt
       <div className="relative flex-1 min-h-0 flex items-center justify-center">
         <video ref={videoRef} autoPlay muted playsInline className={`max-h-full max-w-full ${ready ? "" : "opacity-0"}`} />
         {flash ? <div className="absolute inset-0 bg-white/80" /> : null}
-        {!ready && !problem ? <p className="absolute text-sm text-white/80">Opening the camera…</p> : null}
+        {!ready && !problem ? <p className="absolute text-sm text-on-dark/80">Opening the camera…</p> : null}
         {problem ? (
           <div className="absolute inset-x-4 top-4 rounded-card bg-white p-4 text-ink flex flex-col gap-2 max-w-md mx-auto">
             <span className="font-bold">{problem.message}</span>
@@ -182,7 +182,7 @@ export function CameraCapture({ multiple = false, title = "Take a photo", onCapt
             ) : null}
             <div className="flex flex-wrap gap-2 pt-1">
               <button type="button" onClick={() => { setProblem(null); setReady(false); setAttempt((a) => a + 1); }} className="min-h-11 rounded-control border border-line-strong bg-white px-4 text-sm font-bold">Try again</button>
-              <button type="button" onClick={() => { stop(); onFallback(); }} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-white">Use the camera app instead</button>
+              <button type="button" onClick={() => { stop(); onFallback(); }} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-on-dark">Use the camera app instead</button>
             </div>
           </div>
         ) : null}
@@ -196,7 +196,7 @@ export function CameraCapture({ multiple = false, title = "Take a photo", onCapt
         ) : null}
       </div>
       <div className="grid grid-cols-3 items-center px-6 py-4">
-        <button type="button" onClick={() => { stop(); onFallback(); }} className="justify-self-start min-h-11 text-xs font-semibold text-white/80 underline underline-offset-4">Use the camera app</button>
+        <button type="button" onClick={() => { stop(); onFallback(); }} className="justify-self-start min-h-11 text-xs font-semibold text-on-dark/80 underline underline-offset-4">Use the camera app</button>
         <button type="button" onClick={shoot} disabled={!ready} aria-label="Take the photo" className="justify-self-center h-18 w-18 rounded-full border-4 border-white bg-white/20 disabled:opacity-40">
           <span className="block h-full w-full rounded-full bg-white scale-75" />
         </button>

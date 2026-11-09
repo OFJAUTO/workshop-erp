@@ -8,7 +8,7 @@ export function PositionsLine({ positions, className = "" }: { positions: string
   const words = positionsWords(positions);
   if (!words) return null;
   return (
-    <div className={`text-[11px] font-semibold uppercase tracking-wide text-muted ${className}`} data-line-positions>
+    <div className={`text-xs font-semibold uppercase tracking-wide text-muted ${className}`} data-line-positions>
       {words}
     </div>
   );

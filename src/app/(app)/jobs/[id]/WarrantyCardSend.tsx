@@ -14,7 +14,7 @@ export function WarrantyCardSend({ jobId, message, phoneDigits, sentAt }: { jobI
           target="_blank"
           rel="noreferrer"
           onClick={() => void markWarrantyCardSent(jobId)}
-          className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white"
+          className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-on-dark"
           data-warranty-whatsapp
         >
           {sentAt ? "Send again on WhatsApp" : "Send on WhatsApp"}

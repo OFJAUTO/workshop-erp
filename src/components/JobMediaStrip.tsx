@@ -12,7 +12,7 @@ export function JobMediaStrip({ summary, max = 6 }: { summary: JobMediaSummary |
           // eslint-disable-next-line @next/next/no-img-element
           <img src={summary.pictureUrl} alt="Car" className="h-full w-full object-cover" />
         ) : (
-          <div className="h-full w-full flex items-center justify-center text-[10px] font-semibold text-faint">No picture</div>
+          <div className="h-full w-full flex items-center justify-center text-xs font-semibold text-faint">No picture</div>
         )}
       </div>
       {shown.map((t) => (

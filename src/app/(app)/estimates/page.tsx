@@ -99,7 +99,7 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
             const on = moneyFilter === f.key;
             const n = countOf(f.key);
             return (
-              <Link key={f.key} href={on ? "/estimates" : `/estimates?money=${f.key}`} className={`inline-flex min-h-11 items-center rounded-control border px-3 text-sm font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-em-filter={f.key} data-em-filter-on={on ? "1" : "0"}>
+              <Link key={f.key} href={on ? "/estimates" : `/estimates?money=${f.key}`} className={`inline-flex min-h-11 items-center rounded-control border px-3 text-sm font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-em-filter={f.key} data-em-filter-on={on ? "1" : "0"}>
                 {f.label}{n ? ` · ${n}` : ""}
               </Link>
             );

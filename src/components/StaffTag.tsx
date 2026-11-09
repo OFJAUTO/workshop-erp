@@ -5,7 +5,7 @@ export function StaffTag({ names }: { names: string[] }) {
   const words = staffTagWords(names);
   if (!words) return null;
   return (
-    <span className="inline-flex max-w-full items-center rounded-full border border-line-strong bg-white px-2.5 py-1 text-[11px] font-bold" title={names.join(", ")} data-staff-tag>
+    <span className="inline-flex max-w-full items-center rounded-full border border-line-strong bg-white px-2.5 py-1 text-xs font-bold" title={names.join(", ")} data-staff-tag>
       {words}
     </span>
   );

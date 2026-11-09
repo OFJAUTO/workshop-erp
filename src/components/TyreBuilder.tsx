@@ -5,7 +5,7 @@ import { TyreSizeInput } from "@/components/TyreSizeInput";
 import { Button, Input } from "@/components/ui";
 import { TYRE_MARKS, tyreName, tyreSpecComplete, tyreYears, type TyreSpec } from "@/lib/tyres";
 
-const chip = (on: boolean) => `min-h-10 rounded-control border px-3 text-sm font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`;
+const chip = (on: boolean) => `min-h-10 rounded-control border px-3 text-sm font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`;
 
 /**
  * The tyre details window on a Parts row: brand (one tap, or typed), model per brand (one tap, or typed), the size as
@@ -29,7 +29,7 @@ export function TyreBuilder({ initial, defaultSize, brands, models, onApply, onC
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Brand</span>
+          <span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">Brand</span>
           <div className="flex flex-wrap gap-1.5" data-tyre-brands>
             {brands.filter((b) => !/^other$/i.test(b)).map((b) => (
               <button key={b} type="button" onClick={() => { set({ brand: b, model: spec.brand.toLowerCase() === b.toLowerCase() ? spec.model : "" }); setOtherBrand(""); }} aria-pressed={spec.brand.toLowerCase() === b.toLowerCase()} className={chip(spec.brand.toLowerCase() === b.toLowerCase())}>
@@ -41,7 +41,7 @@ export function TyreBuilder({ initial, defaultSize, brands, models, onApply, onC
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Model{spec.brand ? ` (${spec.brand})` : ""}</span>
+          <span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">Model{spec.brand ? ` (${spec.brand})` : ""}</span>
           {brandModels.length ? (
             <div className="flex flex-wrap gap-1.5" data-tyre-models>
               {brandModels.map((m) => (
@@ -57,7 +57,7 @@ export function TyreBuilder({ initial, defaultSize, brands, models, onApply, onC
         <TyreSizeInput label="Size" value={spec.size} onChange={(text) => set({ size: text })} />
 
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Year (DOT)</span>
+          <span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">Year (DOT)</span>
           <div className="flex flex-wrap items-center gap-1.5" data-tyre-years>
             {tyreYears().map((y) => (
               <button key={y} type="button" onClick={() => set({ year: spec.year === y ? "" : y })} aria-pressed={spec.year === y} className={chip(spec.year === y)}>
@@ -69,7 +69,7 @@ export function TyreBuilder({ initial, defaultSize, brands, models, onApply, onC
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Marks</span>
+          <span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">Marks</span>
           <div className="flex flex-wrap gap-1.5" data-tyre-marks>
             {TYRE_MARKS.map((m) => (
               <button key={m} type="button" onClick={() => toggleMark(m)} aria-pressed={spec.marks.includes(m)} className={chip(spec.marks.includes(m))}>
@@ -80,9 +80,9 @@ export function TyreBuilder({ initial, defaultSize, brands, models, onApply, onC
         </div>
 
         <div className="rounded-control bg-chip px-3 py-2">
-          <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">Name on the quotation</span>
+          <span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">Name on the quotation</span>
           <p className="text-sm font-extrabold" data-tyre-preview>{name || "—"}</p>
-          {!complete ? <p className="text-xs text-amber font-semibold">A brand and the full size are needed before the tyre can be priced.</p> : null}
+          {!complete ? <p className="text-xs text-amber-text font-semibold">A brand and the full size are needed before the tyre can be priced.</p> : null}
         </div>
 
         <div className="flex items-center justify-end gap-2 border-t border-line pt-3">

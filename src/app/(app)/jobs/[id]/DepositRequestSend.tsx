@@ -75,7 +75,7 @@ export function DepositRequestSend({ jobId, message, phoneDigits, requestedAt }:
                 <Input value={link} onChange={(e) => setLink(e.target.value)} placeholder="paste the gateway pay-page link" className="flex-1 min-w-48" data-deposit-pay-link />
                 <Button type="button" size="md" tone="secondary" disabled={busy} onClick={() => void saveLink()} data-save-gateway>{busy ? "…" : "Save link"}</Button>
               </span>
-              {host ? <span className="text-xs font-semibold text-green" data-gateway-ok>Pay now opens {host} ✓</span> : null}
+              {host ? <span className="text-xs font-semibold text-green-text" data-gateway-ok>Pay now opens {host} ✓</span> : null}
               {linkError ? <span className="text-xs font-semibold text-red" data-gateway-error>{linkError}</span> : null}
             </div>
           }

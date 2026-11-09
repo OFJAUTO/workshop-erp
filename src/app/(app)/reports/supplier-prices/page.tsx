@@ -49,7 +49,7 @@ export default async function SupplierPricesReportPage({ searchParams }: { searc
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3" data-sp-totals>
         <Card className="flex flex-col gap-1"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Lines changed</span><span className="text-2xl font-extrabold">{lines.length}</span></Card>
         <Card className="flex flex-col gap-1"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Price up after approval</span><span className="text-2xl font-extrabold text-red">{aed(up)}</span></Card>
-        <Card className="flex flex-col gap-1"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Price down</span><span className="text-2xl font-extrabold text-green">{aed(Math.abs(down))}</span></Card>
+        <Card className="flex flex-col gap-1"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Price down</span><span className="text-2xl font-extrabold text-green-text">{aed(Math.abs(down))}</span></Card>
       </div>
       <Card className="flex flex-col gap-2" data-sp-suppliers>
         <SectionLabel right={`${rows.length}`}>By supplier</SectionLabel>
@@ -60,7 +60,7 @@ export default async function SupplierPricesReportPage({ searchParams }: { searc
                 <span className="min-w-0 flex-1 font-semibold uppercase">{name}</span>
                 <span className="text-muted">{r.count} time{r.count === 1 ? "" : "s"}</span>
                 <span className="font-bold text-red">+{aed(r.up)}</span>
-                {r.down ? <span className="font-bold text-green">−{aed(Math.abs(r.down))}</span> : null}
+                {r.down ? <span className="font-bold text-green-text">−{aed(Math.abs(r.down))}</span> : null}
               </li>
             ))}
           </ul>
@@ -78,7 +78,7 @@ export default async function SupplierPricesReportPage({ searchParams }: { searc
                   <span className="text-muted">{po?.supplier_name}</span>
                   <span className="min-w-0 flex-1 uppercase">{l.description}</span>
                   <span className="font-semibold">{changeWords(l)}</span>
-                  {l.invoice_check === "mismatch" ? <span className="text-xs font-bold text-red">waits for the owner</span> : l.invoice_check === "disputed" ? <span className="text-xs font-bold text-amber">queried</span> : null}
+                  {l.invoice_check === "mismatch" ? <span className="text-xs font-bold text-red">waits for the owner</span> : l.invoice_check === "disputed" ? <span className="text-xs font-bold text-amber-text">queried</span> : null}
                 </li>
               );
             })}

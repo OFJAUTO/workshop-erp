@@ -104,7 +104,7 @@ export default async function AppointmentPage({ params, searchParams }: { params
                   ]
                 : []),
               { label: "When", value: `${formatDayHeading(date)} at ${dubaiTimeOf(a.starts_at)}${a.kind === "customer_visit" ? `, ${a.duration_minutes} min` : ""}` },
-              ...(prepaidLine ? [{ label: "Prepaid", value: <span className="font-bold text-green" data-booking-prepaid>{prepaidLine}</span> }] : []),
+              ...(prepaidLine ? [{ label: "Prepaid", value: <span className="font-bold text-green-text" data-booking-prepaid>{prepaidLine}</span> }] : []),
               { label: "Assigned to", value: a.advisor?.display_name ?? "Not assigned yet" },
               ...(a.job ? [{ label: "Job card", value: <Link href={`/jobs/${a.job_id}`} className="font-semibold hover:underline underline-offset-4">{a.job.job_number}</Link> }] : []),
               ...(a.notes ? [{ label: "Notes", value: <span className="whitespace-pre-wrap">{a.notes}</span> }] : []),
@@ -125,7 +125,7 @@ export default async function AppointmentPage({ params, searchParams }: { params
             <p className="text-sm whitespace-pre-wrap rounded-control bg-chip px-3 py-2">{reminder}</p>
             {canEdit && a.status === "booked" ? (
               <div className="flex flex-wrap gap-2">
-                <a href={`https://wa.me/${digits}?text=${encodeURIComponent(reminder)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white">
+                <a href={`https://wa.me/${digits}?text=${encodeURIComponent(reminder)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-on-dark">
                   Open WhatsApp
                 </a>
                 <CopyText text={reminder} />

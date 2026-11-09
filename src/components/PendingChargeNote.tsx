@@ -12,7 +12,7 @@ export async function PendingChargeNote({ customerId, linked = true }: { custome
   return (
     <div className="flex flex-col gap-1 rounded-control border border-amber-bar bg-amber-soft/50 px-3 py-2" data-pending-charge-note>
       {rows.map((r) => (
-        <span key={r.id} className="text-sm font-bold text-amber">
+        <span key={r.id} className="text-sm font-bold text-amber-text">
           {linked ? <Link href={`/pending-charges?open=${r.id}`} className="underline underline-offset-4">{pendingChargeNote(r)}</Link> : pendingChargeNote(r)}
         </span>
       ))}

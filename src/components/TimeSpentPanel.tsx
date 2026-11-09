@@ -20,7 +20,7 @@ export function TimeSpentPanel({ t }: { t: TimeSpent }) {
                 <span className="font-semibold">{r.stage}</span>
                 {r.who ? <span className="text-muted"> · {r.who}</span> : null}
               </span>
-              {r.minutes === null ? <span className="font-bold text-amber" data-not-clocked>not clocked</span> : <span className="font-semibold tabular-nums">{hoursAndMinutes(r.minutes)}</span>}
+              {r.minutes === null ? <span className="font-bold text-amber-text" data-not-clocked>not clocked</span> : <span className="font-semibold tabular-nums">{hoursAndMinutes(r.minutes)}</span>}
             </li>
           ))}
         </ul>

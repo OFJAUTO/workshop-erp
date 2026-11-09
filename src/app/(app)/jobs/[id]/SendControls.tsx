@@ -14,7 +14,7 @@ import { createReportLink, markReportSent } from "../report-actions";
 /* The send buttons on the stage cards. Each opens the centre window with the message, and the
    status (created, sent, opened, approved) shows on the card itself, where the click happened. */
 
-const TONE_CLASS = { green: "text-green", amber: "text-amber", neutral: "text-muted", red: "text-red" } as const;
+const TONE_CLASS = { green: "text-green-text", amber: "text-amber-text", neutral: "text-muted", red: "text-red" } as const;
 
 function StatusLine({ tone, text, onAgain }: { tone: keyof typeof TONE_CLASS; text: string; onAgain?: () => void }) {
   return (
@@ -196,7 +196,7 @@ export function ApprovalSendControl({
           <Button type="button" size="md" disabled={!complete || pending} onClick={startNew}>
             Create the approval link
           </Button>
-          {!complete ? <span className="text-xs font-semibold text-amber">Blocked until the gate-in media is complete.</span> : null}
+          {!complete ? <span className="text-xs font-semibold text-amber-text">Blocked until the gate-in media is complete.</span> : null}
         </>
       ) : null}
       {canSend && latest && !approved ? (

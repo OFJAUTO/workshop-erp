@@ -22,7 +22,7 @@ export function PasswordBox({ autoFocus = false }: { autoFocus?: boolean }) {
       </Field>
       <ul className="flex flex-col gap-1 text-sm" aria-live="polite">
         {checks.map((c) => (
-          <li key={c.key} className={c.ok ? "text-green font-semibold" : "text-muted"} data-password-check={c.key} data-ok={c.ok ? "1" : "0"}>
+          <li key={c.key} className={c.ok ? "text-green-text font-semibold" : "text-muted"} data-password-check={c.key} data-ok={c.ok ? "1" : "0"}>
             {c.ok ? "✓" : "○"} {c.words}
           </li>
         ))}

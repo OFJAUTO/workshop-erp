@@ -49,7 +49,7 @@ export function QuoteResponse({ token, customerName, total, declaration, declara
               <input name="approver_name" defaultValue={customerName} required minLength={2} spellCheck={false} lang="en" autoCapitalize="words" className="min-h-12 rounded-lg border border-[#D4D4D8] px-3.5 text-base" autoComplete="name" />
             </label>
             <input type="hidden" name="approved_amount" value={total.toFixed(2)} />
-            <button type="submit" name="action" value="approve" className="min-h-14 w-full rounded-lg bg-[#111113] text-base font-extrabold text-white">Yes, {isEstimate ? "accept" : "approve"} · {aed(total)}</button>
+            <button type="submit" name="action" value="approve" className="min-h-14 w-full rounded-lg bg-[#111113] text-base font-extrabold text-on-dark">Yes, {isEstimate ? "accept" : "approve"} · {aed(total)}</button>
             <button type="button" onClick={() => setOpen(false)} className="min-h-11 w-full rounded-lg border border-[#D4D4D8] text-sm font-bold">Not yet</button>
           </form>
         </div>

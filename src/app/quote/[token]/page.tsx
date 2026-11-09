@@ -67,7 +67,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
       <div className="flex flex-col gap-4 rounded-lg bg-white p-6 text-center shadow-sm" data-quote-updated>
         <p className="text-xl font-extrabold">This {kindWord} has been updated</p>
         <p className="text-sm text-[#5F6368]">You opened an older version ({byToken.number} v{byToken.version}). Please look at the latest version (v{row.version}){row.sent_at ? `, sent on ${formatDate(row.sent_at)}` : ""}.</p>
-        <a href={`/quote/${row.token}`} className="flex min-h-14 items-center justify-center rounded-lg bg-[#111113] px-4 text-base font-extrabold text-white" data-quote-latest>View the latest version</a>
+        <a href={`/quote/${row.token}`} className="flex min-h-14 items-center justify-center rounded-lg bg-[#111113] px-4 text-base font-extrabold text-on-dark" data-quote-latest>View the latest version</a>
       </div>,
     );
   }
@@ -137,7 +137,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
       {q.status === "expired" ? <Notice tone="error">This {isEstimate ? "estimate" : "quotation"} expired on {formatDate(q.valid_until)}. Please ask us for a new one.</Notice> : null}
       {dangerous ? (
         <div className="rounded-lg border-2 border-red-bar p-4 flex flex-col gap-1">
-          <span className="text-[11px] font-extrabold tracking-[0.14em] uppercase text-red">Safety warning</span>
+          <span className="text-xs font-extrabold tracking-[0.14em] uppercase text-red">Safety warning</span>
           <p className="text-sm whitespace-pre-wrap">{settings.dangerous_customer_text}</p>
           {settings.dangerous_customer_text_ar ? <p className="text-sm whitespace-pre-wrap" dir="rtl" lang="ar">{settings.dangerous_customer_text_ar}</p> : null}
         </div>
@@ -160,10 +160,10 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         {addsToLine ? <p className="text-sm font-semibold" data-additional-to>{addsToLine}</p> : null}
         {row.version > 1 && row.sent_at ? <p className="text-xs font-semibold text-[#5F6368]" data-updated-on>Updated on {formatDateTime(row.sent_at)}</p> : null}
         <div className="rounded-lg bg-[#F4F4F5] px-4 py-4 flex flex-col gap-1">
-          <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{isEstimate ? "Estimate total" : "Total"} including VAT</span>
+          <span className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]">{isEstimate ? "Estimate total" : "Total"} including VAT</span>
           <span className="text-3xl font-extrabold">{aed(totals.total)}</span>
-          {totals.discount ? <span className="text-sm font-bold text-green" data-labour-discount>{discountLabelOf(q, { hasPackage: hasPackageLine(lines) })}: − {aed(totals.discount)}</span> : null}
-          {totals.rounding < 0 ? <span className="text-sm font-bold text-green" data-roundoff>Round-off: − {aed(Math.abs(totals.rounding))}</span> : null}
+          {totals.discount ? <span className="text-sm font-bold text-green-text" data-labour-discount>{discountLabelOf(q, { hasPackage: hasPackageLine(lines) })}: − {aed(totals.discount)}</span> : null}
+          {totals.rounding < 0 ? <span className="text-sm font-bold text-green-text" data-roundoff>Round-off: − {aed(Math.abs(totals.rounding))}</span> : null}
           {totals.deposit ? <span className="text-sm font-bold" data-deposit-required>Deposit required: {aed(totals.deposit)}</span> : null}
         </div>
         {lines.filter((l) => !!l.package_key).map((l) => {
@@ -172,7 +172,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
         })}
         {hasPpf ? (
           <div className="rounded-lg border border-[#D4D4D8] px-4 py-3 flex flex-col gap-0.5" data-ppf-warranty>
-            <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{String(settings.ppf_brand_name || "OFJ Bespoke PPF")} · {Number(settings.ppf_warranty_years) || 10}-year warranty</span>
+            <span className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]">{String(settings.ppf_brand_name || "OFJ Bespoke PPF")} · {Number(settings.ppf_warranty_years) || 10}-year warranty</span>
             <span className="text-sm">Our own film, installed by our team, with a written warranty certificate at handover.</span>
           </div>
         ) : null}

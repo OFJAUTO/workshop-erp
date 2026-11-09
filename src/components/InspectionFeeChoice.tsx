@@ -22,8 +22,8 @@ export function InspectionFeeChoice({ initial, bounds, isOwner, onChange }: { in
   const amount = v.amount;
   const check = v.choice === "fee" ? checkFee(v, bounds, isOwner) : null;
   const rangeError = check && "error" in check && amount !== null ? check.error : null;
-  const btn = (on: boolean) => `min-h-12 rounded-control border-2 px-4 text-left text-sm font-extrabold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`;
-  const chip = (on: boolean) => `min-h-11 rounded-control border-2 px-3 text-sm font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`;
+  const btn = (on: boolean) => `min-h-12 rounded-control border-2 px-4 text-left text-sm font-extrabold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`;
+  const chip = (on: boolean) => `min-h-11 rounded-control border-2 px-3 text-sm font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`;
   const money = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return (
     <div className="flex flex-col gap-3" data-fee-choice-box={v.choice ?? "none-chosen"}>
@@ -67,8 +67,8 @@ export function InspectionFeeChoice({ initial, bounds, isOwner, onChange }: { in
           {v.reason ? <Input value={v.note ?? ""} onChange={(e) => set({ note: e.target.value })} placeholder={v.reason === "other" ? "Why (required)" : "Note (optional)"} data-no-fee-note /> : null}
           <span className="text-sm font-semibold">Inspection</span>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <button type="button" aria-pressed={v.type === "full"} onClick={() => set({ type: "full" })} className={btn(v.type === "full")} data-inspection-type="full">Full inspection<span className={`block text-xs font-semibold ${v.type === "full" ? "text-white/80" : "text-muted"}`}>Shown as &quot;Free full inspection&quot;</span></button>
-            <button type="button" aria-pressed={v.type === "quick"} onClick={() => set({ type: "quick" })} className={btn(v.type === "quick")} data-inspection-type="quick">Quick job – no full inspection<span className={`block text-xs font-semibold ${v.type === "quick" ? "text-white/80" : "text-muted"}`}>Straight to the quotation (e.g. change a tyre)</span></button>
+            <button type="button" aria-pressed={v.type === "full"} onClick={() => set({ type: "full" })} className={btn(v.type === "full")} data-inspection-type="full">Full inspection<span className={`block text-xs font-semibold ${v.type === "full" ? "text-on-dark/80" : "text-muted"}`}>Shown as &quot;Free full inspection&quot;</span></button>
+            <button type="button" aria-pressed={v.type === "quick"} onClick={() => set({ type: "quick" })} className={btn(v.type === "quick")} data-inspection-type="quick">Quick job – no full inspection<span className={`block text-xs font-semibold ${v.type === "quick" ? "text-on-dark/80" : "text-muted"}`}>Straight to the quotation (e.g. change a tyre)</span></button>
           </div>
           <span className="text-xs text-muted">The customer&apos;s approval page says nothing about a fee.</span>
         </div>

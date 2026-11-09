@@ -46,7 +46,7 @@ export function CarOutline({ tones, selected = null, onPick, size = 220, showCha
           );
         })}
       </svg>
-      {onPick ? <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted">Tap a panel</span> : null}
+      {onPick ? <span className="text-xs font-semibold uppercase tracking-[0.08em] text-muted">Tap a panel</span> : null}
       {showChassis ? (
         <button type="button" disabled={!onPick} onClick={() => onPick?.("chassis")} aria-pressed={selected === "chassis"} className={`min-h-11 rounded-control border-2 px-4 text-sm font-bold ${selected === "chassis" ? "border-ink" : chassisTone === "red" ? "border-red-bar" : chassisTone === "amber" ? "border-amber-bar" : "border-line-strong"} ${chassisTone === "red" ? "bg-red-soft" : chassisTone === "amber" ? "bg-amber-soft" : "bg-white"}`} data-panel="chassis">
           {chassis.label}

@@ -25,7 +25,7 @@ export const STAGE_BOX_CARD: Record<StageBoxState, string> = {
 };
 
 export const STAGE_BOX_TITLE: Record<StageBoxState, string> = {
-  done: "text-green",
+  done: "text-green-text",
   current: "text-ink",
   later: "text-muted",
 };

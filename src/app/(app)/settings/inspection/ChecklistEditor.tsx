@@ -64,13 +64,13 @@ export function ChecklistEditor({ action, initial, initialComplaints = {} }: { a
                       <button
                         type="button"
                         onClick={() => setItem(si, ii, { style: nextStyle })}
-                        className={`min-h-9 whitespace-nowrap rounded-control border px-2 text-xs font-bold ${style !== "grade" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}
+                        className={`min-h-9 whitespace-nowrap rounded-control border px-2 text-xs font-bold ${style !== "grade" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}
                         aria-label="Answer style"
                         title="Tap to switch the answer style"
                       >
                         {ITEM_STYLE_LABELS[style]}
                       </button>
-                      <button type="button" onClick={() => setItem(si, ii, { due: !it.due })} aria-pressed={!!it.due} className={`min-h-9 whitespace-nowrap rounded-control border px-2 text-xs font-bold ${it.due ? "border-ink bg-ink text-white" : "border-line-strong bg-white text-muted"}`} title="The item also asks: Service due?" data-item-due>{it.due ? "Asks: service due ✓" : "Service due?"}</button>
+                      <button type="button" onClick={() => setItem(si, ii, { due: !it.due })} aria-pressed={!!it.due} className={`min-h-9 whitespace-nowrap rounded-control border px-2 text-xs font-bold ${it.due ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white text-muted"}`} title="The item also asks: Service due?" data-item-due>{it.due ? "Asks: service due ✓" : "Service due?"}</button>
                       <button type="button" className={small} onClick={() => setSection(si, { items: move(s.items, ii, ii - 1) })} aria-label="Move item up">↑</button>
                       <button type="button" className={small} onClick={() => setSection(si, { items: move(s.items, ii, ii + 1) })} aria-label="Move item down">↓</button>
                       <button type="button" className={`${small} text-red`} onClick={() => setSection(si, { items: s.items.filter((_, j) => j !== ii) })} aria-label="Remove item">✕</button>

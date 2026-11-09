@@ -151,19 +151,19 @@ export function PricingDoneBar({ progress, mode, sentAt = null, action, onReopen
               {progress.detail ? <span className="text-xs text-muted" data-bar-text>{progress.detail}</span> : <span className="text-xs text-muted" data-bar-text>{progress.total && !progress.open ? "Every part is priced or marked not available" : ""}</span>}
             </span>
             <span className="h-1.5 w-full max-w-xs overflow-hidden rounded-full bg-track"><span className={`block h-full ${progress.open ? "bg-ink" : "bg-green"}`} style={{ width: `${pct}%` }} /></span>
-            {mode === "editing" && editingWords ? <span className="text-xs font-semibold text-amber" data-pricing-editing>{editingWords}</span> : null}
+            {mode === "editing" && editingWords ? <span className="text-xs font-semibold text-amber-text" data-pricing-editing>{editingWords}</span> : null}
             {mode === "sent" && open.length ? (
               // Sent with "Send what you have": the lines left open are still the desk's (on the To price list).
-              <span className="text-xs font-semibold text-amber" data-pricing-sent-open={open.length}>
+              <span className="text-xs font-semibold text-amber-text" data-pricing-sent-open={open.length}>
                 {openLinesWords(progress)}: {open.slice(0, 3).map((l) => l.name.toUpperCase()).join(", ")}{open.length > 3 ? "…" : ""}. {onReopen ? "Tap Edit to price them, then Send updated prices." : "Price them above, then Send updated prices."}
               </span>
             ) : null}
             {answer.error ? <span className="text-sm font-semibold text-red" data-pricing-error>{answer.error}</span> : null}
-            {answer.success ? <span className="text-sm font-semibold text-green" data-pricing-sent>✓ {answer.success}</span> : null}
+            {answer.success ? <span className="text-sm font-semibold text-green-text" data-pricing-sent>✓ {answer.success}</span> : null}
           </div>
           {mode === "sent" ? (
             <div className="ml-auto flex flex-wrap items-center gap-2">
-              <span className="inline-flex min-h-11 items-center gap-2 rounded-control bg-green-soft px-3 text-sm font-bold text-green" data-pricing-locked>✓ Sent to the advisor{sentAt ? ` · ${formatDateTime(sentAt)}` : ""}</span>
+              <span className="inline-flex min-h-11 items-center gap-2 rounded-control bg-green-soft px-3 text-sm font-bold text-green-text" data-pricing-locked>✓ Sent to the advisor{sentAt ? ` · ${formatDateTime(sentAt)}` : ""}</span>
               {/* 5 November 2026: labels that say what they do (the owner's item 6). */}
               {onReopen ? <button type="submit" formAction={onReopen} className="min-h-12 rounded-control border border-line-strong bg-white px-5 text-sm font-bold" data-pricing-edit>Change prices (reopens pricing)</button> : null}
               <a href={backHref} className="inline-flex min-h-12 items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-pricing-back>← All cars on the parts desk</a>
@@ -171,11 +171,11 @@ export function PricingDoneBar({ progress, mode, sentAt = null, action, onReopen
           ) : (
             <div className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto">
               {open.length ? (
-                <button type="button" onClick={() => { setJumping(false); setListOpen(true); onAttempt?.(true); }} className="min-h-12 w-full rounded-control bg-ink px-6 text-base font-extrabold text-white sm:w-auto" title={`${refLabel}: ${openLinesWords(progress)}`} data-pricing-done data-pricing-done-open={open.length}>
+                <button type="button" onClick={() => { setJumping(false); setListOpen(true); onAttempt?.(true); }} className="min-h-12 w-full rounded-control bg-ink px-6 text-base font-extrabold text-on-dark sm:w-auto" title={`${refLabel}: ${openLinesWords(progress)}`} data-pricing-done data-pricing-done-open={open.length}>
                   {big}
                 </button>
               ) : (
-                <button type="submit" name="force" value="" disabled={!progress.count} className="min-h-12 w-full rounded-control bg-ink px-6 text-base font-extrabold text-white disabled:opacity-40 sm:w-auto" title={`${refLabel}: send every price to the advisor`} data-pricing-done>
+                <button type="submit" name="force" value="" disabled={!progress.count} className="min-h-12 w-full rounded-control bg-ink px-6 text-base font-extrabold text-on-dark disabled:opacity-40 sm:w-auto" title={`${refLabel}: send every price to the advisor`} data-pricing-done>
                   {big}
                 </button>
               )}

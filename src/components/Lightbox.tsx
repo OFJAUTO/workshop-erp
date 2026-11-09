@@ -173,17 +173,17 @@ export function Lightbox({ slides, index, onClose, onMove }: { slides: LightboxS
 
   const sharpReady = loaded === slide.url;
   return (
-    <div role="dialog" aria-modal="true" aria-label={slide.label} className="fixed inset-0 z-[80] flex flex-col bg-black text-white" data-lightbox data-lightbox-index={index}>
+    <div role="dialog" aria-modal="true" aria-label={slide.label} className="fixed inset-0 z-[80] flex flex-col bg-black text-on-dark" data-lightbox data-lightbox-index={index}>
       <div className="flex items-start justify-between gap-3 px-4 pt-3 pb-2">
         <div className="flex min-w-0 flex-col">
           <span className="text-sm font-extrabold uppercase leading-snug" data-lightbox-label>{slide.label}</span>
-          {slide.detail ? <span className="text-xs text-white/70">{slide.detail}</span> : null}
+          {slide.detail ? <span className="text-xs text-on-dark/70">{slide.detail}</span> : null}
         </div>
         <div className="flex shrink-0 items-center gap-3">
           {slide.original && slide.kind !== "video" ? (
             <a href={slide.original} target="_blank" rel="noreferrer" download className="inline-flex min-h-11 items-center rounded-full bg-white/15 px-3 text-xs font-bold hover:bg-white/30" data-lightbox-original>Original</a>
           ) : null}
-          <span className="text-sm font-bold text-white/80" data-lightbox-count>{index + 1} / {slides.length}</span>
+          <span className="text-sm font-bold text-on-dark/80" data-lightbox-count>{index + 1} / {slides.length}</span>
           <button type="button" onClick={close} className="min-h-11 min-w-11 rounded-full bg-white/15 text-lg font-bold hover:bg-white/30" aria-label="Close" data-lightbox-close>✕</button>
         </div>
       </div>
@@ -227,7 +227,7 @@ export function Lightbox({ slides, index, onClose, onMove }: { slides: LightboxS
           <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={() => go(index + 1)} className="absolute right-2 top-1/2 -translate-y-1/2 min-h-12 min-w-12 rounded-full bg-white/15 text-2xl font-bold hover:bg-white/30" aria-label="Next" data-lightbox-next>›</button>
         ) : null}
       </div>
-      <p className="py-2 text-center text-xs text-white/60">
+      <p className="py-2 text-center text-xs text-on-dark/60">
         <span className="[@media(hover:hover)]:hidden">{isVideo ? "Swipe with the arrows for the next one" : "Pinch or double-tap to zoom · swipe for the next one · swipe down to close"}</span>
         <span className="hidden [@media(hover:hover)]:inline">{isVideo ? "Arrow keys for the next one · Esc to close" : "Double-click or scroll to zoom · arrow keys for the next one · Esc to close"}</span>
       </p>

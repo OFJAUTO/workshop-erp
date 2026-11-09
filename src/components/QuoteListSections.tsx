@@ -102,7 +102,7 @@ export function QuoteListSections({ rows, me, ownerName, noun, acceptedWords }: 
                 <span className="font-semibold">{r.car}</span>
                 {r.customer ? <span className="text-sm text-muted">{r.customer}</span> : null}
                 <Badge tone={r.handback && s.key === "ready" ? "green" : tone(r.status)}>{r.handback && s.key === "ready" ? r.handback.words : QUOTE_STATUS_LABELS[r.status]}</Badge>
-                {r.additionalTo !== null ? <span className="rounded-full border border-ink px-2 py-0.5 text-[10px] font-extrabold tracking-[0.08em]" data-estimate-additional-chip>ADDITIONAL{r.additionalTo ? ` · to ${r.additionalTo}` : ""}</span> : null}
+                {r.additionalTo !== null ? <span className="rounded-full border border-ink px-2 py-0.5 text-xs font-extrabold tracking-[0.08em]" data-estimate-additional-chip>ADDITIONAL{r.additionalTo ? ` · to ${r.additionalTo}` : ""}</span> : null}
                 {r.money?.badge ? <Badge tone={r.money.tone === "green" ? "green" : "amber"} data-em-list-badge={r.money.badge}>{r.money.badge}</Badge> : null}
                 {r.status === "cancelled" && r.cancelReason ? <span className="text-xs font-semibold text-muted" data-cancel-reason>{r.cancelReason}</span> : null}
                 <span className="ml-auto text-sm font-semibold">{aed(r.total)}</span>

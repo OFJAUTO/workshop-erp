@@ -38,7 +38,7 @@ function TotalsStrip({ t, f }: { t: PaTotals; f: PaFilter }) {
     <div className="grid grid-cols-2 gap-3 md:grid-cols-5" data-pa-totals>
       {tiles.map((x) => (
         <a key={x.key} href={x.href} className={`flex flex-col gap-0.5 rounded-card border bg-white px-4 py-3 hover:border-ink ${x.tone || "border-line"}`} data-pa-tile={x.key} data-tile-value={x.value}>
-          <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">{x.label}</span>
+          <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{x.label}</span>
           <span className={`text-xl font-extrabold ${x.key === "problems" && t.problemsRed ? "text-red" : ""}`}>{x.value}</span>
           <span className="text-xs text-muted">{x.sub}</span>
         </a>
@@ -112,7 +112,7 @@ export default async function PartsAccountsPage({ searchParams }: { searchParams
 
       <nav className="flex flex-wrap gap-1 text-xs font-bold" aria-label="Parts accounts tabs" data-pa-tabs>
         {PA_TABS.map((t) => (
-          <Link key={t.key} href={hrefOf(t.key, f)} className={`inline-flex min-h-11 items-center rounded-control px-3 ${tab === t.key ? "bg-ink text-white" : "bg-chip"}`} aria-current={tab === t.key ? "page" : undefined} data-pa-tab={t.key}>
+          <Link key={t.key} href={hrefOf(t.key, f)} className={`inline-flex min-h-11 items-center rounded-control px-3 ${tab === t.key ? "bg-ink text-on-dark" : "bg-chip"}`} aria-current={tab === t.key ? "page" : undefined} data-pa-tab={t.key}>
             {t.label} · {counts[t.key]}
           </Link>
         ))}
@@ -151,7 +151,7 @@ export default async function PartsAccountsPage({ searchParams }: { searchParams
                 {quick.map((c) => {
                   const on = f.quick === c.key;
                   return (
-                    <Link key={c.key} href={hrefOf(tab, f, { status: f.status, quick: on ? undefined : c.key })} className={`inline-flex min-h-11 items-center rounded-control px-3 ${on ? "bg-ink text-white" : "bg-chip"}`} aria-pressed={on} data-pa-quick={c.key}>
+                    <Link key={c.key} href={hrefOf(tab, f, { status: f.status, quick: on ? undefined : c.key })} className={`inline-flex min-h-11 items-center rounded-control px-3 ${on ? "bg-ink text-on-dark" : "bg-chip"}`} aria-pressed={on} data-pa-quick={c.key}>
                       {c.label} · {quickCount(c.key)}
                     </Link>
                   );

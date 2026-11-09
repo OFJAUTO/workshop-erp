@@ -85,7 +85,7 @@ export function SupplierInvoiceEditButton({
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">Invoice number</span>
           <Input name="invoice_number" value={num} onChange={(e) => setNum(e.target.value)} required data-edit-number />
-          {numberBad ? <span className="text-[11px] font-semibold text-red">That doesn&apos;t look like a real invoice number.</span> : null}
+          {numberBad ? <span className="text-xs font-semibold text-red">That doesn&apos;t look like a real invoice number.</span> : null}
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">Date on the invoice</span>

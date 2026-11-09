@@ -82,21 +82,21 @@ export function CommissionLine({ quotationId, commission, people, isOwner, net, 
     <div className="col-span-2 flex flex-col gap-1.5 rounded-control border border-line bg-white p-2" data-commission-fields>
       <div className="flex flex-wrap items-center gap-1.5">
         {people.map((p) => (
-          <button key={p} type="button" disabled={disabled || pending} onClick={() => setWho(p)} aria-pressed={who === p} className={`min-h-8 rounded-control border px-2.5 text-[11px] font-bold ${who === p ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`} data-commission-person>{who === p ? "✓ " : ""}{p}</button>
+          <button key={p} type="button" disabled={disabled || pending} onClick={() => setWho(p)} aria-pressed={who === p} className={`min-h-8 rounded-control border px-2.5 text-xs font-bold ${who === p ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`} data-commission-person>{who === p ? "✓ " : ""}{p}</button>
         ))}
         <Input value={who} onChange={(e) => setWho(e.target.value)} placeholder="Who gets it?" aria-label="Commission to" className="min-h-8 w-32 text-xs" textCase="title" data-commission-who />
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Input value={value} onChange={(e) => setValue(e.target.value)} inputMode="decimal" placeholder="0" aria-label="Commission amount" className="min-h-8 text-right text-xs" style={{ width: "5.5rem" }} data-commission-amount />
         <span className="inline-flex overflow-hidden rounded-control border border-line-strong">
-          <button type="button" onClick={() => setKind("aed")} aria-pressed={kind === "aed"} className={`min-h-8 px-2.5 text-[11px] font-bold ${kind === "aed" ? "bg-ink text-white" : "bg-white"}`}>AED</button>
-          <button type="button" onClick={() => setKind("percent")} aria-pressed={kind === "percent"} className={`min-h-8 px-2.5 text-[11px] font-bold ${kind === "percent" ? "bg-ink text-white" : "bg-white"}`}>% of total before VAT</button>
+          <button type="button" onClick={() => setKind("aed")} aria-pressed={kind === "aed"} className={`min-h-8 px-2.5 text-xs font-bold ${kind === "aed" ? "bg-ink text-on-dark" : "bg-white"}`}>AED</button>
+          <button type="button" onClick={() => setKind("percent")} aria-pressed={kind === "percent"} className={`min-h-8 px-2.5 text-xs font-bold ${kind === "percent" ? "bg-ink text-on-dark" : "bg-white"}`}>% of total before VAT</button>
         </span>
-        {who.trim() && Number(value) > 0 ? <span className="text-[11px] font-semibold">= {aed(amountOf(kind, Number(value) || 0))}</span> : null}
+        {who.trim() && Number(value) > 0 ? <span className="text-xs font-semibold">= {aed(amountOf(kind, Number(value) || 0))}</span> : null}
         <Button type="button" size="md" disabled={pending || !who.trim() || !(Number(value) > 0)} onClick={save} data-commission-save>{pending ? "…" : isOwner ? "Save" : "Save (owner approves)"}</Button>
         <Button type="button" tone="ghost" size="md" onClick={() => { setEditing(false); setError(null); }}>Cancel</Button>
       </div>
-      {error ? <span className="text-[11px] font-semibold text-red">{error}</span> : null}
+      {error ? <span className="text-xs font-semibold text-red">{error}</span> : null}
     </div>
   );
 
@@ -104,16 +104,16 @@ export function CommissionLine({ quotationId, commission, people, isOwner, net, 
     <>
       <dt className="text-muted" data-commission-line>
         Commission{summary ? ` · ${summary}` : ""}
-        {set && commission.status === "pending" ? <span className="ml-1 font-semibold text-amber" data-commission-pending>Pending owner approval · already counted in the costs</span> : null}
+        {set && commission.status === "pending" ? <span className="ml-1 font-semibold text-amber-text" data-commission-pending>Pending owner approval · already counted in the costs</span> : null}
       </dt>
       <dd className="text-right">
         <span className="inline-flex flex-wrap items-center justify-end gap-1.5">
-          {set ? <span className={commission.status === "pending" ? "text-amber font-semibold" : ""}>{aed(amount)}</span> : <span>{aed(0)}</span>}
-          {!disabled && !set && !editing ? <button type="button" onClick={() => { setEditing(true); setWho(""); setKind("aed"); setValue(""); }} className="min-h-9 rounded-control border border-line-strong bg-white px-2 text-[11px] font-bold" data-commission-add>+ Add</button> : null}
+          {set ? <span className={commission.status === "pending" ? "text-amber-text font-semibold" : ""}>{aed(amount)}</span> : <span>{aed(0)}</span>}
+          {!disabled && !set && !editing ? <button type="button" onClick={() => { setEditing(true); setWho(""); setKind("aed"); setValue(""); }} className="min-h-9 rounded-control border border-line-strong bg-white px-2 text-xs font-bold" data-commission-add>+ Add</button> : null}
           {!disabled && set && !editing ? (
             <>
-              <button type="button" onClick={() => { setEditing(true); setWho(commission.to ?? ""); setKind(commission.kind ?? "aed"); setValue(commission.value === null ? "" : String(commission.value)); }} className="min-h-9 rounded-control border border-line-strong bg-white px-2 text-[11px] font-bold" data-commission-edit>Edit</button>
-              <button type="button" disabled={pending} onClick={() => { const fd = new FormData(); fd.set("to", ""); onLocal?.({ to: null, kind: null, value: null, status: null }); run(() => saveCommission(quotationId, fd)); }} className="min-h-9 px-1.5 text-[11px] font-bold text-red" data-commission-remove>Remove</button>
+              <button type="button" onClick={() => { setEditing(true); setWho(commission.to ?? ""); setKind(commission.kind ?? "aed"); setValue(commission.value === null ? "" : String(commission.value)); }} className="min-h-9 rounded-control border border-line-strong bg-white px-2 text-xs font-bold" data-commission-edit>Edit</button>
+              <button type="button" disabled={pending} onClick={() => { const fd = new FormData(); fd.set("to", ""); onLocal?.({ to: null, kind: null, value: null, status: null }); run(() => saveCommission(quotationId, fd)); }} className="min-h-9 px-1.5 text-xs font-bold text-red" data-commission-remove>Remove</button>
             </>
           ) : null}
         </span>
@@ -121,7 +121,7 @@ export function CommissionLine({ quotationId, commission, people, isOwner, net, 
       {editing ? fields : null}
       {set && commission.status === "pending" && isOwner && !editing ? (
         <div className="col-span-2 flex flex-wrap items-center gap-2 rounded-control border border-amber-bar bg-amber-soft p-2" data-commission-decide>
-          <span className="text-[11px] font-semibold">Commission for {commission.to}, {aed(amount)}: your call.</span>
+          <span className="text-xs font-semibold">Commission for {commission.to}, {aed(amount)}: your call.</span>
           <Button type="button" size="md" disabled={pending} onClick={() => decide("approve")} data-commission-approve>Approve</Button>
           <Button type="button" tone="secondary" size="md" onClick={() => { setEditing(true); setWho(commission.to ?? ""); setKind(commission.kind ?? "aed"); setValue(commission.value === null ? "" : String(commission.value)); }} data-commission-change>Change amount</Button>
           {declining ? (
@@ -132,11 +132,11 @@ export function CommissionLine({ quotationId, commission, people, isOwner, net, 
           ) : (
             <Button type="button" tone="ghost" size="md" onClick={() => setDeclining(true)} data-commission-decline>Decline</Button>
           )}
-          {error ? <span className="text-[11px] font-semibold text-red">{error}</span> : null}
+          {error ? <span className="text-xs font-semibold text-red">{error}</span> : null}
         </div>
       ) : null}
       {commission.status === "declined" && !editing ? (
-        <div className="col-span-2 text-[11px] font-semibold text-red" data-commission-declined>
+        <div className="col-span-2 text-xs font-semibold text-red" data-commission-declined>
           Commission declined by the owner{commission.decisionNote ? `: ${commission.decisionNote}` : ""}.
           {!disabled ? <button type="button" onClick={() => { setEditing(true); setWho(""); setKind("aed"); setValue(""); }} className="ml-2 inline-flex min-h-9 items-center underline underline-offset-4" data-commission-add>+ Add again</button> : null}
         </div>

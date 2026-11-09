@@ -1,5 +1,6 @@
 "use client";
 
+import { promiseState } from "@/lib/promise-dates";
 import type { JobCustomer } from "@/lib/customer-view";
 import { useState, useSyncExternalStore } from "react";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
@@ -57,8 +58,8 @@ export type DashRow = {
 export function AdvisorBadge({ name, compact = false }: { name: string | null; compact?: boolean }) {
   if (!name) return null;
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-line bg-white px-1.5 py-0.5 text-[11px] font-bold" title={`Advisor in charge: ${name}`} data-advisor-badge={name}>
-      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-ink text-[9px] font-extrabold text-white">{name.trim().charAt(0).toUpperCase()}</span>
+    <span className="inline-flex items-center gap-1 rounded-full border border-line bg-white px-1.5 py-0.5 text-xs font-bold" title={`Advisor in charge: ${name}`} data-advisor-badge={name}>
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-ink text-xs font-extrabold text-on-dark">{name.trim().charAt(0).toUpperCase()}</span>
       {compact ? null : <span className="max-w-24 truncate">{name}</span>}
     </span>
   );
@@ -131,11 +132,14 @@ function sortRows(rows: DashRow[], sort: SortKey) {
   }
 }
 
+const dubaiToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dubai" });
+
 type TileKey = "all" | "due" | "overdue" | "ready";
 const TILES: { key: TileKey; label: string; caption: string; tone: "ink" | "amber" | "red" | "green"; match: (r: DashRow) => boolean }[] = [
   { key: "all", label: "In the workshop", caption: "All open cars", tone: "ink", match: () => true },
-  { key: "due", label: "Due today", caption: "Promised for today", tone: "amber", match: (r) => !!r.promisedAt && r.timing.tone === "amber" },
-  { key: "overdue", label: "Overdue or late", caption: "Past the promised date or over the stage target", tone: "red", match: (r) => r.timing.tone === "red" },
+  // 9 November 2026: from the promised date ONLY (never the stage targets): THE rule promiseState in src/lib/promise-dates.ts.
+  { key: "due", label: "Due today", caption: "Promised for today", tone: "amber", match: (r) => promiseState(r.promisedAt, r.status, dubaiToday()) === "due_today" },
+  { key: "overdue", label: "Overdue", caption: "Past the promised date, not done yet", tone: "red", match: (r) => promiseState(r.promisedAt, r.status, dubaiToday()) === "overdue" },
   { key: "ready", label: "Ready to collect", caption: "Job done, ready or pending payment", tone: "green", match: (r) => r.status === "ready" || r.status === "pending_payment" },
 ];
 
@@ -166,7 +170,7 @@ export function DashboardCars({ rows, initialPending, advisorView = false }: { r
         {TILES.map((t) => {
           const active = tile === t.key;
           const n = rows.filter(t.match).length;
-          const color = n === 0 ? "text-muted" : { ink: "text-ink", amber: "text-amber", red: "text-red", green: "text-green" }[t.tone];
+          const color = n === 0 ? "text-muted" : { ink: "text-ink", amber: "text-amber-text", red: "text-red", green: "text-green-text" }[t.tone];
           return (
             <button
               key={t.key}
@@ -191,7 +195,7 @@ export function DashboardCars({ rows, initialPending, advisorView = false }: { r
             {advisorView ? (
               <span className="inline-flex rounded-control border border-line-strong bg-white p-0.5" data-scope-switch>
                 {(["mine", "all"] as const).map((s) => (
-                  <button key={s} type="button" onClick={() => setScope(s)} aria-pressed={scope === s} data-scope={s} className={`min-h-10 rounded-control px-3 text-sm font-bold ${scope === s ? "bg-ink text-white" : "text-muted"}`}>
+                  <button key={s} type="button" onClick={() => setScope(s)} aria-pressed={scope === s} data-scope={s} className={`min-h-10 rounded-control px-3 text-sm font-bold ${scope === s ? "bg-ink text-on-dark" : "text-muted"}`}>
                     {s === "mine" ? `My cars (${searched.filter((r) => r.mine).length})` : `All (${searched.length})`}
                   </button>
                 ))}
@@ -261,7 +265,7 @@ export function DashboardCars({ rows, initialPending, advisorView = false }: { r
                 <>
                   {j.docAlert ? <Badge tone={j.docAlert.tone === "muted" ? "neutral" : j.docAlert.tone}>{j.docAlert.text}</Badge> : null}
                   {j.priced ? <Badge tone="green">Priced</Badge> : null}
-                  {j.extraQuote ? <span className="inline-flex rounded-full bg-amber-soft px-2.5 py-1 text-[11px] font-bold text-amber" data-extra-quote-chip>{j.extraQuote}</span> : null}
+                  {j.extraQuote ? <span className="inline-flex rounded-full bg-amber-soft px-2.5 py-1 text-xs font-bold text-amber-text" data-extra-quote-chip>{j.extraQuote}</span> : null}
                 </>
               }
               actions={j.quotes.length > 1 ? <QuotePicker items={j.quotes} /> : null}

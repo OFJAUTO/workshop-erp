@@ -37,7 +37,7 @@ export function EstimateMenu({ id, number, status, neverSent, canManage }: { id:
 
   return (
     <span className="relative shrink-0" data-estimate-menu={number}>
-      <button type="button" onClick={(e) => setAnchor(anchor ? null : e.currentTarget)} aria-label={`More for ${number}`} aria-expanded={!!anchor} className={`min-h-11 min-w-11 rounded-control border text-base font-bold ${anchor ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-estimate-dots>
+      <button type="button" onClick={(e) => setAnchor(anchor ? null : e.currentTarget)} aria-label={`More for ${number}`} aria-expanded={!!anchor} className={`min-h-11 min-w-11 rounded-control border text-base font-bold ${anchor ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-estimate-dots>
         ⋯
       </button>
       {anchor ? (
@@ -75,7 +75,7 @@ export function EstimateMenu({ id, number, status, neverSent, canManage }: { id:
                   setDialog(null);
                   router.refresh();
                 })}
-                className="min-h-11 rounded-control bg-red-bar px-4 text-sm font-bold text-white disabled:opacity-50"
+                className="min-h-11 rounded-control bg-red-bar px-4 text-sm font-bold text-on-dark disabled:opacity-50"
                 data-estimate-confirm
               >
                 {dialog === "delete" ? "Delete" : "Cancel the estimate"}

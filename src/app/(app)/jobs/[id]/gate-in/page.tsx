@@ -238,7 +238,7 @@ export default async function GateInDetailsPage({ params }: { params: Promise<{ 
                     <figure key={p.id} className="flex flex-col gap-0.5">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <a href={p.url ?? "#"} target="_blank" rel="noreferrer"><img src={p.url ?? ""} alt="Old parts handed over" className="h-24 w-24 rounded-control object-cover" /></a>
-                      <figcaption className="text-[11px] text-muted">{formatDayTime(p.taken_at)}{p.byName ? ` · ${p.byName}` : ""}</figcaption>
+                      <figcaption className="text-xs text-muted">{formatDayTime(p.taken_at)}{p.byName ? ` · ${p.byName}` : ""}</figcaption>
                     </figure>
                   ))}
                 </div>

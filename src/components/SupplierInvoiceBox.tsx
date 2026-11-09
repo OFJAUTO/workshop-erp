@@ -77,12 +77,12 @@ export function SupplierInvoiceBox({
             <label className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">Invoice number</span>
               <Input name="invoice_number" value={number} onChange={(e) => setNumber(e.target.value)} required data-invoice-number />
-              {numberBad ? <span className="text-[11px] font-semibold text-red" data-number-bad>That doesn&apos;t look like a real invoice number.</span> : null}
+              {numberBad ? <span className="text-xs font-semibold text-red" data-number-bad>That doesn&apos;t look like a real invoice number.</span> : null}
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">Date on the invoice</span>
               <Input name="invoice_date" type="date" value={date} onChange={(e) => setDate(e.target.value)} max={dubaiToday()} required data-invoice-date />
-              {dateBad ? <span className="text-[11px] font-semibold text-red" data-date-bad>The invoice date cannot be in the future.</span> : null}
+              {dateBad ? <span className="text-xs font-semibold text-red" data-date-bad>The invoice date cannot be in the future.</span> : null}
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">Total before VAT (optional)</span>

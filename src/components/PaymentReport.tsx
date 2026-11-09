@@ -91,7 +91,7 @@ function ReportDialog({ jobId = null, estimateId = null, balance, expected, repl
         </div>
         {sent ? (
           <div className="flex flex-col gap-3 rounded-control border-2 border-green bg-green-soft p-4" data-report-sent>
-            <p className="text-lg font-extrabold text-green">Sent to accounts ✓</p>
+            <p className="text-lg font-extrabold text-green-text">Sent to accounts ✓</p>
             <p className="text-sm">{state?.told?.length ? `${state.told.join(" and ")} ${state.told.length === 1 ? "is" : "are"} told; the job card shows it in amber until it is recorded.` : "Accounts and the owner are told; the job card shows it in amber until it is recorded."}</p>
             <div><Button type="button" size="md" onClick={onClose} data-report-done>Done</Button></div>
           </div>
@@ -111,7 +111,7 @@ function ReportDialog({ jobId = null, estimateId = null, balance, expected, repl
               <span className="text-xs font-semibold text-muted">How did the customer pay?</span>
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                 {PAYMENT_METHODS.map((m) => (
-                  <button key={m} type="button" onClick={() => setMethod(m)} aria-pressed={method === m} data-report-method={m} className={`min-h-12 rounded-control border-2 px-1 text-sm font-bold ${method === m ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                  <button key={m} type="button" onClick={() => setMethod(m)} aria-pressed={method === m} data-report-method={m} className={`min-h-12 rounded-control border-2 px-1 text-sm font-bold ${method === m ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
                     {PAYMENT_METHOD_LABELS[m] ?? m}
                   </button>
                 ))}
@@ -240,16 +240,16 @@ export function SlipTile({ url, thumb = null, contentType = null, path = null, l
   const box = `shrink-0 ${size} overflow-hidden rounded-control border border-line`;
   if (kind === "pdf") {
     return (
-      <a href={url} target="_blank" rel="noreferrer" aria-label={`Open the PDF: ${label}`} title={label} className={`${box} inline-flex flex-col items-center justify-center bg-chip text-[11px] font-extrabold leading-tight`} data-report-photo={hook} data-slip-kind="pdf">
+      <a href={url} target="_blank" rel="noreferrer" aria-label={`Open the PDF: ${label}`} title={label} className={`${box} inline-flex flex-col items-center justify-center bg-chip text-xs font-extrabold leading-tight`} data-report-photo={hook} data-slip-kind="pdf">
         <span aria-hidden>PDF</span>
-        <span aria-hidden className="text-[10px] font-semibold text-muted">open</span>
+        <span aria-hidden className="text-xs font-semibold text-muted">open</span>
       </a>
     );
   }
   if (kind === "video") {
     return (
       <ViewerThumb src={url} kind="video" label={label} className={`${box} bg-ink`} data-report-photo={hook} data-slip-kind="video">
-        <span aria-hidden className="flex h-full w-full items-center justify-center text-lg text-white">▶</span>
+        <span aria-hidden className="flex h-full w-full items-center justify-center text-lg text-on-dark">▶</span>
       </ViewerThumb>
     );
   }
@@ -333,7 +333,7 @@ export function PaymentReportLines({ reports, viewerId, canRecord, canReport, re
         }
         return (
           <li key={r.id} className="flex flex-wrap items-center gap-2 rounded-control border border-green bg-green-soft p-2 text-xs" data-payment-report-recorded={r.paymentNumber ?? ""}>
-            <span className="font-bold text-green">Recorded ✓ {r.paymentNumber}{r.recordedBy ? ` by ${firstName(r.recordedBy)}` : ""}</span>
+            <span className="font-bold text-green-text">Recorded ✓ {r.paymentNumber}{r.recordedBy ? ` by ${firstName(r.recordedBy)}` : ""}</span>
             <span className="text-muted">{aed(r.amount)} · {methodWord(r.method)} · sent by {firstName(r.reporter)}</span>
           </li>
         );

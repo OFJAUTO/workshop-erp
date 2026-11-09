@@ -97,7 +97,7 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex gap-2" role="group" aria-label="Method">
           {(["card", "link"] as const).map((m) => (
-            <button key={m} type="button" onClick={() => { setMethod(m); setPicked(null); }} aria-pressed={method === m} data-settle-method={m} className={`min-h-11 rounded-control border-2 px-4 text-sm font-bold ${method === m ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+            <button key={m} type="button" onClick={() => { setMethod(m); setPicked(null); }} aria-pressed={method === m} data-settle-method={m} className={`min-h-11 rounded-control border-2 px-4 text-sm font-bold ${method === m ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
               {CLEARING_LABEL[m]} ({rows.filter((r) => r.method === m).length})
             </button>
           ))}
@@ -120,7 +120,7 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
                 </label>
                 <span className="text-muted">{dayText(r.receivedAt)} · {r.plate}{r.isDeposit ? " · deposit" : ""}{r.authCode ? ` · auth ${r.authCode}` : ""}</span>{r.codeMissing ? <span className="text-xs font-semibold text-amber-bar" data-settle-auth-missing>auth missing</span> : null}
                 {after ? <span className="text-xs font-semibold text-muted" data-settle-after>Taken after this settlement date</span> : null}
-                {r.late ? <span className="rounded-full bg-amber-soft px-2 text-xs font-bold text-amber" data-settle-late>Not settled after 3 working days</span> : null}
+                {r.late ? <span className="rounded-full bg-amber-soft px-2 text-xs font-bold text-amber-text" data-settle-late>Not settled after 3 working days</span> : null}
                 <span className="ml-auto font-extrabold">{aed(r.amount)}</span>
                 <span className="w-60 text-right text-xs text-muted">
                   {on && share ? <span className="font-semibold text-ink" data-settle-share>MSF {fig(share.msf)} + fee {fig(share.txn)} + VAT {fig(share.vat)} (actual)</span> : `est. MSF ${fig(e.msf)} + fee ${fig(e.txn)} + VAT ${fig(e.vat)}`}
@@ -173,7 +173,7 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
             />
           </div>
           {check.ok ? (
-            <p className={`text-sm font-semibold ${check.askAgain ? "text-amber" : "text-green"}`} data-settle-adds>
+            <p className={`text-sm font-semibold ${check.askAgain ? "text-amber-text" : "text-green-text"}`} data-settle-adds>
               {aed(gross)} = net {fig(netNum ?? 0)} + MSF {fig(msfNum)} + fee {fig(txnNum)} + VAT {fig(vatNum)} ✓ · the jobs&apos; cost {fig(check.cost)} (the VAT is reclaimable){check.askAgain ? ` · ${check.askAgain}` : ""}
             </p>
           ) : differs ? (
@@ -184,7 +184,7 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
                 <input type="checkbox" name="override" value="1" checked={override} onChange={(e) => setOverride(e.target.checked)} className="h-5 w-5 accent-ink" />
                 Save anyway: the difference is explained in the note (written in the change log)
               </label>
-              {override && !noteOk ? <p className="text-xs font-semibold text-amber" data-settle-need-note>Write the reason in the note first.</p> : null}
+              {override && !noteOk ? <p className="text-xs font-semibold text-amber-text" data-settle-need-note>Write the reason in the note first.</p> : null}
             </div>
           ) : net.trim() ? (
             <p className="text-sm font-semibold text-red" data-settle-problem>{check.error}</p>
@@ -206,7 +206,7 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
 export function UndoSettlement({ number, active, action }: { number: string; active: boolean; action: (s: FormState, f: FormData) => Promise<FormState> }) {
   const [state, formAction, pending] = useActionState(action, initialFormState);
   // Stays mounted on its row after the page refreshes, so the answer is still where the person clicked.
-  if (state.success) return <span className="text-xs font-semibold text-green" data-settle-undone>{state.success}</span>;
+  if (state.success) return <span className="text-xs font-semibold text-green-text" data-settle-undone>{state.success}</span>;
   if (!active) return null;
   return (
     <details className="relative" data-settle-undo={number}>

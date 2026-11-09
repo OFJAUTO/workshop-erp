@@ -121,8 +121,8 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
                   <tr key={w} data-recovery-who={w}>
                     <td className="py-1.5 pr-3 font-semibold">{w}</td><td className="py-1.5 pr-3 text-right">{s.trips}</td><td className="py-1.5 pr-3 text-right font-bold">{aedText(s.total)}</td><td className="py-1.5 pr-3 text-right">{aedText(s.trips ? s.total / s.trips : 0)}</td>
                     <td className="py-1.5 text-right">
-                      {paid ? <span className="inline-flex items-center rounded-control bg-green-soft px-2 py-1 text-xs font-bold text-green" data-month-paid-done>Paid ✓ {formatDate(paid.paid_at)}</span>
-                        : openCount ? <span className="text-xs font-semibold text-amber" data-month-open>{openCount} trip{openCount === 1 ? "" : "s"} not approved yet</span>
+                      {paid ? <span className="inline-flex items-center rounded-control bg-green-soft px-2 py-1 text-xs font-bold text-green-text" data-month-paid-done>Paid ✓ {formatDate(paid.paid_at)}</span>
+                        : openCount ? <span className="text-xs font-semibold text-amber-text" data-month-open>{openCount} trip{openCount === 1 ? "" : "s"} not approved yet</span>
                         : canDecide ? (
                           <form action={markMonthPaid} className="inline">
                             <input type="hidden" name="who" value={w} />
@@ -212,7 +212,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
                           <div className="flex flex-wrap items-center gap-2 rounded-control border border-line bg-canvas px-2 py-1.5 text-xs" data-price-change-message>
                             <span className="font-semibold">Tell the driver:</span>
                             <span className="min-w-0 flex-1">{msg}</span>
-                            <a href={`https://wa.me/${waDigits(phone)}?text=${encodeURIComponent(msg)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center rounded-control bg-ink px-3 font-bold text-white" data-price-change-whatsapp>WhatsApp</a>
+                            <a href={`https://wa.me/${waDigits(phone)}?text=${encodeURIComponent(msg)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-9 items-center rounded-control bg-ink px-3 font-bold text-on-dark" data-price-change-whatsapp>WhatsApp</a>
                             <CopyText text={msg} small />
                           </div>
                         ) : null}
@@ -245,7 +245,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
                   {t.road_km === null && canDecide ? (
                     <div className="flex flex-wrap items-center gap-2">
                       <form action={setTripKm.bind(null, t.id)} className="flex flex-wrap items-center gap-2" data-enter-km>
-                        <span className="text-xs font-semibold text-amber" data-km-why>Distance not found{t.km_error ? ` – ${t.km_error}` : ""} – enter km</span>
+                        <span className="text-xs font-semibold text-amber-text" data-km-why>Distance not found{t.km_error ? ` – ${t.km_error}` : ""} – enter km</span>
                         <Input name="km" inputMode="decimal" placeholder="One-way km" className="w-32 min-h-9" data-km-box />
                         <Button type="submit" tone="secondary" size="md">Save</Button>
                       </form>

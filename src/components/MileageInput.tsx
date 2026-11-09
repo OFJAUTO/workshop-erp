@@ -31,7 +31,7 @@ export function MileageInput({
   const km = entered === null ? null : toKm(entered, unit);
   const converted = entered === null ? "" : unit === "km" ? `${formatThousands(toMiles(entered))} mi` : `${formatThousands(toKm(entered, "mi"))} km`;
   const checks = km === null ? [] : mileageChecks(km, { ...context, unit });
-  const unitBtn = (on: boolean) => `min-h-11 px-4 text-sm font-bold rounded-control border ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`;
+  const unitBtn = (on: boolean) => `min-h-11 px-4 text-sm font-bold rounded-control border ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`;
 
   return (
     <div className="flex flex-col gap-2">

@@ -104,7 +104,7 @@ export default async function BonusPage({ searchParams }: { searchParams: Promis
               <form action={approveBonusPeriod} className="ml-auto flex flex-col items-end gap-2">
                 <input type="hidden" name="period" value={view.period.key} />
                 {view.rows.some((r) => r.cardFeeEstimated) ? (
-                  <label className="flex max-w-md items-start gap-2 text-sm font-semibold text-amber" data-bonus-estimated-ask>
+                  <label className="flex max-w-md items-start gap-2 text-sm font-semibold text-amber-text" data-bonus-estimated-ask>
                     <input type="checkbox" name="confirm_estimated" value="1" required className="mt-1 h-5 w-5 accent-ink" />
                     <span>{view.rows.filter((r) => r.cardFeeEstimated).length} invoice{view.rows.filter((r) => r.cardFeeEstimated).length === 1 ? " still has an" : "s still have"} estimated card fee (the bank has not settled yet). Approving freezes them as they are. Approve anyway?</span>
                   </label>

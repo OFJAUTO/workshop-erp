@@ -46,13 +46,13 @@ export function BudgetTimer({ hoursCharged, minutesUsed, running, locked, breakW
   const used = minutesUsed + live;
   const budget = hoursCharged * 60;
   const left = budget - used;
-  const tone = budget <= 0 ? "text-ink" : left < 0 ? "text-red" : left < budget * 0.2 ? "text-amber" : "text-green";
+  const tone = budget <= 0 ? "text-ink" : left < 0 ? "text-red" : left < budget * 0.2 ? "text-amber-text" : "text-green-text";
   return (
     <div className="flex flex-col items-center gap-1 py-2 text-center">
       <span className="text-xs font-bold uppercase tracking-[0.1em] text-muted">{locked ? "Clock stopped" : left < 0 ? "Over the time" : "Time left"}</span>
       <span className={`text-5xl sm:text-6xl font-extrabold tabular-nums leading-tight ${tone}`}>{budget > 0 ? (left < 0 ? `+${fmtHm(left)}` : fmtHm(left)) : fmtHm(used)}</span>
       <span className="text-sm font-semibold text-muted">{budget > 0 ? `of ${hoursCharged} h charged · used ${fmtHm(used)}` : "no hours quoted on this car"}</span>
-      {running.length ? <span className="text-xs font-semibold text-green">Working now: {running.map((r) => r.name).join(", ")}</span> : null}
+      {running.length ? <span className="text-xs font-semibold text-green-text">Working now: {running.map((r) => r.name).join(", ")}</span> : null}
     </div>
   );
 }
@@ -132,12 +132,12 @@ export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, min
               <div className="grid grid-cols-2 gap-2">
                 {mineRunning ? (
                   <>
-                    <div className="min-h-16 rounded-control bg-green text-white flex flex-col items-center justify-center text-lg font-bold" aria-live="polite"><span>Working</span><span className="text-sm font-semibold"><Since from={running.find((r) => r.mine)?.since ?? null} /></span></div>
+                    <div className="min-h-16 rounded-control bg-green text-on-dark flex flex-col items-center justify-center text-lg font-bold" aria-live="polite"><span>Working</span><span className="text-sm font-semibold"><Since from={running.find((r) => r.mine)?.since ?? null} /></span></div>
                     <Button type="button" size="lg" tone="secondary" className="min-h-16 text-lg" onClick={() => setPausing(true)}>Pause</Button>
                   </>
                 ) : minePause ? (
                   <>
-                    <div className="min-h-16 rounded-control border border-amber-bar bg-amber-soft text-amber flex flex-col items-center justify-center text-lg font-bold text-center"><span>Paused · {minePause.reason}</span><span className="text-sm font-semibold"><Since from={minePause.since} /></span></div>
+                    <div className="min-h-16 rounded-control border border-amber-bar bg-amber-soft text-amber-text flex flex-col items-center justify-center text-lg font-bold text-center"><span>Paused · {minePause.reason}</span><span className="text-sm font-semibold"><Since from={minePause.since} /></span></div>
                     <form action={startAction} className="contents"><Button type="submit" size="lg" className="min-h-16 text-lg">{minePause.reason === "Break" || minePause.reason === "End of shift" ? "Resume work" : "Resume"}</Button></form>
                   </>
                 ) : (
@@ -182,7 +182,7 @@ export function WorkJobs({ jobId, lines, parts, findings, canWork, workDone, sev
           ))}
         </ol>
         {parts.some((p) => p.state !== "handed") ? (
-          <p className="border-t border-line pt-2 text-xs font-bold text-amber">{parts.filter((p) => p.state !== "handed").length} part{parts.filter((p) => p.state !== "handed").length === 1 ? "" : "s"} not received yet · see &quot;Parts for this car&quot;</p>
+          <p className="border-t border-line pt-2 text-xs font-bold text-amber-text">{parts.filter((p) => p.state !== "handed").length} part{parts.filter((p) => p.state !== "handed").length === 1 ? "" : "s"} not received yet · see &quot;Parts for this car&quot;</p>
         ) : null}
       </Card>
 

@@ -32,7 +32,7 @@ export function GeoCapture() {
         {state === "busy" ? "Getting position…" : pos ? "Update GPS position" : "Capture GPS position"}
       </Button>
       {pos ? (
-        <span className="text-xs font-semibold text-green">
+        <span className="text-xs font-semibold text-green-text">
           Position captured ({pos.lat.toFixed(5)}, {pos.lng.toFixed(5)}, ±{Math.round(pos.acc)} m)
         </span>
       ) : state === "error" ? (

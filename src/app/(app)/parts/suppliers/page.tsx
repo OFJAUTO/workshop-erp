@@ -28,7 +28,7 @@ function SupplierFields({ s, types, canDiscount, contactOn }: { s?: Supplier; ty
         {types.map((t) => (
           <label key={t} className="flex flex-col gap-1 text-xs font-semibold text-muted">{t[0].toUpperCase() + t.slice(1)} parts %<Input name={`discount__${t}`} defaultValue={byType[t] === undefined ? "" : String(byType[t])} inputMode="decimal" placeholder="default" disabled={!canDiscount} /></label>
         ))}
-        <span className="col-span-2 sm:col-span-4 text-[11px] text-muted">Parts enter the list price; the discount gives the net cost. A box left empty uses the default. Every change is logged with who and when.{canDiscount ? "" : ""}</span>
+        <span className="col-span-2 sm:col-span-4 text-xs text-muted">Parts enter the list price; the discount gives the net cost. A box left empty uses the default. Every change is logged with who and when.{canDiscount ? "" : ""}</span>
       </div>
       <Field label="Name"><Input name="name" defaultValue={s?.name ?? ""} required textCase="title" /></Field>
       <Field label="TRN" optional hint="15 digits"><Input name="trn" defaultValue={s?.trn ?? ""} inputMode="numeric" maxLength={15} /></Field>
@@ -123,7 +123,7 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
               const on = filter === f;
               const n = searched.filter((s) => inFilter(s, f)).length;
               return (
-                <Link key={f} href={keep({ filter: on ? undefined : f })} className={`inline-flex min-h-11 items-center rounded-control px-3 ${on ? "bg-ink text-white" : "bg-chip"}`} aria-pressed={on} data-supplier-filter={f}>
+                <Link key={f} href={keep({ filter: on ? undefined : f })} className={`inline-flex min-h-11 items-center rounded-control px-3 ${on ? "bg-ink text-on-dark" : "bg-chip"}`} aria-pressed={on} data-supplier-filter={f}>
                   {SUPPLIER_FILTER_WORDS[f]} · {n}
                 </Link>
               );
@@ -152,9 +152,9 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
                   <Button type="submit" tone="ghost" size="md">{s.is_active ? "Take off the list" : "Put back on the list"}</Button>
                 </form>
               </details>
-              {(advanceOf.get(s.id) ?? advanceOf.get(s.name.toUpperCase())) ? <span className="inline-flex min-h-11 w-fit items-center rounded-card border border-green bg-green-soft px-3 py-1 text-xs font-bold text-green" data-supplier-advance>{advanceWords(s.name, advanceOf.get(s.id) ?? advanceOf.get(s.name.toUpperCase()) ?? 0)}</span> : null}
-              {(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase())) ? <Link href="/parts/returns?tab=credit" className="inline-flex min-h-11 w-fit items-center rounded-card border border-amber-bar bg-amber-soft px-3 py-1 text-xs font-bold text-amber" data-supplier-credit-expected={(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase()))!.amount.toFixed(2)}>Credit expected from {s.name} AED {(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase()))!.amount.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · not in the balance yet</Link> : null}
-              {(creditsToUse.get(s.id) ?? creditsToUse.get(s.name.toUpperCase())) ? <span className="inline-flex min-h-11 w-fit items-center rounded-card border border-green bg-green-soft px-3 py-1 text-xs font-bold text-green" data-supplier-credit-to-use>Credit to use AED {(creditsToUse.get(s.id) ?? creditsToUse.get(s.name.toUpperCase()))!.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (returns on paid invoices)</span> : null}
+              {(advanceOf.get(s.id) ?? advanceOf.get(s.name.toUpperCase())) ? <span className="inline-flex min-h-11 w-fit items-center rounded-card border border-green bg-green-soft px-3 py-1 text-xs font-bold text-green-text" data-supplier-advance>{advanceWords(s.name, advanceOf.get(s.id) ?? advanceOf.get(s.name.toUpperCase()) ?? 0)}</span> : null}
+              {(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase())) ? <Link href="/parts/returns?tab=credit" className="inline-flex min-h-11 w-fit items-center rounded-card border border-amber-bar bg-amber-soft px-3 py-1 text-xs font-bold text-amber-text" data-supplier-credit-expected={(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase()))!.amount.toFixed(2)}>Credit expected from {s.name} AED {(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase()))!.amount.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · not in the balance yet</Link> : null}
+              {(creditsToUse.get(s.id) ?? creditsToUse.get(s.name.toUpperCase())) ? <span className="inline-flex min-h-11 w-fit items-center rounded-card border border-green bg-green-soft px-3 py-1 text-xs font-bold text-green-text" data-supplier-credit-to-use>Credit to use AED {(creditsToUse.get(s.id) ?? creditsToUse.get(s.name.toUpperCase()))!.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (returns on paid invoices)</span> : null}
               {unpaid ? (
                 <Link href={unpaidHref(s.id)} className="inline-flex min-h-11 w-fit flex-wrap items-center gap-2 rounded-card border border-line-strong px-3 py-1 text-xs font-bold" data-supplier-unpaid={unpaid.total.toFixed(2)}>
                   <span>Unpaid ({unpaid.count})</span>

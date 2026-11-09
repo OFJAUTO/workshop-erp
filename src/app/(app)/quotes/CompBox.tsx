@@ -7,7 +7,7 @@ import { COMP_REASONS, COMP_REASON_LABELS, compCostWords, needsOriginalJob, type
 import { reloadIfStale } from "@/lib/app-version";
 import { saveCompReason } from "./comp-actions";
 
-const chip = (on: boolean) => `min-h-11 rounded-control border px-3 text-sm font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`;
+const chip = (on: boolean) => `min-h-11 rounded-control border px-3 text-sm font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`;
 
 /**
  * THE complimentary box on a quotation (section 5, 30 October 2026): what is free, why (our mistake / goodwill /

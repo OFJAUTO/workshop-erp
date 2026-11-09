@@ -49,7 +49,8 @@ const p2 = await browserFor("parts", { viewport: { width: 1500, height: 1200 } }
 await p2.page.goto(`${base}/dashboard`, { waitUntil: "load" });
 await p2.page.waitForTimeout(2200);
 const orderRow = p2.page.locator("[data-waiting-row]", { hasText: "ORDER NOW" }).first();
-check("Peter's ORDER NOW task is RED at the top", (await orderRow.count()) >= 1 && (await orderRow.getAttribute("data-urgency")) === "red", String(await orderRow.count()));
+// 9 November 2026: ORDER NOW is today's work (amber), red only when the car's promised date is passed or at risk.
+check("Peter's ORDER NOW task is on his list (amber unless a promise is at risk)", (await orderRow.count()) >= 1 && ["amber", "red"].includes(String(await orderRow.getAttribute("data-urgency"))), String(await orderRow.count()));
 check("it names the LPO, the supplier and the count", new RegExp(`ORDER NOW: ${child.number} · E2e Supplier · 1 part`).test(((await orderRow.textContent()) ?? "").replace(/\s+/g, " ")));
 await p2.page.screenshot({ path: `${shots}/order-now-task.png` });
 const bell = await sql("select count(*)::int as n from public.notifications n join public.staff s on s.id = n.staff_id where n.type = 'po_decided' and n.title like 'ORDER NOW%' and n.job_id = $1 and s.role_id = 'parts'", [jobId]);

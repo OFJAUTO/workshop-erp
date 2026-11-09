@@ -62,21 +62,21 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
       <div className="flex flex-wrap items-center gap-2">
         <span className={`text-base font-extrabold uppercase tracking-[0.04em] ${cancelledPo ? "text-muted" : ""}`}>{po.supplier_name} LPO</span>
         <span className="text-sm font-semibold text-muted">{po.number}</span>
-        <span className={`ml-auto inline-flex h-6 items-center rounded-full px-2.5 text-[11px] font-bold ${ordered ? "bg-green-soft text-green" : "bg-chip text-muted"}`} data-lpo-state>
+        <span className={`ml-auto inline-flex h-6 items-center rounded-full px-2.5 text-xs font-bold ${ordered ? "bg-green-soft text-green-text" : "bg-chip text-muted"}`} data-lpo-state>
           {cancelledPo ? "Cancelled – no part left on it" : po.status === "received" ? "Received ✓" : po.status === "partly_received" ? "Partly received" : ordered ? `Ordered ✓ ${po.ordered_at ? formatDateTime(po.ordered_at) : ""}` : "Approved, not ordered yet"}
         </span>
       </div>
-      {sentLine ? <span className="text-xs font-semibold text-green" data-lpo-sent>{sentLine}</span> : null}
+      {sentLine ? <span className="text-xs font-semibold text-green-text" data-lpo-sent>{sentLine}</span> : null}
       <ul className="divide-y divide-line text-sm">
         {po.lines.map((l) => endedOf.get(l.id) ? (
           <li key={l.id} className="py-1.5 flex flex-wrap items-center gap-2 opacity-70" data-lpo-line data-lpo-line-ended={endedOf.get(l.id)!.state}>
             {realPartNumber(l.part_number) ? <span className="font-mono text-xs font-semibold">{realPartNumber(l.part_number)}</span> : null}
             <span className="flex flex-col"><span className="font-semibold">{l.description}</span><PositionsLine positions={l.positions} /></span>
             <span className="text-muted">× {qtyWithUnit(l.quantity, unitOf(l.unit))} · AED {l.unit_cost.toFixed(2)}{perUnitMark(unitOf(l.unit))}</span>
-            <span className={`ml-auto inline-flex min-h-6 items-center rounded-full border px-2.5 text-[11px] font-bold ${endedOf.get(l.id)!.state === "return_pending" ? "border-amber-bar bg-amber-soft text-amber" : "border-line-strong bg-white text-ink"}`}>{endedOf.get(l.id)!.words}</span>
+            <span className={`ml-auto inline-flex min-h-6 items-center rounded-full border px-2.5 text-xs font-bold ${endedOf.get(l.id)!.state === "return_pending" ? "border-amber-bar bg-amber-soft text-amber-text" : "border-line-strong bg-white text-ink"}`}>{endedOf.get(l.id)!.words}</span>
           </li>
         ) : (
-          <li key={l.id} className={`py-1.5 flex flex-wrap items-center gap-2 ${l.received_qty >= l.quantity ? "rounded-control bg-green-soft px-2 text-green" : ""}`} data-lpo-line data-line-received={l.received_qty >= l.quantity ? "1" : "0"}>
+          <li key={l.id} className={`py-1.5 flex flex-wrap items-center gap-2 ${l.received_qty >= l.quantity ? "rounded-control bg-green-soft px-2 text-green-text" : ""}`} data-lpo-line data-line-received={l.received_qty >= l.quantity ? "1" : "0"}>
             {realPartNumber(l.part_number) ? <span className="font-mono text-xs font-semibold">{realPartNumber(l.part_number)}</span> : null}
             <span className="flex flex-col"><span className="font-semibold">{l.description}</span><PositionsLine positions={l.positions} /></span>
             <span className="text-muted" data-lpo-line-qty={qtyWithUnit(l.quantity, unitOf(l.unit))}>× {qtyWithUnit(l.quantity, unitOf(l.unit))} · AED {l.unit_cost.toFixed(2)}{perUnitMark(unitOf(l.unit))}</span>
@@ -88,7 +88,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
                   <Button type="button" tone="ghost" size="md" onClick={() => setEditing(null)}>Cancel</Button>
                 </form>
               ) : (
-                <button type="button" disabled={!canManage} onClick={() => setEditing(l.part_item_id)} data-part-date className={`ml-auto inline-flex h-9 items-center rounded-full px-2.5 text-[11px] font-bold ${l.received_qty >= l.quantity ? "bg-green-soft text-green" : "border border-line-strong bg-white"}`}>
+                <button type="button" disabled={!canManage} onClick={() => setEditing(l.part_item_id)} data-part-date className={`ml-auto inline-flex h-9 items-center rounded-full px-2.5 text-xs font-bold ${l.received_qty >= l.quantity ? "bg-green-soft text-green-text" : "border border-line-strong bg-white"}`}>
                   {l.received_qty >= l.quantity ? "Here" : l.expected_date ? `Expected ${formatDate(l.expected_date)}` : "No date"}
                 </button>
               )
@@ -97,7 +97,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
         ))}
         {(po.charges ?? []).map((c) => (
           <li key={c.id} className="py-1.5 flex flex-wrap items-center gap-2" data-lpo-charge>
-            <span className="inline-flex h-5 items-center rounded-full bg-chip px-2 text-[10px] font-bold text-muted">Other charge</span>
+            <span className="inline-flex h-5 items-center rounded-full bg-chip px-2 text-xs font-bold text-muted">Other charge</span>
             <span className="font-semibold">{c.description}</span>
             <span className="text-muted">AED {c.amount_aed.toFixed(2)}</span>
           </li>
@@ -107,7 +107,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
             {l.partNumber ? <span className="font-mono text-xs font-semibold line-through">{l.partNumber}</span> : null}
             <span className="font-semibold line-through">{l.description}</span>
             <span className="line-through">× {l.quantity} · AED {l.unitCost.toFixed(2)}</span>
-            <span className="ml-auto inline-flex min-h-6 items-center rounded-full border border-line-strong bg-white px-2.5 text-[11px] font-bold text-ink">{l.words}</span>
+            <span className="ml-auto inline-flex min-h-6 items-center rounded-full border border-line-strong bg-white px-2.5 text-xs font-bold text-ink">{l.words}</span>
           </li>
         ))}
       </ul>
@@ -116,7 +116,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
           <SupplierAmount money={amount} cancelled={cancelledPo} size="sm" align="start" />
           {cancelledLines.length && !cancelledPo ? <span className="text-xs font-semibold text-muted">{cancelledLines.length} line{cancelledLines.length === 1 ? "" : "s"} cancelled</span> : null}
         </span>
-        {returnsAed > 0 ? <span className="text-xs font-semibold text-amber" data-lpo-returns>Returns −AED {money(returnsAed)} (supplier credit) · net AED {money(Math.max(0, po.total_cost_aed - returnsAed))}</span> : null}
+        {returnsAed > 0 ? <span className="text-xs font-semibold text-amber-text" data-lpo-returns>Returns −AED {money(returnsAed)} (supplier credit) · net AED {money(Math.max(0, po.total_cost_aed - returnsAed))}</span> : null}
         {ordered && latest ? <span className="text-xs text-muted">· all here by {formatDate(latest)}</span> : null}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Button type="button" tone="secondary" size="md" onClick={async () => { try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); } catch {} }} data-lpo-copy>{copied ? "Copied" : "Copy"}</Button>
@@ -136,7 +136,7 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
       </div>
       {canManage && onEmail && !emailReady && !emailResult ? <span className="text-xs text-muted" data-lpo-email-note>Email not set up yet: the owner connects the Google Workspace mailbox in Vercel. Share PDF and Copy work meanwhile.</span> : null}
       {canManage && onEmail && emailReady && !supplierEmail && !emailResult ? <span className="text-xs text-muted" data-lpo-email-note>No email on {po.supplier_name} yet: add it under Suppliers to email the LPO.</span> : null}
-      {emailResult ? <span className={`text-xs font-semibold ${emailResult.error ? "text-red" : "text-green"}`} data-lpo-email-result>{emailResult.error ?? emailResult.message}</span> : null}
+      {emailResult ? <span className={`text-xs font-semibold ${emailResult.error ? "text-red" : "text-green-text"}`} data-lpo-email-result>{emailResult.error ?? emailResult.message}</span> : null}
     </div>
   );
 }

@@ -54,7 +54,7 @@ export function StageHandover({ jobId, stage, nextLabel, photos: initial, needPi
               <Button type="button" tone="secondary" size="lg" onClick={() => setOpen(false)}>Cancel</Button>
             </div>
             {!photos.length ? (
-              <span className="text-xs font-semibold text-amber" {...(wait.count && !wait.stopped ? { "data-handover-photo-sending": "" } : {})}>
+              <span className="text-xs font-semibold text-amber-text" {...(wait.count && !wait.stopped ? { "data-handover-photo-sending": "" } : {})}>
                 {wait.stopped ? "The photo could not be sent – try again, or remove it and take another." : wait.count ? "The photo is still sending – Sign off works once it has arrived." : "Add a photo first."}
               </span>
             ) : null}

@@ -89,9 +89,9 @@ export default async function ScoreboardPage({ searchParams }: { searchParams: P
                   <td className="px-3 py-2">{r.jobs}</td>
                   <td className="px-3 py-2">{r.hoursCharged.toFixed(1)} h</td>
                   <td className="px-3 py-2">{hm(r.minutesUsed)}</td>
-                  <td className={`px-3 py-2 font-semibold ${diff < 0 ? "text-red" : "text-green"}`}>{r.jobs ? `${diff < 0 ? "−" : "+"}${hm(Math.abs(diff))}` : ""}</td>
+                  <td className={`px-3 py-2 font-semibold ${diff < 0 ? "text-red" : "text-green-text"}`}>{r.jobs ? `${diff < 0 ? "−" : "+"}${hm(Math.abs(diff))}` : ""}</td>
                   <td className={`px-3 py-2 ${r.qcSendbacks ? "text-red font-semibold" : ""}`}>{r.qcSendbacks}</td>
-                  <td className={`px-3 py-2 ${r.managerSendbacks ? "text-amber font-semibold" : ""}`}>{r.managerSendbacks}</td>
+                  <td className={`px-3 py-2 ${r.managerSendbacks ? "text-amber-text font-semibold" : ""}`}>{r.managerSendbacks}</td>
                   <td className="px-3 py-2">{r.pauses ? `${r.pauses} · ${hm(r.pauseMinutes)}${r.notAccepted ? ` · ${r.notAccepted} not accepted` : ""}` : "0"}</td>
                   <td className={`px-3 py-2 ${r.comebacks ? "text-red font-semibold" : ""}`}>{r.comebacks}</td>
                   <td className="px-3 py-2 flex flex-wrap gap-1">{r.good ? <Badge tone="green">{r.good} good</Badge> : null}{r.talk ? <Badge tone="red">{r.talk} needs a talk</Badge> : null}</td>

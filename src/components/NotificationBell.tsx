@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { FALLBACK_POLL_MS, hiddenTracker, startLive } from "@/lib/live-connection";
 import { TONES, engine, isTone, playTone, type ToneId } from "@/lib/tones";
+import { isActionType } from "@/lib/bell-rules";
 
 type Item = { id: number; staff_id?: string; type: string; title: string; body: string | null; job_id: string | null; href: string | null; read_at: string | null; created_at: string };
 
@@ -126,7 +127,8 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
         if (n.staff_id !== staffId || known.current.has(n.id)) return;
         known.current.add(n.id);
         setItems((prev) => [n, ...prev].slice(0, 30));
-        setUnread((u) => u + 1);
+        // 9 November 2026: the badge counts open ACTIONS only; information never adds to it.
+        if (isActionType(n.type)) setUnread((u) => u + 1);
         announce(n);
       })
       // Read on another device (or "Mark all read"): the badge follows without asking the server.
@@ -135,7 +137,7 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
         if (n.staff_id !== staffId) return;
         setItems((prev) => {
           const was = prev.find((i) => i.id === n.id);
-          if (was && !was.read_at && n.read_at) setUnread((u) => Math.max(0, u - 1));
+          if (was && !was.read_at && n.read_at && isActionType(n.type)) setUnread((u) => Math.max(0, u - 1));
           return prev.map((i) => (i.id === n.id ? { ...i, ...n } : i));
         });
       });
@@ -193,7 +195,7 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
     setToast(null);
     if (!n.read_at) {
       setItems((prev) => prev.map((i) => (i.id === n.id ? { ...i, read_at: new Date().toISOString() } : i)));
-      setUnread((u) => Math.max(0, u - 1));
+      if (isActionType(n.type)) setUnread((u) => Math.max(0, u - 1));
       fetch("/api/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: [n.id] }) }).catch(() => {});
     }
     router.push(n.href ?? (n.job_id ? `/jobs/${n.job_id}` : "/notifications"));
@@ -227,6 +229,15 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
         type="button"
         onClick={() => {
           setOpen((o) => !o);
+          // Information notices are read once the panel has shown them (an action stays until it is done or opened).
+          if (!open) {
+            const seen = items.filter((i) => !i.read_at && !isActionType(i.type)).map((i) => i.id);
+            if (seen.length) {
+              const at = new Date().toISOString();
+              setItems((prev) => prev.map((i) => (seen.includes(i.id) ? { ...i, read_at: at } : i)));
+              fetch("/api/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seen }) }).catch(() => {});
+            }
+          }
           const ctx = engine();
           if (ctx && ctx.state === "suspended") ctx.resume().then(() => setBlocked(false)).catch(() => {});
         }}
@@ -239,7 +250,7 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
           <path d="M13.7 21a2 2 0 0 1-3.4 0" />
         </svg>
         {unread > 0 ? (
-          <span className="absolute top-0.5 right-0.5 min-w-5 h-5 rounded-full bg-red-bar text-white text-[10px] font-bold flex items-center justify-center px-1" data-bell-badge>{unread > 99 ? "99+" : unread}</span>
+          <span className="absolute top-0.5 right-0.5 min-w-5 h-5 rounded-full bg-red-bar text-on-dark text-xs font-bold flex items-center justify-center px-1" data-bell-badge>{unread > 99 ? "99+" : unread}</span>
         ) : null}
       </button>
 
@@ -251,7 +262,7 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
             if (ctx) ctx.resume().then(() => { setBlocked(false); sound("normal"); }).catch(() => {});
           }}
           data-overlap-ok
-          className="fixed bottom-0 inset-x-0 nav:left-60 z-50 bg-ink text-white text-sm font-bold py-2 text-center"
+          className="fixed bottom-0 inset-x-0 nav:left-60 z-50 bg-ink text-on-dark text-sm font-bold py-2 text-center"
         >
           Click here to turn on sounds for notifications
         </button>
@@ -281,17 +292,17 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-semibold text-muted w-12">Sound</span>
               {VOLUMES.map((v) => (
-                <button key={v} type="button" onClick={() => chooseVolume(v)} aria-pressed={volume === v} className={`min-h-8 rounded-control border px-2.5 font-bold ${volume === v ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                <button key={v} type="button" onClick={() => chooseVolume(v)} aria-pressed={volume === v} className={`min-h-8 rounded-control border px-2.5 font-bold ${volume === v ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
                   {v === "off" ? "Off" : v[0].toUpperCase() + v.slice(1)}
                 </button>
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-semibold text-muted w-12">Tone</span>
-              <button type="button" onClick={() => chooseTone(null)} aria-pressed={myTone === null} className={`min-h-8 rounded-control border px-2.5 font-bold ${myTone === null ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Workshop default</button>
+              <button type="button" onClick={() => chooseTone(null)} aria-pressed={myTone === null} className={`min-h-8 rounded-control border px-2.5 font-bold ${myTone === null ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>Workshop default</button>
               {TONES.map((t) => (
                 <span key={t.id} className="inline-flex items-center gap-0.5">
-                  <button type="button" onClick={() => chooseTone(t.id)} aria-pressed={myTone === t.id} className={`min-h-8 rounded-control border px-2.5 font-bold ${myTone === t.id ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{t.label}</button>
+                  <button type="button" onClick={() => chooseTone(t.id)} aria-pressed={myTone === t.id} className={`min-h-8 rounded-control border px-2.5 font-bold ${myTone === t.id ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>{t.label}</button>
                   <button type="button" onClick={() => playTone(t.id, GAIN[volume === "off" ? "normal" : volume])} aria-label={`Play ${t.label}`} className="min-h-8 rounded-control border border-line px-1.5 font-bold text-muted">▶</button>
                 </span>
               ))}
@@ -307,7 +318,7 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
                     <span className="flex flex-col gap-0.5 min-w-0">
                       <span className="text-sm font-semibold leading-snug">{n.title}</span>
                       {n.body ? <span className="text-xs text-muted">{n.body}</span> : null}
-                      <span className="text-[11px] text-faint">{timeAgo(n.created_at)}</span>
+                      <span className="text-xs text-faint">{timeAgo(n.created_at)}</span>
                     </span>
                   </span>
                 </button>
@@ -326,7 +337,7 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
         <button type="button" onClick={() => openItem(toast)} className="fixed bottom-4 right-4 z-50 max-w-sm rounded-card border-2 border-ink bg-white text-ink shadow-2xl px-4 py-3 text-left">
           <span className="block text-sm font-bold">{toast.title}</span>
           {toast.body ? <span className="block text-xs text-muted">{toast.body}</span> : null}
-          <span className="block text-[11px] text-faint mt-1">Tap to open</span>
+          <span className="block text-xs text-faint mt-1">Tap to open</span>
         </button>
       ) : null}
     </div>

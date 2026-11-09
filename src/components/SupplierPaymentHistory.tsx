@@ -35,7 +35,7 @@ function VoidForm({ id, number }: { id: string; number: string }) {
         <Input name="remark" required minLength={5} placeholder="Why? (stays in the history)" className="w-72" aria-label={`Why void ${number}`} />
         <ConfirmSubmit label="Void" title={`Void ${number}?`} lines={["Its invoices are unpaid again; if it reached Zoho Books, the payment is taken back there too."]} live={[{ label: "why:", field: "remark" }]} confirmLabel="Yes, void it" tone="danger" size="md" hook="supplier-pay-void" />
         {state?.error ? <span className="text-xs font-bold text-red">{state.error}</span> : null}
-        {state?.ok ? <span className="text-xs font-bold text-green">{state.message}</span> : null}
+        {state?.ok ? <span className="text-xs font-bold text-green-text">{state.message}</span> : null}
       </form>
     </details>
   );

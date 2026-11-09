@@ -46,7 +46,7 @@ export function AuthAddedWindow() {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label="Auth code saved" onClick={() => announce(null)} data-auth-added-window={a.number}>
       <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-3 shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-lg font-extrabold text-green">Auth code saved ✓</h2>
+        <h2 className="text-lg font-extrabold text-green-text">Auth code saved ✓</h2>
         <p className="text-sm font-semibold" data-auth-added-message>{a.message}</p>
         {a.label ? <p className="text-sm text-muted">{a.label}</p> : null}
         <p className="text-sm text-muted">The amber &quot;{AUTH_MISSING_WORDS}&quot; flag is gone from this receipt. Nothing was recorded again.</p>
@@ -89,7 +89,7 @@ export function AuthCodeMissing({ paymentId, number, method, code = null, canAdd
     }
   };
 
-  if (answer?.ok) return <span className="text-xs font-bold text-green" data-auth-added={number}>✓ {answer.message}</span>;
+  if (answer?.ok) return <span className="text-xs font-bold text-green-text" data-auth-added={number}>✓ {answer.message}</span>;
   return (
     <span className="inline-flex max-w-full flex-wrap items-center gap-2" data-auth-missing={number}>
       {label ? <span className="text-xs font-semibold">{label}</span> : null}

@@ -12,7 +12,7 @@ export type BodyStateProps = { findings: BodyFindingState[]; openedAt: string | 
 
 function Chip({ on, onClick, disabled, children, hook }: { on: boolean; onClick: () => void; disabled?: boolean; children: ReactNode; hook?: string }) {
   return (
-    <button type="button" disabled={disabled} aria-pressed={on} onClick={onClick} className={`min-h-10 rounded-control border px-3 text-sm font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"} disabled:opacity-60`} data-body-chip={hook}>
+    <button type="button" disabled={disabled} aria-pressed={on} onClick={onClick} className={`min-h-10 rounded-control border px-3 text-sm font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"} disabled:opacity-60`} data-body-chip={hook}>
       {children}
     </button>
   );
@@ -118,7 +118,7 @@ export function BodyshopFindings({
     <Card className="flex flex-col gap-4" id="body" data-body-findings="open">
       <div className="flex flex-wrap items-center gap-2">
         <SectionLabel right={`${state.findings.length} panel${state.findings.length === 1 ? "" : "s"}`}>Bodyshop findings</SectionLabel>
-        {state.checkedAt ? <span className="rounded-full bg-green-soft px-2.5 py-0.5 text-xs font-bold text-green" data-body-checked>Checked by the bodyshop{state.checkedBy ? ` · ${state.checkedBy}` : ""}</span> : state.findings.length ? <span className="rounded-full bg-amber-soft px-2.5 py-0.5 text-xs font-bold text-amber">Bodyshop manager told</span> : null}
+        {state.checkedAt ? <span className="rounded-full bg-green-soft px-2.5 py-0.5 text-xs font-bold text-green-text" data-body-checked>Checked by the bodyshop{state.checkedBy ? ` · ${state.checkedBy}` : ""}</span> : state.findings.length ? <span className="rounded-full bg-amber-soft px-2.5 py-0.5 text-xs font-bold text-amber-text">Bodyshop manager told</span> : null}
         {saving ? <span className="text-xs text-muted">Saving…</span> : null}
       </div>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[auto_minmax(0,1fr)]">
@@ -142,7 +142,7 @@ export function BodyshopFindings({
                 {BODY_ACTIONS.map((d) => <Chip key={d.value} hook={`action-${d.value}`} disabled={!canEdit} on={sel.action === d.value} onClick={() => change(sel.panel, { action: sel.action === d.value ? null : d.value })}>{d.label}</Chip>)}
               </div>
               <div className="flex flex-col gap-1">
-                <span className={`text-xs font-semibold ${photoOnTheWay ? "text-amber" : noPhoto ? "text-red" : "text-muted"}`} data-body-photo-label data-photo-on-the-way={photoOnTheWay ? "1" : undefined}>
+                <span className={`text-xs font-semibold ${photoOnTheWay ? "text-amber-text" : noPhoto ? "text-red" : "text-muted"}`} data-body-photo-label data-photo-on-the-way={photoOnTheWay ? "1" : undefined}>
                   Photos (required){photoOnTheWay ? ` · ${pics?.pending} still sending, counted once it has arrived` : ""}
                 </span>
                 {pics?.node}
@@ -193,10 +193,10 @@ export function BodyshopFindings({
           <span className="text-sm">Structural / chassis damage suspected?</span>
           {[{ v: true, l: "Yes" }, { v: false, l: "No" }].map((o) => <Chip key={o.l} hook={`structural-${o.l.toLowerCase()}`} disabled={!canEdit} on={state.structural === o.v} onClick={() => { const v = state.structural === o.v ? null : o.v; setState((s) => ({ ...s, structural: v })); post({ op: "accident", structural: v }); }}>{o.l}</Chip>)}
         </div>
-        {state.structural ? <span className="self-start rounded-control bg-red-bar px-3 py-1.5 text-sm font-extrabold text-white" data-chassis-needed>CHASSIS MEASUREMENT NEEDED</span> : null}
+        {state.structural ? <span className="self-start rounded-control bg-red-bar px-3 py-1.5 text-sm font-extrabold text-on-dark" data-chassis-needed>CHASSIS MEASUREMENT NEEDED</span> : null}
       </div>
       {canCheck && !state.checkedAt && state.findings.length ? (
-        <button type="button" onClick={() => post({ op: "checked" })} className="min-h-12 self-start rounded-control bg-ink px-4 text-sm font-bold text-white" data-body-check>Mark the bodyshop assessment checked</button>
+        <button type="button" onClick={() => post({ op: "checked" })} className="min-h-12 self-start rounded-control bg-ink px-4 text-sm font-bold text-on-dark" data-body-check>Mark the bodyshop assessment checked</button>
       ) : null}
       {error ? <span className="text-sm font-semibold text-red" data-body-error>{error}</span> : null}
     </Card>

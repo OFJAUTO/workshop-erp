@@ -117,8 +117,8 @@ export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, wa
                 <span className="font-semibold">{it.label}</span>
                 <input type="hidden" name={`result__${it.key}`} value={r ?? ""} />
                 <div className="grid grid-cols-2 gap-2">
-                  <button type="button" disabled={readOnly} onClick={() => setResults({ ...results, [it.key]: "pass" })} aria-pressed={r === "pass"} className={`min-h-12 rounded-control border-2 text-sm font-extrabold tracking-[0.04em] ${r === "pass" ? "border-green bg-green text-white" : "border-line-strong bg-white"}`}>PASS</button>
-                  <button type="button" disabled={readOnly} onClick={() => setResults({ ...results, [it.key]: "fail" })} aria-pressed={r === "fail"} className={`min-h-12 rounded-control border-2 text-sm font-extrabold tracking-[0.04em] ${r === "fail" ? "border-red-bar bg-red-bar text-white" : "border-line-strong bg-white"}`}>FAIL</button>
+                  <button type="button" disabled={readOnly} onClick={() => setResults({ ...results, [it.key]: "pass" })} aria-pressed={r === "pass"} className={`min-h-12 rounded-control border-2 text-sm font-extrabold tracking-[0.04em] ${r === "pass" ? "border-green bg-green text-on-dark" : "border-line-strong bg-white"}`}>PASS</button>
+                  <button type="button" disabled={readOnly} onClick={() => setResults({ ...results, [it.key]: "fail" })} aria-pressed={r === "fail"} className={`min-h-12 rounded-control border-2 text-sm font-extrabold tracking-[0.04em] ${r === "fail" ? "border-red-bar bg-red-bar text-on-dark" : "border-line-strong bg-white"}`}>FAIL</button>
                 </div>
                 {r === "fail" ? <Textarea name={`remark__${it.key}`} rows={2} defaultValue={it.remark ?? ""} placeholder="What is wrong (required)" disabled={readOnly} /> : <input type="hidden" name={`remark__${it.key}`} value={it.remark ?? ""} />}
               </div>

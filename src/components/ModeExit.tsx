@@ -8,7 +8,7 @@ export function ModeExit({ dark = false }: { dark?: boolean }) {
     <a
       href="/api/view-as/exit"
       onClick={() => writeTab(null)}
-      className={`inline-flex min-h-10 items-center rounded-control px-4 text-sm font-bold ${dark ? "bg-white text-ink" : "bg-ink text-white"}`}
+      className={`inline-flex min-h-10 items-center rounded-control px-4 text-sm font-bold ${dark ? "bg-white text-ink" : "bg-ink text-on-dark"}`}
     >
       Exit
     </a>

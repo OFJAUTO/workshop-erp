@@ -180,7 +180,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
               </li>
             );
           })}
-          {ROAD_TEST_ITEMS.every((it) => !roadTest.items[it.key]?.status || roadTest.items[it.key]?.status === "good") ? <li className="py-1.5 text-sm text-green font-semibold">Nothing flagged on the road test.</li> : null}
+          {ROAD_TEST_ITEMS.every((it) => !roadTest.items[it.key]?.status || roadTest.items[it.key]?.status === "good") ? <li className="py-1.5 text-sm text-green-text font-semibold">Nothing flagged on the road test.</li> : null}
           {!inWork ? (
             <li className="py-1.5">
               <details>
@@ -355,7 +355,7 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
                   <form action={startInspection.bind(null, id)} className="flex flex-col gap-2">
                     <p className="text-sm text-muted">{insp.status === "returned" ? "Open the report again to make the changes, then submit it again." : "Press start when you begin. The time counts as labour on this job."}</p>
                     <Button type="submit" size="lg" disabled={scanGateOn && !insp.scan_read_at && !insp.scan_approved_at && insp.status !== "returned"}>{insp.status === "returned" ? "Open the report" : "Start inspection"}</Button>
-                    {scanGateOn && !insp.scan_read_at && !insp.scan_approved_at && insp.status !== "returned" ? <p className="text-xs font-semibold text-amber">Step 1 first: the scan report above.</p> : null}
+                    {scanGateOn && !insp.scan_read_at && !insp.scan_approved_at && insp.status !== "returned" ? <p className="text-xs font-semibold text-amber-text">Step 1 first: the scan report above.</p> : null}
                   </form>
                 ) : (
                   <p className="text-sm text-muted">{waitingRoadTest ? "Waiting for road test." : `Assigned to ${bundle?.technician?.display_name ?? "a technician"}.`}</p>

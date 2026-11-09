@@ -12,7 +12,7 @@ export function MileagePanel({ m }: { m: VisitMileage }) {
     <Card id="mileage" className="flex flex-col gap-2" data-mileage-panel>
       <SectionLabel>Mileage</SectionLabel>
       <p className="text-sm font-bold" data-mileage-line>{m.line}</p>
-      {m.note ? <p className="text-sm font-semibold text-amber" data-mileage-not-read>Final km not read: {m.note}</p> : null}
+      {m.note ? <p className="text-sm font-semibold text-amber-text" data-mileage-not-read>Final km not read: {m.note}</p> : null}
       {photos.length ? (
         <div className="grid max-w-md grid-cols-2 gap-2" data-mileage-photos={photos.length}>
           {photos.map((p) => (

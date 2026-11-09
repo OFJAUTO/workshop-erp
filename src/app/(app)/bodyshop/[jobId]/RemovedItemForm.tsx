@@ -17,7 +17,7 @@ export function RemovedItemForm({ jobId, action }: { jobId: string; action: Acti
     <form action={action} className="flex flex-col gap-2" data-removed-form>
       <div className="flex flex-wrap gap-1.5">
         {QUICK.map((q) => (
-          <button key={q} type="button" onClick={() => setLabel(q)} aria-pressed={label === q} className={`min-h-9 rounded-control border px-2.5 text-xs font-bold ${label === q ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{q}</button>
+          <button key={q} type="button" onClick={() => setLabel(q)} aria-pressed={label === q} className={`min-h-9 rounded-control border px-2.5 text-xs font-bold ${label === q ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>{q}</button>
         ))}
       </div>
       <div className="flex flex-wrap items-center gap-2">

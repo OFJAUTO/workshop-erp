@@ -107,7 +107,7 @@ export function PartPriceDialog({ title, qtyWords, minMarkup, isOwner, initial, 
         <div className="flex flex-wrap items-end gap-2">
           <div className="inline-flex shrink-0 rounded-control border border-line-strong p-0.5" data-price-mode={mode}>
             {(["percent", "aed"] as const).map((m) => (
-              <button key={m} type="button" onClick={() => { setMode(m); if (costNum && sell !== null) setMarkup(m === "percent" ? pct((sell / costNum - 1) * 100) : String(r2(sell - costNum))); }} className={`min-h-9 rounded-control px-3 text-xs font-bold ${mode === m ? "bg-ink text-white" : ""}`}>{m === "percent" ? "Markup %" : "Markup AED"}</button>
+              <button key={m} type="button" onClick={() => { setMode(m); if (costNum && sell !== null) setMarkup(m === "percent" ? pct((sell / costNum - 1) * 100) : String(r2(sell - costNum))); }} className={`min-h-9 rounded-control px-3 text-xs font-bold ${mode === m ? "bg-ink text-on-dark" : ""}`}>{m === "percent" ? "Markup %" : "Markup AED"}</button>
             ))}
           </div>
           <label className="flex flex-col gap-1 text-xs font-semibold">{mode === "percent" ? "Markup (%)" : "Markup (AED each)"}

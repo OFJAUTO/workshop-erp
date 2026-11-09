@@ -323,7 +323,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
           <ul className="flex flex-col gap-1 text-sm">
             {changes.added.map((a) => (
               <li key={a.id} className="flex flex-wrap gap-x-2" data-change-row="added">
-                <span className={`font-bold ${a.needsApproval ? "text-amber" : ""}`}>{a.needsApproval ? "NEW – needs approval" : "NEW"}</span>
+                <span className={`font-bold ${a.needsApproval ? "text-amber-text" : ""}`}>{a.needsApproval ? "NEW – needs approval" : "NEW"}</span>
                 <span className="font-semibold uppercase">{a.description} × {a.qty}</span>
                 <span className="text-muted">{a.priced ? `AED ${a.total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : "not priced yet"}</span>
               </li>
@@ -349,7 +349,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
               <span className="text-xs text-muted">Only the changes go to the owner or the head accountant, old vs new. Once approved, the new parts go on a new LPO for the supplier.</span>
             </form>
           ) : lpos.main && lpos.main.status === "pending_approval" && changes.needsApproval.length === 0 ? (
-            <p className="text-sm font-semibold text-amber" data-resend-waiting>Sent for approval on {lpos.main.number} – waiting for the owner or the head accountant.</p>
+            <p className="text-sm font-semibold text-amber-text" data-resend-waiting>Sent for approval on {lpos.main.number} – waiting for the owner or the head accountant.</p>
           ) : null}
           <p className="text-xs text-muted">The customer&apos;s approved quotation is not changed by this. The advisor decides whether to revise it.</p>
         </Card>
@@ -397,7 +397,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
 
       {lpos.suppliers.length ? (
         <section id="lpos" className="flex flex-col gap-3" data-supplier-lpos>
-          <SectionLabel right={lpos.suppliers.every((s) => !["approved", "pending_approval"].includes(s.po.status)) ? <span className="font-bold text-green" data-all-ordered>All ordered ✓</span> : `${lpos.suppliers.length}`}>Supplier LPOs</SectionLabel>
+          <SectionLabel right={lpos.suppliers.every((s) => !["approved", "pending_approval"].includes(s.po.status)) ? <span className="font-bold text-green-text" data-all-ordered>All ordered ✓</span> : `${lpos.suppliers.length}`}>Supplier LPOs</SectionLabel>
           {lpos.suppliers.map((s) => (
             <SupplierLpoCard key={s.po.id} po={toView(s)} vin={v?.vin ?? null} canManage={canOrder} onOrdered={markSupplierOrdered.bind(null, s.po.id)} onSetDate={setPartExpectedDate} supplierEmail={supplierEmailOf.get(s.po.supplier_id ?? "") ?? null} emailReady={gmailConfigured()} onEmail={emailSupplierLpo.bind(null, s.po.id)} jobId={jobId} />
           ))}

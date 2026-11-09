@@ -67,7 +67,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ token
                   <img src={data.beforeThumb ?? data.beforeUrl} alt="Before" className="aspect-[4/3] w-full object-cover bg-[#F4F4F5]" />
                 </ViewerThumb>
               ) : <div className="aspect-[4/3] w-full rounded-lg bg-[#F4F4F5]" />}
-              <figcaption className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">Before</figcaption>
+              <figcaption className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]">Before</figcaption>
             </figure>
             <figure className="flex flex-col gap-1">
               {data.afterUrl ? (
@@ -76,23 +76,23 @@ export default async function HandoverPage({ params }: { params: Promise<{ token
                   <img src={data.afterThumb ?? data.afterUrl} alt="After" className="aspect-[4/3] w-full object-cover bg-[#F4F4F5]" />
                 </ViewerThumb>
               ) : <div className="aspect-[4/3] w-full rounded-lg bg-[#F4F4F5]" />}
-              <figcaption className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">After</figcaption>
+              <figcaption className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]">After</figcaption>
             </figure>
           </div>
         ) : null}
         {wCard && wToken ? <WarrantyCardPanel href={`/warranty/${wToken}`} qr={wQr} certificateNo={wCard.certificateNo} car={[wCard.car, wCard.plate].filter(Boolean).join(" · ")} status={{ kind: customerWarrantyStatus(wCard.status).kind, title: customerWarrantyTitle(wCard.status) }} /> : data.warranty ? (
           <div className="rounded-lg border border-[#D4D4D8] px-4 py-4 flex flex-col gap-1" data-warranty>
-            <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{brand} · {years}-year warranty</span>
+            <span className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]">{brand} · {years}-year warranty</span>
             <span className="text-sm">{data.filmText}. Installed {formatDate(data.warranty.installDate)}, valid until {formatDate(data.warranty.validUntil)}. Certificate {data.warranty.certificateNo}.</span>
           </div>
         ) : null}
         <div className="rounded-lg bg-[#F4F4F5] px-4 py-4 flex flex-col gap-1" data-care>
-          <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">Care instructions</span>
+          <span className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]">Care instructions</span>
           <p className="text-sm whitespace-pre-wrap leading-relaxed">{String(settings.ppf_care_text || "")}</p>
         </div>
         {data.finalCheck ? (
           <div className="rounded-lg border border-[#D4D4D8] px-4 py-4 flex flex-col gap-1" data-final-check>
-            <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">Final check</span>
+            <span className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]">Final check</span>
             <span className="text-sm">We will see the car again on {formatDate(data.finalCheck)} for a short check of the film. We will send a reminder the day before.</span>
           </div>
         ) : null}

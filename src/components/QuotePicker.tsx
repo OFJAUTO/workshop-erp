@@ -41,7 +41,7 @@ export function QuotePicker({ items }: { items: QuotePickItem[] }) {
             <Link key={i.number} href={i.href} onClick={() => setAnchor(null)} className="flex min-h-11 flex-col justify-center rounded-control px-3 py-1.5 hover:bg-canvas" data-quote-pick={i.number}>
               <span className="flex flex-wrap items-center gap-2 text-sm font-extrabold">
                 {i.number}
-                <span className="text-[10px] font-extrabold tracking-[0.08em] text-muted">{i.role === "original" ? "ORIGINAL" : "ADDITIONAL"}</span>
+                <span className="text-xs font-extrabold tracking-[0.08em] text-muted">{i.role === "original" ? "ORIGINAL" : "ADDITIONAL"}</span>
                 <span className="ml-auto whitespace-nowrap">{i.amount}</span>
               </span>
               <span className="text-xs text-muted">

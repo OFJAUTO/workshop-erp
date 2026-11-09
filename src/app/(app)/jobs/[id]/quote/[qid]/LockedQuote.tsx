@@ -50,7 +50,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
               <ol className="divide-y divide-line text-sm">
                 {labour.map((l, i) => (
                   <li key={l.id} className="flex flex-wrap items-start gap-x-3 gap-y-1 py-2" data-locked-line data-line-id={l.id}>
-                    <span className="w-5 shrink-0 text-right text-[11px] font-bold text-muted">{i + 1}</span>
+                    <span className="w-5 shrink-0 text-right text-xs font-bold text-muted">{i + 1}</span>
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span className="flex flex-wrap items-center gap-2"><Words text={l.title || "(no name)"} className="font-semibold uppercase" />{l.urgency === "urgent" ? <Badge tone="red">Urgent</Badge> : null}{l.dangerous ? <Badge tone="red">Dangerous</Badge> : null}{isHidden(l) ? <Badge tone="neutral">Internal cost only</Badge> : null}</span><PositionsLine positions={l.positions} />
                       {detailOf(l) ? <span className="text-xs text-muted">{detailOf(l)}</span> : null}
@@ -101,7 +101,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
                   const hidden = isHidden(l);
                   return (
                     <li key={l.id} className="flex flex-wrap items-start gap-x-3 gap-y-1 py-2" data-locked-line data-line-id={l.id}>
-                      <span className="w-5 shrink-0 text-right text-[11px] font-bold text-muted">{i + 1}</span>
+                      <span className="w-5 shrink-0 text-right text-xs font-bold text-muted">{i + 1}</span>
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="flex flex-wrap items-center gap-2"><Words text={l.title} className="font-semibold" />{hidden ? <Badge tone="neutral">Internal cost only</Badge> : null}</span>
                         {(l.quantity || 1) > 1 ? <span className="text-xs text-muted">{l.quantity} × {aed(l.unit_price)}</span> : null}
@@ -123,14 +123,14 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
               <dt className="text-muted">Labour and services</dt><dd className="text-right">{aed(totals.labourSell)}</dd>
               <dt className="text-muted">Parts</dt><dd className="text-right">{aed(totals.partsSell)}</dd>
               <dt className="text-muted">Other charges</dt><dd className="text-right">{aed(totals.otherSell)}</dd>
-              {totals.discount ? <><dt className="font-bold text-green">{discountLabelOf(quotation, { hasPackage: hasPackageLine(lines) })}</dt><dd className="text-right font-bold text-green">− {aed(totals.discount)}</dd></> : null}
-              {totals.rounding ? <><dt className={totals.rounding < 0 ? "font-bold text-green" : "text-muted"}>{totals.rounding < 0 ? "Round-off" : "Rounding"}</dt><dd className={`text-right ${totals.rounding < 0 ? "font-bold text-green" : ""}`}>{totals.rounding < 0 ? "− " : ""}{aed(Math.abs(totals.rounding))}</dd></> : null}
+              {totals.discount ? <><dt className="font-bold text-green-text">{discountLabelOf(quotation, { hasPackage: hasPackageLine(lines) })}</dt><dd className="text-right font-bold text-green-text">− {aed(totals.discount)}</dd></> : null}
+              {totals.rounding ? <><dt className={totals.rounding < 0 ? "font-bold text-green-text" : "text-muted"}>{totals.rounding < 0 ? "Round-off" : "Rounding"}</dt><dd className={`text-right ${totals.rounding < 0 ? "font-bold text-green-text" : ""}`}>{totals.rounding < 0 ? "− " : ""}{aed(Math.abs(totals.rounding))}</dd></> : null}
               <dt className="text-muted border-t border-line pt-1">Subtotal before VAT</dt><dd className="text-right border-t border-line pt-1">{aed(totals.net)}</dd>
               <dt className="text-muted">VAT {quotation.vat_percent}%</dt><dd className="text-right">{aed(totals.vat)}</dd>
               <dt className="font-extrabold">Grand total</dt><dd className="text-right text-lg font-extrabold" data-locked-total>{aed(totals.total)}</dd>
               {totals.deposit ? <><dt className="text-muted">Deposit required</dt><dd className="text-right font-semibold">{aed(totals.deposit)}</dd></> : null}
             </dl>
-            {showProfit ? <p className="border-t border-line pt-2 text-xs text-muted">Internal: profit <span className={hoursMissing.length ? "font-bold text-red" : undefined} data-locked-profit>{aed(totals.profit)} ({margin.toFixed(0)}% of the net)</span>{totals.commissionPending ? <span className="ml-1 font-semibold text-amber" data-profit-commission-pending>(commission counted, pending owner approval)</span> : null}.{hoursMissing.length ? <span className="block font-bold text-red" data-hours-missing={hoursMissing.length}>{HOURS_MISSING_WORDS}: {hoursMissing.join(", ")} {hoursMissing.length === 1 ? "has" : "have"} no hours.</span> : null}</p> : null}
+            {showProfit ? <p className="border-t border-line pt-2 text-xs text-muted">Internal: profit <span className={hoursMissing.length ? "font-bold text-red" : undefined} data-locked-profit>{aed(totals.profit)} ({margin.toFixed(0)}% of the net)</span>{totals.commissionPending ? <span className="ml-1 font-semibold text-amber-text" data-profit-commission-pending>(commission counted, pending owner approval)</span> : null}.{hoursMissing.length ? <span className="block font-bold text-red" data-hours-missing={hoursMissing.length}>{HOURS_MISSING_WORDS}: {hoursMissing.join(", ")} {hoursMissing.length === 1 ? "has" : "have"} no hours.</span> : null}</p> : null}
             {showProfit && commissionLine ? <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 border-t border-line pt-2 text-xs" data-internal-box>{commissionLine}</dl> : null}
             {quotation.customer_note ? <p className="border-t border-line pt-2 text-xs text-muted">Note to the customer: {quotation.customer_note}</p> : null}
             <p className="text-xs text-muted">Every figure is as the customer approved it. Nothing here can be typed or removed.</p>

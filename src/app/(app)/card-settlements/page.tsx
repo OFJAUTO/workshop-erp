@@ -39,7 +39,7 @@ export default async function CardSettlementsPage({ searchParams }: { searchPara
             <span className="text-2xl font-extrabold">{aed(open[m].reduce((a, r) => a + r.amount, 0))}</span>
             <span className="text-sm text-muted">
               {open[m].length ? `${open[m].length} payment${open[m].length === 1 ? "" : "s"} not settled yet` : "At zero: everything is settled."}
-              {open[m].some((r) => r.late) ? <span className="ml-2 font-semibold text-amber">{open[m].filter((r) => r.late).length} older than 3 working days</span> : null}
+              {open[m].some((r) => r.late) ? <span className="ml-2 font-semibold text-amber-text">{open[m].filter((r) => r.late).length} older than 3 working days</span> : null}
             </span>
           </Card>
         ))}

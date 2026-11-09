@@ -92,7 +92,7 @@ export function SearchSelect({
           ) : null}
         </ul>
       ) : null}
-      {warning ? <span className="text-xs font-semibold text-amber">{warning}</span> : null}
+      {warning ? <span className="text-xs font-semibold text-amber-text">{warning}</span> : null}
       {isNew && allowNew && !open ? <span className="text-xs text-muted">New entry, will be added for review.</span> : null}
     </div>
   );

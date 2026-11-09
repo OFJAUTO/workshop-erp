@@ -16,16 +16,12 @@ import { workSidesForJobs } from "./staff-picker";
 export type Urgency = "red" | "amber" | "grey";
 
 /**
- * How hard a task is knocking (1.2, 21 October 2026): red = money to record, a tax invoice to issue or a
- * customer waiting with the car Ready; amber = today's operational work (approvals, pricing, assigning);
- * grey comes only from the when-you-can extras (recovery, month-end). An amber task older than a day turns
- * red where it is shown.
+ * The base class of a job's next step: amber (today). Red is decided ONLY by THE urgent rule (src/lib/urgent-rule.ts,
+ * 9 November 2026) in WaitingPanel, with its reason: money at risk, a promised date passed or at risk, or a customer
+ * waiting more than the set working hours. Grey comes from the when-you-can extras.
  */
 export function urgencyOf(i: { actorRole: string | null; status: string; line: string }): Urgency {
-  if (/order now/i.test(i.line)) return "red";
-  if (i.actorRole === "accounts") return "red";
-  if (/deposit/i.test(i.line) && /record|waiting for the deposit/i.test(i.line)) return "red";
-  if (["ready", "pending_payment", "in_delivery"].includes(i.status)) return "red";
+  void i;
   return "amber";
 }
 
@@ -43,6 +39,9 @@ export type WaitingItem = {
   wait: string;
   role: string;
   urgency: Urgency;
+  /** The job's status and promised date, for the urgent rule. */
+  status?: string;
+  promisedAt?: string | null;
 };
 
 type Row = {
@@ -70,10 +69,11 @@ type Row = {
   deposit_requested_at: string | null;
   work_done_at: string | null;
   wash_sent_at: string | null;
+  promised_at: string | null;
 };
 
 const SELECT =
-  "id, job_number, job_kind, status, is_open, department, assigned_to, gated_in_by, gated_in_at, first_approval_at, stage_entered_at, plan_released_at, plan_bodyshop_released_at, bodyshop_started_at, plan_date_confirmed_at, deposit_requested_at, work_done_at, wash_sent_at, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(is_complete), inspection:inspections(status, technician_id, submitted_at, approved_at), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at, sent_by), road_test:road_tests(status, decision)";
+  "id, job_number, job_kind, status, is_open, department, assigned_to, gated_in_by, gated_in_at, first_approval_at, stage_entered_at, plan_released_at, plan_bodyshop_released_at, bodyshop_started_at, plan_date_confirmed_at, deposit_requested_at, work_done_at, wash_sent_at, promised_at, vehicle:vehicles(has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, variant, model_year, make:vehicle_makes(name), model:vehicle_models(name)), assignee:staff!jobs_assigned_to_fkey(display_name), gate_in:gate_ins(is_complete), inspection:inspections(status, technician_id, submitted_at, approved_at), approval:approval_requests(sent_at, opened_at, approved_at, approver_name, created_at, sent_by), road_test:road_tests(status, decision)";
 
 /**
  * "Waiting on you": every open car whose next step is this person's move, oldest wait first. The owner sees
@@ -159,6 +159,8 @@ export async function loadWaitingOnYou(staff: CurrentStaff, settings: Settings):
       wait: formatWait(workingMinutesSince(step.since, wt, now), wt),
       role: step.actorRole,
       urgency: urgencyOf({ actorRole: step.actorRole, status: j.status, line: step.line }),
+      status: j.status,
+      promisedAt: j.promised_at,
     });
   }
   out.sort((a, b) => a.since.localeCompare(b.since));

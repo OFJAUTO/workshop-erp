@@ -28,7 +28,7 @@ export function ReasonChips({ name, options, defaultValue = "", placeholder, req
       {options.length ? (
         <div className="flex flex-wrap gap-1.5">
           {options.map((o) => (
-            <button key={o} type="button" disabled={disabled} onClick={() => tap(o)} aria-pressed={selected(o)} className={`min-h-9 rounded-control border px-2.5 text-xs font-semibold text-left ${selected(o) ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>
+            <button key={o} type="button" disabled={disabled} onClick={() => tap(o)} aria-pressed={selected(o)} className={`min-h-9 rounded-control border px-2.5 text-xs font-semibold text-left ${selected(o) ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`}>
               {selected(o) ? "✓ " : ""}{o}
             </button>
           ))}

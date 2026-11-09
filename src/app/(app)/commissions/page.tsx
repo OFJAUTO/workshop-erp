@@ -47,7 +47,7 @@ function Line({ r, isOwner, proofUrl }: { r: CommissionRow; isOwner: boolean; pr
       ) : null}
       {r.status === "paid" ? (
         <span className="flex w-full flex-wrap items-center gap-2 text-xs" data-paid-line>
-          <span className="font-semibold text-green">Paid {r.paidOn ? formatDate(`${r.paidOn}T12:00:00+04:00`) : r.paidAt ? formatDayTime(r.paidAt) : ""} by {r.paidByName ?? "—"} · {r.paidMethod === "transfer" ? "bank transfer" : r.paidMethod ?? ""}{r.reference ? ` · ref ${r.reference}` : ""}</span>
+          <span className="font-semibold text-green-text">Paid {r.paidOn ? formatDate(`${r.paidOn}T12:00:00+04:00`) : r.paidAt ? formatDayTime(r.paidAt) : ""} by {r.paidByName ?? "—"} · {r.paidMethod === "transfer" ? "bank transfer" : r.paidMethod ?? ""}{r.reference ? ` · ref ${r.reference}` : ""}</span>
           {r.voucherNumber ? <span className="font-semibold">{r.voucherNumber}</span> : null}
           {r.voucherId ? <a href={`/api/pdf/commission-voucher/${r.voucherId}`} target="_blank" rel="noreferrer" className="font-bold underline underline-offset-4" data-print-voucher>Print voucher</a> : null}
           {r.proofMissing && r.voucherId ? (
@@ -56,7 +56,7 @@ function Line({ r, isOwner, proofUrl }: { r: CommissionRow; isOwner: boolean; pr
               <ProofUpload paymentId={r.voucherId} label={r.paidMethod === "transfer" ? "Upload bank slip" : "Upload signed voucher"} />
             </>
           ) : proofUrl ? (
-            <a href={proofUrl} target="_blank" rel="noreferrer" className="font-bold text-green underline underline-offset-4" data-proof-link>Proof ✓</a>
+            <a href={proofUrl} target="_blank" rel="noreferrer" className="font-bold text-green-text underline underline-offset-4" data-proof-link>Proof ✓</a>
           ) : null}
         </span>
       ) : null}
@@ -87,7 +87,7 @@ export default async function CommissionsPage({ searchParams }: { searchParams: 
       {fresh ? (
         <Card className="flex flex-wrap items-center gap-3 border-amber-bar" data-fresh-voucher>
           <span className="text-sm font-bold">{fresh.number} · {fresh.recipient}</span>
-          <a href={`/api/pdf/commission-voucher/${fresh.id}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white" data-print-voucher-fresh>Print voucher</a>
+          <a href={`/api/pdf/commission-voucher/${fresh.id}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-on-dark" data-print-voucher-fresh>Print voucher</a>
           {!fresh.proof_path ? <ProofUpload paymentId={fresh.id} label={fresh.method === "transfer" ? "Upload bank slip" : "Upload signed voucher"} /> : <Badge tone="green">Proof ✓</Badge>}
           <span className="text-xs text-muted">{fresh.method === "cash" ? "Print → sign (received by, accounts, owner) → upload the signed copy." : "Upload the bank PDF or screenshot with the reference."}</span>
         </Card>

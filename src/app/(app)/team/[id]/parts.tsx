@@ -62,7 +62,7 @@ export function CopyLink({ link }: { link: string }) {
           href={wa}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center justify-center min-h-11 px-5 rounded-control bg-ink text-white text-sm font-bold"
+          className="inline-flex items-center justify-center min-h-11 px-5 rounded-control bg-ink text-on-dark text-sm font-bold"
         >
           Send on WhatsApp
         </a>

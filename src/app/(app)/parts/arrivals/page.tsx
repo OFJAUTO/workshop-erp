@@ -142,8 +142,8 @@ export default async function ArrivalsPage({ searchParams }: { searchParams: Pro
       {error ? <Notice tone="error">{error}</Notice> : null}
       <form className="flex flex-wrap items-end gap-2">
         <div className="inline-flex overflow-hidden rounded-control border border-line-strong">
-          <Link href={`/parts/arrivals?week=this${supplierParam ? `&supplier=${encodeURIComponent(supplierParam)}` : ""}${specialParam === "1" ? "&special=1" : ""}`} className={`min-h-11 inline-flex items-center px-4 text-sm font-bold ${week === "this" ? "bg-ink text-white" : "bg-white"}`}>This week</Link>
-          <Link href={`/parts/arrivals?week=next${supplierParam ? `&supplier=${encodeURIComponent(supplierParam)}` : ""}${specialParam === "1" ? "&special=1" : ""}`} className={`min-h-11 inline-flex items-center px-4 text-sm font-bold ${week === "next" ? "bg-ink text-white" : "bg-white"}`}>Next week</Link>
+          <Link href={`/parts/arrivals?week=this${supplierParam ? `&supplier=${encodeURIComponent(supplierParam)}` : ""}${specialParam === "1" ? "&special=1" : ""}`} className={`min-h-11 inline-flex items-center px-4 text-sm font-bold ${week === "this" ? "bg-ink text-on-dark" : "bg-white"}`}>This week</Link>
+          <Link href={`/parts/arrivals?week=next${supplierParam ? `&supplier=${encodeURIComponent(supplierParam)}` : ""}${specialParam === "1" ? "&special=1" : ""}`} className={`min-h-11 inline-flex items-center px-4 text-sm font-bold ${week === "next" ? "bg-ink text-on-dark" : "bg-white"}`}>Next week</Link>
         </div>
         <input type="hidden" name="week" value={week} />
         <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Supplier<Select name="supplier" defaultValue={supplierParam ?? ""} className="min-w-44"><option value="">Every supplier</option>{suppliers.map((s) => <option key={s} value={s}>{s}</option>)}</Select></label>

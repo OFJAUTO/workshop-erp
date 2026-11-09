@@ -64,7 +64,7 @@ export function RecoveryProviderPicker({ value, providers, disabled = false, onP
         <span className="inline-flex flex-wrap items-center gap-1" data-recovery-provider-add>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Company or driver's name" spellCheck={false} lang="en" className="min-h-9 rounded-control border border-line-strong px-2 text-sm" style={{ width: "11rem" }} data-recovery-provider-name />
           <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" type="tel" inputMode="tel" className="min-h-9 rounded-control border border-line-strong px-2 text-sm" style={{ width: "8rem" }} data-recovery-provider-phone />
-          <button type="button" disabled={pending} onClick={add} className="min-h-9 rounded-control bg-ink px-3 text-xs font-bold text-white disabled:opacity-50" data-recovery-provider-save>{pending ? "Saving…" : "Save"}</button>
+          <button type="button" disabled={pending} onClick={add} className="min-h-9 rounded-control bg-ink px-3 text-xs font-bold text-on-dark disabled:opacity-50" data-recovery-provider-save>{pending ? "Saving…" : "Save"}</button>
           <button type="button" onClick={() => { setAdding(false); setError(null); }} className="min-h-9 px-2 text-xs font-semibold underline">Cancel</button>
         </span>
       ) : null}

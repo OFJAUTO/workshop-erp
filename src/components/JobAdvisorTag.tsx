@@ -71,7 +71,7 @@ function AskWindow({ jobId, jobWords, name, parts, onClose }: { jobId: string; j
           <span className="text-sm text-muted">{jobWords}</span>
         </div>
         {answer?.message ? (
-          <p className="text-sm font-bold text-green" data-advisor-ask-sent>{answer.message}</p>
+          <p className="text-sm font-bold text-green-text" data-advisor-ask-sent>{answer.message}</p>
         ) : (
           <>
             {parts.length ? (

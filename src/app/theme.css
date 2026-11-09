@@ -1,0 +1,53 @@
+/* THE theme file (9 November 2026): every colour the staff screens use, in one place.
+   The base values (white cards) stay for customer pages, printed pages and PDFs; the softer values below apply only
+   while the staff app is on screen (the app shell carries data-erp-staff), so pop-ups, menus, toasts and the bell
+   panel - drawn at the end of the page - follow too. Black, red, green, the gold bar, fonts and layout are unchanged.
+   Contrast (4.5:1) is kept by darkening text, never by lightening a background (tests/unit/theme-contrast.test.mjs). */
+
+@theme {
+  /* Text on black buttons and badges, the sidebar's text and its active pill. White outside the staff app. */
+  --color-on-dark: #ffffff;
+  --color-sidebar-text: #ffffff;
+  --color-pill: #ffffff;
+  /* Green and amber WORDS (the buttons, borders and bars keep --color-green / --color-amber-bar). */
+  --color-green-text: #0f7b4f;
+  --color-amber-text: #8a5a00;
+}
+
+:root:has([data-erp-staff]) {
+  --color-white: #f6f5f1; /* boxes, cards, pop-ups, menus, tables, forms, toasts, the bell panel */
+  --color-canvas: #e6e5e1; /* the page around the boxes */
+  --color-line: #d6d5d0; /* card borders */
+  --color-line-strong: #c9c8c3; /* input and dropdown borders */
+  --color-chip: #dcdbd6; /* light grey panels and the search field */
+  --color-track: #d6d5d0; /* unfinished stage bars */
+  --color-faint: #55595f; /* darkened from #6b6f76 so it keeps 4.5:1 on the grey panels */
+  --color-on-dark: #f3f2ee;
+  --color-sidebar-text: #ecebe7;
+  --color-pill: #f1f0ec;
+  --color-green-text: #0c6b44; /* darkened so green words keep 4.5:1 on the grey panels */
+  --color-amber-text: #7a4f00;
+
+  /* No text under 13 px on staff screens. */
+  --text-xs: 0.8125rem;
+}
+
+/* White words on a red badge stay pure white (the red is unchanged, so only the text can keep 4.5:1). */
+[class~="bg-red-bar"] {
+  --color-on-dark: #ffffff;
+}
+
+/* Secondary text is 14 px on tablets and phones. */
+@media (pointer: coarse) {
+  :root:has([data-erp-staff]) {
+    --text-xs: 0.875rem;
+  }
+}
+
+/* Anything printed from a staff screen stays white. */
+@media print {
+  :root:has([data-erp-staff]) {
+    --color-white: #ffffff;
+    --color-canvas: #ffffff;
+  }
+}

@@ -36,7 +36,7 @@ export default async function ProgressPage({ params }: { params: Promise<{ token
             <p className="p-6 text-sm">This link is not valid. Please ask the workshop for a new one.</p>
           ) : (
             <div className="flex flex-col gap-4 p-5 sm:p-8" data-progress={u.kind}>
-              <span className="text-[11px] font-bold tracking-[0.12em] uppercase text-[#5F6368]">{u.carTitle}{u.plate ? ` · ${u.plate}` : ""}</span>
+              <span className="text-xs font-bold tracking-[0.12em] uppercase text-[#5F6368]">{u.carTitle}{u.plate ? ` · ${u.plate}` : ""}</span>
               <h1 className="text-2xl font-extrabold">{WORDS[u.kind].title}</h1>
               {u.photoUrl ? (
                 <ViewerThumb src={u.photoUrl} thumb={u.photoThumb} label={`${u.carTitle} · ${WORDS[u.kind].title}`} className="block w-full overflow-hidden rounded-lg">
@@ -46,7 +46,7 @@ export default async function ProgressPage({ params }: { params: Promise<{ token
               ) : null}
               <p className="text-sm leading-relaxed">{WORDS[u.kind].line}</p>
               {u.kind === "ready" && u.handoverToken ? (
-                <Link href={`/handover/${u.handoverToken}`} className="flex min-h-14 w-full items-center justify-center rounded-lg bg-[#111113] text-base font-extrabold text-white">Open your handover page</Link>
+                <Link href={`/handover/${u.handoverToken}`} className="flex min-h-14 w-full items-center justify-center rounded-lg bg-[#111113] text-base font-extrabold text-on-dark">Open your handover page</Link>
               ) : null}
             </div>
           )}

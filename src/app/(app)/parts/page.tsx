@@ -217,7 +217,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           <span className="text-sm text-muted">{j.job_number}</span>
           {seesCust && j.customer ? <span className="text-sm text-muted uppercase">{j.customer.company_name ?? j.customer.full_name}</span> : null}
           <PartsSteps size="dots" steps={steps} />
-          <span className={`ml-auto text-xs font-semibold ${allDone && !gone ? "text-green" : "text-muted"}`}>{gone ? `Gated out${j.gated_out_at ? ` ${formatDate(j.gated_out_at)}` : ""}` : allDone ? "All parts handed over" : (STATUS_LABELS[j.status as JobStatus] ?? j.status)}</span>
+          <span className={`ml-auto text-xs font-semibold ${allDone && !gone ? "text-green-text" : "text-muted"}`}>{gone ? `Gated out${j.gated_out_at ? ` ${formatDate(j.gated_out_at)}` : ""}` : allDone ? "All parts handed over" : (STATUS_LABELS[j.status as JobStatus] ?? j.status)}</span>
         </Link>
         {tagOf(j.id)}
         <Link href={`/jobs/${j.id}/inspection`} className="inline-flex min-h-9 items-center text-xs font-semibold underline underline-offset-4" data-view-inspection={j.id}>
@@ -261,7 +261,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
             if (id) params.set("tech", id);
             const query = params.toString();
             return (
-              <Link key={id || "all"} href={`/parts${query ? `?${query}` : ""}`} aria-current={techFilter === id ? "true" : undefined} className={`inline-flex min-h-9 items-center rounded-full border px-3 text-sm font-semibold ${techFilter === id ? "border-ink bg-ink text-white" : "border-line bg-white"}`} data-tech-filter={id || "all"}>
+              <Link key={id || "all"} href={`/parts${query ? `?${query}` : ""}`} aria-current={techFilter === id ? "true" : undefined} className={`inline-flex min-h-9 items-center rounded-full border px-3 text-sm font-semibold ${techFilter === id ? "border-ink bg-ink text-on-dark" : "border-line bg-white"}`} data-tech-filter={id || "all"}>
                 {name}
               </Link>
             );
@@ -278,7 +278,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
             if (id) params.set("advisor", id);
             const query = params.toString();
             return (
-              <Link key={id || "all"} href={`/parts${query ? `?${query}` : ""}`} aria-current={on ? "true" : undefined} className={`inline-flex min-h-9 items-center rounded-full border px-3 text-sm font-semibold ${on ? "border-ink bg-ink text-white" : "border-line bg-white"}`} data-advisor-filter={id || "all"}>
+              <Link key={id || "all"} href={`/parts${query ? `?${query}` : ""}`} aria-current={on ? "true" : undefined} className={`inline-flex min-h-9 items-center rounded-full border px-3 text-sm font-semibold ${on ? "border-ink bg-ink text-on-dark" : "border-line bg-white"}`} data-advisor-filter={id || "all"}>
                 {name}
               </Link>
             );
@@ -325,7 +325,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
               <span className="flex min-w-0 flex-col gap-0.5">
                 <Link href={`/parts/estimate/${e.id}`} className="font-extrabold hover:underline underline-offset-4">ESTIMATE {e.number} – car not here yet</Link>
                 <span className="text-sm"><span className="font-bold">{e.plate}</span> · {e.car}{e.advisor ? <span className="text-muted"> · Advisor {e.advisor}</span> : null}</span>
-                <span className="flex flex-wrap items-center gap-2 text-sm font-semibold text-amber">{estimateTaskWords(e)}{e.vin ? <CopyVin vin={e.vin} /> : <span className="text-xs font-normal text-muted">VIN not known yet</span>}</span>
+                <span className="flex flex-wrap items-center gap-2 text-sm font-semibold text-amber-text">{estimateTaskWords(e)}{e.vin ? <CopyVin vin={e.vin} /> : <span className="text-xs font-normal text-muted">VIN not known yet</span>}</span>
               </span>
               <LinkButton href={`/parts/estimate/${e.id}#pricing`} size="md" data-estimate-price-open>{e.toPrice ? "Price the parts" : "Send to advisor"}</LinkButton>
             </Card>
@@ -339,7 +339,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
           {toSendJobs.map((jobId) => (
             <Card key={jobId} className="flex flex-wrap items-center gap-3 !border-ink" data-to-send-car={jobId}>
               <span className="flex flex-wrap items-center gap-2"><Link href={`/parts/${jobId}#pricing`} className="font-extrabold hover:underline underline-offset-4">{jobLine(jobId)}</Link>{tagOf(jobId)}{dotsOf(jobId)}</span>
-              <span className="text-sm font-semibold text-amber">{jobs.get(jobId)?.parts_pricing_reopened_at && jobs.get(jobId)?.parts_pricing_done_at ? "Changed since you sent it" : "Ready to send – the advisor does not know yet"}</span>
+              <span className="text-sm font-semibold text-amber-text">{jobs.get(jobId)?.parts_pricing_reopened_at && jobs.get(jobId)?.parts_pricing_done_at ? "Changed since you sent it" : "Ready to send – the advisor does not know yet"}</span>
               <LinkButton href={`/parts/${jobId}#pricing`} size="md" className="ml-auto" data-to-send-open>Send to advisor</LinkButton>
             </Card>
           ))}

@@ -18,7 +18,7 @@ export function PrescanToggle({ inspectionId, initial, disabled = false }: { ins
       setVisible(!v);
     }
   }
-  const cls = (on: boolean) => `min-h-11 flex-1 rounded-control border-2 px-3 text-sm font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"} ${disabled ? "opacity-60" : ""}`;
+  const cls = (on: boolean) => `min-h-11 flex-1 rounded-control border-2 px-3 text-sm font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"} ${disabled ? "opacity-60" : ""}`;
   return (
     <div className="flex flex-col gap-1">
       <div className="flex gap-2">

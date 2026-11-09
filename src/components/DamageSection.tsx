@@ -30,7 +30,7 @@ export function DamageSection({ damage, arabic = true, heading = "Damage already
   return (
     <section className="flex flex-col gap-2" data-damage-section data-damage-count={damage.items.length}>
       <h2 className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 border-b-2 border-[#111113] pb-1.5">
-        <span className="text-[9.5px] font-bold uppercase tracking-[0.08em] text-[#5F6368]">{heading}</span>
+        <span className="text-xs font-bold uppercase tracking-[0.08em] text-[#5F6368]">{heading}</span>
         {arabic ? <span className="text-xs font-bold text-[#5F6368]" dir="rtl" lang="ar">{DAMAGE_WORDS_AR.title}</span> : null}
       </h2>
       {none ? (

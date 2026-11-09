@@ -139,17 +139,17 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
         {isProforma ? <p className="text-xs text-[#5F6368]">This is not a tax invoice. It shows what is due for the work approved; the tax invoice follows on full payment.</p> : null}
         {payable ? (
           <div className={`rounded-lg px-4 py-4 flex flex-col gap-1 ${paid ? "bg-green-soft" : "bg-[#F4F4F5]"}`}>
-            <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">{paid ? "Paid, thank you" : bal.state === "cheque_pending" ? "Cheque pending" : "Amount due"}</span>
+            <span className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]">{paid ? "Paid, thank you" : bal.state === "cheque_pending" ? "Cheque pending" : "Amount due"}</span>
             <span className="text-3xl font-extrabold">{paid ? aed(invoice.total_aed) : aed(bal.balance)}</span>
-            {invoice.discount_aed ? <span className="text-sm font-bold text-green" data-labour-discount>{bundle.lines.some((l) => !!l.package_items) ? "Package discount" : "Labour discount"}: − {aed(invoice.discount_aed)}</span> : null}
-            {invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0)) < -0.004 ? <span className="text-sm font-bold text-green" data-roundoff>Round-off: − {aed(Math.abs(invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0))))}</span> : null}
+            {invoice.discount_aed ? <span className="text-sm font-bold text-green-text" data-labour-discount>{bundle.lines.some((l) => !!l.package_items) ? "Package discount" : "Labour discount"}: − {aed(invoice.discount_aed)}</span> : null}
+            {invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0)) < -0.004 ? <span className="text-sm font-bold text-green-text" data-roundoff>Round-off: − {aed(Math.abs(invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0))))}</span> : null}
             {paid && bal.paidAt ? <span className="text-xs text-[#5F6368]">Final payment received {formatDate(bal.paidAt)}</span> : null}
             {!paid && bal.paid ? <span className="text-xs text-[#5F6368]">Received so far {aed(bal.paid)} of {aed(invoice.total_aed)}</span> : null}
-            {bundle.credited ? <span className="text-xs font-bold text-green" data-credit-note-off>Credit note: {aed(bundle.credited)} taken off</span> : null}
+            {bundle.credited ? <span className="text-xs font-bold text-green-text" data-credit-note-off>Credit note: {aed(bundle.credited)} taken off</span> : null}
           </div>
         ) : (
           <div className="rounded-lg bg-[#F4F4F5] px-4 py-4 flex flex-col gap-1">
-            <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-[#5F6368]">Credit note total</span>
+            <span className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]">Credit note total</span>
             <span className="text-3xl font-extrabold">{aed(invoice.total_aed)}</span>
           </div>
         )}

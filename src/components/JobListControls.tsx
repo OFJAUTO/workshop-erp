@@ -31,7 +31,7 @@ export function JobListControls({ basePath, keep, filters, stages, advisors, tec
     const s = q.toString();
     return s ? `${basePath}?${s}` : basePath;
   };
-  const chip = (on: boolean) => `inline-flex min-h-11 items-center rounded-full border px-4 text-sm font-semibold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white text-ink"}`;
+  const chip = (on: boolean) => `inline-flex min-h-11 items-center rounded-full border px-4 text-sm font-semibold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white text-ink"}`;
   const submit = () => formRef.current?.requestSubmit();
   return (
     <div className="flex flex-col gap-3 rounded-card border border-line bg-white p-3" data-job-list-controls>
@@ -72,7 +72,7 @@ export function JobListControls({ basePath, keep, filters, stages, advisors, tec
             </select>
           </label>
         ) : null}
-        <button type="submit" className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-white" data-job-list-go>Search</button>
+        <button type="submit" className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-on-dark" data-job-list-go>Search</button>
       </Form>
       <div className="flex flex-wrap items-center gap-2" data-job-list-sorts>
         <span className="text-xs font-semibold uppercase tracking-wide text-muted">Sort</span>

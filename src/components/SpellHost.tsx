@@ -271,7 +271,7 @@ export function SpellHost() {
             {menu.flag.suggestions.map((s) => {
               const shown = matchCase(menu.range.word, s);
               return (
-                <button key={s} type="button" onClick={() => replaceWith(shown)} className="min-h-11 rounded-control border border-green bg-green-soft px-3 text-sm font-bold text-green" data-spell-suggest={shown}>
+                <button key={s} type="button" onClick={() => replaceWith(shown)} className="min-h-11 rounded-control border border-green bg-green-soft px-3 text-sm font-bold text-green-text" data-spell-suggest={shown}>
                   {shown}
                 </button>
               );

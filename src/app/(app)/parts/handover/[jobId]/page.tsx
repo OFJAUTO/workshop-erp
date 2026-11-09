@@ -86,7 +86,7 @@ export default async function HandoverPage({ params, searchParams }: { params: P
             {toHand.filter((p) => p.readyAt).map((p) => (
               <li key={p.id} className="flex items-center gap-2 rounded-control border border-amber-bar bg-white px-2 py-2" data-ready-part={p.id}>
                 <span className="font-semibold">{p.description}</span><span className="text-muted">× {p.quantity}</span>
-                <span className="ml-auto text-xs font-semibold text-amber" data-ready-waiting>Ready – waiting for {waitFor || "a technician (none on the car)"} · {readyHours(p.id)} h <span className="font-normal text-muted">({p.readyAt})</span></span>
+                <span className="ml-auto text-xs font-semibold text-amber-text" data-ready-waiting>Ready – waiting for {waitFor || "a technician (none on the car)"} · {readyHours(p.id)} h <span className="font-normal text-muted">({p.readyAt})</span></span>
               </li>
             ))}
           </ul>

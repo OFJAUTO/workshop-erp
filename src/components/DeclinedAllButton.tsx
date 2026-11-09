@@ -50,18 +50,18 @@ export function DeclinedAllButton({ jobId, fee, isOwner, oldWording = null }: { 
             <span className="text-lg font-extrabold">Customer declined all work</span>
             {answer?.ok ? (
               <>
-                <p className="text-sm font-semibold text-green" data-declined-result>{answer.ok}</p>
-                <button type="button" onClick={close} className="inline-flex min-h-11 items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-white">Close</button>
+                <p className="text-sm font-semibold text-green-text" data-declined-result>{answer.ok}</p>
+                <button type="button" onClick={close} className="inline-flex min-h-11 items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-on-dark">Close</button>
               </>
             ) : (
               <>
                 <p className="text-sm">The quotation stays in the history, marked declined by the customer. The declined work is saved for the next visit and the car goes to Ready to collect.</p>
                 {fee > 0 && !changing ? (
                   <>
-                    {oldWording ? <p className="text-sm font-bold text-amber" data-declined-old-wording>Approved with the old wording – AED {money(oldWording.total)} total</p> : null}
+                    {oldWording ? <p className="text-sm font-bold text-amber-text" data-declined-old-wording>Approved with the old wording – AED {money(oldWording.total)} total</p> : null}
                     <p className="text-base font-bold" data-declined-question>Charge the inspection fee of {feeText} the customer agreed to?</p>
                     <div className="flex flex-wrap gap-2">
-                      <button type="button" disabled={pending} onClick={() => send(agreed)} className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white disabled:opacity-50" data-declined-charge>
+                      <button type="button" disabled={pending} onClick={() => send(agreed)} className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-on-dark disabled:opacity-50" data-declined-charge>
                         {pending ? "Recording…" : `Yes, charge ${feeText}`}
                       </button>
                       {oldWording && isOwner ? (
@@ -86,14 +86,14 @@ export function DeclinedAllButton({ jobId, fee, isOwner, oldWording = null }: { 
                         <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} spellCheck={false} data-spell="" lang="en" className="rounded-control border border-line-strong px-3 py-2 text-base" data-declined-reason />
                       </label>
                     ) : null}
-                    <button type="button" disabled={pending} onClick={() => send(value)} className="inline-flex min-h-11 items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-white disabled:opacity-50" data-declined-confirm>
+                    <button type="button" disabled={pending} onClick={() => send(value)} className="inline-flex min-h-11 items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-on-dark disabled:opacity-50" data-declined-confirm>
                       {pending ? "Recording…" : value > 0 ? `Charge AED ${value.toLocaleString("en-GB")}` : "Record, no charge"}
                     </button>
                   </div>
                 ) : (
                   <>
                     <p className="text-sm font-semibold" data-declined-no-fee>No inspection fee on this car: no invoice. The time spent and the declined work are saved.</p>
-                    <button type="button" disabled={pending} onClick={() => send(0)} className="inline-flex min-h-11 items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-white disabled:opacity-50" data-declined-confirm>
+                    <button type="button" disabled={pending} onClick={() => send(0)} className="inline-flex min-h-11 items-center justify-center rounded-control bg-ink px-4 text-sm font-bold text-on-dark disabled:opacity-50" data-declined-confirm>
                       {pending ? "Recording…" : "Record the decline"}
                     </button>
                   </>

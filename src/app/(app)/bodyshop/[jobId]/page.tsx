@@ -176,7 +176,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
           <span className="flex flex-wrap items-center gap-2">
             <span>{job.job_number}{v?.colour ? ` · ${v.colour}` : ""}{seesMoney ? ` · ${customerName}` : ""}</span>
             <VinCopy vin={vinRow?.vin ?? null} />
-            {jobCut ? <span className="inline-flex items-center rounded-control bg-ink px-3 py-1 text-sm font-extrabold tracking-[0.1em] text-white" title={jobCut.long} data-cut-badge={jobCut.badge}>{jobCut.badge}{jobCut.note ? ` · ${jobCut.note}` : ""}</span> : null}
+            {jobCut ? <span className="inline-flex items-center rounded-control bg-ink px-3 py-1 text-sm font-extrabold tracking-[0.1em] text-on-dark" title={jobCut.long} data-cut-badge={jobCut.badge}>{jobCut.badge}{jobCut.note ? ` · ${jobCut.note}` : ""}</span> : null}
             <Badge tone={job.status === "closed" ? "neutral" : job.status === "ready" ? "green" : "ink"}>{statusLabel}</Badge>
             {job.promised_at ? <Badge tone={job.promised_at < today && job.is_open ? "red" : job.promised_at === today ? "amber" : "neutral"}>Handover {formatDate(job.promised_at)}</Badge> : null}
             {kindWords.length ? <span className="text-sm text-muted">{kindWords.join(", ")}{film?.colour || film?.code ? ` · film ${[film.colour, film.code].filter(Boolean).join(" ")}` : ""}{!tintWords && tintPercent ? ` · tint ${tintPercent}%` : ""}</span> : null}
@@ -198,9 +198,9 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
           <Card className="flex flex-col gap-3" data-booking-card>
             <SectionLabel>Before the car arrives</SectionLabel>
             <ol className="flex flex-col gap-2 text-sm">
-              <li className="flex items-center gap-2"><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${approvedQuote ? "bg-green text-white" : latestQuote?.status === "sent" || latestQuote?.status === "opened" ? "bg-amber-bar text-white" : "border border-line-strong"}`}>1</span><span>Quotation {latestQuote ? <>{latestQuote.number}: <span className="font-semibold">{approvedQuote ? `approved ${formatDate(latestQuote.responded_at)}` : latestQuote.status === "draft" ? "being built" : latestQuote.status === "sent" || latestQuote.status === "opened" ? "sent, waiting for the customer" : latestQuote.status}</span></> : "not started"}</span></li>
-              <li className="flex items-center gap-2"><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${job.booked_arrival_at ? "bg-green text-white" : "border border-line-strong"}`}>2</span><span>Arrival {job.booked_arrival_at ? <span className="font-semibold">{formatDateTime(job.booked_arrival_at)}</span> : "not booked"} · handover {job.promised_at ? <span className="font-semibold">{formatDate(job.promised_at)}</span> : "not set"}</span></li>
-              <li className="flex items-center gap-2"><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${deposits.length ? "bg-green text-white" : "border border-line-strong"}`}>3</span><span>Deposit {deposits.length ? <span className="font-semibold">{deposits[0].number}{seesMoney ? ` for ${aed(deposits[0].total_aed)}` : " requested"}</span> : "optional"}</span></li>
+              <li className="flex items-center gap-2"><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${approvedQuote ? "bg-green text-on-dark" : latestQuote?.status === "sent" || latestQuote?.status === "opened" ? "bg-amber-bar text-on-dark" : "border border-line-strong"}`}>1</span><span>Quotation {latestQuote ? <>{latestQuote.number}: <span className="font-semibold">{approvedQuote ? `approved ${formatDate(latestQuote.responded_at)}` : latestQuote.status === "draft" ? "being built" : latestQuote.status === "sent" || latestQuote.status === "opened" ? "sent, waiting for the customer" : latestQuote.status}</span></> : "not started"}</span></li>
+              <li className="flex items-center gap-2"><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${job.booked_arrival_at ? "bg-green text-on-dark" : "border border-line-strong"}`}>2</span><span>Arrival {job.booked_arrival_at ? <span className="font-semibold">{formatDateTime(job.booked_arrival_at)}</span> : "not booked"} · handover {job.promised_at ? <span className="font-semibold">{formatDate(job.promised_at)}</span> : "not set"}</span></li>
+              <li className="flex items-center gap-2"><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${deposits.length ? "bg-green text-on-dark" : "border border-line-strong"}`}>3</span><span>Deposit {deposits.length ? <span className="font-semibold">{deposits[0].number}{seesMoney ? ` for ${aed(deposits[0].total_aed)}` : " requested"}</span> : "optional"}</span></li>
             </ol>
             <p className="text-xs text-muted">When the car arrives, gate it in from the calendar entry: the gate-in links to this quotation and nothing is retyped. The stages start by themselves once the gate-in photos are in.</p>
           </Card>
@@ -259,7 +259,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
         />
       ) : null}
       {/* Section 7 (23 October 2026): the pre-work check before PPF on the same car outline as the inspection. */}
-      {recheck ? null : <PanelMarker noteForCustomer={false} hook="prework" title="Pre-work check (before PPF)" hint="Before the film goes on: mark every panel with existing damage (stone chips, scratches, previous repairs), so it is on record before the work starts." initial={cleanPanelMarks(prework?.prework_panels)} save={savePreworkCheck.bind(null, jobId)} canEdit={canLead} footer={prework?.prework_checked_at ? <p className="text-xs font-semibold text-green" data-prework-done>Pre-work check done {formatDateTime(String(prework.prework_checked_at))}</p> : canLead ? <form action={markPreworkChecked.bind(null, jobId)}><Button type="submit" tone="secondary" size="md" data-prework-mark>Pre-work check done</Button></form> : null} />}
+      {recheck ? null : <PanelMarker noteForCustomer={false} hook="prework" title="Pre-work check (before PPF)" hint="Before the film goes on: mark every panel with existing damage (stone chips, scratches, previous repairs), so it is on record before the work starts." initial={cleanPanelMarks(prework?.prework_panels)} save={savePreworkCheck.bind(null, jobId)} canEdit={canLead} footer={prework?.prework_checked_at ? <p className="text-xs font-semibold text-green-text" data-prework-done>Pre-work check done {formatDateTime(String(prework.prework_checked_at))}</p> : canLead ? <form action={markPreworkChecked.bind(null, jobId)}><Button type="submit" tone="secondary" size="md" data-prework-mark>Pre-work check done</Button></form> : null} />}
 
       {stages.length ? (
         <Card id="stages" className="flex flex-col gap-3" data-stages-card>
@@ -273,7 +273,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
               const next = stages.slice(i + 1).find((x) => x.status !== "done" && x.status !== "skipped");
               return (
                 <li key={s.id} className="py-2 flex flex-wrap items-center gap-2" data-stage={s.key} data-stage-status={s.status} data-tone={tone}>
-                  <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-extrabold ${s.status === "done" ? "bg-green text-white" : s.status === "active" ? "bg-ink text-white" : "border border-line-strong text-muted"}`}>{s.status === "done" ? "✓" : i + 1}</span>
+                  <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-xs font-extrabold ${s.status === "done" ? "bg-green text-on-dark" : s.status === "active" ? "bg-ink text-on-dark" : "border border-line-strong text-muted"}`}>{s.status === "done" ? "✓" : i + 1}</span>
                   <span className={`font-semibold ${s.status === "done" ? "text-muted" : ""}`}>{s.label}</span>
                   <Badge tone="outline">{SECTION_LABELS[s.section]}</Badge>
                   {s.status === "active" ? <Badge tone="ink">Now</Badge> : null}
@@ -281,11 +281,11 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
                   <span className="ml-auto flex flex-wrap items-center gap-2">
                     {canManage && s.status !== "done" ? (
                       <form action={setStageDueAction.bind(null, jobId, s.id)} className="flex items-center gap-1">
-                        <Input type="date" name="date" defaultValue={s.due_date ?? ""} className={`h-9 min-h-9 w-40 text-xs ${tone === "red" ? "border-red-bar text-red font-bold" : tone === "amber" ? "border-amber-bar text-amber font-bold" : ""}`} aria-label={`Due date for ${s.label}`} data-stage-due />
+                        <Input type="date" name="date" defaultValue={s.due_date ?? ""} className={`h-9 min-h-9 w-40 text-xs ${tone === "red" ? "border-red-bar text-red font-bold" : tone === "amber" ? "border-amber-bar text-amber-text font-bold" : ""}`} aria-label={`Due date for ${s.label}`} data-stage-due />
                         <Button type="submit" tone="ghost" size="md">Save</Button>
                       </form>
                     ) : (
-                      <span className={`text-xs ${tone === "red" ? "font-bold text-red" : tone === "amber" ? "font-bold text-amber" : "text-muted"}`} data-stage-due-text>{s.due_date ? (tone === "red" && s.status !== "done" ? `Late · due ${formatDate(s.due_date)}` : tone === "amber" && s.status !== "done" ? "Due today" : `Due ${formatDate(s.due_date)}`) : ""}</span>
+                      <span className={`text-xs ${tone === "red" ? "font-bold text-red" : tone === "amber" ? "font-bold text-amber-text" : "text-muted"}`} data-stage-due-text>{s.due_date ? (tone === "red" && s.status !== "done" ? `Late · due ${formatDate(s.due_date)}` : tone === "amber" && s.status !== "done" ? "Due today" : `Due ${formatDate(s.due_date)}`) : ""}</span>
                     )}
                     {mayDone && !(s.key === "qc" && wRows.length) ? <form action={stageDoneAction.bind(null, jobId, s.id)}><Button type="submit" size="md" data-stage-done={s.key}>Done</Button></form> : null}
                     {mayHandOver ? <StageHandover jobId={jobId} stage={{ id: s.id, key: s.key, label: s.label }} nextLabel={next ? `${next.label} – ${TEAM_OF_SECTION[next.section] ? TEAM_LABELS[TEAM_OF_SECTION[next.section]] : SECTION_LABELS[next.section]}` : null} photos={photosOfStage(s.id)} needPin={!isOwner} action={handOverStageAction.bind(null, jobId, s.id)} /> : null}
@@ -378,7 +378,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
                 <li key={r.id} className="py-2 flex flex-wrap items-center gap-2" data-removed-item>
                   <form action={refitTickAction.bind(null, jobId, r.id)}>
                     <input type="hidden" name="on" value={r.refitted_at ? "0" : "1"} />
-                    <button type="submit" disabled={!managerScope} className={`inline-flex min-h-11 items-center gap-2 rounded-control border px-3 text-sm font-bold ${r.refitted_at ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`} aria-pressed={!!r.refitted_at} data-refit-tick>{r.refitted_at ? "✓ Back on" : "Tick when back on"}</button>
+                    <button type="submit" disabled={!managerScope} className={`inline-flex min-h-11 items-center gap-2 rounded-control border px-3 text-sm font-bold ${r.refitted_at ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`} aria-pressed={!!r.refitted_at} data-refit-tick>{r.refitted_at ? "✓ Back on" : "Tick when back on"}</button>
                   </form>
                   <span className="font-semibold">{r.label}</span>
                   <span className="text-xs text-muted">off {formatDateTime(r.removed_at)}{r.refitted_at ? ` · on ${formatDateTime(r.refitted_at)}` : ""}{r.photo_path ? " · photo" : ""}</span>
@@ -396,12 +396,12 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
           <div className="flex flex-wrap items-center gap-2">
             {assignments.length === 0 ? <span className="text-sm text-muted">Nobody yet.</span> : null}
             {assignments.map((a) => (
-              <span key={a.id} className={`inline-flex items-center gap-2 rounded-control border px-2.5 min-h-10 text-sm font-bold ${openClockBy.has(a.staff_id) ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`} data-on-car={a.staff_id}>
+              <span key={a.id} className={`inline-flex items-center gap-2 rounded-control border px-2.5 min-h-10 text-sm font-bold ${openClockBy.has(a.staff_id) ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`} data-on-car={a.staff_id}>
                 <Avatar name={a.name} photoUrl={a.photoUrl} size={24} />{a.name}
-                <span className="text-[11px] font-semibold text-muted">{TEAM_LABELS[TEAM_OF_SECTION[a.section] ?? "dismantle_refit"]}{openClockBy.has(a.staff_id) ? " · clocked in" : ""}</span>
+                <span className="text-xs font-semibold text-muted">{TEAM_LABELS[TEAM_OF_SECTION[a.section] ?? "dismantle_refit"]}{openClockBy.has(a.staff_id) ? " · clocked in" : ""}</span>
                 {canLead && job.is_open && ownSection(a.section) ? (
                   <>
-                    <form action={clockAction.bind(null, jobId)}><input type="hidden" name="staff_id" value={a.staff_id} />{openClockBy.has(a.staff_id) ? <input type="hidden" name="out" value="1" /> : null}<button type="submit" className="rounded-control border border-line px-2 py-0.5 text-[11px] font-bold" data-clock={openClockBy.has(a.staff_id) ? "out" : "in"}>{openClockBy.has(a.staff_id) ? "Clock out" : "Clock in"}</button></form>
+                    <form action={clockAction.bind(null, jobId)}><input type="hidden" name="staff_id" value={a.staff_id} />{openClockBy.has(a.staff_id) ? <input type="hidden" name="out" value="1" /> : null}<button type="submit" className="rounded-control border border-line px-2 py-0.5 text-xs font-bold" data-clock={openClockBy.has(a.staff_id) ? "out" : "in"}>{openClockBy.has(a.staff_id) ? "Clock out" : "Clock in"}</button></form>
                     <form action={assignAction.bind(null, jobId)}><input type="hidden" name="staff_id" value={a.staff_id} /><input type="hidden" name="off" value="1" /><button type="submit" className="text-muted px-1" aria-label={`Take ${a.name} off`}>✕</button></form>
                   </>
                 ) : null}
@@ -449,7 +449,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span className="text-sm font-semibold">{p.text}</span>
                       <span className="text-xs text-muted">{p.raiser?.display_name ?? "A leader"} · {formatDateTime(p.created_at)}</span>
-                      {p.answered_at ? <span className="text-sm text-green font-semibold" data-problem-answer>Answer from {p.answerer?.display_name ?? "the manager"}: {p.answer}</span> : <span className="text-xs font-bold text-amber">Waiting for the bodyshop manager</span>}
+                      {p.answered_at ? <span className="text-sm text-green-text font-semibold" data-problem-answer>Answer from {p.answerer?.display_name ?? "the manager"}: {p.answer}</span> : <span className="text-xs font-bold text-amber-text">Waiting for the bodyshop manager</span>}
                     </span>
                   </div>
                   {!p.answered_at && managerScope ? (
@@ -469,7 +469,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
       {careRow && (maySignAftercare(scope) || seesMoney) ? (
         <Card id="aftercare" className={`flex flex-col gap-2 ${careRow.done_at ? "border-green" : "border-ink"}`} data-aftercare-card>
           <SectionLabel right={careRow.done_at ? "Done" : careRow.due_date ? `Due ${formatDate(careRow.due_date)}` : undefined}>10-day after-care check</SectionLabel>
-          {careRow.done_at ? <p className="text-sm font-semibold text-green">Signed off {formatDateTime(careRow.done_at)}.</p> : careRow.activated_at ? <p className="text-sm font-semibold text-green">Activated by the owner {formatDateTime(careRow.activated_at)}.</p> : maySignAftercare(scope) ? <AftercareSignoff action={signOffAftercare.bind(null, jobId)} points={[...AFTERCARE_POINTS]} jobId={jobId} from="bodyshop" /> : <p className="text-sm text-muted">The PPF team leader does the check and signs it off here.</p>}
+          {careRow.done_at ? <p className="text-sm font-semibold text-green-text">Signed off {formatDateTime(careRow.done_at)}.</p> : careRow.activated_at ? <p className="text-sm font-semibold text-green-text">Activated by the owner {formatDateTime(careRow.activated_at)}.</p> : maySignAftercare(scope) ? <AftercareSignoff action={signOffAftercare.bind(null, jobId)} points={[...AFTERCARE_POINTS]} jobId={jobId} from="bodyshop" /> : <p className="text-sm text-muted">The PPF team leader does the check and signs it off here.</p>}
         </Card>
       ) : null}
 
@@ -559,7 +559,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
             {row("Consumables share", share)}
             {row("Labour (clocked)", Math.round(labourCost * 100) / 100)}
             {row("Recovery", recovery)}
-            <div className="flex items-center justify-between border-t border-ink pt-2 text-base font-extrabold"><span>REAL PROFIT</span><span className={real < 0 ? "text-red" : "text-green"} data-real-profit-figure>{aed(real)}</span></div>
+            <div className="flex items-center justify-between border-t border-ink pt-2 text-base font-extrabold"><span>REAL PROFIT</span><span className={real < 0 ? "text-red" : "text-green-text"} data-real-profit-figure>{aed(real)}</span></div>
             {sections.length ? (
               <div className="flex flex-wrap gap-x-4 gap-y-1 pt-1 text-xs text-muted" data-section-hours>
                 {sections.map((s) => <span key={s.section}>{(SECTION_LABELS as Record<string, string>)[s.section] ?? s.section}: {s.people} {s.people === 1 ? "person" : "people"} · {s.hours} h</span>)}

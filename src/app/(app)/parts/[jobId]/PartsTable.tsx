@@ -271,7 +271,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
     <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-0.5" data-cost-bar>
       <span className="inline-flex items-center gap-2"><span className="text-sm font-bold">Our cost</span><SupplierAmount money={costMoney} size="sm" align="start" hook="cost-grand" /></span>
       {chargesCost ? <span className="text-xs text-muted" data-cost-charges>incl. supplier charges AED {aed(chargesCost)}</span> : null}
-      {selectedCost ? <span className="text-sm font-semibold text-green" data-cost-selected>Selected: AED {aed(selectedCost)}</span> : null}
+      {selectedCost ? <span className="text-sm font-semibold text-green-text" data-cost-selected>Selected: AED {aed(selectedCost)}</span> : null}
       {supplierPairs.length > 1 ? <span className="text-xs text-muted" data-cost-suppliers>{supplierPairs.map(([s, v]) => `${s} AED ${aed(v)}`).join(" · ")}</span> : null}
     </div>
   ) : null;
@@ -409,13 +409,13 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
           </Button>
         ) : null}
         {undo ? (
-          <span className="inline-flex min-h-10 items-center gap-2 rounded-control bg-ink px-3 text-sm font-semibold text-white" data-delete-toast>
+          <span className="inline-flex min-h-10 items-center gap-2 rounded-control bg-ink px-3 text-sm font-semibold text-on-dark" data-delete-toast>
             {undo.count} part{undo.count === 1 ? "" : "s"} deleted{undo.kept ? ` · ${undo.kept} ordered part${undo.kept === 1 ? " was" : "s were"} kept` : ""}
             {undo.batch ? <button type="button" onClick={() => void undoDelete()} className="rounded-control bg-white px-2.5 py-1 text-xs font-bold text-ink" data-undo-delete>Undo</button> : null}
           </span>
         ) : null}
         {bulkError ? <span className="text-sm font-semibold text-red">{bulkError}</span> : null}
-        <button type="button" onClick={toggleUnpriced} aria-pressed={!!onlyUnpriced} className={`min-h-10 rounded-control border px-3 text-xs font-bold ${onlyUnpriced ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{onlyUnpriced ? "✓ " : ""}Show only unpriced</button>
+        <button type="button" onClick={toggleUnpriced} aria-pressed={!!onlyUnpriced} className={`min-h-10 rounded-control border px-3 text-xs font-bold ${onlyUnpriced ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`}>{onlyUnpriced ? "✓ " : ""}Show only unpriced</button>
         <Button type="button" tone="secondary" size="md" onClick={() => setListOpen(true)}>Copy list for supplier</Button>
         {isJob && showCost ? <a href={`/api/pdf/parts-check/${jobId}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-print-pdf>Print / PDF</a> : null}
         {isJob && canPrice && !pricingLocked ? <a href={`/parts/${jobId}/import`} className="inline-flex min-h-10 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-import-prices>Import prices</a> : null}
@@ -426,7 +426,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
         ) : null}
       </div>
       <div className="overflow-x-auto">
-        <div className={`${GRID} hidden md:grid border-b border-line pb-1 text-[11px] font-bold uppercase tracking-[0.06em] text-muted`}>
+        <div className={`${GRID} hidden md:grid border-b border-line pb-1 text-xs font-bold uppercase tracking-[0.06em] text-muted`}>
           <span className="flex items-center gap-1.5">
             {isJob && canPrice && !pricingLocked ? <input type="checkbox" aria-label="Select all parts" checked={allTicked} onChange={toggleAll} disabled={deletable.length === 0} className="h-4 w-4 accent-ink" data-select-all /> : null}
             Part
@@ -765,20 +765,20 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
   const wrote = row.original ?? (row.requestId || row.estimate ? origin : null);
   const notes = [row.removed && !row.ended ? `Removed by ${row.removed.by}: ${row.removed.reason}` : "", row.estimate?.note ? `Note from ${row.estimate.advisorName ?? "the advisor"}: ${row.estimate.note}` : "", row.info, standardNote, wrote && wrote !== name ? `${row.askedBy === "advisor" ? "Advisor" : row.askedBy === "parts" ? "Parts" : "Technician"} wrote: ${wrote}` : "", qtyChanged || (unitsReady && row.askedUnit && unitOf(v.unit) !== row.askedUnit) ? quantityChangeWords({ askedBy: row.askedBy ?? "technician", asked: row.techQty, askedUnit: row.askedUnit ?? null, changedBy: changedBy, now: qty, unit: unitOf(v.unit) }) : "", row.question ? `Asked the manager: ${row.question}${row.answer ? ` · ${row.answer}` : " · waiting"}` : "", row.unavailable && row.closedReason ? row.closedReason : ""].filter(Boolean).join(" · ");
   const detailsInPartNumber = isGenericTyreName(name) && /\s/.test(v.part_number.trim());
-  const tag = error ? { text: error, cls: "font-semibold text-red" } : saving ? { text: "Saving…", cls: "text-muted" } : unsaved ? { text: "Not saved yet", cls: "font-semibold text-amber" } : detailsInPartNumber ? { text: "Add the details to the name (tap Tyre details). Part numbers aren't shown to customers.", cls: "font-semibold text-amber" } : red ? { text: missing.map((m) => m.short).join(" · "), cls: "font-bold text-red" } : partial && !row.unavailable ? { text: `Not finished: ${missing.map((m) => m.long).join(", ")}`, cls: "text-muted" } : { text: "", cls: "" };
+  const tag = error ? { text: error, cls: "font-semibold text-red" } : saving ? { text: "Saving…", cls: "text-muted" } : unsaved ? { text: "Not saved yet", cls: "font-semibold text-amber-text" } : detailsInPartNumber ? { text: "Add the details to the name (tap Tyre details). Part numbers aren't shown to customers.", cls: "font-semibold text-amber-text" } : red ? { text: missing.map((m) => m.short).join(" · "), cls: "font-bold text-red" } : partial && !row.unavailable ? { text: `Not finished: ${missing.map((m) => m.long).join(", ")}`, cls: "text-muted" } : { text: "", cls: "" };
 
   return (
     <div data-row-key={row.key} data-row-state={state} className={`${GRID} rounded-control border px-2 py-1 ${tone}`} onFocusCapture={() => setFocused(true)} onBlurCapture={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setFocused(false); flushNow(); } }}>
       {/* Part: the name (tap to correct it through the picker); a long name wraps onto two or three lines and the row grows with it */}
       <div className="col-span-2 md:col-span-1 min-h-9 flex items-center gap-1 min-w-0">
         {canPrice && !estimate && !row.removed ? <input type="checkbox" aria-label={`Select ${name}`} checked={selected} onChange={(e) => onSelect(e.target.checked)} className="h-4 w-4 shrink-0 accent-ink" data-row-select /> : null}
-        <span className={`w-4 shrink-0 text-center text-green font-extrabold ${complete ? "" : "invisible"}`} aria-label={complete ? "priced" : undefined}>✓</span>
+        <span className={`w-4 shrink-0 text-center text-green-text font-extrabold ${complete ? "" : "invisible"}`} aria-label={complete ? "priced" : undefined}>✓</span>
         <button type="button" disabled={readOnly} onClick={() => setEditingName(true)} className={`min-h-9 min-w-0 flex-1 py-0.5 text-left font-bold disabled:cursor-default overflow-hidden ${row.removed || row.refused ? "line-through text-muted" : ""}`} title={readOnly ? name : `${name} · tap to correct the name`} data-part-name>
           <Words text={name} className="block break-words text-[13px] uppercase leading-[1.15]" />
           <PositionsLine positions={row.shownPositions ?? row.positions} className="leading-tight" />
         </button>
         {(isTyreName(name) || v.tyre_row) && !readOnly && !estimate ? (
-          <button type="button" onClick={() => setTyreOpen(true)} className={`h-9 shrink-0 rounded-control border px-2 text-xs font-bold ${v.tyre_row && (!v.tyre_brand || !v.tyre_size) ? "border-amber-bar bg-amber-soft text-amber" : "border-line-strong bg-white"}`} data-tyre-details>
+          <button type="button" onClick={() => setTyreOpen(true)} className={`h-9 shrink-0 rounded-control border px-2 text-xs font-bold ${v.tyre_row && (!v.tyre_brand || !v.tyre_size) ? "border-amber-bar bg-amber-soft text-amber-text" : "border-line-strong bg-white"}`} data-tyre-details>
             Tyre details
           </button>
         ) : null}
@@ -807,7 +807,7 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
           <Input value={v.part_number} onChange={(e) => change({ part_number: e.target.value })} onBlur={() => void lookupMemory()} placeholder="Part number" textCase="upper" className={box("part_number", "w-full min-w-0 flex-1 px-2")} aria-label="Part number" />
         )}
         {/* No part number from the supplier: "None" says so honestly (1 November 2026: the box used to get line numbers) */}
-        {!v.part_number && !readOnly ? <button type="button" onClick={() => change({ part_number: NO_PART_NUMBER })} className="shrink-0 h-9 w-12 rounded-control border border-line-strong bg-white text-[11px] font-bold" title="The supplier gave no part number" data-no-part-number>None</button> : <button type="button" onClick={copyPn} disabled={!realPartNumber(v.part_number)} className={`shrink-0 h-9 w-12 rounded-control border border-line text-[11px] font-bold ${realPartNumber(v.part_number) ? "" : "invisible"}`} aria-label="Copy the part number">{copied ? "✓" : "Copy"}</button>}
+        {!v.part_number && !readOnly ? <button type="button" onClick={() => change({ part_number: NO_PART_NUMBER })} className="shrink-0 h-9 w-12 rounded-control border border-line-strong bg-white text-xs font-bold" title="The supplier gave no part number" data-no-part-number>None</button> : <button type="button" onClick={copyPn} disabled={!realPartNumber(v.part_number)} className={`shrink-0 h-9 w-12 rounded-control border border-line text-xs font-bold ${realPartNumber(v.part_number) ? "" : "invisible"}`} aria-label="Copy the part number">{copied ? "✓" : "Copy"}</button>}
       </span>
       {/* Type and brand on one line; the brand box keeps its place when it does not apply */}
       <span className={`${SECOND_LINE} h-9 flex items-center gap-1 min-w-0`}>
@@ -880,7 +880,7 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
       <div className="relative h-9 flex items-center justify-end">
         {canPrice && !(estimate && readOnly) ? (
           <>
-            <button ref={menuRef} type="button" onClick={openMenu} aria-label="More for this part" aria-expanded={!!menu} className={`h-9 min-w-9 rounded-control border text-base font-bold ${menu ? "border-ink bg-ink text-white" : "border-line"}`}>⋯</button>
+            <button ref={menuRef} type="button" onClick={openMenu} aria-label="More for this part" aria-expanded={!!menu} className={`h-9 min-w-9 rounded-control border text-base font-bold ${menu ? "border-ink bg-ink text-on-dark" : "border-line"}`}>⋯</button>
             {menu ? (
               <FloatingMenu anchor={menuAnchor} onClose={() => setMenu(null)} label="More for this part" data-part-menu="">
                   {!readOnly ? <MenuItem label="Edit part name" onClick={() => { setMenu(null); setEditingName(true); }} /> : null}
@@ -911,50 +911,50 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
         ) : null}
       </div>
       {/* The status line: always there, always one line high, so the row never grows or shrinks */}
-      <div className={`${STATUS_LINE} min-h-5 flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 text-[11px] leading-tight`} data-status-line>
+      <div className={`${STATUS_LINE} min-h-5 flex flex-wrap items-center gap-x-2 gap-y-0.5 min-w-0 text-xs leading-tight`} data-status-line>
         {row.removed ? <Chip tone="outline">Removed</Chip> : null}
-        {row.ended ? <span className="min-w-0 break-words text-[11px] font-bold text-ink" data-part-ended>{row.ended}{row.removed?.reason ? `: ${row.removed.reason}` : ""}</span> : null}
+        {row.ended ? <span className="min-w-0 break-words text-xs font-bold text-ink" data-part-ended>{row.ended}{row.removed?.reason ? `: ${row.removed.reason}` : ""}</span> : null}
         {/* A tag, not a tap target (the status line is 20 px high): "Record the credit note" is in the ⋯ menu, 44 px. */}
-        {row.creditAwaited ? <span className="inline-flex min-h-5 shrink-0 items-center rounded-full border border-amber-bar bg-amber-soft px-2 text-[10px] font-bold text-amber" data-credit-awaited>Credit note awaited · ⋯ to record it</span> : null}
-        {row.refused ? <span className="inline-flex min-h-5 shrink-0 items-center rounded-full border border-red-bar bg-white px-2 text-[10px] font-bold text-red" data-refused-chip>Refused by {row.refused.by}{row.refused.reason ? ` – ${row.refused.reason}` : ""}</span> : null}
+        {row.creditAwaited ? <span className="inline-flex min-h-5 shrink-0 items-center rounded-full border border-amber-bar bg-amber-soft px-2 text-xs font-bold text-amber-text" data-credit-awaited>Credit note awaited · ⋯ to record it</span> : null}
+        {row.refused ? <span className="inline-flex min-h-5 shrink-0 items-center rounded-full border border-red-bar bg-white px-2 text-xs font-bold text-red" data-refused-chip>Refused by {row.refused.by}{row.refused.reason ? ` – ${row.refused.reason}` : ""}</span> : null}
         {row.notNeeded && !row.removed ? <Chip tone="outline">Not needed</Chip> : null}
-        {row.replaces ? <span className="inline-flex min-h-5 shrink-0 items-center rounded-full border border-ink px-2 text-[10px] font-bold" data-replaces-chip>{row.replaces}</span> : null}
-        {row.replaceable && canPrice && partId ? <button type="button" onClick={() => run(() => replaceRefusedPart(jobId, partId))} className="shrink-0 h-5 rounded-control border border-ink bg-white px-2 text-[10px] font-bold" data-replace-part>Replace (another supplier)</button> : null}
+        {row.replaces ? <span className="inline-flex min-h-5 shrink-0 items-center rounded-full border border-ink px-2 text-xs font-bold" data-replaces-chip>{row.replaces}</span> : null}
+        {row.replaceable && canPrice && partId ? <button type="button" onClick={() => run(() => replaceRefusedPart(jobId, partId))} className="shrink-0 h-5 rounded-control border border-ink bg-white px-2 text-xs font-bold" data-replace-part>Replace (another supplier)</button> : null}
         {row.waitingApproval && !row.removed ? <Chip tone="amber">Waiting for owner approval</Chip> : null}
         {row.optionGroup ? <Chip tone="outline">Option</Chip> : null}
         {row.unavailable && !row.removed ? <Chip tone="amber">Not available</Chip> : null}
         {row.orderLabel ? <Chip tone="ink">{row.orderLabel}</Chip> : null}
-        {row.repeatedNumber && state !== "removed" ? <span className="inline-flex min-h-5 max-w-full flex-wrap items-center rounded-control border border-red-bar bg-red-soft px-2 py-0.5 text-[11px] font-bold text-red" data-repeated-pn>{row.repeatedNumber}</span> : null}
-        {unitsReady && unitOf(v.unit) !== "pc" && num(v.cost_aed) > 0 && state !== "removed" ? <span className="shrink-0 text-[11px] font-semibold" data-per-unit={unitOf(v.unit)}>AED {aed(num(v.cost_aed))} {perUnitWords(unitOf(v.unit))} × {qtyWithUnit(qty, unitOf(v.unit))}</span> : null}
-        {row.qtyMemory && !readOnly && (Math.abs(row.qtyMemory.qty - qty) > 0.005 || (unitsReady && row.qtyMemory.unit !== unitOf(v.unit))) ? <button type="button" onClick={() => change({ qty: String(row.qtyMemory!.qty), ...(unitsReady ? { unit: row.qtyMemory!.unit } : {}) })} className="shrink-0 h-5 max-w-[60%] truncate rounded-control border border-ink bg-white px-2 text-[10px] font-bold" title="The quantity used last time on the same model (or make). Nothing changes until you tap it." data-qty-memory={`${row.qtyMemory.qty}${row.qtyMemory.unit}`}>{row.qtyMemory.words} · Use</button> : null}
+        {row.repeatedNumber && state !== "removed" ? <span className="inline-flex min-h-5 max-w-full flex-wrap items-center rounded-control border border-red-bar bg-red-soft px-2 py-0.5 text-xs font-bold text-red" data-repeated-pn>{row.repeatedNumber}</span> : null}
+        {unitsReady && unitOf(v.unit) !== "pc" && num(v.cost_aed) > 0 && state !== "removed" ? <span className="shrink-0 text-xs font-semibold" data-per-unit={unitOf(v.unit)}>AED {aed(num(v.cost_aed))} {perUnitWords(unitOf(v.unit))} × {qtyWithUnit(qty, unitOf(v.unit))}</span> : null}
+        {row.qtyMemory && !readOnly && (Math.abs(row.qtyMemory.qty - qty) > 0.005 || (unitsReady && row.qtyMemory.unit !== unitOf(v.unit))) ? <button type="button" onClick={() => change({ qty: String(row.qtyMemory!.qty), ...(unitsReady ? { unit: row.qtyMemory!.unit } : {}) })} className="shrink-0 h-5 max-w-[60%] truncate rounded-control border border-ink bg-white px-2 text-xs font-bold" title="The quantity used last time on the same model (or make). Nothing changes until you tap it." data-qty-memory={`${row.qtyMemory.qty}${row.qtyMemory.unit}`}>{row.qtyMemory.words} · Use</button> : null}
         {row.estimate ? <EstimateLineExtras quotationId={estimate?.id ?? ""} lineId={partId ?? row.key} est={row.estimate} preparing={!!estimate?.preparing} canPrice={canPrice} onChecked={markChecked} /> : null}
         {/* A JOB part the advisor priced himself (Enter price myself, 5 November 2026): the desk's later look, never a hold. */}
-        {row.changedWords ? <span className="inline-flex min-h-5 max-w-full flex-wrap items-center rounded-control border border-amber-bar bg-amber-soft px-2 py-0.5 text-[11px] font-bold text-amber" data-price-changed>{row.changedWords}</span> : null}
+        {row.changedWords ? <span className="inline-flex min-h-5 max-w-full flex-wrap items-center rounded-control border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text" data-price-changed>{row.changedWords}</span> : null}
         {!row.estimate && row.advisorPriced && partId && state !== "removed" ? <JobAdvisorPrice jobId={jobId} partId={partId} info={row.advisorPriced} cost={num(v.cost_aed)} supplier={v.supplier} canPrice={canPrice} onChecked={markChecked} /> : null}
-        {memory && !v.list_price && !v.cost_aed && !readOnly ? <button type="button" onClick={useMemory} className="shrink-0 h-5 max-w-[55%] truncate rounded-control border border-green bg-green-soft px-2 text-[10px] font-bold text-green" title="The last price given for this part number" data-price-memory>Last: AED {memory.net !== null ? memory.net.toFixed(2) : "?"} net{memory.supplier ? ` · ${memory.supplier}` : ""}{memory.job ? ` · ${memory.job}` : ""}{memory.paid ? ` · bought at AED ${memory.paid.cost.toFixed(2)} (${memory.paid.where})` : ""} · Use</button> : null}
+        {memory && !v.list_price && !v.cost_aed && !readOnly ? <button type="button" onClick={useMemory} className="shrink-0 h-5 max-w-[55%] truncate rounded-control border border-green bg-green-soft px-2 text-xs font-bold text-green-text" title="The last price given for this part number" data-price-memory>Last: AED {memory.net !== null ? memory.net.toFixed(2) : "?"} net{memory.supplier ? ` · ${memory.supplier}` : ""}{memory.job ? ` · ${memory.job}` : ""}{memory.paid ? ` · bought at AED ${memory.paid.cost.toFixed(2)} (${memory.paid.where})` : ""} · Use</button> : null}
         {/* From our stock: the item and its average cost; Change opens the picker again */}
         {isOurStock(v.supplier) && !row.removed ? (
           v.stock_item ? (
-            <span className="inline-flex min-h-5 shrink-0 flex-wrap items-center gap-1.5 text-[11px]" data-stock-words>
-              <span className={`font-semibold ${shelfShort ? "text-amber" : ""}`} data-stock-short={shelfShort ? "1" : "0"}>From our stock: {v.stock_words || "stock item"}{shelfShort ? " – not enough on the shelf by the count: count it, or order more" : ""}</span>
-              {!readOnly ? <button type="button" onClick={() => setStockOpen(true)} className="min-h-9 rounded-control border border-line-strong bg-white px-2 text-[11px] font-bold" data-stock-change>Change</button> : null}
+            <span className="inline-flex min-h-5 shrink-0 flex-wrap items-center gap-1.5 text-xs" data-stock-words>
+              <span className={`font-semibold ${shelfShort ? "text-amber-text" : ""}`} data-stock-short={shelfShort ? "1" : "0"}>From our stock: {v.stock_words || "stock item"}{shelfShort ? " – not enough on the shelf by the count: count it, or order more" : ""}</span>
+              {!readOnly ? <button type="button" onClick={() => setStockOpen(true)} className="min-h-9 rounded-control border border-line-strong bg-white px-2 text-xs font-bold" data-stock-change>Change</button> : null}
             </span>
           ) : !settledRow ? (
             // Priced "Our stock" with no stock item (before the rule, or carried from an estimate): never unpriced for
             // it, but the stock item makes the cost the stock list's (Prices to fix lists it).
-            !readOnly ? <button type="button" onClick={() => setStockOpen(true)} className="min-h-9 shrink-0 rounded-control border border-amber-bar bg-amber-soft px-2 text-[11px] font-bold text-amber" data-stock-pick>Pick the stock item</button>
-            : canPrice && pricingLocked && !row.locked ? <span className="text-[11px] font-semibold text-amber" data-stock-pick-hint>From our stock, no stock item: tap Edit at the top, then Pick the stock item.</span> : null
+            !readOnly ? <button type="button" onClick={() => setStockOpen(true)} className="min-h-9 shrink-0 rounded-control border border-amber-bar bg-amber-soft px-2 text-xs font-bold text-amber-text" data-stock-pick>Pick the stock item</button>
+            : canPrice && pricingLocked && !row.locked ? <span className="text-xs font-semibold text-amber-text" data-stock-pick-hint>From our stock, no stock item: tap Edit at the top, then Pick the stock item.</span> : null
           ) : null
         ) : null}
         {/* The cost question (2 November 2026): one tap answers it for this cost; a different cost asks again */}
         {costAsk && !row.removed && !row.settledFix ? (
-          <span className={`inline-flex min-h-5 max-w-full flex-wrap items-center gap-1.5 rounded-control border px-2 py-0.5 text-[11px] font-bold ${v.cost_ask_kind === "far_below" ? "border-red-bar bg-white text-red" : "border-amber-bar bg-amber-soft text-amber"}`} data-cost-ask={v.cost_ask_kind || "ask_cheap"} data-cost-ask-hold={v.cost_ask_hold === "1" ? "1" : "0"}>
+          <span className={`inline-flex min-h-5 max-w-full flex-wrap items-center gap-1.5 rounded-control border px-2 py-0.5 text-xs font-bold ${v.cost_ask_kind === "far_below" ? "border-red-bar bg-white text-red" : "border-amber-bar bg-amber-soft text-amber-text"}`} data-cost-ask={v.cost_ask_kind || "ask_cheap"} data-cost-ask-hold={v.cost_ask_hold === "1" ? "1" : "0"}>
             <span className="break-words">{costAsk}</span>
             {/* Still being priced: through the one row save; approved and not ordered yet (locked): the answer alone */}
-            {v.cost_ask_hold === "1" && canPrice && !row.locked && !row.refused && !row.unavailable ? <button type="button" onClick={confirmCost} disabled={saving} className="min-h-9 rounded-control bg-ink px-2.5 text-[11px] font-bold text-white disabled:opacity-50" data-cost-confirm>Yes, real price</button> : null}
+            {v.cost_ask_hold === "1" && canPrice && !row.locked && !row.refused && !row.unavailable ? <button type="button" onClick={confirmCost} disabled={saving} className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-on-dark disabled:opacity-50" data-cost-confirm>Yes, real price</button> : null}
             {v.cost_ask_hold === "1" && canPrice && row.locked && row.approvedNotOrdered && !estimate ? (
               <>
-                <button type="button" onClick={confirmApproved} disabled={saving} className="min-h-9 rounded-control bg-ink px-2.5 text-[11px] font-bold text-white disabled:opacity-50" data-cost-confirm data-cost-confirm-approved>Yes, real price</button>
+                <button type="button" onClick={confirmApproved} disabled={saving} className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-on-dark disabled:opacity-50" data-cost-confirm data-cost-confirm-approved>Yes, real price</button>
                 <span className="font-normal">Approved by the customer, not ordered yet.</span>
               </>
             ) : null}
@@ -962,14 +962,14 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
         ) : null}
         {/* Ordered or received with a cost that is not real: the one way to put the cost that really stands */}
         {row.settledFix && !row.removed ? (
-          <span className="inline-flex min-h-5 max-w-full flex-wrap items-center gap-1.5 rounded-control border border-red-bar bg-white px-2 py-0.5 text-[11px] font-bold text-red" data-settled-fix>
+          <span className="inline-flex min-h-5 max-w-full flex-wrap items-center gap-1.5 rounded-control border border-red-bar bg-white px-2 py-0.5 text-xs font-bold text-red" data-settled-fix>
             <span className="break-words">{row.settledFix}</span>
-            {canPrice && partId ? <button type="button" onClick={() => setCorrecting(true)} className="min-h-9 rounded-control bg-ink px-2.5 text-[11px] font-bold text-white" data-correct-cost>Correct the cost…</button> : <span className="font-normal">Parts correct it.</span>}
+            {canPrice && partId ? <button type="button" onClick={() => setCorrecting(true)} className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-on-dark" data-correct-cost>Correct the cost…</button> : <span className="font-normal">Parts correct it.</span>}
           </span>
         ) : null}
-        {v.cost_note && !row.removed ? <span className="max-w-full break-words text-[11px] font-semibold text-amber" data-cost-note>{v.cost_note}</span> : null}
+        {v.cost_note && !row.removed ? <span className="max-w-full break-words text-xs font-semibold text-amber-text" data-cost-note>{v.cost_note}</span> : null}
         <span className="min-w-0 flex-1 break-words text-muted">{notes}</span>
-        {row.removed && !row.ended && canPrice ? <button type="button" onClick={() => run(() => putBackPart(jobId, removeTarget))} className="shrink-0 h-5 rounded-control border border-line-strong bg-white px-2 text-[10px] font-bold">{undo ? "Undo" : "Put back"}</button> : null}
+        {row.removed && !row.ended && canPrice ? <button type="button" onClick={() => run(() => putBackPart(jobId, removeTarget))} className="shrink-0 h-5 rounded-control border border-line-strong bg-white px-2 text-xs font-bold">{undo ? "Undo" : "Put back"}</button> : null}
         <span className={`max-w-full break-words ${tag.cls}`} data-row-tag>{tag.text}</span>
       </div>
       {split && partId ? <SplitDialog name={name} qty={qty} onClose={() => setSplit(false)} onSplit={(lines) => { setSplit(false); const fd = new FormData(); fd.set("lines", JSON.stringify(lines)); run(() => splitPart(jobId, partId, fd)); }} /> : null}
@@ -1040,7 +1040,7 @@ function EndDialog({ name, endings: given, options, onClose, onEnd }: { name: st
         <span className="text-sm font-bold uppercase break-words">{name}</span>
         {done ? (
           <div className="flex flex-col gap-3" data-end-done>
-            <p className="text-sm text-green font-semibold" data-end-message>{done.message}</p>
+            <p className="text-sm text-green-text font-semibold" data-end-message>{done.message}</p>
             {done.supplierCopy ? (
               <div className="flex flex-col gap-2 rounded-control border border-line bg-chip p-3" data-end-supplier-copy>
                 <span className="text-xs font-bold">Tell {done.supplierCopy.supplier}:</span>
@@ -1060,14 +1060,14 @@ function EndDialog({ name, endings: given, options, onClose, onEnd }: { name: st
             <div className="flex flex-col gap-1.5">
               {endings!.options.map((o) => (
                 <div key={o.key} className="flex flex-col gap-0.5">
-                  <button type="button" disabled={!o.allowed || busy} onClick={() => setChoice(o.key)} aria-pressed={choice === o.key} className={`min-h-11 rounded-control border px-3 text-left text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${choice === o.key ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-end-option={o.key} data-allowed={o.allowed ? "1" : "0"}>
+                  <button type="button" disabled={!o.allowed || busy} onClick={() => setChoice(o.key)} aria-pressed={choice === o.key} className={`min-h-11 rounded-control border px-3 text-left text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50 ${choice === o.key ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-end-option={o.key} data-allowed={o.allowed ? "1" : "0"}>
                     {choice === o.key ? "✓ " : ""}{o.label}
                   </button>
                   <span className={`text-xs ${o.allowed ? "text-muted" : "font-semibold text-muted"}`} data-end-why={o.allowed ? undefined : o.key}>{o.allowed ? o.help : o.why}</span>
                 </div>
               ))}
             </div>
-            {endings!.partly ? <p className="text-xs font-semibold text-amber" data-end-partly>{endings!.partly}</p> : null}
+            {endings!.partly ? <p className="text-xs font-semibold text-amber-text" data-end-partly>{endings!.partly}</p> : null}
             <ReasonChips name="reason" label="Why is it not needed? (optional)" options={options} onValue={setReason} placeholder="Tap a reason, or type – empty saves as “Not needed”" textCase="sentence" disabled={busy} />
             {error ? <p className="rounded-control border border-red-bar bg-white px-3 py-2 text-sm font-semibold text-red" role="alert" data-end-error>{error}</p> : null}
             <div className="flex flex-wrap gap-2">
@@ -1084,8 +1084,8 @@ function EndDialog({ name, endings: given, options, onClose, onEnd }: { name: st
 
 /** A small label of fixed height on the status line. */
 function Chip({ tone, children }: { tone: "outline" | "amber" | "ink"; children: React.ReactNode }) {
-  const cls = tone === "amber" ? "bg-amber-soft text-amber" : tone === "ink" ? "bg-ink text-white" : "border border-ink text-ink";
-  return <span className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[10px] font-bold whitespace-nowrap ${cls}`}>{children}</span>;
+  const cls = tone === "amber" ? "bg-amber-soft text-amber-text" : tone === "ink" ? "bg-ink text-on-dark" : "border border-ink text-ink";
+  return <span className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs font-bold whitespace-nowrap ${cls}`}>{children}</span>;
 }
 
 /** One line of the three-dot menu. */
@@ -1110,9 +1110,9 @@ function EstimateLineExtras({ quotationId, lineId, est, preparing, canPrice, onC
   const shownState = checked && est.state === "advisor" ? "checked" : est.state;
   return (
     <>
-      <span className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 text-[10px] font-bold whitespace-nowrap ${shownState === "with_desk" || shownState === "advisor" ? "bg-amber-soft text-amber" : "border border-green text-green"}`} data-desk-part-state={shownState}>{ESTIMATE_PART_WORDS[shownState]}</span>
+      <span className={`inline-flex h-5 shrink-0 items-center rounded-full px-2 text-xs font-bold whitespace-nowrap ${shownState === "with_desk" || shownState === "advisor" ? "bg-amber-soft text-amber-text" : "border border-green text-green-text"}`} data-desk-part-state={shownState}>{ESTIMATE_PART_WORDS[shownState]}</span>
       {advisorPriced ? (
-        <span className="inline-flex min-h-5 max-w-full flex-wrap items-center gap-1.5 rounded-control border border-amber-bar bg-amber-soft px-2 py-0.5 text-[11px] font-bold text-amber" data-desk-check>
+        <span className="inline-flex min-h-5 max-w-full flex-wrap items-center gap-1.5 rounded-control border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text" data-desk-check>
           <span className="break-words">Priced by {est.advisorName ?? "the advisor"}{est.advisorCost !== null ? `: AED ${aed(est.advisorCost)}` : ""}{est.advisorSupplier ? ` from ${est.advisorSupplier}` : ""}. Check it when you can.</span>
           {canPrice ? (
             <button
@@ -1130,7 +1130,7 @@ function EstimateLineExtras({ quotationId, lineId, est, preparing, canPrice, onC
                   router.refresh();
                 }
               }}
-              className="min-h-9 rounded-control bg-ink px-2.5 text-[11px] font-bold text-white disabled:opacity-50"
+              className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-on-dark disabled:opacity-50"
               data-desk-price-right
             >
               {checking ? "Saving…" : "Price is right ✓"}
@@ -1140,7 +1140,7 @@ function EstimateLineExtras({ quotationId, lineId, est, preparing, canPrice, onC
         </span>
       ) : null}
       {!preparing && canPrice && est.state !== "with_desk" ? (
-        <details className="text-[11px]">
+        <details className="text-xs">
           <summary className="min-h-9 cursor-pointer font-semibold underline underline-offset-4">The price is different: tell the advisor</summary>
           <ActionForm action={tellAdvisorPrice.bind(null, quotationId, lineId)} className="mt-1 flex flex-col gap-1.5">
             {() => (
@@ -1166,10 +1166,10 @@ function JobAdvisorPrice({ jobId, partId, info, cost, supplier, canPrice, onChec
   const [checkError, setCheckError] = useState<string | null>(null);
   const [checked, setChecked] = useState(info.checked);
   if (checked) {
-    return <span className="inline-flex h-5 shrink-0 items-center rounded-full border border-green px-2 text-[10px] font-bold text-green whitespace-nowrap" data-advisor-priced="checked">Priced by {info.name ?? "advisor"} · checked ✓</span>;
+    return <span className="inline-flex h-5 shrink-0 items-center rounded-full border border-green px-2 text-xs font-bold text-green-text whitespace-nowrap" data-advisor-priced="checked">Priced by {info.name ?? "advisor"} · checked ✓</span>;
   }
   return (
-    <span className="inline-flex min-h-5 max-w-full flex-wrap items-center gap-1.5 rounded-control border border-amber-bar bg-amber-soft px-2 py-0.5 text-[11px] font-bold text-amber" data-advisor-priced="open">
+    <span className="inline-flex min-h-5 max-w-full flex-wrap items-center gap-1.5 rounded-control border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text" data-advisor-priced="open">
       <span className="break-words">Priced by {info.name ?? "the advisor"}{cost > 0 ? `: AED ${aed(cost)}` : ""}{supplier ? ` from ${supplier}` : ""}. Check it when you can.</span>
       {canPrice ? (
         <button
@@ -1187,7 +1187,7 @@ function JobAdvisorPrice({ jobId, partId, info, cost, supplier, canPrice, onChec
               router.refresh();
             }
           }}
-          className="min-h-9 rounded-control bg-ink px-2.5 text-[11px] font-bold text-white disabled:opacity-50"
+          className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-on-dark disabled:opacity-50"
           data-desk-price-right
         >
           {checking ? "Saving…" : "Price is right ✓"}
@@ -1236,7 +1236,7 @@ function SupplierList({ rows, car, vin, openingLine, onClose }: { rows: TableRow
         <div className="flex items-center justify-between gap-2"><span className="text-lg font-extrabold">List for the supplier</span><button type="button" onClick={onClose} aria-label="Close" className="min-h-11 min-w-11 rounded-control text-xl font-bold hover:bg-chip">✕</button></div>
         <div className="flex flex-wrap gap-1.5">
           {rows.filter((r) => !r.optionGroup).map((r) => (
-            <button key={r.key} type="button" onClick={() => setTicked((s) => { const n = new Set(s); if (n.has(r.key)) n.delete(r.key); else n.add(r.key); return n; })} aria-pressed={ticked.has(r.key)} className={`min-h-9 rounded-control border px-2.5 text-xs font-bold ${ticked.has(r.key) ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`}>{ticked.has(r.key) ? "✓ " : ""}{r.name}</button>
+            <button key={r.key} type="button" onClick={() => setTicked((s) => { const n = new Set(s); if (n.has(r.key)) n.delete(r.key); else n.add(r.key); return n; })} aria-pressed={ticked.has(r.key)} className={`min-h-9 rounded-control border px-2.5 text-xs font-bold ${ticked.has(r.key) ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`}>{ticked.has(r.key) ? "✓ " : ""}{r.name}</button>
           ))}
         </div>
         <pre className="whitespace-pre-wrap rounded-control bg-chip p-3 text-sm font-sans overflow-auto max-h-64">{text}</pre>

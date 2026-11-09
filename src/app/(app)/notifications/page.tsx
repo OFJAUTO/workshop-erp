@@ -55,7 +55,7 @@ export default async function NotificationsPage() {
                     <Link href={n.href ?? (n.job_id ? `/jobs/${n.job_id}` : "#")} className="flex flex-col gap-0.5 px-5 py-3 hover:bg-canvas">
                       <span className="text-sm font-semibold">{n.title}</span>
                       {n.body ? <span className="text-xs text-muted">{n.body}</span> : null}
-                      <span className="text-[11px] text-faint">{formatDateTime(n.created_at)}</span>
+                      <span className="text-xs text-faint">{formatDateTime(n.created_at)}</span>
                     </Link>
                   </li>
                 ))}

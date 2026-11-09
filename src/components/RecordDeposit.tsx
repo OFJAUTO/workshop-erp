@@ -145,7 +145,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
               </div>
             ) : done ? (
               <div className="flex flex-col gap-3" data-deposit-done>
-                <p className="rounded-control bg-green-soft border border-green px-3 py-2 text-sm font-bold text-green">
+                <p className="rounded-control bg-green-soft border border-green px-3 py-2 text-sm font-bold text-green-text">
                   {done.number} recorded ✓ — {aed(value)} received.
                 </p>
                 {done.recordedAt ? (
@@ -194,7 +194,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
                 {overBy > 0 ? <p className="text-sm font-semibold text-amber-bar" data-deposit-over>{aed(overBy)} more than requested – kept as an advance on the job.</p> : null}
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5" data-deposit-methods>
                   {METHODS.map(([v, l]) => (
-                    <button key={v} type="button" onClick={() => setMethod(v)} aria-pressed={method === v} data-deposit-method={v} className={`min-h-11 rounded-control border-2 px-1 text-xs font-bold ${method === v ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>{l}</button>
+                    <button key={v} type="button" onClick={() => setMethod(v)} aria-pressed={method === v} data-deposit-method={v} className={`min-h-11 rounded-control border-2 px-1 text-xs font-bold ${method === v ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>{l}</button>
                   ))}
                 </div>
                 {feeRuleWords(rule) !== "no bank fee" ? <p className="text-xs text-muted" data-deposit-fee>Bank fee {feeRuleWords(rule)} on {METHODS.find(([v]) => v === method)?.[1].toLowerCase()}{value > 0 ? ` (estimated ${fee.cost.toFixed(2)}${fee.vat > 0 ? ` + VAT ${fee.vat.toFixed(2)}` : ""})` : ""}: internal, counted against profit without the reclaimable VAT.</p> : null}

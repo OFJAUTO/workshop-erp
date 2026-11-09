@@ -87,7 +87,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
           <>
             <LinkButton href="/invoices" tone="secondary" size="lg">Invoices</LinkButton>
             {job ? <LinkButton href={`/jobs/${job.id}`} tone="secondary" size="lg">Job card</LinkButton> : null}
-            <a href={`/api/pdf/invoice-by-id/${invoice.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-control font-bold bg-ink text-white hover:bg-black min-h-14 px-6 text-base">PDF</a>
+            <a href={`/api/pdf/invoice-by-id/${invoice.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-control font-bold bg-ink text-on-dark hover:bg-black min-h-14 px-6 text-base">PDF</a>
           </>
         }
       />
@@ -98,9 +98,9 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
           <span className="text-lg font-extrabold">Invoice AED {m(invoice.total_aed)}</span>
           <span className="text-lg font-extrabold">Paid AED {m(bal.paid)}</span>
           {bal.credited ? <span className="text-sm font-semibold text-muted" data-credit-note-off>Credit notes AED {m(bal.credited)} off</span> : null}
-          <span className={`text-lg font-extrabold ${bal.balance > 0 ? "text-red" : "text-green"}`}>Balance AED {m(bal.balance)}</span>
-          {bal.pendingAmount ? <span className="text-sm font-semibold text-amber">Cheque of AED {m(bal.pendingAmount)} pending clearance</span> : null}
-          {pendingOwner.length ? <span className="text-sm font-semibold text-amber">{pendingOwner.length} payment{pendingOwner.length === 1 ? "" : "s"} waiting for the owner</span> : null}
+          <span className={`text-lg font-extrabold ${bal.balance > 0 ? "text-red" : "text-green-text"}`}>Balance AED {m(bal.balance)}</span>
+          {bal.pendingAmount ? <span className="text-sm font-semibold text-amber-text">Cheque of AED {m(bal.pendingAmount)} pending clearance</span> : null}
+          {pendingOwner.length ? <span className="text-sm font-semibold text-amber-text">{pendingOwner.length} payment{pendingOwner.length === 1 ? "" : "s"} waiting for the owner</span> : null}
         </Card>
       ) : null}
 
@@ -128,7 +128,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                       {p.status === "recorded" && !staff.viewingAs && (role === "owner" || p.received_by === staff.id) && p.created_at ? <UndoButton at={p.created_at} minutes={undoMinutes} done="Payment recorded" action={undoPaymentAction.bind(null, p.id, `/invoices/${invoice.id}`)} /> : null}
                       {p.status === "voided" ? <span className="text-red font-semibold">Voided by {nameOf.get(p.voided_by ?? "") ?? "the owner"} {formatDateTime(p.voided_at)}: {p.void_reason}</span> : null}
                       {p.status === "reversed" ? <span className="text-red font-semibold">Reversed: {p.reversed_reason}</span> : null}
-                      {p.status === "recorded" ? (p.verified_at ? <span className="text-green font-semibold">Verified by {nameOf.get(p.verified_by ?? "") ?? "accounts"} {formatDate(p.verified_at)}</span> : <span className="text-amber font-semibold">Not verified by accounts yet</span>) : null}
+                      {p.status === "recorded" ? (p.verified_at ? <span className="text-green-text font-semibold">Verified by {nameOf.get(p.verified_by ?? "") ?? "accounts"} {formatDate(p.verified_at)}</span> : <span className="text-amber-text font-semibold">Not verified by accounts yet</span>) : null}
                       {p.status === "recorded" && !p.verified_at && canVerify ? (
                         <form action={verifyPaymentAction.bind(null, p.id)}><Button type="submit" size="md" tone="secondary">Verified: the money is in</Button></form>
                       ) : null}
@@ -156,7 +156,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                   <PaymentForm invoiceId={invoice.id} jobId={null} proofJobId={invoice.job_id} balance={bal.balance} action={recordPayment} charges={bankCharges} methods={methodsFor(role)} invoiceNumber={invoice.number} isProforma={invoice.kind === "proforma"} nextTaxNumber={invoice.kind === "proforma" ? await nextDocumentNumber("tax_invoice", settings) : null} isOwner={role === "owner"} spentKeys={payments.map((p) => (p as { client_key?: string | null }).client_key).filter((k): k is string => !!k && !k.startsWith("ngenius:"))} />
                 </div>
               ) : null}
-              {payable && bal.state === "paid" ? <div className="rounded-card border-2 border-green p-4 text-center text-lg font-extrabold text-green">Paid in full{bal.paidAt ? ` · ${formatDate(bal.paidAt)}` : ""}</div> : null}
+              {payable && bal.state === "paid" ? <div className="rounded-card border-2 border-green p-4 text-center text-lg font-extrabold text-green-text">Paid in full{bal.paidAt ? ` · ${formatDate(bal.paidAt)}` : ""}</div> : null}
             </Card>
           ) : null}
 
@@ -221,7 +221,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                   <Card className="flex flex-col gap-2" data-cn-refund>
                     <SectionLabel>Refund to the customer</SectionLabel>
                     {refund?.refund_paid_at ? (
-                      <p className="text-sm font-semibold text-green" data-cn-refund-done>
+                      <p className="text-sm font-semibold text-green-text" data-cn-refund-done>
                         AED {m(Number(refund.refund_amount_aed) || 0)} refunded by {refund.refund_method === "cash" ? "cash" : "bank transfer"}
                         {refund.refund_reference ? ` (ref ${refund.refund_reference})` : ""} on {formatDate(refund.refund_paid_at)}.
                       </p>

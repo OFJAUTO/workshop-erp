@@ -107,7 +107,7 @@ export default async function PartsNoHomePage({ searchParams }: { searchParams: 
                     <input type="hidden" name="back" value="/parts/no-home" />
                     <Button type="submit" size="md" data-goodwill-approve>Approve: fit it as goodwill (AED {cost(p).toFixed(2)})</Button>
                   </form>
-                ) : <p className="text-xs font-semibold text-amber">Waiting for the owner.</p>}
+                ) : <p className="text-xs font-semibold text-amber-text">Waiting for the owner.</p>}
                 {/* Not fitted after all: the request is replaced by its real ending. */}
                 {canEnd && p.job && endings && !endings.refusal ? <EndingForm partId={p.id} back="/parts/no-home" action={dispositionAction.bind(null, p.job.id)} endings={endings} /> : null}
               </div>

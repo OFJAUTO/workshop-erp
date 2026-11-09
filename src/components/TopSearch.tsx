@@ -82,7 +82,7 @@ export function TopSearch({ customers = true }: { customers?: boolean }) {
                       <span className="block truncate text-sm font-extrabold">{h.plate}<span className="font-semibold text-muted"> · {h.title}</span></span>
                       <span className="block truncate text-xs text-muted">{[h.customer, h.stage].filter(Boolean).join(" · ")}</span>
                     </span>
-                    {!h.open ? <span className="shrink-0 rounded-full bg-chip px-2 py-0.5 text-[11px] font-bold text-muted">Gone</span> : null}
+                    {!h.open ? <span className="shrink-0 rounded-full bg-chip px-2 py-0.5 text-xs font-bold text-muted">Gone</span> : null}
                   </button>
                   {canPay && h.jobId ? (
                     <button type="button" onClick={() => { setOpen(false); openRecordPayment({ jobId: h.jobId }); }} className="min-h-11 shrink-0 px-3 text-xs font-bold underline decoration-dotted underline-offset-4" data-search-pay>

@@ -50,18 +50,18 @@ export default async function SupplierTotalsPage() {
         <Card className="flex flex-col gap-2" data-supplier-totals>
           <SectionLabel right={`${list.length} supplier${list.length === 1 ? "" : "s"}`}>By supplier</SectionLabel>
           <div className="grid grid-cols-[1fr_auto_auto_auto_auto] gap-x-4 gap-y-1 text-sm">
-            <span className="text-[11px] font-bold uppercase tracking-[0.08em] text-muted">Supplier</span>
-            <span className="text-right text-[11px] font-bold uppercase tracking-[0.08em] text-muted">LPOs</span>
-            <span className="text-right text-[11px] font-bold uppercase tracking-[0.08em] text-muted">This month</span>
-            <span className="text-right text-[11px] font-bold uppercase tracking-[0.08em] text-muted">3 months</span>
-            <span className="text-right text-[11px] font-bold uppercase tracking-[0.08em] text-muted">All time</span>
+            <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Supplier</span>
+            <span className="text-right text-xs font-bold uppercase tracking-[0.08em] text-muted">LPOs</span>
+            <span className="text-right text-xs font-bold uppercase tracking-[0.08em] text-muted">This month</span>
+            <span className="text-right text-xs font-bold uppercase tracking-[0.08em] text-muted">3 months</span>
+            <span className="text-right text-xs font-bold uppercase tracking-[0.08em] text-muted">All time</span>
             {list.map((r) => (
               <div key={r.id ?? r.name} className="contents" data-supplier-total={r.name}>
                 <span className="flex flex-wrap items-center gap-2 py-1 border-t border-line">
                   <Link href={r.id ? `/parts/orders?supplier=${r.id}` : "/parts/orders"} className="font-semibold underline underline-offset-4">{r.name}</Link>
                   {r.last ? <span className="text-xs text-muted">last order {formatDate(r.last)}</span> : null}
                   {r.stockOrders ? <span className="text-xs text-muted">· {r.stockOrders} stock order{r.stockOrders === 1 ? "" : "s"}</span> : null}
-                  {r.toFollow ? <span className="text-xs font-bold text-amber">· {r.toFollow} invoice{r.toFollow === 1 ? "" : "s"} to follow</span> : null}
+                  {r.toFollow ? <span className="text-xs font-bold text-amber-text">· {r.toFollow} invoice{r.toFollow === 1 ? "" : "s"} to follow</span> : null}
                   {r.toCheck ? <span className="text-xs font-bold text-red">· {r.toCheck} price{r.toCheck === 1 ? "" : "s"} to check</span> : null}
                 </span>
                 <span className="py-1 border-t border-line text-right">{r.count}</span>

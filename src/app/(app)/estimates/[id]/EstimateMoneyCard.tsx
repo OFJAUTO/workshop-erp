@@ -169,7 +169,7 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
         <ul className="flex flex-col gap-1 text-sm">
           {money.taxes.map((t) => (
             <li key={t.id} className="flex flex-wrap items-center gap-2" data-em-tax={t.number}>
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-green text-xs font-bold text-white">✓</span>
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-green text-xs font-bold text-on-dark">✓</span>
               <span className="font-semibold">Tax invoice {t.number}</span>
               <span className="text-muted">{t.advance ? `advance against ${number}` : "the whole bill"} · {aed(t.total)}</span>
               {t.token ? <a className="text-xs font-bold underline underline-offset-4" href={`/api/pdf/invoice/${t.token}`} target="_blank" rel="noreferrer">PDF</a> : null}
@@ -220,10 +220,10 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
       ) : canCreate ? (
         <div className="flex flex-col gap-3" data-em-create>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setMode("complete")} disabled={!approved} aria-pressed={mode === "complete"} data-em-mode="complete" className={`min-h-11 rounded-control border px-4 text-sm font-bold ${mode === "complete" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"} ${approved ? "" : "opacity-50"}`}>
+            <button type="button" onClick={() => setMode("complete")} disabled={!approved} aria-pressed={mode === "complete"} data-em-mode="complete" className={`min-h-11 rounded-control border px-4 text-sm font-bold ${mode === "complete" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"} ${approved ? "" : "opacity-50"}`}>
               COMPLETE – the whole bill{approved ? ` (${aed(money.total)})` : ""}
             </button>
-            <button type="button" onClick={() => setMode("partial")} aria-pressed={mode === "partial"} data-em-mode="partial" className={`min-h-11 rounded-control border px-4 text-sm font-bold ${mode === "partial" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+            <button type="button" onClick={() => setMode("partial")} aria-pressed={mode === "partial"} data-em-mode="partial" className={`min-h-11 rounded-control border px-4 text-sm font-bold ${mode === "partial" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
               PARTIAL – a deposit
             </button>
           </div>
@@ -235,7 +235,7 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
                 const on = combine.has(c.id);
                 return (
                   <button key={c.id} type="button" onClick={() => setCombine((s) => { const n = new Set(s); if (n.has(c.id)) n.delete(c.id); else n.add(c.id); return n; })} aria-pressed={on} data-em-combine={c.id} className="flex min-h-11 items-center gap-2 rounded-control px-2 text-left text-sm">
-                    <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong text-transparent"}`}>✓</span>
+                    <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong text-transparent"}`}>✓</span>
                     <span className="font-semibold">{c.number}</span>
                     <span className="text-muted">{aed(c.total)}</span>
                   </button>
@@ -246,8 +246,8 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
           {mode === "partial" ? (
             <div className="flex flex-wrap items-center gap-2" data-em-partial>
               <span className="inline-flex shrink-0 overflow-hidden rounded-control border border-line-strong">
-                <button type="button" onClick={() => setPartialKind("percent")} aria-pressed={partialKind === "percent"} data-em-partial-kind="percent" className={`min-h-11 px-3 text-sm font-bold ${partialKind === "percent" ? "bg-ink text-white" : "bg-white"}`}>%</button>
-                <button type="button" onClick={() => setPartialKind("aed")} aria-pressed={partialKind === "aed"} data-em-partial-kind="aed" className={`min-h-11 px-3 text-sm font-bold ${partialKind === "aed" ? "bg-ink text-white" : "bg-white"}`}>AED</button>
+                <button type="button" onClick={() => setPartialKind("percent")} aria-pressed={partialKind === "percent"} data-em-partial-kind="percent" className={`min-h-11 px-3 text-sm font-bold ${partialKind === "percent" ? "bg-ink text-on-dark" : "bg-white"}`}>%</button>
+                <button type="button" onClick={() => setPartialKind("aed")} aria-pressed={partialKind === "aed"} data-em-partial-kind="aed" className={`min-h-11 px-3 text-sm font-bold ${partialKind === "aed" ? "bg-ink text-on-dark" : "bg-white"}`}>AED</button>
               </span>
               <NumericInput value={partialValue} onChange={(e) => setPartialValue((e.target as HTMLInputElement).value)} placeholder={partialKind === "percent" ? "e.g. 50" : "amount"} style={{ width: "9rem" }} data-em-partial-value />
               {partialKind === "percent" && Number(partialValue) > 0 && money.total > 0 ? <span className="text-sm text-muted">= {aed(Math.round(money.total * Number(partialValue)) / 100)}</span> : null}
@@ -269,8 +269,8 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
               <NumericInput value={cancelFee} onChange={(e) => setCancelFee((e.target as HTMLInputElement).value)} style={{ width: "8rem" }} data-em-cancel-fee />
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => setCancelKeep("credit")} aria-pressed={cancelKeep === "credit"} data-em-cancel-keep="credit" className={`min-h-11 rounded-control border px-3 text-sm font-bold ${cancelKeep === "credit" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Keep as customer credit</button>
-              <button type="button" onClick={() => setCancelKeep("refund")} aria-pressed={cancelKeep === "refund"} data-em-cancel-keep="refund" className={`min-h-11 rounded-control border px-3 text-sm font-bold ${cancelKeep === "refund" ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>Refund the rest</button>
+              <button type="button" onClick={() => setCancelKeep("credit")} aria-pressed={cancelKeep === "credit"} data-em-cancel-keep="credit" className={`min-h-11 rounded-control border px-3 text-sm font-bold ${cancelKeep === "credit" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>Keep as customer credit</button>
+              <button type="button" onClick={() => setCancelKeep("refund")} aria-pressed={cancelKeep === "refund"} data-em-cancel-keep="refund" className={`min-h-11 rounded-control border px-3 text-sm font-bold ${cancelKeep === "refund" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>Refund the rest</button>
             </div>
             <div><Button type="button" size="md" tone="secondary" disabled={busy || cancelWhy.trim().length < 3} onClick={doCancel} data-em-cancel-save>Cancel the estimate</Button></div>
             <p className="text-xs text-muted">The open proforma is voided (logged). What stands invoiced beyond the fee becomes a credit note — refunded on its page, or kept as the customer&apos;s credit. A cheque still clearing blocks this.</p>

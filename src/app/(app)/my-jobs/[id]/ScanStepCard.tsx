@@ -52,7 +52,7 @@ export function ScanStepCard({ jobId, inspectionId, files, receivedAt, readAt, a
         <p className="rounded-control bg-green-soft px-3 py-2 text-sm font-bold" data-scan-received>{receivedWords}</p>
       ) : null}
       {done ? (
-        <p className="text-sm font-semibold text-green">{readAt ? "Scan report read. The inspection is open." : "Scan not possible, approved by the workshop manager. The inspection is open."}</p>
+        <p className="text-sm font-semibold text-green-text">{readAt ? "Scan report read. The inspection is open." : "Scan not possible, approved by the workshop manager. The inspection is open."}</p>
       ) : (
         <p className="text-sm">Plug in the scanner and run the scan. The report arrives here by email, or attach the PDF by hand. Then tap that you have read it. If a scan is not possible, say why; the workshop manager approves that.</p>
       )}
@@ -61,11 +61,11 @@ export function ScanStepCard({ jobId, inspectionId, files, receivedAt, readAt, a
       <InspectionMedia inspectionId={inspectionId} files={list} where={{ isPrescan: true }} accept="pdf" disabled={!canAct} onAdded={(f) => setList((l) => (l.some((x) => x.id === f.id) ? l : [...l, f]))} />
       {!done && canAct ? (
         <div className="flex flex-col gap-3 border-t border-line pt-3">
-          <button type="button" disabled={!list.length || busy} onClick={() => send({ inspection: { scan_read: true } })} className={`min-h-14 rounded-control text-base font-extrabold ${list.length ? "bg-ink text-white" : "bg-chip text-muted"}`} data-scan-read>
+          <button type="button" disabled={!list.length || busy} onClick={() => send({ inspection: { scan_read: true } })} className={`min-h-14 rounded-control text-base font-extrabold ${list.length ? "bg-ink text-on-dark" : "bg-chip text-muted"}`} data-scan-read>
             I have read the scan report
           </button>
           {notPossibleReason ? (
-            <p className="text-sm font-semibold text-amber">Scan not possible: {notPossibleReason}. Waiting for the workshop manager&apos;s approval.</p>
+            <p className="text-sm font-semibold text-amber-text">Scan not possible: {notPossibleReason}. Waiting for the workshop manager&apos;s approval.</p>
           ) : (
             <div className="flex flex-wrap items-end gap-2">
               <label className="flex flex-col gap-1 flex-1 min-w-48">

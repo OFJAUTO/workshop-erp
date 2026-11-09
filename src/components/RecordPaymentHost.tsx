@@ -237,7 +237,7 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
           </div>
         ) : done ? (
           <div className="flex flex-col gap-3 rounded-control border-2 border-green bg-green-soft p-4" data-record-payment-done={done.number}>
-            <p className="text-lg font-extrabold text-green">✓ {done.number} recorded</p>
+            <p className="text-lg font-extrabold text-green-text">✓ {done.number} recorded</p>
             <p className="text-sm">{done.where}</p>
             {done.told ? <p className="text-sm font-semibold" data-report-told>{done.told}</p> : null}
             {done.recordedAt && done.paymentId ? (
@@ -294,7 +294,7 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
                         <span className="text-sm font-bold uppercase" data-payer-car>{h.plate ? [h.plate, h.car].filter(Boolean).join(" · ") : "No car on record"}</span>
                         <span className="text-xs text-muted" data-payer-who><span className="uppercase">{h.name}</span>{h.jobNumber ? <> · <span className="whitespace-nowrap">{h.jobNumber}</span></> : null}{h.phone ? ` · ${h.phone}` : ""}</span>
                       </span>
-                      <span className={`shrink-0 max-w-[9rem] text-right text-xs font-bold ${h.balance !== null && h.balance > 0.005 ? "text-ink" : h.jobId ? "text-green" : "text-muted"}`} data-payer-balance>{h.moneyWords}</span>
+                      <span className={`shrink-0 max-w-[9rem] text-right text-xs font-bold ${h.balance !== null && h.balance > 0.005 ? "text-ink" : h.jobId ? "text-green-text" : "text-muted"}`} data-payer-balance>{h.moneyWords}</span>
                     </button>
                     {h.jobId ? <Link href={`/jobs/${h.jobId}`} onClick={onClose} className="shrink-0 min-h-11 px-3 flex items-center text-xs font-bold underline underline-offset-4" data-payer-job-card>Job card</Link> : null}
                   </li>
@@ -341,10 +341,10 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
                   aria-pressed={targetKey === t.key}
                   data-pay-target={t.key}
                   data-pay-target-kind={t.kind}
-                  className={`min-h-12 rounded-control border-2 px-3 py-2 text-left flex flex-col ${targetKey === t.key ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}
+                  className={`min-h-12 rounded-control border-2 px-3 py-2 text-left flex flex-col ${targetKey === t.key ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}
                 >
                   <span className="text-sm font-bold uppercase">{t.kind === "unallocated" ? t.title : `Allocate to ${t.title}`}</span>
-                  <span className={`text-xs ${targetKey === t.key ? "text-white/80" : "text-muted"}`}>{t.detail}</span>
+                  <span className={`text-xs ${targetKey === t.key ? "text-on-dark/80" : "text-muted"}`}>{t.detail}</span>
                 </button>
               ))}
               {!choices.unallocatedReady ? <p className="text-xs text-muted">Saving a payment on the customer&apos;s account (not allocated) switches on with the database update of 1 November.</p> : null}
@@ -378,7 +378,7 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
                           <span className="text-xs font-semibold text-muted">For which car? (optional)</span>
                           <div className="flex flex-wrap gap-2">
                             {[{ id: "", plate: "No particular car", car: "" }, ...choices.cars].map((c) => (
-                              <button key={c.id || "none"} type="button" onClick={() => setCarId(c.id)} aria-pressed={carId === c.id} data-pay-car={c.id || "none"} className={`min-h-11 rounded-control border-2 px-3 text-xs font-bold ${carId === c.id ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                              <button key={c.id || "none"} type="button" onClick={() => setCarId(c.id)} aria-pressed={carId === c.id} data-pay-car={c.id || "none"} className={`min-h-11 rounded-control border-2 px-3 text-xs font-bold ${carId === c.id ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
                                 {[c.plate, c.car].filter(Boolean).join(" · ")}
                               </button>
                             ))}

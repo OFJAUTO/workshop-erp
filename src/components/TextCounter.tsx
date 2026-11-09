@@ -5,7 +5,7 @@ export function TextCounter({ length, max = LINE_TEXT_MAX }: { length: number; m
   const c = textCounter(length, max);
   if (!c) return null;
   return (
-    <span className={`px-1 text-[11px] ${c.over ? "font-bold text-red" : "text-muted"}`} data-text-counter data-over={c.over ? "1" : "0"} aria-live="polite">
+    <span className={`px-1 text-xs ${c.over ? "font-bold text-red" : "text-muted"}`} data-text-counter data-over={c.over ? "1" : "0"} aria-live="polite">
       {c.words}
     </span>
   );

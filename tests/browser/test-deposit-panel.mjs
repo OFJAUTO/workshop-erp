@@ -22,7 +22,8 @@ await page.waitForTimeout(2200);
 check("the panel is OPEN by default", (await page.locator("[data-waiting-panel] details[open]").count()) === 1);
 const rows = page.locator("[data-waiting-row]", { hasText: "Dubai S 30303" });
 check("ONE line for the job, not two", (await rows.count()) === 1, String(await rows.count()));
-check("it is red (urgent)", (await rows.first().getAttribute("data-urgency")) === "red");
+// 9 November 2026: a deposit still to come is "today" (amber); urgent only with money at risk, a promise or a customer waiting.
+check("it is amber (today), never red by itself", (await rows.first().getAttribute("data-urgency")) === "amber");
 check("it reads Deposit to record with the amount", /Deposit to record.*AED 20,000\.00/.test(((await rows.first().textContent()) ?? "").replace(/\s+/g, " ")));
 
 // The button opens the action right there.

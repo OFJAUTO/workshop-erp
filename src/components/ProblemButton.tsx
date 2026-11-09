@@ -75,7 +75,7 @@ export function ProblemButton({ jobId, stageId, action, from }: { jobId: string;
               <Button type="button" tone="secondary" size="lg" onClick={() => setOpen(false)}>Cancel</Button>
             </div>
             {wait.count ? (
-              <span className={`text-xs font-semibold ${wait.stopped ? "text-red" : "text-amber"}`} data-problem-photo-sending>
+              <span className={`text-xs font-semibold ${wait.stopped ? "text-red" : "text-amber-text"}`} data-problem-photo-sending>
                 {wait.stopped ? "The photo could not be sent – try again, or remove it to send without it." : "The photo is still sending – Send works once it has arrived (or remove it to send without it)."}
               </span>
             ) : null}

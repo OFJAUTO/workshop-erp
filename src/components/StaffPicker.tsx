@@ -64,9 +64,9 @@ export function StaffPicker(props: TickProps | TapProps | ViewProps | ChipsProps
               <input type="hidden" name={props.field ?? "technician"} value={p.id} />
               {Object.entries(props.fields ?? {}).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
               {isOn ? <input type="hidden" name="off" value="1" /> : null}
-              <button type="submit" disabled={props.disabled} data-pick-person={p.id} data-on={isOn ? "1" : "0"} className={`inline-flex min-h-11 items-center gap-2 rounded-control border px-2.5 text-sm font-bold ${isOn ? "border-green bg-green-soft text-green" : "border-line-strong bg-white"}`} title={p.now}>
+              <button type="submit" disabled={props.disabled} data-pick-person={p.id} data-on={isOn ? "1" : "0"} className={`inline-flex min-h-11 items-center gap-2 rounded-control border px-2.5 text-sm font-bold ${isOn ? "border-green bg-green-soft text-green-text" : "border-line-strong bg-white"}`} title={p.now}>
                 <Avatar name={p.display_name} photoUrl={p.photoUrl} size={24} />{isOn ? "✓ " : ""}{p.display_name}
-                {p.isLeader ? <span className="rounded-control bg-ink px-1 py-0.5 text-[9px] font-bold uppercase tracking-[0.06em] text-white" data-leader>Leader</span> : null}
+                {p.isLeader ? <span className="rounded-control bg-ink px-1 py-0.5 text-xs font-bold uppercase tracking-[0.06em] text-on-dark" data-leader>Leader</span> : null}
               </button>
             </form>
           );
@@ -80,24 +80,24 @@ export function StaffPicker(props: TickProps | TapProps | ViewProps | ChipsProps
     const on = ticked.includes(p.id);
     const face = (
       <>
-        {props.mode === "tick" ? <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong text-transparent"}`}>✓</span> : null}
+        {props.mode === "tick" ? <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong text-transparent"}`}>✓</span> : null}
         <span className={`shrink-0 rounded-full ring-[3px] ${p.onBreak ? "ring-line-strong" : RING[p.status]}`}><Avatar name={p.display_name} photoUrl={p.photoUrl} size={36} /></span>
         <span className="min-w-[7rem] flex-1 flex flex-col">
           <span className="flex min-w-0 items-center gap-1.5">
             <span className="truncate text-[15px] font-semibold">{p.display_name}</span>
-            {p.isLeader ? <span className="shrink-0 rounded-control bg-ink px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.06em] text-white" data-leader>Leader</span> : null}
+            {p.isLeader ? <span className="shrink-0 rounded-control bg-ink px-1.5 py-0.5 text-xs font-bold uppercase tracking-[0.06em] text-on-dark" data-leader>Leader</span> : null}
           </span>
-          <span className={`truncate text-[12px] ${p.status === "free" && !p.onBreak ? "font-semibold text-green" : "text-muted"}`}>{p.now}</span>
+          <span className={`truncate text-xs ${p.status === "free" && !p.onBreak ? "font-semibold text-green-text" : "text-muted"}`}>{p.now}</span>
           {p.cars.length ? (
             <span className="mt-0.5 flex flex-wrap gap-1">
-              {p.cars.slice(0, 3).map((c) => <span key={c.jobId} className={`rounded-control border px-1.5 py-0.5 text-[11px] font-bold ${c.running ? "border-red-bar text-red" : "border-line text-muted"}`}>{c.plate}</span>)}
-              {p.cars.length > 3 ? <span className="text-[11px] font-semibold text-muted">+{p.cars.length - 3}</span> : null}
+              {p.cars.slice(0, 3).map((c) => <span key={c.jobId} className={`whitespace-nowrap rounded-control border px-1.5 py-0.5 text-xs font-bold ${c.running ? "border-red-bar text-red" : "border-line text-muted"}`}>{c.plate}</span>)}
+              {p.cars.length > 3 ? <span className="text-xs font-semibold text-muted">+{p.cars.length - 3}</span> : null}
             </span>
           ) : null}
         </span>
         {showLoad ? (
           <span className="flex w-24 shrink-0 flex-col items-end gap-0.5">
-            <span className="text-[11px] font-semibold text-muted">{p.loadHours} of {Math.round(p.weekHours)} h</span>
+            <span className="text-xs font-semibold text-muted">{p.loadHours} of {Math.round(p.weekHours)} h</span>
             <span className="h-1.5 w-full overflow-hidden rounded-full bg-track"><span className={`block h-full ${BAR(p.percent)}`} style={{ width: `${Math.min(100, p.percent)}%` }} /></span>
           </span>
         ) : null}
@@ -110,7 +110,7 @@ export function StaffPicker(props: TickProps | TapProps | ViewProps | ChipsProps
           {Object.entries(props.fields ?? {}).map(([k, v]) => <input key={k} type="hidden" name={k} value={v} />)}
           <button type="submit" data-pick-person={p.id} className="flex w-full min-h-12 items-center gap-3 rounded-control px-2 text-left hover:bg-chip" aria-label={`${props.tapWord ?? "Put on the car"}: ${p.display_name}`}>
             {face}
-            <span className="shrink-0 rounded-control border border-ink px-2 py-1 text-[12px] font-bold">{props.tapWord ?? "+ Add"}</span>
+            <span className="shrink-0 rounded-control border border-ink px-2 py-1 text-xs font-bold">{props.tapWord ?? "+ Add"}</span>
           </button>
         </form>
       );
@@ -122,7 +122,7 @@ export function StaffPicker(props: TickProps | TapProps | ViewProps | ChipsProps
         {ask === p.id ? (
           <div className="flex flex-wrap items-center gap-2 rounded-control bg-amber-soft px-3 py-2 text-xs" data-pick-busy>
             <span className="font-semibold">{p.display_name} is {p.status === "working" ? "working on another car" : "already on a car"}. Put on this car as well?</span>
-            <button type="button" onClick={() => toggle(p)} className="min-h-11 rounded-control bg-ink px-4 font-bold text-white">Yes</button>
+            <button type="button" onClick={() => toggle(p)} className="min-h-11 rounded-control bg-ink px-4 font-bold text-on-dark">Yes</button>
             <button type="button" onClick={() => setAsk(null)} className="min-h-11 rounded-control border border-line px-4 font-semibold">No</button>
           </div>
         ) : null}
@@ -140,7 +140,7 @@ export function StaffPicker(props: TickProps | TapProps | ViewProps | ChipsProps
             {two ? <span className="text-[13px] font-extrabold">{SIDE_WORD[side]}</span> : null}
             {mine.map((g) => (
               <div key={`${g.side}-${g.team.key}`} className="flex flex-col gap-0.5" data-team={g.team.key}>
-                <span className="text-[12px] font-bold uppercase tracking-[0.08em] text-muted">{g.team.label}</span>
+                <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{g.team.label}</span>
                 <ul className="flex flex-col">
                   {g.members.map((p) => <li key={p.id}>{row(p)}</li>)}
                 </ul>

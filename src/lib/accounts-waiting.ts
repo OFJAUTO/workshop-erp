@@ -46,7 +46,8 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
       actionLabel: "Confirm & bank",
       href: p.job_id ? `/jobs/${p.job_id}/invoice` : p.invoice_id ? `/invoices/${p.invoice_id}` : "/invoices",
       always: true,
-      urgency: "red",
+      urgency: "amber",
+      money: `cash ${aed(p.amount_aed)} taken, not banked yet`,
       since: p.received_at,
       hint: "Cash was taken: tick it once the money is counted and banked.",
       inline: { kind: "confirm_payment", paymentId: p.id },
@@ -87,7 +88,7 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
       href: `/jobs/${d.jobId}/invoice`,
       always: true,
       replaces: true,
-      urgency: "red",
+      urgency: "amber",
       since: d.approvedAt,
       hint: `The customer approved ${d.quotation} ${d.hours} h ago with a deposit of ${aed(d.required)}; ${aed(d.received)} received so far.`,
       inline: { kind: "record_deposit", deposit: { jobId: d.jobId, plate: d.plate, car: d.carTitle, customer: d.customer, quote: d.quotation, requested: d.required, received: d.received, outstanding: round2(Math.max(0, d.required - d.received)) } },
@@ -115,7 +116,7 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
   {
     const { rows } = await loadSupplierInvoices();
     for (const r of rows.filter((x) => x.status === "new")) {
-      out.push({ jobId: `si:${r.key}`, plate: r.number ? invWords(r.number) : "Supplier invoice", car: r.supplier, what: `Supplier invoice to check · ${r.shares.map((x) => x.poNumber).join(", ")}${r.duplicateOf ? " · possible duplicate" : ""}`, amount: aed(r.total), actionLabel: "Check", href: `/supplier-invoices?open=${encodeURIComponent(r.key)}`, always: true, urgency: r.duplicateOf ? "red" : "amber", since: r.at ?? undefined, hint: "Open it next to the parts it covers, then Mark checked (the bill goes to Zoho) or Query it with Parts." });
+      out.push({ jobId: `si:${r.key}`, plate: r.number ? invWords(r.number) : "Supplier invoice", car: r.supplier, what: `Supplier invoice to check · ${r.shares.map((x) => x.poNumber).join(", ")}${r.duplicateOf ? " · possible duplicate" : ""}`, amount: aed(r.total), actionLabel: "Check", href: `/supplier-invoices?open=${encodeURIComponent(r.key)}`, always: true, urgency: "amber", money: r.duplicateOf ? `possible duplicate of ${r.duplicateOf} – it could be paid twice` : null, since: r.at ?? undefined, hint: "Open it next to the parts it covers, then Mark checked (the bill goes to Zoho) or Query it with Parts." });
     }
     // 4 November 2026: parts received with the invoice still to come - ACCOUNTS collect the paper from Parts and scan it.
     for (const r of rows.filter((x) => x.status === "waiting")) {

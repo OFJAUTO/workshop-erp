@@ -84,7 +84,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                       </button>
                     </form>
                     <form action={startActAs.bind(null, p.id)}>
-                      <button type="submit" className="min-h-10 w-full rounded-control border border-ink bg-ink px-3 text-xs font-bold text-white" title="Do their work from their screen; everything is logged as you, on their behalf">
+                      <button type="submit" className="min-h-10 w-full rounded-control border border-ink bg-ink px-3 text-xs font-bold text-on-dark" title="Do their work from their screen; everything is logged as you, on their behalf">
                         Act as {p.display_name}
                       </button>
                     </form>

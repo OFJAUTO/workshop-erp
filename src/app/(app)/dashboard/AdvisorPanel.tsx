@@ -18,7 +18,7 @@ export function AdvisorPanel({ day, month }: { day: AdvisorDay; month: AdvisorMo
         <div className="h-2 w-32 sm:w-44 overflow-hidden rounded-full bg-chip" data-advisor-bar><div className={`h-full rounded-full ${barTone}`} style={{ width: `${pct}%` }} /></div>
         <span className="text-sm font-bold whitespace-nowrap" data-advisor-pace>{day.percent}% · To hit {monthName}: {fmt(day.perDayNeeded)} a day</span>
         <details className="relative" data-advisor-info>
-          <summary className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border border-line-strong text-[11px] font-bold text-muted" aria-label="How is this worked out?">ⓘ</summary>
+          <summary className="inline-flex h-6 w-6 cursor-pointer items-center justify-center rounded-full border border-line-strong text-xs font-bold text-muted" aria-label="How is this worked out?">ⓘ</summary>
           <div className="absolute right-0 z-40 mt-1 w-80 rounded-card border border-line bg-white p-3 text-xs leading-relaxed shadow-xl">
             One shared team figure: the profit of the work customers approve today (the approved quotations, before VAT, after every job cost) against the daily target from Settings. &quot;To hit {monthName}&quot; is the month&apos;s remaining target spread over the working days left (Sundays never counted). Approving good work moves it; sales value alone does not. One figure for the whole team, never person by person.
           </div>

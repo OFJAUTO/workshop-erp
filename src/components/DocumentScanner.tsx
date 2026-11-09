@@ -172,7 +172,7 @@ export function DocumentScanner({ title = "Scan document", onDone, onClose }: { 
   }
 
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-ink text-white" role="dialog" aria-modal="true" aria-label={title} data-doc-scanner>
+    <div className="fixed inset-0 z-[70] flex flex-col bg-ink text-on-dark" role="dialog" aria-modal="true" aria-label={title} data-doc-scanner>
       <div className="flex items-center justify-between gap-3 px-4 py-3">
         <span className="text-sm font-bold">{title}</span>
         <button type="button" onClick={onClose} className="min-h-11 min-w-11 rounded-control border border-white/30 px-3 text-sm font-bold" aria-label="Close the scanner" data-scan-close>✕</button>
@@ -199,7 +199,7 @@ export function DocumentScanner({ title = "Scan document", onDone, onClose }: { 
               <p className="text-sm font-semibold">{pages.length} page{pages.length === 1 ? "" : "s"} ready.</p>
             </>
           ) : (
-            <p className="max-w-sm text-center text-sm text-white/80">{touch ? "Point the camera at the document." : "Choose a photo of the document (or a PDF)."}</p>
+            <p className="max-w-sm text-center text-sm text-on-dark/80">{touch ? "Point the camera at the document." : "Choose a photo of the document (or a PDF)."}</p>
           )}
           {error ? <p className="text-sm font-semibold text-red-200" role="alert">{error}</p> : null}
           <div className="flex flex-wrap items-center justify-center gap-2">
@@ -272,7 +272,7 @@ function CropStep({ shot, onQuad, mode, onMode, busy, onRetake, onUse }: { shot:
       </div>
       <div className="flex flex-wrap items-center justify-center gap-2" data-scan-modes>
         {MODES.map((m) => (
-          <button key={m.key} type="button" onClick={() => onMode(m.key)} aria-pressed={mode === m.key} data-scan-mode={m.key} className={`min-h-11 rounded-control border px-4 text-sm font-bold ${mode === m.key ? "border-white bg-white text-ink" : "border-white/40 text-white"}`}>
+          <button key={m.key} type="button" onClick={() => onMode(m.key)} aria-pressed={mode === m.key} data-scan-mode={m.key} className={`min-h-11 rounded-control border px-4 text-sm font-bold ${mode === m.key ? "border-white bg-white text-ink" : "border-white/40 text-on-dark"}`}>
             {m.label}
           </button>
         ))}

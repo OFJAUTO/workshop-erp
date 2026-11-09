@@ -20,7 +20,7 @@ export function WarrantyFields({ row, rolls = [], products = [], disabled = fals
   const [areas, setAreas] = useState<string[]>(row.areas.length ? row.areas : row.suggestedAreas);
   const extra = areas.filter((a) => !(PPF_AREAS as readonly string[]).includes(a));
   const toggle = (a: string) => setAreas((list) => (list.includes(a) ? list.filter((x) => x !== a) : [...list, a]));
-  const chip = (on: boolean) => `min-h-11 rounded-control border px-3 text-xs font-bold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`;
+  const chip = (on: boolean) => `min-h-11 rounded-control border px-3 text-xs font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`;
   return (
     <div className="flex flex-col gap-2 rounded-control border border-line px-3 py-2" data-warranty-fields={`${row.product}:${row.itemKey}`}>
       <span className="text-sm font-bold">{TITLES[row.product]}{row.product === "ceramic" ? ` · ${row.label}` : ""}</span>

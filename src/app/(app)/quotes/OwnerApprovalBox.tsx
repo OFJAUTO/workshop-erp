@@ -68,7 +68,7 @@ function RevisionPreview({ rows }: { rows: RevisionPreviewRow[] }) {
   // computer, the whole width on a phone), and a five-column table hid the selling price off to the side.
   const figure = (label: string, value: React.ReactNode, hook: Record<string, string>, strong = false) => (
     <div className="flex min-w-0 flex-col">
-      <span className="text-[10px] font-bold uppercase tracking-[0.06em] text-muted">{label}</span>
+      <span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">{label}</span>
       <span className={`${strong ? "font-semibold" : ""}`} {...hook}>{value}</span>
     </div>
   );

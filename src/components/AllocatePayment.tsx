@@ -42,7 +42,7 @@ export function AllocatePayment({ paymentId, number, amount, customerId, vehicle
   const chosen = target ?? targets?.find((t) => t.key === picked) ?? null;
   const over = !!chosen && chosen.balance !== null && amount > chosen.balance + 0.005;
 
-  if (state?.ok) return <span className="text-sm font-bold text-green" data-allocated={number}>✓ {state.message}</span>;
+  if (state?.ok) return <span className="text-sm font-bold text-green-text" data-allocated={number}>✓ {state.message}</span>;
 
   const form = (
     <form action={formAction} className="flex flex-col gap-2" data-allocate-form={number}>
@@ -81,9 +81,9 @@ export function AllocatePayment({ paymentId, number, amount, customerId, vehicle
             {targets?.length ? (
               <div className="flex flex-col gap-2">
                 {targets.map((t) => (
-                  <button key={t.key} type="button" onClick={() => setPicked(t.key)} aria-pressed={picked === t.key} data-allocate-target={t.key} className={`min-h-12 rounded-control border-2 px-3 py-2 text-left flex flex-col ${picked === t.key ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+                  <button key={t.key} type="button" onClick={() => setPicked(t.key)} aria-pressed={picked === t.key} data-allocate-target={t.key} className={`min-h-12 rounded-control border-2 px-3 py-2 text-left flex flex-col ${picked === t.key ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
                     <span className="text-sm font-bold uppercase">{t.title}</span>
-                    <span className={`text-xs ${picked === t.key ? "text-white/80" : "text-muted"}`}>{t.detail}</span>
+                    <span className={`text-xs ${picked === t.key ? "text-on-dark/80" : "text-muted"}`}>{t.detail}</span>
                   </button>
                 ))}
               </div>

@@ -138,7 +138,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
             <span>· {customerName}</span>
             {leadName ? <span data-estimate-lead>· started by {leadName}</span> : null}
             <Badge tone={handback ? "green" : tone}>{handback ? "Ready to send" : QUOTE_STATUS_LABELS[q.status]}</Badge>
-            {addsTo ? <Link href={`/estimates/${addsTo.id}`} className="rounded-full border border-ink px-2 py-0.5 text-[11px] font-extrabold tracking-[0.06em] whitespace-nowrap" data-estimate-adds-to={addsTo.number}>ADDITIONAL · in addition to {addsTo.number}</Link> : null}
+            {addsTo ? <Link href={`/estimates/${addsTo.id}`} className="rounded-full border border-ink px-2 py-0.5 text-xs font-extrabold tracking-[0.06em] whitespace-nowrap" data-estimate-adds-to={addsTo.number}>ADDITIONAL · in addition to {addsTo.number}</Link> : null}
             {attached ? <Link href={`/jobs/${attached.id}`} className="text-xs font-bold underline underline-offset-4 whitespace-nowrap" data-estimate-carried={attached.job_number}>Carried over to {attached.job_number}</Link> : null}
           </span>
         }

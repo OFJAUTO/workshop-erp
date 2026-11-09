@@ -21,7 +21,7 @@ export function QtyUnitBox({ qty, unit, onQty, onUnit, disabled = false, showUni
         <select value={unit} onChange={(e) => onUnit?.(e.target.value as PartUnit)} disabled={disabled} aria-label="Unit" title="Pieces, litres or sets: the cost is per unit" className="h-9 shrink-0 rounded-control border border-line-strong bg-white px-0.5 text-xs font-bold disabled:opacity-60" style={{ width: "2.6rem" }} data-part-unit={unit}>
           {UNIT_CHOICES.map((c) => <option key={c.value} value={c.value}>{c.short}</option>)}
         </select>
-      ) : unit === "set" ? <span className="text-[10px] text-muted">sets</span> : unit === "l" ? <span className="text-[10px] text-muted">L</span> : null}
+      ) : unit === "set" ? <span className="text-xs text-muted">sets</span> : unit === "l" ? <span className="text-xs text-muted">L</span> : null}
     </span>
   );
 }

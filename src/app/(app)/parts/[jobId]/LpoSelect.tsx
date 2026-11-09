@@ -59,7 +59,7 @@ export function LpoSelect({ rows, vatSupplierNames, pendingNumber, send }: { row
               <span className="flex min-w-0 flex-col">
                 <span className="text-sm font-bold uppercase">{r.name}</span>
                 <span className="text-xs text-muted">{r.supplier || "No supplier"} · qty {r.quantity} · AED {aed(r.cost * r.quantity)} before VAT</span>
-                {r.why ? <span className={`text-xs font-semibold ${r.red ? "text-red" : "text-muted"}`} data-lpo-why data-lpo-why-red={r.red ? "1" : "0"}>{r.why}</span> : <span className="text-xs font-semibold text-green">Approved – to order</span>}
+                {r.why ? <span className={`text-xs font-semibold ${r.red ? "text-red" : "text-muted"}`} data-lpo-why data-lpo-why-red={r.red ? "1" : "0"}>{r.why}</span> : <span className="text-xs font-semibold text-green-text">Approved – to order</span>}
               </span>
             </label>
           </li>
@@ -70,7 +70,7 @@ export function LpoSelect({ rows, vatSupplierNames, pendingNumber, send }: { row
         {n ? <span className="text-sm text-muted" data-lpo-select-total>{supplierMoneyText(total)}</span> : null}
       </div>
       {answer?.error ? <p className="text-sm font-semibold text-red" role="alert" data-lpo-selected-error>{answer.error}</p> : null}
-      {answer?.message ? <p className="text-sm font-semibold text-green" data-lpo-selected-done>{answer.message}</p> : null}
+      {answer?.message ? <p className="text-sm font-semibold text-green-text" data-lpo-selected-done>{answer.message}</p> : null}
       {preview && typeof document !== "undefined"
         ? createPortal(
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onClick={() => !busy && setPreview(false)}>

@@ -58,7 +58,7 @@ function OpenEstimateQuestion({ v, state }: { v: Record<string, string>; state: 
           <Link href={`/estimates/${first.id}`} className="inline-flex min-h-11 items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-estimate-open-existing>
             Open {first.number}
           </Link>
-          <button type="submit" name="confirm_new" value="1" formNoValidate className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-white" data-estimate-new-anyway data-estimate-additional>
+          <button type="submit" name="confirm_new" value="1" formNoValidate className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-on-dark" data-estimate-new-anyway data-estimate-additional>
             Make an additional estimate
           </button>
         </div>

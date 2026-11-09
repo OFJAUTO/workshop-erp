@@ -42,7 +42,7 @@ export function DocReviseButton({
         <form action={onRevise}>
           <Button type="submit" size="lg" data-revise data-revise-bar>{label}</Button>
         </form>
-        {revision?.allowedAt ? <span className="text-xs font-semibold text-green" data-revise-allowed>Owner allowed one revision</span> : null}
+        {revision?.allowedAt ? <span className="text-xs font-semibold text-green-text" data-revise-allowed>Owner allowed one revision</span> : null}
       </span>
     );
   }
@@ -51,7 +51,7 @@ export function DocReviseButton({
   return (
     <span className="inline-flex flex-wrap items-center gap-2" data-revise-top>
       {waiting ? (
-        <span className="inline-flex min-h-14 items-center rounded-control border border-amber-bar bg-amber-soft px-4 text-sm font-semibold text-amber" data-revise-pending>Revise: owner asked {formatDayTime(revision!.requestedAt!)}, waiting</span>
+        <span className="inline-flex min-h-14 items-center rounded-control border border-amber-bar bg-amber-soft px-4 text-sm font-semibold text-amber-text" data-revise-pending>Revise: owner asked {formatDayTime(revision!.requestedAt!)}, waiting</span>
       ) : (
         <Button type="button" size="lg" onClick={() => setAsk(true)} title="The customer approved it: the owner allows a revision first" data-ask-revise>{label}</Button>
       )}

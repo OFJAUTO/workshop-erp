@@ -60,7 +60,7 @@ export function ApproveForm({ action, hasPrescan, techHours = null, groups = {},
     setUsed((u) => [...u, p]);
   }
   const chip = (p: string) => (
-    <button key={p} type="button" onClick={() => tap(p)} aria-pressed={selected(p)} className={`min-h-10 rounded-control border px-2.5 text-left text-xs font-semibold ${selected(p) ? "border-green bg-green-soft text-green" : confirming === p ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+    <button key={p} type="button" onClick={() => tap(p)} aria-pressed={selected(p)} className={`min-h-10 rounded-control border px-2.5 text-left text-xs font-semibold ${selected(p) ? "border-green bg-green-soft text-green-text" : confirming === p ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
       {selected(p) ? "✓ " : ""}{confirming === p ? `Tap again to confirm: ${p}` : p}
     </button>
   );
@@ -86,7 +86,7 @@ export function ApproveForm({ action, hasPrescan, techHours = null, groups = {},
                   <div className="flex flex-col gap-2 rounded-control bg-chip p-2">
                     {rest.map(([g, list]) => (
                       <div key={g} className="flex flex-col gap-1">
-                        <span className="text-[11px] font-bold uppercase tracking-[0.06em] text-muted">{g}</span>
+                        <span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">{g}</span>
                         <div className="flex flex-wrap gap-1.5">{list.map(chip)}</div>
                       </div>
                     ))}
@@ -117,12 +117,12 @@ export function ApproveForm({ action, hasPrescan, techHours = null, groups = {},
                     </div>
                   ) : null}
                 </div>
-                <span className="text-[11px] text-muted">The advisor sees the agreed figure on the quotation as the workshop estimate.</span>
+                <span className="text-xs text-muted">The advisor sees the agreed figure on the quotation as the workshop estimate.</span>
               </div>
             ) : (
               <p className="text-xs text-muted">The technician gave no estimated hours.</p>
             )}
-            {!hasPrescan ? <p className="text-xs text-amber font-semibold">No pre-scan PDF is attached yet. You can still approve.</p> : null}
+            {!hasPrescan ? <p className="text-xs text-amber-text font-semibold">No pre-scan PDF is attached yet. You can still approve.</p> : null}
             <p className="text-xs text-muted">Approve, or send back, from the bar at the bottom of the screen.</p>
           </>
         )}
@@ -177,7 +177,7 @@ export function ReviewBar({ inspectionId = null }: { inspectionId?: string | nul
         ) : (
           <>
             <button type="button" onClick={() => { setBack(true); document.getElementById("return-form")?.scrollIntoView({ behavior: "smooth", block: "center" }); }} className="min-h-12 rounded-control border border-line-strong bg-white px-4 text-sm font-bold">Send back to the technician</button>
-            <button type="button" onClick={() => { if (guard.mayGo()) submit("approve-form"); }} className="ml-auto min-h-12 rounded-control bg-ink px-5 text-sm font-bold text-white">Approve and send to the advisor</button>
+            <button type="button" onClick={() => { if (guard.mayGo()) submit("approve-form"); }} className="ml-auto min-h-12 rounded-control bg-ink px-5 text-sm font-bold text-on-dark">Approve and send to the advisor</button>
           </>
         )}
       </div>

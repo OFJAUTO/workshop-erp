@@ -16,14 +16,14 @@ export function SignoffPanel({ needed, signed, mine, isOwner, canAct, onSign, on
   const waiting = needed.filter((k) => !signed.some((s) => s.role_key === k));
   return (
     <div className="flex flex-col gap-3" data-signoff-panel>
-      <p className="text-sm" data-waiting-on>{waiting.length ? <>Waiting on: <span className="font-bold">{waiting.map((k) => SIGNOFF_LABELS[k]).join(", ")}</span>. The handover stays locked until all have signed.</> : <span className="font-bold text-green">Every sign-off is in. The car can be handed over.</span>}</p>
+      <p className="text-sm" data-waiting-on>{waiting.length ? <>Waiting on: <span className="font-bold">{waiting.map((k) => SIGNOFF_LABELS[k]).join(", ")}</span>. The handover stays locked until all have signed.</> : <span className="font-bold text-green-text">Every sign-off is in. The car can be handed over.</span>}</p>
       <ul className="divide-y divide-line">
         {needed.map((k) => {
           const s = signed.find((x) => x.role_key === k);
           const may = canAct && (isOwner || mine === k);
           return (
             <li key={k} className="py-2 flex flex-wrap items-center gap-2" data-signoff-row={k} data-signed={!!s}>
-              <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-sm font-extrabold ${s ? "bg-green text-white" : "border border-line-strong text-transparent"}`}>✓</span>
+              <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-sm font-extrabold ${s ? "bg-green text-on-dark" : "border border-line-strong text-transparent"}`}>✓</span>
               <span className="font-semibold">{SIGNOFF_LABELS[k]}</span>
               {s ? <span className="text-xs text-muted">signed by {s.name}{s.on_behalf ? " (owner, on behalf)" : ""} · {new Date(s.signed_at).toLocaleString("en-GB", { timeZone: "Asia/Dubai", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}</span> : null}
               {!s && may ? (

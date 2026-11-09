@@ -106,7 +106,7 @@ export function AssignBoard({ cars, people }: { cars: BoardCar[]; people: Techni
                 <StaffPicker key={selected.id} mode="tick" people={people} sides={shownSides.length ? shownSides : sides} value={[...ticked]} onChange={(ids) => setTicked(new Set(ids))} showLoad={false} />
                 {!isBodyshopOnly && (shownSides.length ? shownSides : sides).includes("mechanical") ? (
                   <div className="flex flex-col gap-1">
-                    <span className="text-[14px] font-semibold">Road test{selected.roadTestSuggested ? <span className="ml-2 rounded-control bg-amber-soft px-2 py-0.5 text-[12px] font-bold text-amber">Suggested: the requests mention noise, vibration, steering or braking</span> : null}</span>
+                    <span className="text-[14px] font-semibold">Road test{selected.roadTestSuggested ? <span className="ml-2 rounded-control bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text">Suggested: the requests mention noise, vibration, steering or braking</span> : null}</span>
                     <ChoiceButtons name="road_test" columns={3} defaultValue={selected.defaultRoadTest} options={ROAD_TEST_CHOICES} />
                   </div>
                 ) : <p className="text-[13px] text-muted" data-no-roadtest>Bodyshop car: no road test, no mechanical inspection. The car runs on the bodyshop board.</p>}

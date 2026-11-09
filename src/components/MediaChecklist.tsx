@@ -24,10 +24,10 @@ function rowState(done: boolean, files: DeviceFile[], attempted: boolean): { sta
 }
 
 const ROW_LOOK: Record<RowState, { cls: string; icon: string }> = {
-  done: { cls: "bg-green-soft text-green", icon: "✓" },
+  done: { cls: "bg-green-soft text-green-text", icon: "✓" },
   stopped: { cls: "bg-red-soft text-red", icon: "!" },
-  sending: { cls: "bg-amber-soft text-amber", icon: "↑" },
-  device: { cls: "bg-amber-soft text-amber", icon: "↑" },
+  sending: { cls: "bg-amber-soft text-amber-text", icon: "↑" },
+  device: { cls: "bg-amber-soft text-amber-text", icon: "↑" },
   missing: { cls: "bg-red-soft text-red", icon: "!" },
   waiting: { cls: "bg-chip text-muted", icon: "…" },
 };
@@ -78,10 +78,10 @@ export function ChecklistSummary({ check, attempted = false, device = [] }: { ch
       {missing.length === 0 ? (
         <>
           <Notice tone="success">All uploads complete.</Notice>
-          {device.length ? <p className="text-sm font-semibold text-amber" data-device-line>{sendingLine} – it carries on by itself.</p> : null}
+          {device.length ? <p className="text-sm font-semibold text-amber-text" data-device-line>{sendingLine} – it carries on by itself.</p> : null}
         </>
       ) : (
-        <p className={`text-sm ${attempted && uncovered.length ? "font-semibold text-red" : !uncovered.length ? "font-semibold text-amber" : "text-muted"}`} data-items-left>{line}</p>
+        <p className={`text-sm ${attempted && uncovered.length ? "font-semibold text-red" : !uncovered.length ? "font-semibold text-amber-text" : "text-muted"}`} data-items-left>{line}</p>
       )}
     </div>
   );

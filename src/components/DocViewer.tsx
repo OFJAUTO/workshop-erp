@@ -38,7 +38,7 @@ export function DocViewer({ href, label, fileName }: { href: string; label: stri
 
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className="flex min-h-16 w-full items-center justify-center rounded-lg bg-[#111113] px-4 text-lg font-extrabold text-white" data-doc-viewer-open>
+      <button type="button" onClick={() => setOpen(true)} className="flex min-h-16 w-full items-center justify-center rounded-lg bg-[#111113] px-4 text-lg font-extrabold text-on-dark" data-doc-viewer-open>
         {label}
       </button>
       {open ? (
@@ -62,7 +62,7 @@ export function DocViewer({ href, label, fileName }: { href: string; label: stri
             ) : null}
           </div>
           <div className="flex items-center gap-2 border-t border-[#D4D4D8] bg-white px-3 py-2">
-            <a href={href} download={fileName} className="flex min-h-12 flex-1 items-center justify-center rounded-lg bg-[#111113] px-4 text-sm font-extrabold text-white" data-doc-download>Download PDF</a>
+            <a href={href} download={fileName} className="flex min-h-12 flex-1 items-center justify-center rounded-lg bg-[#111113] px-4 text-sm font-extrabold text-on-dark" data-doc-download>Download PDF</a>
             <button type="button" onClick={() => setOpen(false)} className="min-h-12 rounded-lg border border-[#D4D4D8] px-4 text-sm font-bold">Back</button>
           </div>
         </div>

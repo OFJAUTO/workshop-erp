@@ -50,7 +50,7 @@ export function PartsForCar({ jobId, parts, canAct, receive, exchangeAction }: {
     <Card className="flex flex-col gap-3" data-parts-for-car>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <SectionLabel right={allReceived ? undefined : `${received.length} of ${parts.length} received`}>Parts for this car</SectionLabel>
-        {allReceived ? <span className="text-sm font-bold text-green" data-all-received>All {parts.length} received ✓</span> : notReceived ? <span className="text-xs font-bold text-amber" data-parts-note>{notReceived} part{notReceived === 1 ? "" : "s"} not received yet</span> : null}
+        {allReceived ? <span className="text-sm font-bold text-green-text" data-all-received>All {parts.length} received ✓</span> : notReceived ? <span className="text-xs font-bold text-amber-text" data-parts-note>{notReceived} part{notReceived === 1 ? "" : "s"} not received yet</span> : null}
       </div>
       <ul className="flex flex-col gap-1 text-sm">
         {takeable.map((p) => {
@@ -58,7 +58,7 @@ export function PartsForCar({ jobId, parts, canAct, receive, exchangeAction }: {
           return (
             <li key={p.id} data-part-take={p.id} data-ticked={on ? "1" : "0"}>
               <button type="button" disabled={!canAct} onClick={() => toggle(p.id)} aria-pressed={on} className={`flex w-full min-h-12 items-center gap-3 rounded-control border px-2 text-left ${on ? "border-[#7FC195] bg-[#E8F5EC]" : "border-transparent bg-chip"}`}>
-                <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-green bg-green text-white" : "border-line-strong bg-white text-transparent"}`}>✓</span>
+                <span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-control border text-xs font-bold ${on ? "border-green bg-green text-on-dark" : "border-line-strong bg-white text-transparent"}`}>✓</span>
                 <span className="flex flex-1 flex-col"><span className="font-semibold">{p.description}</span><PositionsLine positions={p.positions} /></span>
                 <span>× {p.quantity}</span>
                 <span className="text-xs font-semibold text-muted">{p.state === "ready" ? "Ready at the desk" : "At the parts desk"}</span>
@@ -87,7 +87,7 @@ export function PartsForCar({ jobId, parts, canAct, receive, exchangeAction }: {
               {pending ? "Saving…" : `I've received these (${ticked.length})`}
             </Button>
           </div>
-          {msg ? <span className={`text-sm font-semibold ${msg.tone === "error" ? "text-red" : "text-green"}`} role="alert">{msg.text}</span> : null}
+          {msg ? <span className={`text-sm font-semibold ${msg.tone === "error" ? "text-red" : "text-green-text"}`} role="alert">{msg.text}</span> : null}
         </div>
       ) : null}
       {received.length ? (
@@ -96,9 +96,9 @@ export function PartsForCar({ jobId, parts, canAct, receive, exchangeAction }: {
           <ul className="mt-1 flex flex-col gap-1 text-sm">
             {received.map((p) => (
               <li key={p.id} className="flex items-center gap-2 rounded-control border border-[#7FC195] bg-[#E8F5EC] px-2 py-2" data-part-received={p.id}>
-                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green text-xs font-bold text-white">✓</span>
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green text-xs font-bold text-on-dark">✓</span>
                 <span className="flex flex-col"><span className="font-semibold">{p.description}</span><PositionsLine positions={p.positions} /></span><span className="text-muted">× {p.quantity}</span>
-                <span className="ml-auto text-xs font-semibold text-green">Received ✓{p.receivedBy ? ` ${p.receivedBy}` : ""}{p.receivedAt ? ` · ${p.receivedAt}` : ""}</span>
+                <span className="ml-auto text-xs font-semibold text-green-text">Received ✓{p.receivedBy ? ` ${p.receivedBy}` : ""}{p.receivedAt ? ` · ${p.receivedAt}` : ""}</span>
               </li>
             ))}
           </ul>

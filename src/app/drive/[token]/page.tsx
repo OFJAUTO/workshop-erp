@@ -53,8 +53,8 @@ export default async function DrivePage({ params }: { params: Promise<{ token: s
               <>
                 <p className="text-base font-semibold text-[#5F6368]">{formatPhone(contact.phone)}</p>
                 <div className="grid grid-cols-2 gap-2">
-                  <a href={`tel:${contact.phone.replace(/[^\d+]/g, "")}`} className="flex min-h-14 items-center justify-center rounded-xl bg-[#111113] px-3 text-lg font-extrabold text-white" data-drive-call>Call</a>
-                  <a href={`https://wa.me/${digits(contact.phone)}`} target="_blank" rel="noreferrer" className="flex min-h-14 items-center justify-center rounded-xl bg-[#1b6b2f] px-3 text-lg font-extrabold text-white" data-drive-whatsapp>WhatsApp</a>
+                  <a href={`tel:${contact.phone.replace(/[^\d+]/g, "")}`} className="flex min-h-14 items-center justify-center rounded-xl bg-[#111113] px-3 text-lg font-extrabold text-on-dark" data-drive-call>Call</a>
+                  <a href={`https://wa.me/${digits(contact.phone)}`} target="_blank" rel="noreferrer" className="flex min-h-14 items-center justify-center rounded-xl bg-[#1b6b2f] px-3 text-lg font-extrabold text-on-dark" data-drive-whatsapp>WhatsApp</a>
                 </div>
               </>
             ) : null}
@@ -63,8 +63,8 @@ export default async function DrivePage({ params }: { params: Promise<{ token: s
                 <p className="text-base font-extrabold">Pick-up contact{contact.other.name ? `: ${contact.other.name}` : ""}</p>
                 {contact.other.phone ? (
                   <div className="grid grid-cols-2 gap-2">
-                    <a href={`tel:${contact.other.phone.replace(/[^\d+]/g, "")}`} className="flex min-h-14 items-center justify-center rounded-xl bg-[#111113] px-3 text-lg font-extrabold text-white">Call</a>
-                    <a href={`https://wa.me/${digits(contact.other.phone)}`} target="_blank" rel="noreferrer" className="flex min-h-14 items-center justify-center rounded-xl bg-[#1b6b2f] px-3 text-lg font-extrabold text-white">WhatsApp</a>
+                    <a href={`tel:${contact.other.phone.replace(/[^\d+]/g, "")}`} className="flex min-h-14 items-center justify-center rounded-xl bg-[#111113] px-3 text-lg font-extrabold text-on-dark">Call</a>
+                    <a href={`https://wa.me/${digits(contact.other.phone)}`} target="_blank" rel="noreferrer" className="flex min-h-14 items-center justify-center rounded-xl bg-[#1b6b2f] px-3 text-lg font-extrabold text-on-dark">WhatsApp</a>
                   </div>
                 ) : null}
               </div>

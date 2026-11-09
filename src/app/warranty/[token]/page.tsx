@@ -51,9 +51,9 @@ export default async function WarrantyPage({ params }: { params: Promise<{ token
       </section>
 
       <section className={`flex flex-col gap-2 rounded-xl border-2 px-5 py-4 ${statusTone}`} data-warranty-status={cs.kind}>
-        <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#5F6368]">Status</span>
+        <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#5F6368]">Status</span>
         <span className="text-lg font-extrabold leading-snug">{cs.title}</span>
-        {cs.finalCheck ? <span className="text-base font-bold text-green" data-final-check-done>{cs.finalCheck}</span> : null}
+        {cs.finalCheck ? <span className="text-base font-bold text-green-text" data-final-check-done>{cs.finalCheck}</span> : null}
         {s.kind === "active" && s.manual ? <span className="text-sm">Activated by OFJ Automotive on {formatDate(s.manual.at)}{s.manual.note ? `: ${s.manual.note}` : "."}</span> : null}
         {cs.kind === "active" && !s.checkDate && !s.manual && card.handoverDay ? <span className="text-sm">From the handover on {formatDate(card.handoverDay)}.</span> : null}
         {s.kind === "before_handover" ? <span className="text-sm">{s.detail}</span> : null}
@@ -70,7 +70,7 @@ export default async function WarrantyPage({ params }: { params: Promise<{ token
       </section>
 
       <section className="flex flex-col gap-3 rounded-xl bg-white px-5 py-4" data-warranty-products>
-        <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#5F6368]">What is covered</span>
+        <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#5F6368]">What is covered</span>
         {card.rows.map((r) => (
           <div key={`${r.product}:${r.itemKey}`} className="flex flex-col gap-1 border-t border-[#E4E4E7] pt-3 first:border-t-0 first:pt-0" data-warranty-product={r.product}>
             <span className="text-base font-extrabold">{r.name}</span>
@@ -93,7 +93,7 @@ export default async function WarrantyPage({ params }: { params: Promise<{ token
       </section>
 
       <section className="flex flex-col gap-3 rounded-xl bg-white px-5 py-4" data-warranty-terms>
-        <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-[#5F6368]">Terms</span>
+        <span className="text-xs font-bold uppercase tracking-[0.12em] text-[#5F6368]">Terms</span>
         {termKeys.map((k) => (
           <div key={k} className="flex flex-col gap-1">
             <span className="text-sm font-bold">{TERMS_LABELS[k]}</span>

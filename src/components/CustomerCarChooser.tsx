@@ -92,9 +92,9 @@ export function CustomerCarChooser({ v, customers, cars, makes, models }: { v: R
       <input type="hidden" name="force" value={force ? "1" : ""} />
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" data-chooser-choices>
         {CHOICES.map((c) => (
-          <button key={c.key} type="button" onClick={() => { setMode(c.key); setDup(null); setForce(false); if (c.key === "new_customer") { setCustomer({ id: "", text: "" }); setVehicleId(""); } if (c.key === "new_car") setVehicleId(""); }} aria-pressed={mode === c.key} data-choice={c.key} className={`min-h-20 rounded-card border-2 px-4 py-3 text-left flex flex-col gap-1 ${mode === c.key ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+          <button key={c.key} type="button" onClick={() => { setMode(c.key); setDup(null); setForce(false); if (c.key === "new_customer") { setCustomer({ id: "", text: "" }); setVehicleId(""); } if (c.key === "new_car") setVehicleId(""); }} aria-pressed={mode === c.key} data-choice={c.key} className={`min-h-20 rounded-card border-2 px-4 py-3 text-left flex flex-col gap-1 ${mode === c.key ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
             <span className="text-base font-extrabold">{c.title}</span>
-            <span className={`text-xs ${mode === c.key ? "text-white/80" : "text-muted"}`}>{c.hint}</span>
+            <span className={`text-xs ${mode === c.key ? "text-on-dark/80" : "text-muted"}`}>{c.hint}</span>
           </button>
         ))}
       </div>
@@ -103,12 +103,12 @@ export function CustomerCarChooser({ v, customers, cars, makes, models }: { v: R
         <div className="rounded-card border-2 border-amber-bar bg-amber-soft px-4 py-3 flex flex-col gap-2" data-duplicate={dup.kind}>
           <span className="text-sm font-bold">{dup.kind === "vehicle" ? `${dup.label} is already on record under ${dup.customerLabel}.` : `This phone number belongs to ${dup.label}.`}</span>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={useDuplicate} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-white" data-use-duplicate>{dup.kind === "vehicle" ? "Use this car" : "Use this customer"}</button>
+            <button type="button" onClick={useDuplicate} className="min-h-11 rounded-control bg-ink px-4 text-sm font-bold text-on-dark" data-use-duplicate>{dup.kind === "vehicle" ? "Use this car" : "Use this customer"}</button>
             {dup.kind === "customer" ? <button type="button" onClick={() => { setForce(true); setDup(null); }} className="min-h-11 rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-create-anyway>Create a second customer anyway</button> : null}
           </div>
         </div>
       ) : null}
-      {force ? <p className="text-xs font-semibold text-amber" data-force-on>A second customer will be created on this phone number.</p> : null}
+      {force ? <p className="text-xs font-semibold text-amber-text" data-force-on>A second customer will be created on this phone number.</p> : null}
 
       {mode !== "new_customer" ? (
         <SearchSelect name="customer" label="Customer" options={customers} value={customer} onChange={(c) => { setCustomer(c); setVehicleId(""); }} placeholder="Type a name, company or phone…" allowNew={false} />

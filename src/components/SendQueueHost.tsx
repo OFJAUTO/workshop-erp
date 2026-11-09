@@ -125,7 +125,7 @@ export function SendQueueHost() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className={`flex min-h-11 items-center gap-2 rounded-full px-4 text-sm font-bold shadow-lg ${stopped ? "bg-red text-white" : "bg-ink text-white"}`}
+        className={`flex min-h-11 items-center gap-2 rounded-full px-4 text-sm font-bold shadow-lg ${stopped ? "bg-red text-on-dark" : "bg-ink text-on-dark"}`}
         aria-expanded={open}
         data-send-queue-pill
         data-send-queue-count={rows.length}

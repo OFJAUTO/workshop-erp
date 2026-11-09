@@ -43,7 +43,7 @@ export function PayPanel({ rows, action, today, isOwner }: { rows: ReadyRow[]; a
           <span className="text-sm font-bold">Pay {recipient}: {ticked.size} commission{ticked.size === 1 ? "" : "s"}</span>
           <div className="flex gap-2">
             {(["cash", "transfer"] as const).map((m) => (
-              <button key={m} type="button" onClick={() => setMethod(m)} aria-pressed={method === m} data-pay-method={m} className={`min-h-11 rounded-control border-2 px-4 text-sm font-bold ${method === m ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}>
+              <button key={m} type="button" onClick={() => setMethod(m)} aria-pressed={method === m} data-pay-method={m} className={`min-h-11 rounded-control border-2 px-4 text-sm font-bold ${method === m ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
                 {m === "cash" ? "Cash" : "Bank transfer"}
               </button>
             ))}

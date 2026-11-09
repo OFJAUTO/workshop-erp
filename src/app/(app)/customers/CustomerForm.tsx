@@ -81,7 +81,7 @@ export function CustomerForm({
                   {[["", "Pay before release"], ["7", "7 days credit"], ["15", "15 days credit"], ["30", "30 days credit"], ["60", "60 days credit"]].map(([val, label]) => (
                     <label key={val || "off"} className="cursor-pointer">
                       <input type="radio" name="credit_terms_days" value={val} defaultChecked={(v.credit_terms_days ?? "") === val} className="peer sr-only" />
-                      <span className="inline-flex min-h-11 items-center rounded-control border border-line-strong bg-white px-3 text-sm font-bold peer-checked:border-ink peer-checked:bg-ink peer-checked:text-white">{label}</span>
+                      <span className="inline-flex min-h-11 items-center rounded-control border border-line-strong bg-white px-3 text-sm font-bold peer-checked:border-ink peer-checked:bg-ink peer-checked:text-on-dark">{label}</span>
                     </label>
                   ))}
                 </div>

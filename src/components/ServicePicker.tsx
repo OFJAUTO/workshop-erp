@@ -72,7 +72,7 @@ export function ServicePicker({
   const heading = title ?? (kind === "labour" ? "Labour jobs" : kind === "service" ? "Services" : "Labour jobs and services");
 
   const tabBtn = (id: string, label: string, bold = false) => (
-    <button key={id} type="button" onClick={() => { setTab(id); setQuery(""); }} className={`min-h-11 rounded-control px-3 text-left text-sm ${bold ? "font-bold" : "font-semibold"} ${tab === id && !q ? "bg-ink text-white" : "bg-chip"}`}>
+    <button key={id} type="button" onClick={() => { setTab(id); setQuery(""); }} className={`min-h-11 rounded-control px-3 text-left text-sm ${bold ? "font-bold" : "font-semibold"} ${tab === id && !q ? "bg-ink text-on-dark" : "bg-chip"}`}>
       {label}
     </button>
   );
@@ -98,7 +98,7 @@ export function ServicePicker({
               const on = isPicked(s);
               return (
                 <button key={s.id} type="button" onClick={() => toggle(s)} aria-pressed={on} className={`min-h-12 rounded-control border px-3 text-left flex items-center gap-3 ${on ? "border-green bg-green-soft" : "border-line hover:border-ink"}`}>
-                  <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${on ? "bg-green text-white" : "border border-line-strong text-transparent"}`}>✓</span>
+                  <span className={`inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-xs font-bold ${on ? "bg-green text-on-dark" : "border border-line-strong text-transparent"}`}>✓</span>
                   <span className="font-semibold truncate flex-1 min-w-0 uppercase">{s.name}</span>
                   <span className="text-xs font-semibold shrink-0 text-muted">{priceText(s)}</span>
                 </button>
@@ -106,7 +106,7 @@ export function ServicePicker({
             })}
             {custom.map((c) => (
               <button key={`custom-${c}`} type="button" onClick={() => setCustom((cur) => cur.filter((x) => x !== c))} aria-pressed className="min-h-12 rounded-control border border-green bg-green-soft px-3 text-left flex items-center gap-3">
-                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green text-[11px] font-bold text-white">✓</span>
+                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-green text-xs font-bold text-on-dark">✓</span>
                 <span className="font-semibold truncate flex-1 min-w-0">{c}</span>
                 <span className="text-xs font-semibold shrink-0 text-muted">as typed</span>
               </button>
@@ -117,7 +117,7 @@ export function ServicePicker({
                   + Add &quot;{query.trim()}&quot; as typed
                 </button>
                 {onSaveCustom ? (
-                  <button type="button" onClick={() => { const name = query.trim(); setCustom((cur) => [...cur, name]); setQuery(""); onSaveCustom(name); }} className="min-h-12 rounded-control border border-dashed border-green px-3 text-left text-sm font-bold text-green" data-save-custom>
+                  <button type="button" onClick={() => { const name = query.trim(); setCustom((cur) => [...cur, name]); setQuery(""); onSaveCustom(name); }} className="min-h-12 rounded-control border border-dashed border-green px-3 text-left text-sm font-bold text-green-text" data-save-custom>
                     + Add &quot;{query.trim()}&quot; and save it to the list
                   </button>
                 ) : null}
@@ -129,7 +129,7 @@ export function ServicePicker({
           {editHref ? <a href={editHref} className="text-xs font-semibold text-muted underline underline-offset-4">Edit the list</a> : <span />}
           <span className="ml-auto text-sm font-semibold">{count ? `${count} selected` : ""}</span>
           <button type="button" onClick={onClose} className="min-h-12 rounded-control px-4 text-sm font-bold text-muted hover:bg-chip">Cancel</button>
-          <button type="button" disabled={!count} onClick={() => onDone(picked, custom)} className={`min-h-12 rounded-control px-5 text-sm font-bold text-white ${count ? "bg-ink" : "bg-ink/40"}`}>Done{count ? ` (${count})` : ""}</button>
+          <button type="button" disabled={!count} onClick={() => onDone(picked, custom)} className={`min-h-12 rounded-control px-5 text-sm font-bold text-on-dark ${count ? "bg-ink" : "bg-ink/40"}`}>Done{count ? ` (${count})` : ""}</button>
         </div>
       </div>
     </div>

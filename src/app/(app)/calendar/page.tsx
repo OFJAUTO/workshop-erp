@@ -130,7 +130,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
           {canBook ? (
             <div className="flex gap-1 rounded-control border border-line p-1">
               {(["me", "all"] as const).map((w) => (
-                <Link key={w} href={href(view, date, w)} className={`min-h-11 inline-flex items-center rounded-control px-4 text-sm font-bold ${who === w ? "bg-ink text-white" : "hover:bg-chip"}`}>
+                <Link key={w} href={href(view, date, w)} className={`min-h-11 inline-flex items-center rounded-control px-4 text-sm font-bold ${who === w ? "bg-ink text-on-dark" : "hover:bg-chip"}`}>
                   {w === "me" ? "My bookings" : "Everyone"}
                 </Link>
               ))}
@@ -138,7 +138,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
           ) : null}
           <div className="flex gap-1 rounded-control border border-line p-1">
             {(["day", "week", "month"] as CalendarView[]).map((v) => (
-              <Link key={v} href={href(v, date)} className={`min-h-11 inline-flex items-center rounded-control px-4 text-sm font-bold ${view === v ? "bg-ink text-white" : "hover:bg-chip"}`}>
+              <Link key={v} href={href(v, date)} className={`min-h-11 inline-flex items-center rounded-control px-4 text-sm font-bold ${view === v ? "bg-ink text-on-dark" : "hover:bg-chip"}`}>
                 {v[0].toUpperCase() + v.slice(1)}
               </Link>
             ))}
@@ -196,7 +196,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
                       <Badge tone="green">Reminder sent</Badge>
                     ) : canBook ? (
                       <div className="flex flex-wrap gap-2">
-                        <a href={whatsappLink(a, settings)} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-white">
+                        <a href={whatsappLink(a, settings)} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-on-dark">
                           WhatsApp
                         </a>
                         <CopyText text={whatsappText(a, settings)} />
@@ -245,7 +245,7 @@ function Fullness({ count, perDay, compact = false }: { count: number; perDay: n
       <div className="h-1.5 flex-1 rounded-full bg-track overflow-hidden">
         <div className={`h-full ${bar}`} style={{ width: `${f.percent}%` }} />
       </div>
-      {!compact ? <span className="text-[11px] text-muted whitespace-nowrap">{f.text}</span> : null}
+      {!compact ? <span className="text-xs text-muted whitespace-nowrap">{f.text}</span> : null}
     </div>
   );
 }
@@ -268,18 +268,18 @@ function ApptItem({ a, ctx, compact = false }: { a: AppointmentFull; ctx: Ctx; c
         </span>
       </span>
       {!compact ? (
-        <span className="block text-[11px] text-muted truncate">
+        <span className="block text-xs text-muted truncate">
           {BOOKING_KIND_SHORT[a.kind]} · {a.reason}
         </span>
       ) : null}
-      <span className="flex items-center gap-1 text-[11px] font-semibold truncate" style={{ color: colour }}>
+      <span className="flex items-center gap-1 text-xs font-semibold truncate" style={{ color: colour }}>
         <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: colour }} />
         {a.advisor?.display_name ?? "Not assigned"}
       </span>
-      {missed ? <span className="block text-[11px] font-bold text-red">{missedLabel(a.kind)}</span> : null}
-      {a.status === "no_show" ? <span className="block text-[11px] font-semibold text-red">No-show</span> : null}
-      {a.status === "cancelled" ? <span className="block text-[11px] font-semibold text-muted">Cancelled</span> : null}
-      {a.vehicle_id && ctx.prepaid?.get(a.vehicle_id) ? <span className="block text-[11px] font-bold text-green" data-appt-prepaid={a.vehicle_id}>Prepaid AED {(ctx.prepaid.get(a.vehicle_id) ?? 0).toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span> : null}
+      {missed ? <span className="block text-xs font-bold text-red">{missedLabel(a.kind)}</span> : null}
+      {a.status === "no_show" ? <span className="block text-xs font-semibold text-red">No-show</span> : null}
+      {a.status === "cancelled" ? <span className="block text-xs font-semibold text-muted">Cancelled</span> : null}
+      {a.vehicle_id && ctx.prepaid?.get(a.vehicle_id) ? <span className="block text-xs font-bold text-green-text" data-appt-prepaid={a.vehicle_id}>Prepaid AED {(ctx.prepaid.get(a.vehicle_id) ?? 0).toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span> : null}
     </Link>
   );
 }
@@ -292,7 +292,7 @@ function JobItem({ j, kind, compact = false }: { j: JobLite; kind: "due" | "out"
       <span className="block text-xs font-bold">{kind === "due" ? "Due" : `Left ${j.gated_out_at ? dubaiTimeOf(j.gated_out_at) : ""}`}</span>
       <Words className="block text-xs font-bold" text={j.vehicle ? formatPlate(j.vehicle) : j.job_number} />
       {/* The car and the job number - the number only when the line above shows the plate, never twice. */}
-      {!compact && (j.vehicle || j.vehicle === undefined) ? <span className="block text-[11px] text-muted truncate">{[[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" "), j.vehicle ? j.job_number : null].filter(Boolean).join(" · ")}</span> : null}
+      {!compact && (j.vehicle || j.vehicle === undefined) ? <span className="block text-xs text-muted truncate">{[[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" "), j.vehicle ? j.job_number : null].filter(Boolean).join(" · ")}</span> : null}
     </Link>
   );
 }
@@ -307,7 +307,7 @@ function MonthGrid({ days, date, today, byDay, perDay, who, ctx }: { days: strin
     <Card className="p-2 sm:p-3">
       <div className="grid grid-cols-7 gap-1 mb-1">
         {["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((d) => (
-          <span key={d} className="text-center text-[11px] font-bold uppercase tracking-[0.08em] text-muted">
+          <span key={d} className="text-center text-xs font-bold uppercase tracking-[0.08em] text-muted">
             {d}
           </span>
         ))}
@@ -320,7 +320,7 @@ function MonthGrid({ days, date, today, byDay, perDay, who, ctx }: { days: strin
           const shown = items.slice(0, 3);
           return (
             <div key={d} className={`min-h-28 rounded-control border p-1.5 flex flex-col gap-1 ${d === today ? "border-ink" : "border-line"} ${inMonth ? "bg-white" : "bg-canvas opacity-60"}`}>
-              <Link href={`/calendar?view=day&date=${d}&who=${who}`} className={`text-xs font-bold self-start min-h-6 min-w-6 inline-flex items-center justify-center rounded-full ${d === today ? "bg-ink text-white px-1.5" : "hover:underline"}`}>
+              <Link href={`/calendar?view=day&date=${d}&who=${who}`} className={`text-xs font-bold self-start min-h-6 min-w-6 inline-flex items-center justify-center rounded-full ${d === today ? "bg-ink text-on-dark px-1.5" : "hover:underline"}`}>
                 {Number(d.slice(8, 10))}
               </Link>
               <Fullness count={e.appts.filter(active).length} perDay={perDay} compact />
@@ -328,7 +328,7 @@ function MonthGrid({ days, date, today, byDay, perDay, who, ctx }: { days: strin
                 <div key={i.key}>{i.node}</div>
               ))}
               {items.length > shown.length ? (
-                <Link href={`/calendar?view=day&date=${d}&who=${who}`} className="text-[11px] font-semibold text-muted hover:underline">
+                <Link href={`/calendar?view=day&date=${d}&who=${who}`} className="text-xs font-semibold text-muted hover:underline">
                   +{items.length - shown.length} more
                 </Link>
               ) : null}
@@ -363,7 +363,7 @@ function WeekGrid({ days, today, byDay, perDay, who, ctx }: { days: string[]; to
             {e.out.map((j) => (
               <JobItem key={"o" + j.id} j={j} kind="out" />
             ))}
-            {e.appts.length + e.due.length + e.out.length === 0 ? <span className="text-[11px] text-faint">Nothing booked</span> : null}
+            {e.appts.length + e.due.length + e.out.length === 0 ? <span className="text-xs text-faint">Nothing booked</span> : null}
           </Card>
         );
       })}
@@ -415,7 +415,7 @@ function DayList({ date, today, entry, perDay, ctx }: { date: string; today: str
         <Card className="flex flex-col gap-2">
           <SectionLabel right={`${entry.due.length}`}>Cars due</SectionLabel>
           {entry.due.length === 0 ? <p className="text-sm text-muted">No promised dates on this day.</p> : entry.due.map((j) => <JobItem key={j.id} j={j} kind="due" />)}
-          {entry.due.length ? <p className="text-[11px] text-muted">{formatPromised(date)}</p> : null}
+          {entry.due.length ? <p className="text-xs text-muted">{formatPromised(date)}</p> : null}
         </Card>
         <Card className="flex flex-col gap-2">
           <SectionLabel right={`${entry.out.length}`}>Delivered or collected</SectionLabel>

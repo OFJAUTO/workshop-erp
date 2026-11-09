@@ -135,12 +135,12 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
       action={
         !approved ? (
           <div id="approval" className="rounded-lg border-2 border-green bg-green-soft p-4 flex flex-col gap-1">
-            <span className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368]">Your approval</span>
+            <span className="text-xs font-bold tracking-[0.08em] uppercase text-[#5F6368]">Your approval</span>
             <form id="approval-form" method="post" action={`/api/approve/${token}`} className="flex flex-col gap-3 py-1">
               <p className="text-xs text-[#5F6368]">This authorises inspection and diagnosis only. Any work will be quoted separately for your approval.</p>
               {incurred.length ? (
                 <div className="rounded-lg bg-white px-3 py-2.5 flex flex-col gap-1.5" data-charges-incurred>
-                  <span className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368]">Charges already incurred · رسوم مستحقة</span>
+                  <span className="text-xs font-bold tracking-[0.08em] uppercase text-[#5F6368]">Charges already incurred · رسوم مستحقة</span>
                   {incurred.map((c, i) => (
                     <span key={i} className="flex flex-col gap-0.5" data-charge-incurred>
                       <span className="text-sm font-bold">{chargeWordsEn(c.description, c, vatPct)}</span>
@@ -181,13 +181,13 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
       {approved && approvedReq ? <div data-approved-line><Notice tone="success">{approvedLine(approvedReq.approver_name, card.customer?.company_name, formatDateTime(approvedReq.approved_at))} Thank you.</Notice></div> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <section className="flex flex-col gap-1">
-        <h2 className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368] border-b-2 border-[#111113] pb-1.5">Your requests</h2>
+        <h2 className="text-xs font-bold tracking-[0.08em] uppercase text-[#5F6368] border-b-2 border-[#111113] pb-1.5">Your requests</h2>
         <ol className="list-decimal pl-5 text-sm flex flex-col gap-0.5 py-1">
           {requests.length ? requests.map((r) => <li key={r.id}>{r.text}</li>) : <li className="whitespace-pre-wrap list-none -ml-5">{gateIn.customer_requests}</li>}
         </ol>
       </section>
       <section className="flex flex-col gap-1">
-        <h2 className="text-[9.5px] font-bold tracking-[0.08em] uppercase text-[#5F6368] border-b-2 border-[#111113] pb-1.5">Check-in videos and photos</h2>
+        <h2 className="text-xs font-bold tracking-[0.08em] uppercase text-[#5F6368] border-b-2 border-[#111113] pb-1.5">Check-in videos and photos</h2>
         <div className="py-1 flex flex-col gap-4">
           <CustomerVideos token={token} initial={videoRows} expected={videoRows.some((v) => v.kind === "video") ? ["video"] : ["video_exterior", "video_interior"]} complete={videosComplete} signedAt={signedAt} />
           <MediaGallery media={media} urls={Object.fromEntries(mediaUrls)} thumbs={Object.fromEntries(photoThumbs)} mediums={Object.fromEntries(photoMediums)} stacked hideVideos damageElsewhere />

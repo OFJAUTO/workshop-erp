@@ -343,10 +343,10 @@ function PendingTile({ p, size, small }: { p: PendingFile; size: string; small: 
         // eslint-disable-next-line @next/next/no-img-element
         <img src={p.previewUrl} alt={fileName(p)} className="h-full w-full object-cover" />
       ) : (
-        <span className="flex h-full w-full items-center justify-center text-[10px] font-bold text-muted">{p.kind === "video" ? "Video" : "File"}</span>
+        <span className="flex h-full w-full items-center justify-center text-xs font-bold text-muted">{p.kind === "video" ? "Video" : "File"}</span>
       )}
-      {p.kind === "video" && p.previewUrl ? <span className="absolute inset-0 flex items-center justify-center text-lg text-white" aria-hidden>▶</span> : null}
-      <span className={`absolute inset-x-0 bottom-0 truncate px-0.5 text-center font-bold text-white ${small ? "text-[9px] leading-3" : "text-[11px]"} ${stopped ? "bg-red-bar" : "bg-ink/75"}`}>{band}</span>
+      {p.kind === "video" && p.previewUrl ? <span className="absolute inset-0 flex items-center justify-center text-lg text-on-dark" aria-hidden>▶</span> : null}
+      <span className={`absolute inset-x-0 bottom-0 truncate px-0.5 text-center font-bold text-on-dark ${small ? "text-xs leading-3" : "text-xs"} ${stopped ? "bg-red-bar" : "bg-ink/75"}`}>{band}</span>
       {p.state === "sending" ? <span className="absolute left-0 top-0 h-1 bg-amber-bar" style={{ width: `${Math.max(4, pct)}%` }} aria-hidden /> : null}
     </span>
   );
@@ -507,7 +507,7 @@ export function InspectionMedia({
                 {f.kind === "video" ? (
                   <span className="relative block h-full w-full bg-black">
                     <video src={f.url ?? undefined} muted playsInline preload="metadata" className="h-full w-full object-cover" />
-                    <span className="absolute inset-0 flex items-center justify-center text-white text-xl">▶</span>
+                    <span className="absolute inset-0 flex items-center justify-center text-on-dark text-xl">▶</span>
                   </span>
                 ) : (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -515,7 +515,7 @@ export function InspectionMedia({
                 )}
               </button>
               {!disabled ? (
-                <button type="button" onClick={() => void remove(f.id)} disabled={removing === f.id} className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-[11px] font-bold text-white shadow" aria-label="Remove this file" data-remove-file>
+                <button type="button" onClick={() => void remove(f.id)} disabled={removing === f.id} className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-ink text-xs font-bold text-on-dark shadow" aria-label="Remove this file" data-remove-file>
                   {removing === f.id ? "…" : "✕"}
                 </button>
               ) : null}
@@ -542,14 +542,14 @@ export function InspectionMedia({
         </span>
       ) : null}
       {movingLine ? (
-        <span className={`text-xs font-semibold text-amber ${iconOnly ? "basis-full" : ""}`} data-pending-summary>
+        <span className={`text-xs font-semibold text-amber-text ${iconOnly ? "basis-full" : ""}`} data-pending-summary>
           {movingLine}
           {keepOpen ? " Keep this page open until it has gone." : ""}
         </span>
       ) : null}
       {troubled.map((p) => (
         <span key={p.id} className={`flex flex-wrap items-center gap-2 ${iconOnly ? "basis-full" : ""}`} data-pending-line={p.id} data-pending-state={p.state}>
-          <span className={`text-xs font-semibold ${p.state === "stopped" ? "text-red" : "text-amber"}`}>
+          <span className={`text-xs font-semibold ${p.state === "stopped" ? "text-red" : "text-amber-text"}`}>
             {fileName(p)}: {pendingWords(p)}
           </span>
           <button type="button" onClick={() => void retry(p.id)} className="min-h-11 rounded-control border border-line-strong bg-white px-3 text-xs font-bold" data-retry>
@@ -713,7 +713,7 @@ export function useSendGuard({
 
   const note =
     waitIds && waitedOpen.length ? (
-      <span className="flex flex-wrap items-center gap-2 text-sm font-semibold text-amber" data-send-waiting={waitedOpen.length}>
+      <span className="flex flex-wrap items-center gap-2 text-sm font-semibold text-amber-text" data-send-waiting={waitedOpen.length}>
         <span>
           Waiting for {filesWords(waitedOpen)} to arrive – {words.goes} Keep this page open.
         </span>
@@ -727,7 +727,7 @@ export function useSendGuard({
         </button>
       </span>
     ) : pending.length ? (
-      <span className={`text-sm font-semibold ${stopped.length ? "text-red" : "text-amber"}`} data-send-pending={pending.length}>
+      <span className={`text-sm font-semibold ${stopped.length ? "text-red" : "text-amber-text"}`} data-send-pending={pending.length}>
         {[moving.length ? `${filesWords(moving)} still sending from ${device}${online ? "" : " – no signal yet"}` : null, stopped.length ? `${filesWords(stopped)} could not be sent` : null].filter(Boolean).join(" · ")}
       </span>
     ) : null;
@@ -772,12 +772,12 @@ export function useSendGuard({
               )}
               <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                 {moving.length ? (
-                  <button type="button" onClick={waitThenGo} className="min-h-12 rounded-control bg-ink px-4 text-sm font-bold text-white" data-send-wait>
+                  <button type="button" onClick={waitThenGo} className="min-h-12 rounded-control bg-ink px-4 text-sm font-bold text-on-dark" data-send-wait>
                     {words.wait}
                   </button>
                 ) : null}
                 {!blocked || allIn ? (
-                  <button type="button" onClick={goNow} className={`min-h-12 rounded-control border-2 border-ink px-4 text-sm font-bold ${moving.length ? "bg-white text-ink" : "bg-ink text-white"}`} data-send-now>
+                  <button type="button" onClick={goNow} className={`min-h-12 rounded-control border-2 border-ink px-4 text-sm font-bold ${moving.length ? "bg-white text-ink" : "bg-ink text-on-dark"}`} data-send-now>
                     {words.now}
                   </button>
                 ) : null}

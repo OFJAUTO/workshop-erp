@@ -22,13 +22,13 @@ export default async function LpoVerificationPage({ params }: { params: Promise<
   const { data: sup } = po?.supplier_id ? await admin.from("suppliers").select("name, trn, vat_registered").eq("id", po.supplier_id).maybeSingle() : { data: null };
   const money = po ? supplierMoneyWords(supplierMoney(Number(po.total_cost_aed) || 0, { chargesVat: supplierChargesVat(sup ? { ...sup, name: po.supplier_name } : { name: po.supplier_name, trn: null, vat_registered: null }) })) : null;
   const state = !po ? null : po.superseded_by ? { label: `Superseded by ${next?.number ?? "a newer LPO"}`, tone: "amber" } : po.status === "cancelled" ? { label: "Cancelled", tone: "red" } : po.status === "pending_approval" ? { label: "Not yet approved", tone: "amber" } : { label: "Valid", tone: "green" };
-  const toneClass = state?.tone === "green" ? "border-green bg-green-soft text-green" : state?.tone === "red" ? "border-red-bar bg-red-soft text-red" : "border-amber-bar bg-amber-soft text-amber";
+  const toneClass = state?.tone === "green" ? "border-green bg-green-soft text-green-text" : state?.tone === "red" ? "border-red-bar bg-red-soft text-red" : "border-amber-bar bg-amber-soft text-amber-text";
   return (
     <div className="min-h-screen bg-canvas">
       <main className="mx-auto max-w-md px-4 py-8 flex flex-col gap-4">
         <div className="flex justify-center"><Logo className="h-12" /></div>
         <div className="rounded-card border border-line bg-white p-5 flex flex-col gap-3">
-          <span className="text-[11px] font-bold tracking-[0.1em] uppercase text-muted">Local purchase order</span>
+          <span className="text-xs font-bold tracking-[0.1em] uppercase text-muted">Local purchase order</span>
           {!po || !state ? (
             <p className="text-sm font-semibold text-red">This verification link is not valid.</p>
           ) : (

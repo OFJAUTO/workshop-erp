@@ -23,7 +23,7 @@ export function CustomerMedia({ items, size = "md", label }: { items: CustomerMe
             ) : (
               <video src={`${i.url}#t=0.5`} muted playsInline preload="metadata" className="pointer-events-none h-full w-full object-cover" />
             )}
-            <span className="absolute inset-0 flex items-center justify-center text-2xl text-white drop-shadow">▶</span>
+            <span className="absolute inset-0 flex items-center justify-center text-2xl text-on-dark drop-shadow">▶</span>
           </ViewerThumb>
         ) : i.kind === "pdf" ? (
           <a key={i.id} href={i.url} className="inline-flex min-h-11 items-center rounded-lg border border-[#D4D4D8] bg-[#F4F4F5] px-3 text-sm font-semibold">

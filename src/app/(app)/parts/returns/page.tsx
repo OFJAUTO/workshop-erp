@@ -37,7 +37,7 @@ export default async function PurchaseReturnsPage({ searchParams }: { searchPara
       <Card className="flex flex-col gap-3">
         <div className="flex flex-wrap gap-1 text-xs font-bold" data-return-tabs>
           {RETURN_TABS.map((t) => (
-            <Link key={t.key} href={`/parts/returns?tab=${t.key}`} className={`min-h-9 inline-flex items-center rounded-control px-3 ${tab.key === t.key ? "bg-ink text-white" : "bg-chip"}`} data-return-tab={t.key}>{t.label} · {counts[t.key]}</Link>
+            <Link key={t.key} href={`/parts/returns?tab=${t.key}`} className={`min-h-9 inline-flex items-center rounded-control px-3 ${tab.key === t.key ? "bg-ink text-on-dark" : "bg-chip"}`} data-return-tab={t.key}>{t.label} · {counts[t.key]}</Link>
           ))}
         </div>
         {expected > 0 ? <p className="text-sm font-bold" data-return-expected-total>Credit expected in all: AED {expected.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (not in any supplier balance until it is recorded)</p> : null}

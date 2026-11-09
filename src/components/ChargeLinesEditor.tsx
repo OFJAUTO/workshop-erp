@@ -38,7 +38,7 @@ export function ChargeLinesEditor({ name = "lines", recoveryTypes, providers, st
         <div key={i} className="flex flex-col gap-2 rounded-control border border-line-strong bg-white p-3" data-charge-row={i}>
           <div className="flex flex-wrap items-center gap-1.5">
             {CHARGE_KINDS.map((k) => (
-              <button key={k.key} type="button" onClick={() => set(i, { kind: k.key })} aria-pressed={r.kind === k.key} className={`min-h-11 rounded-control border px-4 text-sm font-bold ${r.kind === k.key ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`} data-charge-kind={k.key}>{k.label}</button>
+              <button key={k.key} type="button" onClick={() => set(i, { kind: k.key })} aria-pressed={r.kind === k.key} className={`min-h-11 rounded-control border px-4 text-sm font-bold ${r.kind === k.key ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-charge-kind={k.key}>{k.label}</button>
             ))}
             {rows.length > 1 ? <button type="button" onClick={() => setRows((p) => p.filter((_, j) => j !== i))} className="ml-auto min-h-11 px-3 text-sm font-bold text-red" aria-label="Remove this charge">Remove</button> : null}
           </div>

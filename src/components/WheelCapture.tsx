@@ -108,14 +108,14 @@ export function WheelCapture({
                   disabled={saving}
                   onClick={() => choose(c)}
                   aria-pressed={on}
-                  className={`min-h-11 rounded-control border px-2 text-sm font-semibold ${on ? "border-ink bg-ink text-white" : "border-line-strong bg-white"}`}
+                  className={`min-h-11 rounded-control border px-2 text-sm font-semibold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}
                 >
                   {WHEEL_CONDITION_LABELS[c]}
                 </button>
               );
             })}
           </div>
-          {error ? <p className="text-sm font-semibold text-red">{error}</p> : saved ? <p className="text-xs font-semibold text-green">Saved</p> : picked.length === 0 ? <p className={`text-xs font-semibold ${attempted ? "text-red" : "text-amber"}`}>Choose the condition to finish this wheel.</p> : null}
+          {error ? <p className="text-sm font-semibold text-red">{error}</p> : saved ? <p className="text-xs font-semibold text-green-text">Saved</p> : picked.length === 0 ? <p className={`text-xs font-semibold ${attempted ? "text-red" : "text-amber-text"}`}>Choose the condition to finish this wheel.</p> : null}
         </div>
       ) : null}
     </div>

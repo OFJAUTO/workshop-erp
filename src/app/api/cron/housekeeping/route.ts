@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { archiveOldNotices, clearDoneNotices } from "@/lib/bell-clear";
 import { checkLateJobs, recordJobRun } from "@/lib/background-jobs";
 import { quoteLeadIds } from "@/lib/quote-lead";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
@@ -622,6 +623,15 @@ async function runHousekeeping(): Promise<Record<string, number>> {
     report.passkeyChallengesRemoved = data?.length ?? 0;
   } catch {
     report.passkeyChallengesRemoved = -1;
+  }
+
+  // 31. The bell only counts what is still open (9 November 2026): notices whose task is done clear for everyone;
+  //     read and cleared notices older than 30 days are archived.
+  try {
+    report.bellCleared = (await clearDoneNotices()).cleared;
+    report.bellArchived = await archiveOldNotices();
+  } catch {
+    report.bellCleared = -1;
   }
   return report;
 }
