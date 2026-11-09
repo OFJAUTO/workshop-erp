@@ -1,17 +1,19 @@
-# Handover – 9 November 2026
+# Handover – 9 November 2026, night
 
 **NEEDS OMAR:**
-1. **Backup key copy:** `OFJ-BACKUP-KEY.txt` is on your Desktop (same key as GitHub). Put it in your password manager, print it for the safe, then delete the file.
-2. **The PC's 20 GB `backups/` folder:** paste the three B2 values into `.env.local` (`B2_KEY_ID`, `B2_APP_KEY`, `B2_BUCKET`) and reply "local key saved", or leave it on the PC.
-3. Read the three old "Off-site … FAILED: B2_KEY_ID is not set" bells (no new ones come).
-4. From before: Mathew sets both Zoho orgs to Asia/Dubai; LPO-00045-1 "Check again in Zoho"; one real supplier payment through Sync to Zoho; passkeys for everyone; Network International on STL-00012; Peter's test label.
+1. **"apply"** for the six items on WAITING FOR APPLY (below). Until then those parts stay switched off and say so on screen.
+2. **AL ALI cheque 019383:** on J-00858's money page press "Replace with combined payment" on RCT-00058, tick RCT-00057, RCT-00058 and the duplicate RCT-00062 (J-00860), save. J-00860 left on 9 Nov before the cheque cleared.
+3. **J-00974 (Range Rover):** pick the PPF and tint rolls on the car's Warranty details (bells go out with item 4 below).
+4. **The BMW job (rear differential oil 3 → 2):** Parts, use "Change the quantity…" on the part.
+5. **J-00991:** promised date and advisor still missing.
+6. **Office PCs for passkeys:** steps in `docs/passkeys-pc-9-nov-note.md` (Bluetooth, firewall for cable.ua5v.com and cable.auth.com).
+7. **Lathe price list:** Parts management → Lathe → Price list (one line per item: `Brake disc | 80`), once item 1 is applied.
+8. From before: `OFJ-BACKUP-KEY.txt` on the Desktop (password manager, print, delete); B2 values in `.env.local` (optional); Mathew sets both Zoho orgs to Asia/Dubai; LPO-00045-1 "Check again in Zoho".
 
-**Live (9 Nov):** the morning's five "apply" items (photo sizes backfill 1,330 photos, 0 failed) · the owner's list of 8 Nov: 1 softer look (one theme file), 2 urgent only for money / promised date / customer waiting over 4 working hours, 3 promised date required at release with reasons logged, 4 the bell counts open actions only (e064dd8, layout fixes after it). Note: `docs/9-nov-batch-note.md`.
+**Live (9 Nov evening, the owner's 8 sections):** 1 quantity change after approval (12a77f6) · 2 Accounts posting (ea08217) · 3 one payment for several cars + statement (8808fa5) · 4 passkey rules (4d454b9) · 5 simple part sticker (c3a56fa) · 6 warranty batch only PPF/tint (d2579f1) · 7 clear 1080p videos + archive (711c6bb) · 8 lathe work (4fe5ecf) · layout fixes (3b2f40f).
 
-**Applied 9 Nov afternoon** (backup `backups/2026-11-09T14-14-12`, check:live 33/33): `jobs.promised_time`, `notifications.cleared_at/archived_at`, promised-date bells (only 2 cars were still without a date: J-00317 Anas, J-00991 owner).
-
-**WAITING FOR APPLY:** nothing.
+**WAITING FOR APPLY** (`docs/waiting-for-apply.md`, backup `backups/2026-11-09T16-29-03`): 1 accounts_posting · 2 payment_groups · 3 passkey_reset_code · 4 J-00974 batch-missing bells · 5 video_archive · 6 lathe_work.
 
 **Queue:** empty.
 
-**Tests:** security passed, simulation 341/0, test-nov9 15/15, full layout check (33 findings from the bigger small text, fixed and re-checked).
+**Tests:** security passed; full layout check (2 findings fixed, re-checked clean); simulation 448 passed, 0 failed (all paths, every role, 71 min); live check 33 passed.
