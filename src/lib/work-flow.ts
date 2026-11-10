@@ -1,4 +1,5 @@
 import { dbWords } from "@/lib/app-errors";
+import { attachPostscanToQc } from "./scans";
 import { withBreak } from "@/lib/breaks";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { workingTimeOf } from "@/lib/jobs";
@@ -159,6 +160,8 @@ export async function openQcRound(jobId: string, by: string | null, settings: Se
   const items = await buildQcItems(jobId, settings, previous);
   await admin.from("qc_checks").insert({ job_id: jobId, round, status: "open", items, created_by: by, updated_by: by });
   await admin.from("jobs").update({ qc_round: round }).eq("id", jobId);
+  // 10 November 2026: a post-scan that came by email during the work files itself into the new round.
+  await attachPostscanToQc(jobId).catch(() => null);
   return round;
 }
 

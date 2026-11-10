@@ -1,4 +1,6 @@
 import { VinCopy } from "@/components/VinCopy";
+import { getSettings } from "@/lib/settings";
+import { attachPostscanToQc } from "@/lib/scans";
 import { notFound } from "next/navigation";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
@@ -27,8 +29,18 @@ export default async function QcPage({ params, searchParams }: { params: Promise
   const [card, work, { data: checks }] = await Promise.all([loadJobCard(supabase, jobId), loadWork(jobId), createAdminClient().from("qc_checks").select(QC_SELECT).eq("job_id", jobId).eq("is_active", true).order("round")]);
   if (!card) notFound();
   const { job, vehicle, gateIn } = card;
-  const rounds = (checks ?? []) as QcCheckRow[];
-  const open = rounds.find((c) => c.status === "open") ?? null;
+  let rounds = (checks ?? []) as QcCheckRow[];
+  let open = rounds.find((c) => c.status === "open") ?? null;
+  // 10 November 2026: an Autel post-scan that came by email files itself into the open round (idempotent catch-up for a
+  // round opened before the email arrived or before this rule).
+  if (open && !open.postscan_path && job.job_kind !== "loose" && (await attachPostscanToQc(jobId)) === "attached") {
+    const { data: again } = await createAdminClient().from("qc_checks").select(QC_SELECT).eq("id", open.id).maybeSingle();
+    if (again) { rounds = rounds.map((c) => (c.id === open!.id ? (again as QcCheckRow) : c)); open = again as QcCheckRow; }
+  }
+  // While no post-scan is in: when the scans mailbox was last read (the five-minute check).
+  const lastCheck = (await getSettings()).scans_mailbox_last_check as { at?: string } | null;
+  // eslint-disable-next-line react-hooks/purity
+  const mailboxMinutes = lastCheck?.at ? Math.max(0, Math.round((Date.now() - Date.parse(lastCheck.at)) / 60000)) : null;
   const workedOnIt = work.sessions.some((s) => s.technician_id === staff.id) || job.assigned_to === staff.id;
   const canDo = can(role, "doQc") && !staff.viewingAs && !!open && job.status === "pending_qc" && !workedOnIt;
   const scanUrl = open?.postscan_path ? (await signJobFiles([open.postscan_path]))[open.postscan_path] : null;
@@ -44,7 +56,7 @@ export default async function QcPage({ params, searchParams }: { params: Promise
       {gateIn?.old_parts_return ? <Notice tone="info">The customer asked for the old parts: check they are kept.</Notice> : null}
       {open && open.round > 1 ? <Notice tone="info">Recheck after rework: only the items that failed last time are listed.</Notice> : null}
       {open ? (
-        <QcForm jobId={jobId} items={open.items} initialMileage={open.mileage ?? gateIn?.mileage ?? null} mileageUnit={open.mileage_unit ?? gateIn?.mileage_unit ?? "km"} postscan={open.postscan_path ? { id: open.id, path: open.postscan_path, url: scanUrl ?? null, caption: "post-scan.pdf", contentType: "application/pdf" } : null} waivedReason={open.postscan_waived_reason} notes={open.notes} readOnly={!canDo} loose={card.job.job_kind === "loose"} action={saveQc.bind(null, jobId)} />
+        <QcForm mailboxMinutes={mailboxMinutes} jobId={jobId} items={open.items} initialMileage={open.mileage ?? gateIn?.mileage ?? null} mileageUnit={open.mileage_unit ?? gateIn?.mileage_unit ?? "km"} postscan={open.postscan_path ? { id: open.id, path: open.postscan_path, url: scanUrl ?? null, caption: "post-scan.pdf", contentType: "application/pdf" } : null} waivedReason={open.postscan_waived_reason} notes={open.notes} readOnly={!canDo} loose={card.job.job_kind === "loose"} action={saveQc.bind(null, jobId)} />
       ) : canOpen ? (
         <Card className="flex flex-col gap-3 border-ink">
           <SectionLabel>No QC round is open yet</SectionLabel>

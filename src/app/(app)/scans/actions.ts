@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
 import { notifyManagers, notifyStaff } from "@/lib/notifications";
-import { SCANS_BUCKET, attachPrescan, scanKindFor } from "@/lib/scans";
+import { SCANS_BUCKET, attachPostscanToQc, attachPrescan, scanKindForJob } from "@/lib/scans";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { checkScansMailbox, processMail } from "@/lib/mailbox";
 import { attachMatchedScans } from "@/lib/scan-sync";
@@ -37,12 +37,13 @@ export async function attachScan(scanId: string, formData: FormData) {
     admin.from("jobs").select("id, job_number, status, department, assigned_to").eq("id", jobId).maybeSingle(),
   ]);
   if (!scan || !job) back("Scan or job not found.");
-  const kind = scanKindFor(job!.status);
+  const kind = await scanKindForJob(job!.id, job!.status);
   await admin.from("inbound_scans").update({ job_id: job!.id, kind, status: "attached", attached_by: staff.id, attached_at: new Date().toISOString(), updated_by: staff.id }).eq("id", scan!.id);
   if (kind === "pre") {
     const { data: file } = await admin.storage.from(SCANS_BUCKET).download(scan!.storage_path);
     if (file) await attachPrescan(job!.id, Buffer.from(await file.arrayBuffer()), scan!.file_name ?? "scan.pdf");
   }
+  if (kind === "post") await attachPostscanToQc(job!.id);
   await admin.from("job_events").insert({ job_id: job!.id, event_type: "scan_attached", note: `${staff.display_name} attached the scan report ${scan!.file_name ?? ""} (${kind}-scan)`, created_by: staff.id });
   const n = { type: "scan_received", title: `${kind === "pre" ? "Pre-scan" : "Post-scan"} report attached · ${job!.job_number}`, body: `${staff.display_name} attached ${scan!.file_name ?? "a scan report"}.`, jobId: job!.id, href: `/jobs/${job!.id}/inspection` };
   await notifyManagers(job!.department, n);

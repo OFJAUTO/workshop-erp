@@ -1,3 +1,4 @@
+import { logAppError } from "./app-errors";
 import "server-only";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { attachmentsOf, getAttachment, getMessage, headerOf, listMessages, scansMailbox, textBodyOf, type GmailMessage } from "./gmail";
@@ -5,7 +6,7 @@ import { mailboxConnection, oauthConfigured } from "./google-mailbox";
 import { notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import { autelLinksIn, carHintOf, fetchAutelReport, isAutelSender, reportIdOf } from "./autel";
 import { readPdfRows } from "./pdf-read";
-import { SCANS_BUCKET, attachPrescan, scanKindFor } from "./scans";
+import { SCANS_BUCKET, attachPostscanToQc, attachPrescan, scanKindFor, jobHasPrescan } from "./scans";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
 
@@ -81,6 +82,9 @@ export async function processMail(mail: MailIn, opts: { keepEmailOnNoFiles?: boo
   }
   let stored = 0;
   let repeats = 0;
+  // THE pre/post rule: the first report is the pre-scan; once work started or a pre-scan exists, the post-scan.
+  let hasPre = job ? await jobHasPrescan(job.id) : false;
+  let filedPost = false;
   for (const f of files) {
     // No Report ID in the email: the same file for the same car within two weeks is still the same report.
     if (!reportId && vin) {
@@ -95,11 +99,15 @@ export async function processMail(mail: MailIn, opts: { keepEmailOnNoFiles?: boo
     const contentType = isPdf(f) ? "application/pdf" : f.contentType.toLowerCase() === "text/html" ? "text/html" : f.contentType.toLowerCase().startsWith("image/") ? f.contentType.toLowerCase() : "image/jpeg";
     const { error: upError } = await admin.storage.from(SCANS_BUCKET).upload(path, f.bytes, { contentType, upsert: false });
     if (upError) continue;
-    const kind = job ? scanKindFor(job.status) : null;
+    const kind = job ? scanKindFor(job.status, hasPre) : null;
     await admin.from("inbound_scans").insert({ from_email: mail.from, subject, vin, storage_path: path, content_type: contentType, file_name: f.name, job_id: job?.id ?? null, kind, status: job ? "matched" : "unmatched", gmail_message_id: mail.messageId, source_url: sourceUrl, report_id: reportId, car_hint: carHint });
     stored++;
     if (job && kind === "pre" && isPdf(f)) await attachPrescan(job.id, f.bytes, f.name);
+    if (kind === "pre") hasPre = true;
+    if (kind === "post" && isPdf(f)) filedPost = true;
   }
+  // The post-scan goes to QC's box by itself (the open round; a later round takes it when it opens).
+  if (job && filedPost) await attachPostscanToQc(job.id).catch((e) => logAppError("mailbox.postscan", e, { jobId: job!.id }));
   if (!stored) {
     if (repeats) {
       if (mail.messageId) {
@@ -113,7 +121,7 @@ export async function processMail(mail: MailIn, opts: { keepEmailOnNoFiles?: boo
   }
   if (job) {
     const plate = job.vehicle ? formatPlate(job.vehicle) : job.job_number;
-    const kind = scanKindFor(job.status);
+    const kind = filedPost ? "post" : scanKindFor(job.status, hasPre);
     const n = { type: "scan_received", title: `Scan report received for ${plate}`, body: `${stored} file${stored === 1 ? "" : "s"} from the scanner (${kind === "pre" ? "pre-scan" : "post-scan"}), ${job.job_number}.`, jobId: job.id, href: `/jobs/${job.id}` };
     const advisors = await advisorsInCharge(job.id);
     await notifyStaff(advisors, n);

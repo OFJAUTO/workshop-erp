@@ -15,7 +15,7 @@ function scanOfSent(r: SentResult): JobFile | null {
 }
 
 /** The QC checklist: every item Pass or Fail with a remark on Fail, the mileage, and the post-scan PDF or a reason. */
-export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, waivedReason, notes, readOnly, loose = false, action }: { /** Loose items: no mileage, no Autel scan. */ loose?: boolean; jobId: string; items: QcItem[]; initialMileage: number | null; mileageUnit: string; postscan: JobFile | null; waivedReason: string | null; notes: string | null; readOnly: boolean; action: (formData: FormData) => void }) {
+export function QcForm({ mailboxMinutes = null, jobId, items, initialMileage, mileageUnit, postscan, waivedReason, notes, readOnly, loose = false, action }: { /** Loose items: no mileage, no Autel scan. */ loose?: boolean; /** Minutes since the scans mailbox was last read (10 November 2026). */ mailboxMinutes?: number | null; jobId: string; items: QcItem[]; initialMileage: number | null; mileageUnit: string; postscan: JobFile | null; waivedReason: string | null; notes: string | null; readOnly: boolean; action: (formData: FormData) => void }) {
   const [results, setResults] = useState<Record<string, "pass" | "fail" | null>>(Object.fromEntries(items.map((i) => [i.key, i.result])));
   // Pass and Fail taps are kept in this browser until the check is finished, so a closed tablet loses nothing.
   const draftKey = `erp-qc-results-${jobId}`;
@@ -139,6 +139,7 @@ export function QcForm({ jobId, items, initialMileage, mileageUnit, postscan, wa
       {!loose ? (
       <Card className="flex flex-col gap-3">
         <SectionLabel>Post-scan from the Autel (PDF)</SectionLabel>
+        {!scan ? <p className="text-sm font-semibold text-amber-text" data-postscan-waiting>Waiting for the Autel report…{mailboxMinutes !== null ? ` last checked ${mailboxMinutes < 1 ? "just now" : `${mailboxMinutes} min ago`}` : ""}</p> : <p className="text-sm font-semibold text-green" data-postscan-in>Post-scan in ✓</p>}
         <JobFileUpload jobId={jobId} kind="qc_postscan" files={scan ? [scan] : []} accept="pdf" label="Attach the post-scan PDF" disabled={readOnly} onAdded={(f) => setScan(f)} />
         <input type="hidden" name="postscan_path" value={scan?.path ?? ""} />
         {!scan ? (

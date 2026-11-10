@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -3208,6 +3208,121 @@ await section("sec8", "outsourced lathe work", async () => {
   } finally {
     await sql("update public.settings set value = $1::jsonb where key = 'lathe_price_list'", [JSON.stringify(before)]);
   }
+});
+
+/* ================================================================================================= */
+/* d1 (10 November 2026, Section 1): paid means paid. One proforma, three money situations: a cheque */
+/* waiting to clear, part paid, fully paid. The "car is ready" window and the customer's page follow  */
+/* THE still-due figure: no payment options once nothing is due, only the remaining figure otherwise. */
+/* ================================================================================================= */
+await section("d1", "paid means paid", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-10-paid-means-paid";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "ready" })).json;
+  const jobId = seed.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const job = (await sql("select customer_id, vehicle_id from public.jobs where id = $1", [jobId]))[0];
+  const acc = (await sql("select id from public.staff where role_id = 'accounts' and is_active order by created_at limit 1"))[0].id;
+  // The J-00981 situation: a proforma of AED 2,325.75 not sent yet, a cheque for all of it waiting to clear.
+  await sql("update public.invoices set status = 'cancelled' where job_id = $1 and kind = 'proforma' and status = 'issued'", [jobId]);
+  const pro = (await sql("insert into public.invoices (number, kind, job_id, customer_id, vehicle_id, status, issued_at, subtotal_aed, discount_aed, taxable_aed, vat_aed, total_aed, token, created_by, updated_by) values ('E2E-PRO-D1', 'proforma', $1, $2, $3, 'issued', now(), 2215, 0, 2215, 110.75, 2325.75, 'e2e-d1-pro', $4, $4) returning id", [jobId, job.customer_id, job.vehicle_id, acc]))[0];
+  await sql("insert into public.invoice_lines (invoice_id, position, section, description, quantity, unit_price, amount_aed, vat_aed, total_aed, cost_aed, created_by, updated_by) values ($1, 1, 'labour', 'E2E SERVICE', 1, 2215, 2215, 110.75, 2325.75, 0, $2, $2)", [pro.id, acc]);
+  const pay = (await sql("insert into public.payments (job_id, invoice_id, customer_id, vehicle_id, method, amount_aed, bank_charge_aed, is_deposit, status, cheque_number, cheque_bank, cheque_date, cheque_status, received_by, created_by, updated_by) values ($1, $2, $3, $4, 'cheque', 2325.75, 0, false, 'recorded', '019555', 'Emirates NBD', now()::date, 'pending', $5, $5, $5) returning id", [jobId, pro.id, job.customer_id, job.vehicle_id, acc]))[0];
+  const o = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  const openWindow = async () => {
+    await go(o.page, `${base}/jobs/${jobId}`);
+    const box = o.page.locator("[data-money-tile] [data-ready-send='proforma']");
+    const state = await box.getAttribute("data-due-state").catch(() => null);
+    await box.locator("button").first().click();
+    await sleep(800);
+    const how = (await o.page.locator("[data-pay-how]").count()) > 0;
+    const msg = how ? "" : ((await o.page.locator("[data-send-message]").inputValue().catch(() => "")) ?? "");
+    const howWords = how ? ((await o.page.locator("[data-pay-how]").textContent().catch(() => "")) ?? "") : "";
+    return { state, how, msg, howWords };
+  };
+  const customer = async () => {
+    await go(o.page, `${base}/proforma/e2e-d1-pro`);
+    const text = ((await o.page.locator("main").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+    return { text, payNow: (await o.page.getByText("Pay now", { exact: false }).count()) > 0, heading: ((await o.page.locator("[data-amount-heading]").textContent().catch(() => "")) ?? "").trim(), amount: ((await o.page.locator("[data-amount-due]").textContent().catch(() => "")) ?? "").trim() };
+  };
+
+  // p1. Cheque waiting to clear: no "how will the customer pay", the waiting words, never a payment link.
+  let w = await openWindow();
+  check(`p1: cheque pending → state waiting_clear (${w.state})`, w.state === "waiting_clear");
+  check("p1: no payment choice asked", !w.how);
+  check("p1: the message says waiting to clear, no Pay now", /waiting to clear/i.test(w.msg) && !/pay now/i.test(w.msg), w.msg.slice(0, 160));
+  let c = await customer();
+  check(`p1: the customer's page says waiting to clear, no Pay now (${c.heading})`, /waiting to clear/i.test(c.heading) && !!(await o.page.locator("[data-waiting-clear]").count()) && !c.payNow);
+
+  // p2. Part paid (1,000 cleared): only the remaining 1,325.75 is offered.
+  await sql("update public.payments set amount_aed = 1000, cheque_status = 'cleared', cleared_at = now() where id = $1", [pay.id]);
+  w = await openWindow();
+  check(`p2: part paid → state part (${w.state})`, w.state === "part");
+  check("p2: the window asks only for the remaining AED 1,325.75", w.how && /remaining AED 1,325\.75/.test(w.howWords), w.howWords.slice(0, 120));
+  await o.page.locator("[data-expected='cash']").click();
+  await o.page.locator("[data-pay-continue]").click();
+  await sleep(1500);
+  const partMsg = (await o.page.locator("[data-send-message]").inputValue().catch(() => "")) ?? "";
+  check("p2: the message names the balance due 1,325.75", /Balance due: AED 1,325\.75/.test(partMsg), partMsg.slice(0, 200));
+  c = await customer();
+  check(`p2: the customer's page offers only 1,325.75 (${c.heading} ${c.amount})`, /still to pay/i.test(c.heading) && c.amount.includes("1,325.75"));
+
+  // p3. Fully paid: no payment options, "fully paid, thank you", receipts on the page.
+  await sql("update public.payments set amount_aed = 2325.75 where id = $1", [pay.id]);
+  w = await openWindow();
+  check(`p3: fully paid → state paid (${w.state})`, w.state === "paid");
+  check("p3: no payment choice asked", !w.how);
+  check("p3: the message says fully paid, thank you, no payment wording", /fully paid, thank you/i.test(w.msg) && !/pay now|amount due/i.test(w.msg), w.msg.slice(0, 200));
+  await o.page.screenshot({ path: `${proof}/d1-paid-car-ready-message-1440.png`, fullPage: false }).catch(() => null);
+  c = await customer();
+  check(`p3: the customer's page says Paid with the receipt, no Pay now (${c.heading})`, /paid, thank you/i.test(c.heading) && !!(await o.page.locator("[data-paid-receipts]").count()) && !c.payNow);
+  await o.browser.close();
+});
+
+/* ================================================================================================= */
+/* d2 (10 November 2026, Section 2): the Autel post-scan files itself into QC. A car in QC with an   */
+/* open round and a pre-scan; an emailed report (through the TEST route, never the real mailbox)     */
+/* arrives as the POST-scan and lands in QC's box with no hand step; the same Report ID is not filed */
+/* twice.                                                                                            */
+/* ================================================================================================= */
+await section("d2", "Autel post-scan files itself into QC", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-10-autel-postscan";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const vin = ((await sql("select v.vin from public.jobs j join public.vehicles v on v.id = j.vehicle_id where j.id = $1", [jobId]))[0]?.vin ?? "").toUpperCase();
+  await sql("update public.jobs set status = 'pending_qc', stage = 'qc' where id = $1", [jobId]);
+  await sql("insert into public.qc_checks (job_id, round, status, items) select $1, 1, 'open', '[]'::jsonb where not exists (select 1 from public.qc_checks where job_id = $1 and status = 'open')", [jobId]);
+  // The pre-scan the inspection had (filed earlier by email).
+  await sql("insert into public.inbound_scans (from_email, subject, vin, storage_path, content_type, file_name, job_id, kind, status, report_id) values ('scanner@e2e.test', 'pre', $2, 'e2e/pre.pdf', 'application/pdf', 'pre.pdf', $1, 'pre', 'matched', 'MAXIAE2EPRE1')", [jobId, vin]);
+  const o = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  await go(o.page, `${base}/qc/${jobId}`);
+  const waiting = ((await o.page.locator("[data-postscan-waiting]").textContent().catch(() => "")) ?? "").trim();
+  check(`a1: before the email QC says it is waiting (${waiting})`, /Waiting for the Autel report/.test(waiting));
+  // The Autel emails the post-scan.
+  const subject = `Please receive 2019 BMW Vehicle Diagnostic Report (Report ID: MAXIAE2EPOST1) ${vin}`;
+  const r1 = (await api("/api/e2e/mailbox", { pdfText: `Autel MaxiSys report VIN ${vin} post repair`, subject, fileName: "2019 BMW Vehicle Diagnostic Report_E2E.pdf", messageId: `e2e-d2-${Date.now()}`, from: "scanner@e2e.test" })).json;
+  check(`a2: the email is matched to the car (${JSON.stringify(r1?.result ?? r1)})`, (r1?.result ?? r1)?.matched === true);
+  const filed = (await sql("select kind, status from public.inbound_scans where report_id = 'MAXIAE2EPOST1' and job_id = $1", [jobId]))[0];
+  check(`a3: filed as the POST-scan (${filed?.kind})`, filed?.kind === "post");
+  const qc = await until(async () => (await sql("select postscan_path from public.qc_checks where job_id = $1 and status = 'open'", [jobId]))[0]?.postscan_path ?? null, 20, 500);
+  check(`a4: QC's post-scan box filled by itself (${qc})`, !!qc && String(qc).includes("qc-postscan"));
+  await go(o.page, `${base}/qc/${jobId}`);
+  check("a5: QC shows the post-scan in, nothing to attach by hand", (await o.page.locator("[data-postscan-in]").count()) === 1 && (await o.page.locator("[data-postscan-waiting]").count()) === 0);
+  await o.page.locator("[data-postscan-in]").scrollIntoViewIfNeeded().catch(() => null);
+  await o.page.screenshot({ path: `${proof}/d2-qc-postscan-landed-1440.png`, fullPage: false }).catch(() => null);
+  // The same Report ID again: never filed twice.
+  await api("/api/e2e/mailbox", { pdfText: `Autel MaxiSys report VIN ${vin} post repair`, subject, fileName: "2019 BMW Vehicle Diagnostic Report_E2E.pdf", messageId: `e2e-d2b-${Date.now()}`, from: "scanner@e2e.test" });
+  const twice = (await sql("select count(*)::int as n from public.inbound_scans where report_id = 'MAXIAE2EPOST1'"))[0]?.n;
+  check(`a6: the same Report ID is filed once (${twice})`, twice === 1);
+  // An unmatched report (no open job for that VIN) goes to the unmatched list.
+  await api("/api/e2e/mailbox", { pdfText: "Autel report", subject: "Please receive 2020 Audi Vehicle Diagnostic Report (Report ID: MAXIAE2EUNM1) WAUZZZ0000E2E0001", fileName: "audi.pdf", messageId: `e2e-d2c-${Date.now()}`, from: "scanner@e2e.test" });
+  const unm = (await sql("select status from public.inbound_scans where report_id = 'MAXIAE2EUNM1'"))[0]?.status;
+  check(`a7: an unmatched report is kept as unmatched (${unm})`, unm === "unmatched");
+  await go(o.page, `${base}/scans`);
+  check("a8: the unmatched report is listed on Scan reports", ((await o.page.locator("main").textContent().catch(() => "")) ?? "").includes("audi.pdf"));
+  await o.browser.close();
 });
 
 const failed = summary();
