@@ -7,6 +7,7 @@ import { Button, Input } from "@/components/ui";
 import { EXPECTED_METHODS, EXPECTED_METHOD_LABELS } from "@/lib/money-steps";
 import { markInvoiceSent, markReadySent, prepareProformaSend } from "@/app/(app)/invoices/actions";
 import { feeRuleWords, type BankFees } from "@/lib/bank-fees";
+import { PAID_THANKS, WAITING_CLEAR, mayOfferPayment, stillDueWords, type StillDue } from "@/lib/still-due";
 
 /**
  * "Your car is ready" with the proforma link, or the tax invoice once paid. For the proforma the window first asks
@@ -30,6 +31,7 @@ export function ReadySendControl({
   pdf = null,
   startWithPayNow = false,
   charges = {},
+  due = null,
 }: {
   jobId: string;
   token: string | null;
@@ -53,10 +55,16 @@ export function ReadySendControl({
   startWithPayNow?: boolean;
   /** Bank charge per method, shown next to the choice. */
   charges?: BankFees;
+  /**
+   * THE still-due figure (10 November 2026, paid means paid): fully paid or covered by money waiting to clear = no
+   * "how will the customer pay", no payment link, the paid / waiting words; part paid = the remaining figure only.
+   */
+  due?: StillDue | null;
 }) {
+  const noPayment = kind === "proforma" && !!due && !mayOfferPayment(due);
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<"how" | "message">(kind === "tax_invoice" ? "message" : "how");
+  const [step, setStep] = useState<"how" | "message">(kind === "tax_invoice" || noPayment ? "message" : "how");
   const [expected, setExpected] = useState<string | null>(expectedMethod);
   const [payNow, setPayNow] = useState(startWithPayNow || payNowOn);
   const [linkUrl, setLinkUrl] = useState("");
@@ -64,17 +72,17 @@ export function ReadySendControl({
   const [note, setNote] = useState<string | null>(null);
   const [pending, start] = useTransition();
   // Before payment the link says proforma, never invoice; the tax invoice has its own address.
-  const payLine = kind === "proforma" && (payNowOn || payNow || linkUrl.trim()) ? "\n\nYou can pay by card online: open the link and tap *Pay now*." : "";
+  const payLine = kind === "proforma" && !noPayment && (payNowOn || payNow || linkUrl.trim()) ? "\n\nYou can pay by card online: open the link and tap *Pay now*." : "";
   const message = token ? messageTemplate.replaceAll("[link]", shortLink ?? `${siteUrl}/${kind === "tax_invoice" ? "invoice" : "proforma"}/${token}`) + payLine : null;
   if (!token) return <p className="text-xs text-muted">The message is ready once the proforma is prepared.</p>;
   const tax = kind === "tax_invoice";
-  const title = tax ? "Your tax invoice" : "Your car is ready";
+  const title = tax ? "Your tax invoice" : noPayment ? `Your car is ready – ${due?.state === "paid" ? PAID_THANKS.toLowerCase() : WAITING_CLEAR.toLowerCase()}` : "Your car is ready";
   const buttonLabel = label ?? (tax ? (sentAt ? "Send the tax invoice again" : "Send the tax invoice") : sentAt ? (startWithPayNow ? "Add Pay now and resend" : "Send the proforma again") : "Send the proforma");
 
   function openWindow() {
     setError(null);
     setNote(null);
-    setStep(tax ? "message" : "how");
+    setStep(tax || noPayment ? "message" : "how");
     setOpen(true);
   }
 
@@ -102,13 +110,14 @@ export function ReadySendControl({
 
   const sent = (method: "whatsapp" | "copy") =>
     start(async () => {
-      const r = tax ? await markInvoiceSent(jobId, method) : await markReadySent(jobId, method, { expected });
+      const r = tax ? await markInvoiceSent(jobId, method) : await markReadySent(jobId, method, { expected: noPayment ? null : expected });
       if (r.error) setError(r.error);
       router.refresh();
     });
 
   return (
-    <div className="flex flex-col gap-1" data-ready-send={kind}>
+    <div className="flex flex-col gap-1" data-ready-send={kind} data-due-state={due?.state ?? "none"}>
+      {kind === "proforma" && due && due.state !== "none" && due.state !== "due" ? <span className={`text-xs font-semibold ${noPayment ? "text-green" : "text-amber-text"}`} data-still-due>{stillDueWords(due)}</span> : null}
       <Button type="button" size={size} tone={sentAt && !startWithPayNow ? "secondary" : "primary"} onClick={openWindow} className={size === "lg" ? "w-full" : ""}>
         {buttonLabel}
       </Button>
@@ -118,7 +127,7 @@ export function ReadySendControl({
           {step === "how" ? (
             <div className="flex flex-col gap-4" data-pay-how>
               <div className="flex flex-col gap-2">
-                <p className="text-xs font-bold uppercase tracking-[0.08em] text-muted">How will the customer pay?</p>
+                <p className="text-xs font-bold uppercase tracking-[0.08em] text-muted">How will the customer pay{due && due.state === "part" ? ` the remaining AED ${due.due.toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : ""}?</p>
                 <div className="grid grid-cols-2 gap-2">
                   {EXPECTED_METHODS.map((m) => (
                     <button key={m} type="button" onClick={() => setExpected(m)} aria-pressed={expected === m} data-expected={m} className={`min-h-12 rounded-control border-2 px-2 text-sm font-bold flex flex-col items-center justify-center ${expected === m ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>

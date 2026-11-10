@@ -1,4 +1,6 @@
 "use server";
+import { mayOfferPayment, stillDueOf } from "@/lib/still-due";
+import { jobMoneyOf } from "@/lib/customer-money";
 import { countsAsPaid } from "@/lib/bank-status";
 import { dbWords } from "@/lib/app-errors";
 
@@ -379,6 +381,9 @@ export async function prepareProformaSend(jobId: string, opts: { expected: strin
   if (!expected || !PAYMENT_METHODS.includes(expected as (typeof PAYMENT_METHODS)[number])) return { error: "Choose how the customer will pay before sending." };
   const pro = await liveProforma(jobId);
   if (!pro) return { error: "There is no proforma on this job yet." };
+  // 10 November 2026, paid means paid: no payment link once nothing is due (cleared or waiting to clear).
+  const dueNow = stillDueOf(await jobMoneyOf(jobId, await getSettings()));
+  if ((opts.linkUrl || opts.payNow) && !mayOfferPayment(dueNow)) return { error: dueNow.state === "paid" ? "Fully paid: no payment link is needed." : "Payment received – waiting to clear. No new payment link: the customer is never asked to pay twice." };
   let payNowError: string | undefined;
   let payNowOn = false;
   if (opts.linkUrl) {
@@ -404,13 +409,16 @@ export async function markReadySent(jobId: string, method: string, opts: { expec
   const pro = await liveProforma(jobId);
   if (!pro) return { error: "There is no proforma on this job yet." };
   const expected = opts.expected ?? pro.expected_payment_method ?? null;
-  if (!expected || !PAYMENT_METHODS.includes(expected as (typeof PAYMENT_METHODS)[number])) return { error: "Choose how the customer will pay before sending." };
+  // 10 November 2026: once nothing is due the message carries no payment choice, so none is asked for.
+  const dueNow = stillDueOf(await jobMoneyOf(jobId, await getSettings()));
+  const noPayment = !mayOfferPayment(dueNow);
+  if (!noPayment && (!expected || !PAYMENT_METHODS.includes(expected as (typeof PAYMENT_METHODS)[number]))) return { error: "Choose how the customer will pay before sending." };
   const now = new Date().toISOString();
   const first = !pro.sent_at;
   await admin.from("jobs").update({ ready_sent_at: now }).eq("id", jobId);
-  await admin.from("invoices").update({ sent_by: staff.id, sent_at: now, expected_payment_method: expected, updated_by: staff.id }).eq("id", pro.id);
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "ready_sent", note: `Proforma ${pro.number} and "your car is ready" sent by ${staff.display_name} (${method}); expected ${PAYMENT_METHOD_LABELS[expected] ?? expected}${pro.pay_now_enabled ? ", Pay now on the page" : ""}`, created_by: staff.id });
-  if (first) {
+  await admin.from("invoices").update({ sent_by: staff.id, sent_at: now, ...(expected ? { expected_payment_method: expected } : {}), updated_by: staff.id }).eq("id", pro.id);
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "ready_sent", note: noPayment ? `Proforma ${pro.number} and "your car is ready – ${dueNow.state === "paid" ? "fully paid, thank you" : "payment received, waiting to clear"}" sent by ${staff.display_name} (${method}); no payment options offered` : `Proforma ${pro.number} and "your car is ready" sent by ${staff.display_name} (${method}); expected ${PAYMENT_METHOD_LABELS[expected!] ?? expected}${dueNow.state === "part" ? `, AED ${dueNow.due.toLocaleString("en-GB", { minimumFractionDigits: 2 })} still to pay` : ""}${pro.pay_now_enabled ? ", Pay now on the page" : ""}`, created_by: staff.id });
+  if (first && !noPayment && expected) {
     const { data: job } = await admin.from("jobs").select("job_number, customer:customers(full_name, company_name), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("id", jobId).maybeSingle();
     const cust = job?.customer as unknown as { full_name: string; company_name: string | null } | null;
     const who = cust?.company_name ?? (cust?.full_name ?? "").split(" ")[0] ?? "the customer";

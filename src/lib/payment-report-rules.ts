@@ -7,6 +7,7 @@
 import { authCodeProblem, cleanAuthCode, needsAuthCode, realAuthCode } from "./auth-code";
 import { PAYMENT_METHODS, PAYMENT_METHOD_LABELS } from "./money-steps";
 import { workingHoursBetween, type WorkingTime } from "./working-time";
+import { stillDueOf } from "./still-due";
 
 export type ReportStatus = "waiting" | "recorded" | "queried" | "withdrawn";
 
@@ -96,8 +97,11 @@ export function reportStatusWords(r: { status: ReportStatus; reporter: string | 
  * owed on the car - the balance is above zero, or nothing is approved yet to measure against. Open or gone alike (a car
  * that left on credit terms still owes).
  */
-export function stillOwes(m: { balance: number | null } | null | undefined): boolean {
-  return !!m && (m.balance === null || m.balance > 0.005);
+export function stillOwes(m: { balance: number | null; pendingCheque?: number } | null | undefined): boolean {
+  if (!m) return false;
+  if (m.balance === null) return true;
+  // 10 November 2026: THE still-due figure - money waiting to clear is not asked for again.
+  return stillDueOf({ total: 0, paid: 0, balance: m.balance, pending: m.pendingCheque ?? 0 }).due > 0.005;
 }
 
 /** What a slip is: a photo, a PDF (bank transfer confirmations come as PDFs) or a video - each shown its own way. */

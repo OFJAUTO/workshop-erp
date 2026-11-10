@@ -125,7 +125,8 @@ export function moneyState(i: MoneyInput): MoneyState {
   }
   // A proforma exists.
   if (i.proforma) {
-    if (!i.proforma.sent_at) return { current: "proforma_sent", done: ["job_done"], chip: { text: "Proforma ready to send", tone: "ink" }, action: "send_proforma", actionLabel: "Send the proforma", waitingHours: null, live };
+    // 10 November 2026, paid means paid: money already in (or waiting to clear) is named on the chip; the send then carries no payment options.
+    if (!i.proforma.sent_at) return { current: "proforma_sent", done: ["job_done"], chip: i.balance <= 0.005 ? { text: "Paid · proforma to send", tone: "green" } : i.chequePending > 0 && i.chequePending + 0.005 >= i.balance ? { text: `${i.pendingWord ?? "Cheque"} received – waiting to clear · proforma to send`, tone: "amber" } : i.paid > 0 ? { text: `Part paid · ${money(i.balance)} due · proforma to send`, tone: "amber" } : { text: "Proforma ready to send", tone: "ink" }, action: "send_proforma", actionLabel: "Send the proforma", waitingHours: null, live };
     const waited = Math.floor((now - Date.parse(i.proforma.sent_at)) / 3600000);
     const long = waited >= limitHours;
     if (i.reported) return { current: "payment", done: ["job_done", "proforma_sent"], chip: { text: `Payment reported by ${i.reported.by}, checking`, tone: "amber" }, action: "record_payment", actionLabel: "Record the reported payment", waitingHours: long ? waited : null, live };

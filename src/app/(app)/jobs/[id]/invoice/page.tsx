@@ -1,4 +1,5 @@
 import { awaitsBank, duplicateWords, pendingLine } from "@/lib/bank-status";
+import { readyTemplateFor, stillDueOf } from "@/lib/still-due";
 import { loadBankWaiting } from "@/lib/bank-posting";
 import { dubaiToday } from "@/lib/card-settlements";
 import { BankAnswerHost, BankRow } from "@/components/BankPosting";
@@ -188,7 +189,9 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const phoneDigits = (customer?.phone ?? "").replace(/[^\d]/g, "");
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   const fillCar = (t: string) => t.replaceAll("[make model]", [vehicle.make?.name, vehicle.model?.name].filter(Boolean).join(" ")).replaceAll("[plate]", formatPlate(vehicle)).replaceAll("[advisor]", staff.display_name).replaceAll("[name]", greetingNameOf(customer)).replaceAll("[bank]", "");
-  const readyTemplate = fillCar(settings.whatsapp_ready_template);
+  // 10 November 2026, paid means paid: THE still-due figure of the live document picks the wording and the payment offer.
+  const due = stillDueOf(live && bal ? { total: live.total_aed, paid: bal.paid, balance: bal.balance, pending: bal.pendingAmount } : null);
+  const readyTemplate = fillCar(readyTemplateFor(settings.whatsapp_ready_template, due));
   const invoiceTemplate = fillCar(String(settings.whatsapp_invoice_template ?? ""));
   const bankCharges = bankFeesOf(settings);
   const shownLines = live ? liveLines : draft.lines;
@@ -350,7 +353,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                 return (
                   <div className="flex flex-col gap-2" data-what-now-bank>
                     <p className="text-sm font-semibold" data-bank-wait-words>{bankWaitWords(pendingWord)}</p>
-                    {proforma && !proforma.sent_at && canSend ? <ReadySendControl jobId={id} size="md" token={proforma.token} shortLink={proformaShort} kind="proforma" siteUrl={site} messageTemplate={readyTemplate} phoneDigits={phoneDigits} sentAt={proforma.sent_at} expectedMethod={proforma.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={proforma.token ? { href: `/api/pdf/invoice/${proforma.token}`, fileName: `OFJ Proforma ${proforma.number}.pdf` } : null} /> : null}
+                    {proforma && !proforma.sent_at && canSend ? <ReadySendControl jobId={id} size="md" token={proforma.token} shortLink={proformaShort} kind="proforma" siteUrl={site} messageTemplate={readyTemplate} due={due} phoneDigits={phoneDigits} sentAt={proforma.sent_at} expectedMethod={proforma.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={proforma.token ? { href: `/api/pdf/invoice/${proforma.token}`, fileName: `OFJ Proforma ${proforma.number}.pdf` } : null} /> : null}
                     {canRecord ? <ul className="divide-y divide-line">{bankRows.map((r) => <BankRow key={r.id} row={r} today={todayDubai} canSave={acting} ready={bankReady} proofUrl={r.proofPath ? (bankProofs[r.proofPath] ?? null) : null} />)}</ul> : <p className="text-xs text-muted">Accounts mark it cleared when it is on the bank statement; the payment counts then.</p>}
                     {canRecord ? (
                       <details className="border-t border-line pt-2" data-record-block data-folded>
@@ -364,7 +367,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
               if (proforma && unpaid && !proforma.sent_at) {
                 return (
                   <div className="flex flex-col gap-2">
-                    {canSend ? <ReadySendControl jobId={id} size="lg" token={proforma.token} shortLink={proformaShort} kind="proforma" siteUrl={site} messageTemplate={readyTemplate} phoneDigits={phoneDigits} sentAt={proforma.sent_at} expectedMethod={proforma.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={proforma.token ? { href: `/api/pdf/invoice/${proforma.token}`, fileName: `OFJ Proforma ${proforma.number}.pdf` } : null} /> : <p className="text-sm text-muted">The advisor sends {proforma.number} to the customer.</p>}
+                    {canSend ? <ReadySendControl jobId={id} size="lg" token={proforma.token} shortLink={proformaShort} kind="proforma" siteUrl={site} messageTemplate={readyTemplate} due={due} phoneDigits={phoneDigits} sentAt={proforma.sent_at} expectedMethod={proforma.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={proforma.token ? { href: `/api/pdf/invoice/${proforma.token}`, fileName: `OFJ Proforma ${proforma.number}.pdf` } : null} /> : <p className="text-sm text-muted">The advisor sends {proforma.number} to the customer.</p>}
                     {canRecord ? (
                       <details className="border-t border-line pt-2" data-record-block data-folded>
                         <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold text-muted">{otherPay ? `${otherPay} (not the one ${firstName(waitingReport?.reporter)} reported)` : "Record a payment before the proforma is sent"}</summary>
@@ -404,7 +407,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                 return (
                   <div className="flex flex-col gap-2">
                     <p className="text-sm text-muted" data-waiting-accounts>{proforma?.sent_at ? `Proforma sent ${formatDayTime(proforma.sent_at)} · ` : ""}{proforma?.expected_payment_method ? `Expected: ${PAYMENT_METHOD_LABELS[proforma.expected_payment_method] ?? proforma.expected_payment_method} · ` : ""}Waiting for accounts to record the payment.</p>
-                    {canSend && proforma ? <ReadySendControl jobId={id} size="md" token={proforma.token} shortLink={proformaShort} kind="proforma" siteUrl={site} messageTemplate={readyTemplate} phoneDigits={phoneDigits} sentAt={proforma.sent_at} expectedMethod={proforma.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={proforma.token ? { href: `/api/pdf/invoice/${proforma.token}`, fileName: `OFJ Proforma ${proforma.number}.pdf` } : null} /> : null}
+                    {canSend && proforma ? <ReadySendControl jobId={id} size="md" token={proforma.token} shortLink={proformaShort} kind="proforma" siteUrl={site} messageTemplate={readyTemplate} due={due} phoneDigits={phoneDigits} sentAt={proforma.sent_at} expectedMethod={proforma.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={proforma.token ? { href: `/api/pdf/invoice/${proforma.token}`, fileName: `OFJ Proforma ${proforma.number}.pdf` } : null} /> : null}
                   </div>
                 );
               }

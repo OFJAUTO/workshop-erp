@@ -1,5 +1,6 @@
 "use server";
 
+import { stillDueOf } from "@/lib/still-due";
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/auth";
 import { jobMoneyOf } from "@/lib/customer-money";
@@ -28,6 +29,11 @@ export async function preparePaymentLink(jobId: string, amountIn: number, gatewa
   const settings = await getSettings();
   const m = await jobMoneyOf(jobId, settings);
   if (!m) return { error: "Job not found." };
+  // 10 November 2026, paid means paid: THE still-due figure - no link once nothing is due, never more than is due.
+  const d = stillDueOf(m);
+  if (d.state === "paid") return { error: "Fully paid: no payment link is needed." };
+  if (d.state === "waiting_clear") return { error: "Payment received – waiting to clear. No new payment link: the customer is never asked to pay twice." };
+  if (d.state !== "none" && amount > d.due + 0.005) return { error: `Only AED ${d.due.toLocaleString("en-GB", { minimumFractionDigits: 2 })} is still to pay.` };
   let host: string | null = null;
   let url: string | null | undefined = undefined;
   if (gatewayUrl !== undefined && gatewayUrl !== null) {

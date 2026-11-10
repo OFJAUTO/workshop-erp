@@ -1,3 +1,4 @@
+import { stillDueOf } from "./still-due";
 import { dbWords } from "@/lib/app-errors";
 import "server-only";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
@@ -58,14 +59,16 @@ export async function replacePaymentLink(invoiceId: string, url: string | null, 
 }
 
 /** The balance on an invoice right now (cheques count once cleared). */
-async function balanceOf(invoiceId: string): Promise<{ balance: number; number: string; jobId: string | null; token: string | null; customerId: string } | null> {
+async function balanceOf(invoiceId: string): Promise<{ balance: number; waiting: boolean; number: string; jobId: string | null; token: string | null; customerId: string } | null> {
   const admin = createAdminClient();
   const { data: inv } = await admin.from("invoices").select(INVOICE_SELECT).eq("id", invoiceId).maybeSingle();
   if (!inv) return null;
   const invoice = toInvoice(inv as Record<string, unknown>);
   const { data: pays } = await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", invoiceId).eq("is_active", true);
   const bal = invoiceBalance(invoice, ((pays ?? []) as Record<string, unknown>[]).map(toPayment), (await creditsOnDocs([invoiceId])).get(invoiceId) ?? 0);
-  return { balance: bal.balance, number: invoice.number, jobId: invoice.job_id, token: invoice.token, customerId: invoice.customer_id };
+  // 10 November 2026: THE still-due figure - a cheque or transfer waiting to clear is never asked for again.
+  const d = stillDueOf({ total: invoice.total_aed, paid: bal.paid, balance: bal.balance, pending: bal.pendingAmount });
+  return { balance: d.due, waiting: d.state === "waiting_clear", number: invoice.number, jobId: invoice.job_id, token: invoice.token, customerId: invoice.customer_id };
 }
 
 /**
@@ -78,6 +81,7 @@ export async function ensureAutoPayLink(invoiceId: string, staff: { id: string |
   const admin = createAdminClient();
   const info = await balanceOf(invoiceId);
   if (!info) return { error: "Invoice not found." };
+  if (info.waiting) return { error: "Payment received – waiting to clear. No new payment link: the customer is never asked to pay twice." };
   if (info.balance <= 0.005) return { error: "This invoice is paid: nothing to pay." };
   const links = await paymentLinksOf(invoiceId);
   const cur = currentPaymentLink(links);
@@ -126,6 +130,10 @@ export async function openPaymentLink(token: string, siteUrl?: string): Promise<
   }
   let cur = currentPaymentLink(await paymentLinksOf(inv.id));
   if (!cur) return { error: "There is no payment link on this invoice yet. Please ask us for one." };
+  // 10 November 2026, paid means paid: THE still-due figure - never open a payment once nothing is due.
+  const info = await balanceOf(inv.id);
+  if (info?.waiting) return { error: "Payment received – waiting to clear. There is nothing more to pay." };
+  if (info && info.balance <= 0.005) return { error: "This invoice is already paid. Thank you." };
   if (cur.provider === "ngenius") {
     if (cur.paid_at) return { error: "This invoice is already paid. Thank you." };
     // The balance may have moved since the order was made: the order follows the balance.

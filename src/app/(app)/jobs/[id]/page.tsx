@@ -1,4 +1,5 @@
 import { loadBankWaiting } from "@/lib/bank-posting";
+import { readyTemplateFor, stillDueOf } from "@/lib/still-due";
 import { pendingLine } from "@/lib/bank-status";
 import { compCostOf, loadCompJobs, reworkByOriginal } from "@/lib/comp-data";
 import { withAddressAs } from "@/lib/customer-address";
@@ -315,7 +316,6 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const checkinCopyTemplate = fillCar(settings.whatsapp_checkin_copy_template).replaceAll("[name]", greetName);
   const reportTemplate = fillCar(settings.whatsapp_report_template).replaceAll("[name]", greetName);
   // The messages are short: no bank details (those sit behind "Bank details" on the proforma page and in the PDF).
-  const readyTemplate = fillCar(settings.whatsapp_ready_template).replaceAll("[name]", greetName).replaceAll("[bank]", "");
   const invoiceTemplate = fillCar(String(settings.whatsapp_invoice_template ?? "")).replaceAll("[name]", greetName);
   const approverContacts = seesCustomerDetails && customer ? await loadApproverContacts(customer.id) : [];
 
@@ -352,6 +352,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // any amount sent (advisors). "Paid so far · Balance" before the proforma is the approved total less every advance; the
   // chip says so too ("Advance AED 30,000 · AED 7,930 to pay", 3 November 2026).
   const jobMoney = can(role, "viewInvoices") ? await jobMoneyOf(id, settings) : null;
+  // 10 November 2026, paid means paid: THE still-due figure picks the "car is ready" wording and whether to offer payment.
+  const readyDue = stillDueOf(jobMoney);
+  const readyMsg = fillCar(readyTemplateFor(settings.whatsapp_ready_template, readyDue)).replaceAll("[name]", greetName).replaceAll("[bank]", "");
   // 9 November 2026: cheques and transfers of this car still waiting for the bank (the words and the one action).
   const bankWait = jobMoney && jobMoney.pendingCheque > 0 ? await loadBankWaiting({ jobIds: [id] }) : [];
   const bankWords = jobMoney ? pendingLine({ paid: jobMoney.paid, pending: bankWait.map((r) => ({ method: r.method, number: r.number, amount: r.amount })), balance: jobMoney.balance }) : null;
@@ -961,12 +964,12 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             ) : null}
             {money.action === "prepare_proforma" && can(role, "markReadyToInvoice") && !staff.viewingAs && job.is_open ? <form action={markReadyToInvoice.bind(null, id)}><Button type="submit" size="lg" className="w-full">Prepare the proforma</Button></form> : null}
             {(money.action === "send_proforma" || money.action === "send_tax_invoice") && money.live && can(role, "sendApproval") && !staff.viewingAs && job.is_open ? (
-              <ReadySendControl jobId={id} size="lg" token={money.live.token} shortLink={money.live.token ? await shortFor(`${PRODUCTION_SITE_URL}/${money.live.kind === "tax_invoice" ? "invoice" : "proforma"}/${money.live.token}`) : null} kind={money.live.kind === "tax_invoice" ? "tax_invoice" : "proforma"} siteUrl={site} messageTemplate={money.live.kind === "tax_invoice" ? invoiceTemplate : readyTemplate} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={money.live.kind === "tax_invoice" ? job.invoice_sent_at : job.ready_sent_at} expectedMethod={liveProforma?.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={money.live.token ? { href: `/api/pdf/invoice/${money.live.token}`, fileName: `OFJ ${money.live.kind === "tax_invoice" ? "Tax invoice" : "Proforma"} ${money.live.number}.pdf` } : null} />
+              <ReadySendControl jobId={id} size="lg" token={money.live.token} shortLink={money.live.token ? await shortFor(`${PRODUCTION_SITE_URL}/${money.live.kind === "tax_invoice" ? "invoice" : "proforma"}/${money.live.token}`) : null} kind={money.live.kind === "tax_invoice" ? "tax_invoice" : "proforma"} siteUrl={site} messageTemplate={money.live.kind === "tax_invoice" ? invoiceTemplate : readyMsg} due={readyDue} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={money.live.kind === "tax_invoice" ? job.invoice_sent_at : job.ready_sent_at} expectedMethod={liveProforma?.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={money.live.token ? { href: `/api/pdf/invoice/${money.live.token}`, fileName: `OFJ ${money.live.kind === "tax_invoice" ? "Tax invoice" : "Proforma"} ${money.live.number}.pdf` } : null} />
             ) : null}
             {/* A payment an advisor sent waits: the main button opens THAT report, pre-filled with his slip (one report, one receipt); the window offers "Record a different payment instead". */}
             {(mayPay || viewPay) && (waitingReport || owes || money.action === "record_payment") ? <RecordPaymentButton jobId={id} reportId={waitingReport?.id ?? null} readOnly={viewPay} size={waitingReport || money.action === "record_payment" ? "lg" : "md"} tone={waitingReport || money.action === "record_payment" ? "primary" : "secondary"} className="w-full" label={waitingReport ? "Record the reported payment" : money.action === "record_payment" ? money.actionLabel : "Record payment"} /> : null}
             {mayReport && owes ? <PaymentReportButton jobId={id} balance={jobMoney?.balance ?? null} expected={liveProforma?.expected_payment_method ?? null} className="w-full" /> : null}
-            {linkReady && owes ? <PaymentLinkSend jobId={id} balance={jobMoney?.balance ?? null} message={payLinkMessage} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} /> : null}
+            {linkReady && owes ? <PaymentLinkSend jobId={id} balance={readyDue.state === "none" ? (jobMoney?.balance ?? null) : readyDue.due} message={payLinkMessage} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} /> : null}
             {money.action === "gate_out" && can(role, "gateOut") && !staff.viewingAs && job.is_open ? <LinkButton href={`/jobs/${id}/gate-out`} size="lg" className="w-full">Gate out</LinkButton> : null}
             {can(role, "viewInvoices") && laterStage ? <LinkButton href={`/jobs/${id}/invoice`} tone="secondary" size="md">Payments and invoice</LinkButton> : null}
           </div>

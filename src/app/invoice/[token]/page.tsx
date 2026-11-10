@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { stillDueOf, WAITING_CLEAR } from "@/lib/still-due";
 import { unbroken } from "@/lib/text-case";
 import { customerWarrantyStatus, customerWarrantyTitle } from "@/lib/warranty";
 import { CustomerFront, customerBoxes } from "@/components/CustomerFront";
@@ -60,7 +61,11 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
   const title = isProforma ? "Proforma invoice" : invoice.kind === "credit_note" ? "Credit note" : "Tax invoice";
   const payable = isTax || isProforma;
   const paid = payable && bal.state === "paid";
-  const due = payable && !paid;
+  // 10 November 2026, paid means paid: THE still-due figure. Money waiting to clear is never asked for again: no Pay now,
+  // no bank details as a request, "Payment received – waiting to clear"; part paid offers only what is left.
+  const stillDue = stillDueOf({ total: invoice.total_aed, paid: bal.paid, balance: bal.balance, pending: bal.pendingAmount });
+  const waitingClear = payable && stillDue.state === "waiting_clear";
+  const due = payable && !paid && !waitingClear;
   const meta = [
     { label: isProforma ? "Proforma no." : isTax ? "Invoice no." : "Credit note no.", value: invoice.number },
     { label: "Date", value: formatDate(invoice.issued_at) },
@@ -100,7 +105,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
         action={
           due ? (
             <div className="flex flex-col gap-3">
-              {link && (link.provider === "ngenius" ? !link.paid_at : !link.opened_at) ? <PayNowButton token={token} amountText={aed(bal.balance)} once={link.provider !== "ngenius"} /> : null}
+              {link && (link.provider === "ngenius" ? !link.paid_at : !link.opened_at) ? <PayNowButton token={token} amountText={aed(stillDue.due)} once={link.provider !== "ngenius"} /> : null}
               {link?.opened_at && link.provider !== "ngenius" ? (
                 <div className="rounded-lg border border-[#D4D4D8] bg-[#F4F4F5] px-4 py-3 flex flex-col gap-2 text-sm">
                   <span className="font-bold">Payment link opened at {formatDateTime(link.opened_at)}</span>
@@ -120,8 +125,9 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
                 </div>
               </details>
             </div>
-          ) : paid && live.length ? (
-            <div className="flex flex-col gap-2">
+          ) : (paid || waitingClear) && live.length ? (
+            <div className="flex flex-col gap-2" data-paid-receipts data-due-state={stillDue.state}>
+              {waitingClear ? <p className="rounded-lg bg-amber-soft px-4 py-3 text-sm font-bold" data-waiting-clear>{WAITING_CLEAR}. There is nothing more to pay.</p> : null}
               {live.map((p) => (
                 <a key={p.id} href={`/api/pdf/receipt/${p.id}?t=${token}`} target="_blank" rel="noreferrer" className="flex min-h-12 items-center justify-between rounded-lg border border-[#D4D4D8] px-4 text-sm font-bold">
                   <span>View receipt {p.number} (PDF)</span>
@@ -139,12 +145,12 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
         {isProforma ? <p className="text-xs text-[#5F6368]">This is not a tax invoice. It shows what is due for the work approved; the tax invoice follows on full payment.</p> : null}
         {payable ? (
           <div className={`rounded-lg px-4 py-4 flex flex-col gap-1 ${paid ? "bg-green-soft" : "bg-[#F4F4F5]"}`}>
-            <span className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]">{paid ? "Paid, thank you" : bal.state === "cheque_pending" ? "Cheque pending" : "Amount due"}</span>
-            <span className="text-3xl font-extrabold">{paid ? aed(invoice.total_aed) : aed(bal.balance)}</span>
+            <span className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]" data-amount-heading>{paid ? "Paid, thank you" : waitingClear ? WAITING_CLEAR : stillDue.state === "part" ? "Still to pay" : "Amount due"}</span>
+            <span className="text-3xl font-extrabold" data-amount-due>{paid ? aed(invoice.total_aed) : waitingClear ? aed(stillDue.pending) : aed(stillDue.due)}</span>
             {invoice.discount_aed ? <span className="text-sm font-bold text-green-text" data-labour-discount>{bundle.lines.some((l) => !!l.package_items) ? "Package discount" : "Labour discount"}: − {aed(invoice.discount_aed)}</span> : null}
             {invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0)) < -0.004 ? <span className="text-sm font-bold text-green-text" data-roundoff>Round-off: − {aed(Math.abs(invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0))))}</span> : null}
             {paid && bal.paidAt ? <span className="text-xs text-[#5F6368]">Final payment received {formatDate(bal.paidAt)}</span> : null}
-            {!paid && bal.paid ? <span className="text-xs text-[#5F6368]">Received so far {aed(bal.paid)} of {aed(invoice.total_aed)}</span> : null}
+            {!paid && (bal.paid || stillDue.pending) ? <span className="text-xs text-[#5F6368]">Received so far {aed(bal.paid + stillDue.pending)} of {aed(invoice.total_aed)}{stillDue.pending ? ` (${aed(stillDue.pending)} waiting to clear)` : ""}</span> : null}
             {bundle.credited ? <span className="text-xs font-bold text-green-text" data-credit-note-off>Credit note: {aed(bundle.credited)} taken off</span> : null}
           </div>
         ) : (
