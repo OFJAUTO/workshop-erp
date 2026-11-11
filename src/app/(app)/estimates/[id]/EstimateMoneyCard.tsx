@@ -7,7 +7,7 @@ import { RecordPaymentButton } from "@/components/RecordPaymentHost";
 import { PaymentReportButton } from "@/components/PaymentReport";
 import { SendLinkDialog } from "@/components/SendLinkDialog";
 import { NumericInput } from "@/components/NumericInput";
-import { Badge, Button, Card, Input, SectionLabel } from "@/components/ui";
+import { Badge, Button, Input, SectionLabel } from "@/components/ui";
 import type { BillTo } from "@/lib/estimate-money-rules";
 
 const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -73,6 +73,8 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
   const [cancelKeep, setCancelKeep] = useState<"credit" | "refund">("credit");
   const [done, setDone] = useState<{ words: string; cnId?: string | null } | null>(null);
   const [busy, start] = useTransition();
+  // 11 November 2026 (Section 13): the box is ONE bar until opened; it opens by itself while something needs an answer.
+  const [opened, setOpened] = useState(false);
   const pro = money.proforma;
 
   const create = () => start(async () => {
@@ -134,12 +136,16 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
     </div>
   );
 
+  const mustOpen = !!error || !!done || !!send || !!linkSend || voiding || cancelOpen || linking;
   return (
-    <Card className="flex flex-col gap-3" data-em-card>
-      <div className="flex flex-wrap items-center gap-2">
+    <details className="group rounded-card border border-line bg-white" open={opened || mustOpen} onToggle={(e) => setOpened(e.currentTarget.open)} data-em-card data-fold-bar>
+      <summary className="flex min-h-14 cursor-pointer list-none flex-wrap items-center gap-2 px-5 py-3 [&::-webkit-details-marker]:hidden" data-em-bar>
         <SectionLabel>Proforma &amp; payment · car not here yet</SectionLabel>
         {money.badgeWords ? <Badge tone={money.badgeTone === "green" ? "green" : "amber"} data-em-badge={money.badgeWords}>{money.badgeWords}</Badge> : null}
-      </div>
+        <span className="ml-auto text-sm font-bold group-open:hidden">Open ▾</span>
+        <span className="ml-auto hidden text-sm font-bold group-open:inline">Close ▴</span>
+      </summary>
+      <div className="flex flex-col gap-3 px-5 pb-5">
       {money.paidWords ? <p className="text-sm font-semibold" data-em-paid>{money.paidWords}</p> : null}
       {money.combinedOn ? <p className="text-sm font-semibold" data-em-combined-on={money.combinedOn.proformaNumber}>Billed on <b>{money.combinedOn.proformaNumber}</b> together with {money.combinedOn.baseNumber} (one combined proforma).</p> : null}
       {done ? (
@@ -298,6 +304,7 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
           onClose={() => setLinkSend(null)}
         />
       ) : null}
-    </Card>
+      </div>
+    </details>
   );
 }

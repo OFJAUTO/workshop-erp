@@ -18,7 +18,7 @@ export function CopyVin({ vin }: { vin: string | null | undefined }) {
           window.prompt("Copy the VIN", vin);
         }
       }}
-      className="inline-flex min-h-10 items-center gap-2 rounded-control border border-line-strong bg-white px-3 font-mono text-sm font-semibold hover:border-ink"
+      className="inline-flex min-h-11 items-center gap-2 rounded-control border border-line-strong bg-white px-3 font-mono text-sm font-semibold hover:border-ink"
       aria-label="Copy the VIN"
     >
       <span className="tracking-[0.04em]">{vin}</span>

@@ -23,7 +23,8 @@ const toneClass: Record<Tone, string> = {
 
 const sizeClass: Record<Size, string> = {
   md: "min-h-11 px-5 text-sm",
-  lg: "min-h-14 px-6 text-base",
+  // 11 November 2026 (Section 13): ONE button size everywhere - 44 px, the same corners, text and gaps.
+  lg: "min-h-11 px-5 text-sm",
 };
 
 const base =
@@ -57,12 +58,27 @@ export function LinkButton({
   size?: Size;
   className?: string;
 } & Omit<React.AnchorHTMLAttributes<HTMLAnchorElement>, "href" | "children" | "className">) {
+  // A file (a PDF, an export) is a plain link: never prefetched, never routed through the app.
+  if (href.startsWith("/api/")) {
+    return (
+      <a href={href} className={`${base} ${toneClass[tone]} ${sizeClass[size]} ${className}`} {...rest}>
+        {children}
+      </a>
+    );
+  }
   return (
     <Link href={href} className={`${base} ${toneClass[tone]} ${sizeClass[size]} ${className}`} {...rest}>
       {children}
     </Link>
   );
 }
+
+/**
+ * THE SQUARE BUTTON (11 November 2026, Section 13): the "⋯" menu and the bell are 44 × 44 squares in the same style as
+ * every other button - white, the grey outline, the same corners; black outline while open.
+ */
+export const SQUARE_BUTTON = "inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-control border bg-white text-ink text-base font-bold hover:bg-chip";
+export const squareTone = (open: boolean) => (open ? "border-ink" : "border-line-strong");
 
 export function Card({ children, className = "", id, ...rest }: { children: ReactNode; className?: string; id?: string } & Omit<React.HTMLAttributes<HTMLDivElement>, "children" | "className" | "id">) {
   return (
@@ -76,6 +92,7 @@ export function PageHeader({
   actions,
   picture,
   titleAfter,
+  views,
 }: {
   title: string;
   subtitle?: ReactNode;
@@ -84,6 +101,8 @@ export function PageHeader({
   picture?: ReactNode;
   /** Beside the title, on its line (an estimate's or a quotation's "v1 | v2", 5 November 2026). */
   titleAfter?: ReactNode;
+  /** 11 November 2026 (Section 13): the view buttons (back to a list, View as customer, the PDF), always before the actions. */
+  views?: ReactNode;
 }) {
   return (
     <div className="flex flex-wrap items-end gap-4">
@@ -101,7 +120,10 @@ export function PageHeader({
           {subtitle ? <p className="text-sm font-medium text-muted">{subtitle}</p> : null}
         </div>
       </div>
-      <div className="ml-auto flex flex-wrap items-center gap-2">
+      {/* THE HEADER ROW (11 November 2026, Section 13): view buttons, then the actions, then the bell - in that order on
+          every page; on a tablet the row takes the full width and its buttons share it equally. */}
+      <div className="ml-auto flex flex-wrap items-center gap-2 max-lg:w-full max-lg:[&>*:not(#header-bell-slot)]:flex-1 max-lg:[&>*:not(#header-bell-slot)]:basis-40 max-lg:[&>*>a]:w-full max-lg:[&>*>button]:w-full max-lg:[&>a]:w-full max-lg:[&>button]:w-full" data-header-row>
+        {views}
         {actions}
         <span id="header-bell-slot" className="inline-flex shrink-0 items-center" />
       </div>
@@ -227,11 +249,12 @@ export function ChoiceButtons({
   defaultValue?: string | null;
   columns?: 2 | 3 | 4;
 }) {
-  const cols = { 2: "grid-cols-2", 3: "grid-cols-2 sm:grid-cols-3", 4: "grid-cols-2 sm:grid-cols-4" }[columns];
+  // 11 November 2026 (Section 13): the choices are ONE strip with the chosen one highlighted (a long list wraps).
+  void columns;
   return (
-    <div className={`grid ${cols} gap-2`}>
+    <div className="flex flex-wrap overflow-hidden rounded-control border border-line-strong bg-white" data-choice-strip>
       {options.map((o) => (
-        <label key={o.value} className="cursor-pointer">
+        <label key={o.value} className="min-w-[7rem] flex-1 cursor-pointer border-line-strong [&:not(:first-child)]:border-l">
           <input
             type="radio"
             name={name}
@@ -239,7 +262,7 @@ export function ChoiceButtons({
             defaultChecked={defaultValue === o.value}
             className="peer sr-only"
           />
-          <span className="flex min-h-12 flex-col items-center justify-center rounded-control border border-line-strong bg-white px-3 py-2 text-center text-sm font-semibold peer-checked:border-ink peer-checked:bg-ink peer-checked:text-on-dark peer-focus-visible:ring-2 peer-focus-visible:ring-ink/30">
+          <span className="flex h-full min-h-11 flex-col items-center justify-center bg-white px-3 py-2 text-center text-sm font-semibold peer-checked:bg-ink peer-checked:text-on-dark peer-focus-visible:ring-2 peer-focus-visible:ring-inset peer-focus-visible:ring-ink/30">
             {o.label}
             {o.hint ? <span className="text-xs font-medium opacity-70">{o.hint}</span> : null}
           </span>

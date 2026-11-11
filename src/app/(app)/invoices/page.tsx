@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { MoneyRow } from "@/components/MoneyRow";
-import { Button, Card, Empty, Input, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { Button, Card, Empty, Input, Notice, PageHeader, SectionLabel, LinkButton } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { dubaiDate } from "@/lib/jobs";
 import { loadMoneyList, loadMoneyTiles, type MoneyRowData } from "@/lib/money-data";
@@ -82,7 +82,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Pro
       <PageHeader
         title="Invoices and payments"
         subtitle={`${counts[""]} row${counts[""] === 1 ? "" : "s"} with money paid or owed${ranged ? ` · documents from ${from || "the start"} to ${to || "today"}` : ""}`}
-        actions={can(role, "exportAccounts") || mayPay || viewPay ? <>{mayPay || viewPay ? <RecordPaymentButton size="lg" readOnly={viewPay} /> : null}{can(role, "exportAccounts") ? <a href="/api/export/accounts" className="inline-flex items-center justify-center rounded-control font-bold bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">Export for the accountant</a> : null}</> : undefined}
+        actions={can(role, "exportAccounts") || mayPay || viewPay ? <>{mayPay || viewPay ? <RecordPaymentButton size="lg" readOnly={viewPay} /> : null}{can(role, "exportAccounts") ? <LinkButton href="/api/export/accounts" tone="secondary">Export for the accountant</LinkButton> : null}</> : undefined}
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}

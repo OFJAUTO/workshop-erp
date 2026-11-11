@@ -145,16 +145,18 @@ export default async function EstimatePage({ params, searchParams }: { params: P
             {attached ? <Link href={`/jobs/${attached.id}`} className="text-xs font-bold underline underline-offset-4 whitespace-nowrap" data-estimate-carried={attached.job_number}>Carried over to {attached.job_number}</Link> : null}
           </span>
         }
+        views={
+          <>
+            <LinkButton href="/estimates" tone="secondary">Estimates</LinkButton>
+            <ViewAsCustomer href={q.token ? `/quote/${q.token}` : null} notSent={q.status === "draft" || q.status === "pending_owner"} make={{ kind: "quote", id: q.id }} />
+            <LinkButton href={`/api/pdf/quotation/${q.id}`} tone="secondary" target="_blank" rel="noreferrer">Preview PDF</LinkButton>
+          </>
+        }
         actions={
           <>
-            <LinkButton href="/estimates" tone="secondary" size="lg">Estimates</LinkButton>
-            <ViewAsCustomer href={q.token ? `/quote/${q.token}` : null} notSent={q.status === "draft" || q.status === "pending_owner"} make={{ kind: "quote", id: q.id }} />
-            <EstimateMenu id={q.id} number={q.number} status={q.status} neverSent={!q.sent_at} canManage={mayManage} />
-            <a href={`/api/pdf/quotation/${q.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">
-              Preview PDF
-            </a>
             {mayManage && sendState ? <QuoteSendButton state={sendState} pageHref={`/estimates/${sendState.targetId}`} resentWords={resentWords[sendState.targetId] ?? null} autoOpen={send === "1"} /> : null}
-            <DocReviseButton version={q.version} onRevise={mayRevise ? reviseQuotation.bind(null, q.id) : null} />
+            <DocReviseButton version={q.version} onRevise={mayRevise ? reviseQuotation.bind(null, q.id) : null} primary={!(mayManage && sendState?.enabled && !sendState.resend)} />
+            <EstimateMenu id={q.id} number={q.number} status={q.status} neverSent={!q.sent_at} canManage={mayManage} />
           </>
         }
       />

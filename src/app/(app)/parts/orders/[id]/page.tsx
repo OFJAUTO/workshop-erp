@@ -254,15 +254,17 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             {!isMain && (po.supplier_invoice_status === "received" || po.supplier_invoice_status === "to_follow") && ["owner", "accounts", "parts"].includes(role) ? <Link href={invoiceHref(po)} className="text-sm font-bold underline underline-offset-4" data-lpo-invoice-link>{po.supplier_invoice_number ? `INV ${po.supplier_invoice_number}` : "Invoice"} in Supplier invoices</Link> : null}
           </span>
         }
+        views={
+          <>
+            <LinkButton href="/parts/orders" tone="secondary">All LPOs</LinkButton>
+            {job ? <LinkButton href={`/parts/${job.id}#lpo`} tone="secondary">Parts page</LinkButton> : null}
+            {job ? <LinkButton href={`/jobs/${job.id}`} tone="secondary">Job card</LinkButton> : null}
+            {sendable ? <LinkButton href={`/api/pdf/po/${po.id}`} tone="secondary" target="_blank" rel="noreferrer">Supplier copy (PDF)</LinkButton> : null}
+            {po.job_id ? <CopyVin vin={v?.vin} /> : null}
+          </>
+        }
         actions={
           <>
-            {po.job_id ? <CopyVin vin={v?.vin} /> : null}
-            <LinkButton href="/parts/orders" tone="secondary" size="lg">All LPOs</LinkButton>
-            {job ? <LinkButton href={`/parts/${job.id}#lpo`} tone="secondary" size="lg">Parts page</LinkButton> : null}
-            {job ? <LinkButton href={`/jobs/${job.id}`} tone="secondary" size="lg">Job card</LinkButton> : null}
-            {sendable ? (
-              <a href={`/api/pdf/po/${po.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">Supplier copy (PDF)</a>
-            ) : null}
             {sendable && canManage ? <LpoSendControl poId={po.id} number={po.number} dateText={formatDate(po.approved_at ?? po.created_at)} link={`${site}/api/pdf/lpo/${po.verify_token}`} phoneDigits={supplierDigits} sentAt={po.sent_at} /> : null}
           </>
         }

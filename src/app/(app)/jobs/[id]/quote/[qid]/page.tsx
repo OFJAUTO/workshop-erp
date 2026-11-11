@@ -296,14 +296,16 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
             {q.estimate_id ? <Badge tone="neutral">From estimate {fromEst?.number ?? ""}</Badge> : null}
           </span>
         }
+        views={
+          <>
+            <LinkButton href={`/jobs/${id}`} tone="secondary">Job card</LinkButton>
+            <ViewAsCustomer href={q.token ? `/quote/${q.token}` : null} notSent={q.status === "draft" || q.status === "pending_owner"} make={{ kind: "quote", id: q.id }} />
+            {bundle.inspection ? <LinkButton href={`/jobs/${id}/inspection`} tone="secondary">Inspection report</LinkButton> : null}
+            <LinkButton href={`/api/pdf/quotation/${q.id}`} tone="secondary" target="_blank" rel="noreferrer">Preview PDF</LinkButton>
+          </>
+        }
         actions={
           <>
-            <LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>
-            <ViewAsCustomer href={q.token ? `/quote/${q.token}` : null} notSent={q.status === "draft" || q.status === "pending_owner"} make={{ kind: "quote", id: q.id }} />
-            {bundle.inspection ? <LinkButton href={`/jobs/${id}/inspection`} tone="secondary" size="lg">Inspection report</LinkButton> : null}
-            <a href={`/api/pdf/quotation/${q.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">
-              Preview PDF
-            </a>
             {/* ALWAYS A WAY TO SEND OR RESEND (6 November 2026, Q-00062): the one button, next to Revise. */}
             {canSend && sendState ? <QuoteSendButton state={sendState} pageHref={`/jobs/${id}/quote/${sendState.targetId}`} resentWords={resentWords[sendState.targetId] ?? null} autoOpen={send === "1"} /> : null}
             {/* REVISE AT THE TOP (5 November 2026): the one revise control, next to Preview PDF. */}
@@ -315,6 +317,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
               reasons={reasonsFor(settings, "revise_after_approval")}
               reviseDefault={partsAfter?.words ? `Parts changed after approval: ${partsAfter.words.replace(/^Changes since approval: /, "")}` : null}
               reviseOpen={mayAskRevise && revise === "parts"}
+              primary={!(canSend && sendState?.enabled && !sendState.resend)}
             />
           </>
         }

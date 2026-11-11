@@ -548,16 +548,20 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             {!job.is_open ? <Badge tone="neutral">Closed</Badge> : null}
           </span>
         }
-        actions={
+        views={
           <>
             {/* 11 November 2026 (Section 9): THE jobs list on paper. */}
-            {job.first_approval_at ? <a href={`/print/job-card/${id}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-print-job-card-link>Print job card</a> : null}
+            {job.first_approval_at ? <LinkButton href={`/print/job-card/${id}`} tone="secondary" target="_blank" rel="noreferrer" data-print-job-card-link>Print job card</LinkButton> : null}
             {latestApproval?.token && seesCustomerDetails ? <ViewAsCustomer href={`/approve/${latestApproval.token}`} notSent={!latestApproval.sent_at} /> : null}
             {loose ? (
               <LinkButton href={`/jobs/${id}/gate-in`} tone="secondary" data-gate-in-details>
                 Gate-in details
               </LinkButton>
             ) : null}
+          </>
+        }
+        actions={
+          <>
             {canEditGateIn && !check.complete && !loose ? (
               <LinkButton href={`/jobs/${id}/media`} size="lg">
                 {(() => { const m = missingItems(check); return m.length === 1 ? `Finish gate-in: ${m[0].name} missing` : `Finish gate-in: ${m.length} items missing (${m.map((x) => x.name).join(", ")})`; })()}
@@ -565,14 +569,14 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             ) : null}
             {canGateOut ? (
               <span className="flex flex-col items-end gap-1">
-                <LinkButton href={`/jobs/${id}/gate-out`} tone="secondary" size={gateOutReason ? "md" : "lg"}>
+                <LinkButton href={`/jobs/${id}/gate-out`} tone={gateOutReason || (canEditGateIn && !check.complete && !loose) ? "secondary" : "primary"}>
                   Gate out
                 </LinkButton>
                 {gateOutReason ? <span className="text-xs text-muted">Normally {gateOutReason.toLowerCase()}</span> : null}
               </span>
             ) : can(role, "gateOut") && job.is_open && gateOutReason ? (
               <span className="flex flex-col items-end gap-1">
-                <span className="inline-flex min-h-14 items-center rounded-control border border-line bg-chip px-6 text-base font-bold text-muted" aria-disabled="true">Gate out</span>
+                <span className="inline-flex min-h-11 items-center rounded-control border border-line bg-chip px-5 text-sm font-bold text-muted" aria-disabled="true">Gate out</span>
                 <span className="text-xs text-muted">{gateOutReason}</span>
               </span>
             ) : null}

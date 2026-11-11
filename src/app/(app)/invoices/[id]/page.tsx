@@ -90,7 +90,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
           <>
             <LinkButton href="/invoices" tone="secondary" size="lg">Invoices</LinkButton>
             {job ? <LinkButton href={`/jobs/${job.id}`} tone="secondary" size="lg">Job card</LinkButton> : null}
-            <a href={`/api/pdf/invoice-by-id/${invoice.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center rounded-control font-bold bg-ink text-on-dark hover:bg-black min-h-14 px-6 text-base">PDF</a>
+            <LinkButton href={`/api/pdf/invoice-by-id/${invoice.id}`} tone="secondary" target="_blank" rel="noreferrer">PDF</LinkButton>
           </>
         }
       />

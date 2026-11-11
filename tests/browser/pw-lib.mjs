@@ -47,7 +47,7 @@ async function open(cookies, opts) {
   // a person taps the bar. A test of the bar itself passes { waitingOpen: false }.
   if (opts.waitingOpen !== false) {
     await context.addInitScript(() => {
-      const openAll = () => document.querySelectorAll("[data-waiting-panel] details:not([open])").forEach((d) => { d.open = true; });
+      const openAll = () => document.querySelectorAll("[data-waiting-panel] details:not([open]), details[data-fold-bar]:not([open])").forEach((d) => { d.open = true; });
       window.addEventListener("load", () => {
         openAll();
         new MutationObserver(openAll).observe(document.body, { childList: true, subtree: true });

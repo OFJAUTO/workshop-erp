@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { SQUARE_BUTTON, squareTone } from "@/components/ui";
 import { useRouter } from "next/navigation";
 import { FloatingMenu } from "@/components/FloatingMenu";
 import { ReasonChips } from "@/components/ReasonChips";
@@ -37,7 +38,7 @@ export function EstimateMenu({ id, number, status, neverSent, canManage }: { id:
 
   return (
     <span className="relative shrink-0" data-estimate-menu={number}>
-      <button type="button" onClick={(e) => setAnchor(anchor ? null : e.currentTarget)} aria-label={`More for ${number}`} aria-expanded={!!anchor} className={`min-h-11 min-w-11 rounded-control border text-base font-bold ${anchor ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-estimate-dots>
+      <button type="button" onClick={(e) => setAnchor(anchor ? null : e.currentTarget)} aria-label={`More for ${number}`} aria-expanded={!!anchor} className={`${SQUARE_BUTTON} ${squareTone(!!anchor)}`} data-estimate-dots>
         ⋯
       </button>
       {anchor ? (

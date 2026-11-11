@@ -20,6 +20,7 @@ export function DocReviseButton({
   reasons = [],
   reviseDefault = null,
   reviseOpen = false,
+  primary = true,
 }: {
   /** This version's number: the button makes version + 1. */
   version: number;
@@ -33,6 +34,8 @@ export function DocReviseButton({
   reviseDefault?: string | null;
   /** Arriving from the notice: the ask opens by itself. */
   reviseOpen?: boolean;
+  /** 11 November 2026 (Section 13): black only when it is the screen's one next step (else white). */
+  primary?: boolean;
 }) {
   const [ask, setAsk] = useState(reviseOpen && !onRevise && !!onAskRevise);
   const label = `Revise → version ${version + 1}`;
@@ -40,7 +43,7 @@ export function DocReviseButton({
     return (
       <span className="inline-flex flex-wrap items-center gap-2" data-revise-top>
         <form action={onRevise}>
-          <Button type="submit" size="lg" data-revise data-revise-bar>{label}</Button>
+          <Button type="submit" tone={primary ? "primary" : "secondary"} data-revise data-revise-bar>{label}</Button>
         </form>
         {revision?.allowedAt ? <span className="text-xs font-semibold text-green-text" data-revise-allowed>Owner allowed one revision</span> : null}
       </span>
@@ -51,9 +54,9 @@ export function DocReviseButton({
   return (
     <span className="inline-flex flex-wrap items-center gap-2" data-revise-top>
       {waiting ? (
-        <span className="inline-flex min-h-14 items-center rounded-control border border-amber-bar bg-amber-soft px-4 text-sm font-semibold text-amber-text" data-revise-pending>Revise: owner asked {formatDayTime(revision!.requestedAt!)}, waiting</span>
+        <span className="inline-flex min-h-11 items-center rounded-control border border-amber-bar bg-amber-soft px-4 text-sm font-semibold text-amber-text" data-revise-pending>Revise: owner asked {formatDayTime(revision!.requestedAt!)}, waiting</span>
       ) : (
-        <Button type="button" size="lg" onClick={() => setAsk(true)} title="The customer approved it: the owner allows a revision first" data-ask-revise>{label}</Button>
+        <Button type="button" tone={primary ? "primary" : "secondary"} onClick={() => setAsk(true)} title="The customer approved it: the owner allows a revision first" data-ask-revise>{label}</Button>
       )}
       {revision?.declinedAt && !revision.allowedAt ? <span className="text-xs font-semibold text-red" data-revise-declined>Declined by the owner{revision.declinedNote ? `: ${revision.declinedNote}` : ""}</span> : null}
       {ask ? (

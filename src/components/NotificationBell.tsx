@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SQUARE_BUTTON, squareTone } from "./ui";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { FALLBACK_POLL_MS, hiddenTracker, startLive } from "@/lib/live-connection";
@@ -243,14 +244,14 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
         }}
         aria-label={`Notifications, ${unread} unread`}
         aria-expanded={open}
-        className={`relative inline-flex h-14 w-14 items-center justify-center rounded-control border bg-white text-ink hover:bg-chip ${open ? "border-ink" : unread > 0 ? "border-red-bar" : "border-line-strong"}`}
+        className={`relative ${SQUARE_BUTTON} ${squareTone(open)}`}
       >
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={shake ? "bell-shake" : unread > 0 && !open ? "bell-wiggle" : ""}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className={shake ? "bell-shake" : unread > 0 && !open ? "bell-wiggle" : ""}>
           <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
           <path d="M13.7 21a2 2 0 0 1-3.4 0" />
         </svg>
         {unread > 0 ? (
-          <span className="absolute top-0.5 right-0.5 min-w-5 h-5 rounded-full bg-red-bar text-on-dark text-xs font-bold flex items-center justify-center px-1" data-bell-badge>{unread > 99 ? "99+" : unread}</span>
+          <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 rounded-full bg-red-bar text-on-dark text-xs font-bold flex items-center justify-center px-1" data-bell-badge>{unread > 99 ? "99+" : unread}</span>
         ) : null}
       </button>
 

@@ -69,7 +69,7 @@ export function QuoteSendButton({ state, pageHref, resentWords = null, autoOpen 
   }
   return (
     <span className="inline-flex flex-col gap-0.5" data-quote-send={state.label} data-quote-send-ready="1">
-      <Button type="button" size={size} onClick={open} disabled={busy} data-quote-send-open>
+      <Button type="button" tone="secondary" size={size} onClick={open} disabled={busy} data-quote-send-open>
         {busy ? "Preparing…" : state.label}
       </Button>
       {done ? <span className="text-xs font-bold text-green-text" data-quote-resent>Resent ✓</span> : resentWords ? <span className="text-xs text-muted" data-quote-resent-words>{resentWords}</span> : null}
