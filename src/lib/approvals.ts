@@ -10,7 +10,7 @@ import { schemaReady } from "@/lib/schema-ready";
  * Approve and Refuse go through ONE dispatcher (src/app/(app)/approvals/actions.ts) to each kind's own decision, so
  * the rules of each decision stay where they are.
  */
-export const APPROVAL_KINDS = ["quote", "revision", "commission", "lpo", "discount", "fee", "price", "free_charge", "inspection_change", "stock_reversal", "comeback", "overpayment", "void", "inspection_type"] as const;
+export const APPROVAL_KINDS = ["quote", "revision", "commission", "lpo", "discount", "fee", "price", "free_charge", "inspection_change", "stock_reversal", "comeback", "overpayment", "void", "lathe_void", "inspection_type"] as const;
 export type ApprovalKind = (typeof APPROVAL_KINDS)[number];
 
 export const KIND_WORDS: Record<ApprovalKind, string> = {
@@ -27,6 +27,7 @@ export const KIND_WORDS: Record<ApprovalKind, string> = {
   comeback: "Comeback at our cost",
   overpayment: "Payment above the balance",
   void: "Void a receipt",
+  lathe_void: "Void a lathe bill",
   inspection_type: "Inspection type downgrade",
 };
 
@@ -161,6 +162,14 @@ export async function loadApprovals(scope: Scope = {}): Promise<ApprovalItem[]> 
     if (extraJobs.length) for (const j of ((await admin.from("jobs").select("id, job_number").in("id", extraJobs)).data ?? []) as R[]) jobWords.set(String(j.id), String(j.job_number));
     for (const r of vr) {
       push({ kind: "void", id: String(r.id), title: `Void receipt ${r.number}${r.cheque_number ? ` · cheque ${r.cheque_number}` : ""}`, what: `${String(r.void_request_reason ?? "")}${r.job_id ? ` · ${jw(r.job_id)}` : ""}`, askedBy: nm(r.void_requested_by), askedAt: (r.void_requested_at as string) ?? null, money: aed(r.amount_aed), href: r.job_id ? `/jobs/${r.job_id}/invoice` : "/accounts-posting?tab=cheque", jobId: (r.job_id as string) ?? null, quotationId: null, poId: null, approveLabel: "Void it", refuseLabel: "Keep the receipt" });
+    }
+  }
+  // Lathe bills paid or in Zoho that accounts asked to void (11 November 2026, Section 6).
+  if (await schemaReady("lathe_bills", "void_requested_at")) {
+    const { data: lv } = await admin.from("lathe_bills").select("id, bill_number, supplier_name, total_aed, void_request_reason, void_requested_by, void_requested_at").not("void_requested_at", "is", null).is("voided_at", null);
+    for (const r of (lv ?? []) as R[]) {
+      if (r.void_requested_by && !who.has(String(r.void_requested_by))) for (const st of ((await admin.from("staff").select("id, display_name").eq("id", String(r.void_requested_by))).data ?? []) as R[]) who.set(String(st.id), String(st.display_name));
+      push({ kind: "lathe_void", id: String(r.id), title: `Void lathe bill ${r.bill_number} · ${r.supplier_name}`, what: String(r.void_request_reason ?? ""), askedBy: nm(r.void_requested_by), askedAt: (r.void_requested_at as string) ?? null, money: aed(r.total_aed), href: "/parts/lathe", jobId: null, quotationId: null, poId: null, approveLabel: "Void it", refuseLabel: "Keep the bill" });
     }
   }
   for (const extra of await moreApprovals(scope)) out.push(extra);

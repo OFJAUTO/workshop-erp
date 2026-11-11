@@ -23,9 +23,10 @@ export async function readInvoiceScanAction(poId: string): Promise<ReadScanResul
     admin.from("purchase_orders").select("id, supplier_invoice_path").eq("id", poId).maybeSingle(),
     admin.from("job_files").select("storage_path, content_type, caption, created_at").eq("kind", "supplier_invoice").eq("ref_id", poId).is("removed_at", null).order("created_at", { ascending: false }).limit(1),
   ]);
-  if (!po) return { error: "That LPO no longer exists." };
+  // A lathe bill reads its own attached scan the same way (11 November 2026, Section 6): files tied to its id.
+  if (!po && !(files ?? []).length) return { error: "No scan or photo here yet: press Scan document first." };
   const newest = (files ?? [])[0] ?? null;
-  const path = (newest?.storage_path as string | undefined) ?? (po.supplier_invoice_path as string | null) ?? null;
+  const path = (newest?.storage_path as string | undefined) ?? ((po?.supplier_invoice_path as string | null | undefined) ?? null);
   if (!path) return { error: "No scan or photo on this LPO yet: press Scan document first." };
   const { data: blob, error: dlErr } = await admin.storage.from(JOB_FILES_BUCKET).download(path);
   if (dlErr || !blob) return { error: "The scan could not be opened just now. Try again." };

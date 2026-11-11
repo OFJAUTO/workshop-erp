@@ -1004,9 +1004,27 @@ async function syncLatheBillRow(org: string, accounts: Resolved, billId: string)
     if (!zid) throw new ZohoError("Zoho did not return the new bill.");
   }
   await admin.from("lathe_bills").update({ zoho_bill_id: zid }).eq("id", b.id);
-  // Paid as ONE supplier payment, once accounts mark it paid.
+  // The invoice attached on the lathe page (11 November 2026, Section 6) goes on the Zoho bill, once.
+  let attached = false;
+  {
+    const zb = await zohoBillById(org, zid);
+    attached = ((zb as { documents?: unknown[] } | null)?.documents?.length ?? 0) > 0;
+    if (!attached) {
+      const { data: files } = await admin.from("job_files").select("storage_path").eq("kind", "supplier_invoice").eq("ref_id", b.id).is("removed_at", null).order("created_at").limit(5);
+      for (const fl of (files ?? []) as { storage_path: string }[]) {
+        const file = await bucketFile("job-files", fl.storage_path);
+        if (!file || !BILL_ATTACH_EXTS.has(file.ext)) continue;
+        await zohoFetch(`/bills/${zid}/attachment`, { org, method: "POST", upload: { field: "attachment", filename: file.name, contentType: file.contentType, data: file.data } });
+        attached = true;
+        break;
+      }
+    }
+  }
+  // Paid as ONE supplier payment, once accounts mark it paid - by the old one-bill form only: one paid through the
+  // Supplier payments tab goes to Zoho with that payment (11 November 2026, Section 6).
   let payId = b.zoho_payment_id;
-  if (b.paid_at && !payId) {
+  const { data: viaTab } = (await schemaReady("supplier_payment_lines", "lathe_bill_id")) ? await admin.from("supplier_payment_lines").select("id").eq("lathe_bill_id", b.id).eq("is_active", true).limit(1) : { data: [] };
+  if (b.paid_at && !payId && !(viaTab ?? []).length) {
     const method = (b.paid_method ?? "transfer") as SupplierPayKey;
     const paidThrough = accounts.paidFromBy?.[method] ?? needAccounts(accounts.paidFrom, accounts.paidFromError);
     const ref = cut(`LATHE ${b.bill_number}`, 50);
@@ -1019,7 +1037,7 @@ async function syncLatheBillRow(org: string, accounts: Resolved, billId: string)
     }
     if (payId) await admin.from("lathe_bills").update({ zoho_payment_id: payId }).eq("id", b.id);
   }
-  return { zohoId: zid, result: { lathe_bill: b.bill_number, lines: line_items.length, total: round2(Number(b.total_aed) || 0), payment: payId ?? null } };
+  return { zohoId: zid, result: { lathe_bill: b.bill_number, lines: line_items.length, total: round2(Number(b.total_aed) || 0), payment: payId ?? null, attached } };
 }
 
 /**
@@ -1710,12 +1728,23 @@ async function syncSupplierPayRow(org: string, accounts: Resolved, paymentId: st
   if (gate) return gate;
   if (!pay.supplier_id) throw new ZohoError(`${pay.number}: the supplier ${pay.supplier_name} is not on the suppliers list, so Zoho has no vendor for it. Add it on Parts > Suppliers, then Retry.`);
   // A line may pay a FURTHER invoice on the LPO (10 November 2026, Section 3): its own bill.
-  const invCol = (await schemaReady("supplier_payment_lines", "lpo_invoice_id")) ? ", lpo_invoice_id" : "";
+  const invCol = ((await schemaReady("supplier_payment_lines", "lpo_invoice_id")) ? ", lpo_invoice_id" : "") + ((await schemaReady("supplier_payment_lines", "lathe_bill_id")) ? ", lathe_bill_id" : "");
   const { data: lineRows } = await admin.from("supplier_payment_lines").select("po_id, amount_aed, applied_later" + invCol).eq("payment_id", pay.id).eq("is_active", true);
-  const lines = ((lineRows ?? []) as unknown as { po_id: string; amount_aed: number; applied_later: boolean; lpo_invoice_id?: string | null }[]).map((l) => ({ poId: l.po_id, invoiceId: l.lpo_invoice_id ?? null, amount: round2(Number(l.amount_aed) || 0), later: !!l.applied_later }));
+  const lines = ((lineRows ?? []) as unknown as { po_id: string | null; amount_aed: number; applied_later: boolean; lpo_invoice_id?: string | null; lathe_bill_id?: string | null }[]).map((l) => ({ poId: l.po_id ?? "", invoiceId: l.lpo_invoice_id ?? null, latheBillId: l.lathe_bill_id ?? null, amount: round2(Number(l.amount_aed) || 0), later: !!l.applied_later }));
   // Every bill first: a payment applies only to bills Zoho already has.
   const bills: { bill_id: string; amount_applied: number }[] = [];
   for (const l of lines) {
+    // A lathe bill paid through Supplier payments (11 November 2026, Section 6): its own bill in Zoho.
+    if (l.latheBillId) {
+      const { data: lb } = await admin.from("lathe_bills").select("bill_number, zoho_bill_id").eq("id", l.latheBillId).maybeSingle();
+      const row = lb as { bill_number: string; zoho_bill_id: string | null } | null;
+      if (!row?.zoho_bill_id) {
+        await ensureQueued("lathebill", l.latheBillId, null);
+        return { wait: `Waiting for lathe bill ${row?.bill_number ?? ""} to reach Zoho first.` };
+      }
+      bills.push({ bill_id: row.zoho_bill_id, amount_applied: l.amount });
+      continue;
+    }
     if (l.invoiceId) {
       const { data: inv } = await admin.from("lpo_invoices").select("number, zoho_bill_id").eq("id", l.invoiceId).maybeSingle();
       const row = inv as { number: string; zoho_bill_id: string | null } | null;

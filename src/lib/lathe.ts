@@ -148,6 +148,12 @@ export async function recordLatheBill(input: BillInput, actor: Actor): Promise<{
     await logAppError("lathe: bill", error ?? "no row", { staffId: actor.id });
     return { error: SAVE_FAILED };
   }
+  // No ticket: the whole bill is one line with no ticket (it reaches no car; the confirm said so, Parts are told).
+  if (!input.tickets.length && !input.extraLines.length) {
+    const whole = [{ description: "Lathe work – no ticket", amount: round2(input.beforeVat) }];
+    await admin.from("lathe_bills").update({ extra_lines: whole }).eq("id", bill.id);
+    input.extraLines = whole;
+  }
   const shares = splitBill(round2(input.beforeVat), extra, input.tickets);
   const { data: parts } = await admin.from("part_items").select("id, job_id, quantity, lathe_ticket, lathe_bill_id").in("id", input.tickets.map((t) => t.partId));
   let done = 0;
@@ -162,7 +168,7 @@ export async function recordLatheBill(input: BillInput, actor: Actor): Promise<{
     await admin.from("job_events").insert({ job_id: p.job_id, event_type: "lathe_billed", note: `${p.lathe_ticket}: billed AED ${amount.toFixed(2)} on ${input.billNumber} (${actor.display_name})`, created_by: actor.id });
     done++;
   }
-  if (extra > 0) {
+  if (input.extraLines.length) {
     const { notifyRoles } = await import("./notifications");
     await notifyRoles(["parts"], { type: "lathe_unmatched", title: `Lathe bill ${input.billNumber}: ${input.extraLines.length} line${input.extraLines.length === 1 ? "" : "s"} with no ticket`, body: `${input.extraLines.map((l) => `${l.description} AED ${Number(l.amount).toFixed(2)}`).join("; ")}. Find the car each was for (or ask the lathe shop).`, href: "/parts/lathe" });
   }
@@ -177,4 +183,112 @@ export async function latheReport(month: string) {
   const cost = round2(rows.reduce((a, r) => a + (r.billAmount ?? r.estimate), 0));
   const charged = round2(rows.reduce((a, r) => a + (r.charged ?? 0), 0));
   return { tickets: rows.length, billed: rows.filter((r) => r.billId).length, cost, charged, profit: round2(charged - cost) };
+}
+
+/** THE lathe shops (11 November 2026, Section 6): every shop on a lathe ticket (with its open tickets) and any supplier named "lathe". */
+export async function latheShops(): Promise<{ name: string; open: number }[]> {
+  const admin = createAdminClient();
+  const [{ data: t }, { data: sup }] = await Promise.all([
+    (await latheReady()) ? admin.from("part_items").select("supplier, lathe_bill_id").not("lathe_ticket", "is", null).eq("is_active", true) : Promise.resolve({ data: [] }),
+    admin.from("suppliers").select("name").eq("is_active", true).ilike("name", "%lathe%"),
+  ]);
+  const m = new Map<string, { name: string; open: number }>();
+  for (const r of (t ?? []) as { supplier: string | null; lathe_bill_id: string | null }[]) {
+    const n = (r.supplier ?? "").trim();
+    if (!n) continue;
+    const cur = m.get(n.toUpperCase()) ?? { name: n, open: 0 };
+    if (!r.lathe_bill_id) cur.open++;
+    m.set(n.toUpperCase(), cur);
+  }
+  for (const r of (sup ?? []) as { name: string }[]) if (!m.has(r.name.trim().toUpperCase())) m.set(r.name.trim().toUpperCase(), { name: r.name.trim(), open: 0 });
+  return Array.from(m.values()).sort((a, b) => b.open - a.open || a.name.localeCompare(b.name));
+}
+
+export const latheV2Ready = () => schemaReady("lathe_bills", "edit_history, void_requested_at");
+
+type BillRow = { id: string; supplier_id: string | null; supplier_name: string; bill_number: string; bill_date: string; before_vat_aed: number | string; vat_aed: number | string; total_aed: number | string; paid_at: string | null; zoho_bill_id: string | null; edit_history?: unknown[] | null; voided_at?: string | null };
+
+/** Correct an unpaid lathe bill that is not in Zoho yet (shop, number, date, amounts), every change kept with the remark. */
+export async function editLatheBill(billId: string, input: { supplier: string; billNumber: string; billDate: string; beforeVat: number; vat: number; remark: string }, actor: Actor): Promise<{ error?: string; ok?: boolean; words?: string }> {
+  if (!(actor.role_id === "owner" || actor.role_id === "accounts")) return { error: "Accounts or the owner correct a lathe bill." };
+  if (!(await latheV2Ready())) return { error: "Correcting a lathe bill switches on once the database change is applied." };
+  if (input.remark.trim().length < 5) return { error: "Write why it is corrected (a few words): it stays in the history." };
+  if (!input.billNumber.trim()) return { error: "Type the bill number." };
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.billDate)) return { error: "Pick the bill's date." };
+  if (!(input.beforeVat > 0)) return { error: "Type the bill's amount before VAT." };
+  const admin = createAdminClient();
+  const { data: raw } = await admin.from("lathe_bills").select("id, supplier_id, supplier_name, bill_number, bill_date, before_vat_aed, vat_aed, total_aed, paid_at, zoho_bill_id, edit_history, voided_at").eq("id", billId).maybeSingle();
+  const b = raw as BillRow | null;
+  if (!b || b.voided_at) return { error: "That bill is voided or gone." };
+  if (b.paid_at || b.zoho_bill_id) return { error: `Bill ${b.bill_number} is ${b.paid_at ? "paid" : "in Zoho"}: it cannot be corrected - void it (the owner approves) and enter it again.` };
+  const { data: paidLines } = await admin.from("supplier_payment_lines").select("id").eq("lathe_bill_id", billId).eq("is_active", true).limit(1);
+  if ((paidLines ?? []).length) return { error: `Bill ${b.bill_number} has a payment on it: void that payment first, or void the bill.` };
+  const { data: sup } = await admin.from("suppliers").select("id, name").ilike("name", input.supplier.trim()).maybeSingle();
+  const next = { supplier_name: (sup?.name as string | undefined) ?? input.supplier.trim(), supplier_id: (sup?.id as string | undefined) ?? null, bill_number: input.billNumber.trim(), bill_date: input.billDate, before_vat_aed: round2(input.beforeVat), vat_aed: round2(input.vat), total_aed: round2(input.beforeVat + input.vat) };
+  const changes: { field: string; old: unknown; new: unknown }[] = [];
+  const cmp = (field: keyof typeof next, oldV: unknown) => { if (String(oldV ?? "").slice(0, 10) !== String(next[field] ?? "").slice(0, 10) && Number(oldV) !== Number(next[field])) changes.push({ field, old: oldV, new: next[field] }); };
+  cmp("supplier_name", b.supplier_name);
+  cmp("bill_number", b.bill_number);
+  cmp("bill_date", String(b.bill_date).slice(0, 10));
+  cmp("before_vat_aed", Number(b.before_vat_aed));
+  cmp("vat_aed", Number(b.vat_aed));
+  if (!changes.length) return { ok: true, words: "Nothing changed." };
+  const hist = [...((b.edit_history as unknown[]) ?? []), { at: new Date().toISOString(), by: actor.display_name, remark: input.remark.trim().slice(0, 300), changes }];
+  const { error } = await admin.from("lathe_bills").update({ ...next, edit_history: hist, updated_by: actor.id }).eq("id", billId).is("paid_at", null).is("zoho_bill_id", null);
+  if (error) {
+    if (/duplicate|unique/i.test(error.message)) return { error: `Bill ${input.billNumber} of ${next.supplier_name} is already entered.` };
+    await logAppError("lathe: edit", error, { staffId: actor.id });
+    return { error: SAVE_FAILED };
+  }
+  // The ticket shares follow a changed amount (by their estimates, as at entry).
+  if (Math.abs(Number(b.before_vat_aed) - next.before_vat_aed) > 0.004) {
+    const { data: parts } = await admin.from("part_items").select("id, quantity, cost_aed, lathe_bill_amount_aed").eq("lathe_bill_id", billId);
+    const list = (parts ?? []) as { id: string; quantity: number | string; cost_aed: number | string | null; lathe_bill_amount_aed: number | string | null }[];
+    const shares = splitBill(next.before_vat_aed, 0, list.map((p) => ({ partId: p.id, estimate: Number(p.lathe_bill_amount_aed) || Number(p.cost_aed) || 0, typed: null })));
+    for (const p of list) {
+      const amount = shares.get(p.id) ?? 0;
+      await admin.from("part_items").update({ lathe_bill_amount_aed: amount, final_cost_aed: round2(amount / (Number(p.quantity) || 1)), updated_by: actor.id }).eq("id", p.id);
+    }
+  }
+  return { ok: true, words: `Bill corrected: ${changes.map((c) => c.field.replace(/_aed$/, "").replace(/_/g, " ")).join(", ")}. Kept in its history.` };
+}
+
+/** Void a lathe bill: unpaid and not in Zoho = at once (owner or accounts); paid or in Zoho = the owner approves. Nothing deleted. */
+export async function requestLatheVoid(billId: string, reason: string, actor: Actor): Promise<{ error?: string; ok?: boolean; words?: string }> {
+  if (!(actor.role_id === "owner" || actor.role_id === "accounts")) return { error: "Accounts or the owner void a lathe bill." };
+  if (!(await latheV2Ready())) return { error: "Voiding a lathe bill switches on once the database change is applied." };
+  const why = reason.trim().slice(0, 300);
+  if (why.length < 5) return { error: "Write why (a few words): it stays in the history." };
+  const admin = createAdminClient();
+  const { data: raw } = await admin.from("lathe_bills").select("id, bill_number, paid_at, zoho_bill_id, voided_at, void_requested_at").eq("id", billId).maybeSingle();
+  const b = raw as (BillRow & { void_requested_at: string | null }) | null;
+  if (!b || b.voided_at) return { error: "That bill is already voided." };
+  if (actor.role_id === "owner" || (!b.paid_at && !b.zoho_bill_id)) return voidLatheBill(billId, why, actor);
+  if (b.void_requested_at) return { error: `The owner is already asked to void ${b.bill_number}.` };
+  await admin.from("lathe_bills").update({ void_requested_at: new Date().toISOString(), void_requested_by: actor.id, void_request_reason: why, updated_by: actor.id }).eq("id", billId);
+  const { notifyRoles } = await import("./notifications");
+  await notifyRoles(["owner"], { type: "owner_approval_needed", title: `Void lathe bill ${b.bill_number}?`, body: `${actor.display_name}: ${why}`, href: `/approvals#approval-lathe_void:${billId}` });
+  return { ok: true, words: `The owner is asked to void ${b.bill_number}; it stays as it is until he decides.` };
+}
+
+/** THE lathe bill void: its tickets go back to open (their estimate counts again), Zoho is flagged for a hand reversal. */
+export async function voidLatheBill(billId: string, reason: string, actor: Actor): Promise<{ error?: string; ok?: boolean; words?: string }> {
+  const admin = createAdminClient();
+  const { data: raw } = await admin.from("lathe_bills").select("id, bill_number, zoho_bill_id, voided_at").eq("id", billId).maybeSingle();
+  const b = raw as BillRow | null;
+  if (!b || b.voided_at) return { error: "That bill is already voided." };
+  const { data: paidLines } = await admin.from("supplier_payment_lines").select("id").eq("lathe_bill_id", billId).eq("is_active", true).limit(1);
+  if ((paidLines ?? []).length) return { error: `Bill ${b.bill_number} has a supplier payment on it: void that payment (Supplier payments) first.` };
+  const { error } = await admin.from("lathe_bills").update({ voided_at: new Date().toISOString(), voided_by: actor.id, void_reason: reason, void_requested_at: null, is_active: false, updated_by: actor.id }).eq("id", billId).is("voided_at", null);
+  if (error) { await logAppError("lathe: void", error, { staffId: actor.id }); return { error: SAVE_FAILED }; }
+  const { data: parts } = await admin.from("part_items").select("id, job_id, lathe_ticket").eq("lathe_bill_id", billId);
+  for (const p of (parts ?? []) as { id: string; job_id: string; lathe_ticket: string }[]) {
+    await admin.from("part_items").update({ lathe_bill_id: null, lathe_bill_amount_aed: null, final_cost_aed: null, updated_by: actor.id }).eq("id", p.id);
+    await admin.from("job_events").insert({ job_id: p.job_id, event_type: "lathe_billed", note: `${p.lathe_ticket}: bill ${b.bill_number} voided by ${actor.display_name} (${reason}); the ticket is open again`, created_by: actor.id });
+  }
+  if (b.zoho_bill_id) {
+    const { flagZohoAttention } = await import("./zoho-sync");
+    await flagZohoAttention("lathebill", billId, `Lathe bill ${b.bill_number} was voided in the ERP after it reached Zoho: void it in Zoho by hand, then press "Done by hand". Reason: ${reason}`, { handOnly: true }).catch(() => null);
+  }
+  return { ok: true, words: `Bill ${b.bill_number} voided; its tickets are open again. It stays in the list marked VOID.` };
 }

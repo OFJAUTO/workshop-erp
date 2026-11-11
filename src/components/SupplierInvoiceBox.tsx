@@ -25,7 +25,10 @@ export function SupplierInvoiceBox({
   onWaiting,
   prefill = null,
   lpoDate,
+  noCarUploads = false,
 }: {
+  /** 11 November 2026: a supplier invoice with no car (a stock LPO) can take its scan once the database allows it. */
+  noCarUploads?: boolean;
   /** The LPO's own date: an invoice dated long before it is flagged (11 November 2026). */
   lpoDate?: string | null;
   jobId: string | null;
@@ -103,12 +106,12 @@ export function SupplierInvoiceBox({
             </label>
           ) : null}
           <input type="hidden" name="amount_confirmed" value={confirmed ? "on" : ""} />
-          {jobId ? (
+          {jobId || noCarUploads ? (
             <div className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">Photo or PDF of the invoice (several pages are fine; needed before the supplier is paid)</span>
               {ref ? (
                 <JobFileUpload
-                  jobId={jobId}
+                  jobId={jobId ?? "nocar"}
                   kind="supplier_invoice"
                   refId={ref}
                   form={formTag && clientKey ? { tag: formTag, key: clientKey } : null}

@@ -19,6 +19,56 @@ const fresh = () => new AbortController().signal;
 
 type PoRow = { id: string; number: string; kind: string; status: string; supplier_id: string | null; supplier_name: string; total_cost_aed: number; supplier_invoice_status: string | null; supplier_invoice_number: string | null; supplier_invoice_date: string | null; supplier_invoice_amount: number | null; supplier_invoice_vat_aed?: number | null; supplier_paid_at: string | null; supplier_payment_id?: string | null; job_id: string | null };
 
+/** 11 November 2026 (Section 6): a lathe bill is paid like any supplier invoice; its key in the box is "lathe:<id>". */
+export const isLatheKey = (key: string) => key.startsWith("lathe:");
+export const latheKeyOf = (billId: string) => `lathe:${billId}`;
+const lathePayReady = () => schemaReady("supplier_payment_lines", "lathe_bill_id");
+/** The columns of a payment line for one invoice key: an LPO (and its further invoice), or a lathe bill. */
+function lineTarget(key: string, invReady: boolean): Record<string, unknown> {
+  if (isLatheKey(key)) return { po_id: null, lathe_bill_id: key.slice(6) };
+  const k = splitPayKey(key);
+  return { po_id: k.poId, ...(invReady ? { lpo_invoice_id: k.invoiceId } : {}) };
+}
+
+/** The supplier's lathe bills still owed (not voided), each with what the supplier payments left on it. */
+async function latheOpenOf(supplierId: string | null, supplierName: string): Promise<(OpenInvoice & { gross: number; paid: number; jobId: string | null })[]> {
+  if (!(await lathePayReady())) return [];
+  const admin = createAdminClient();
+  let q = admin.from("lathe_bills").select("id, bill_number, bill_date, total_aed, paid_at, supplier_id, supplier_name").eq("is_active", true).is("voided_at", null).abortSignal(fresh());
+  q = supplierId ? q.eq("supplier_id", supplierId) : q.ilike("supplier_name", supplierName);
+  const { data } = await q;
+  const bills = (data ?? []) as { id: string; bill_number: string; bill_date: string; total_aed: number | string; paid_at: string | null }[];
+  if (!bills.length) return [];
+  const { data: lines } = await admin.from("supplier_payment_lines").select("lathe_bill_id, amount_aed, payment_id").in("lathe_bill_id", bills.map((b) => b.id)).eq("is_active", true).abortSignal(fresh());
+  const payIds = Array.from(new Set(((lines ?? []) as { payment_id: string }[]).map((l) => l.payment_id)));
+  const { data: pays } = payIds.length ? await admin.from("supplier_payments").select("id, status").in("id", payIds).abortSignal(fresh()) : { data: [] };
+  const live = new Set(((pays ?? []) as { id: string; status: string }[]).filter((p) => p.status === "recorded").map((p) => p.id));
+  const paid = new Map<string, number>();
+  for (const l of (lines ?? []) as { lathe_bill_id: string; amount_aed: number | string; payment_id: string }[]) if (live.has(l.payment_id)) paid.set(l.lathe_bill_id, r2((paid.get(l.lathe_bill_id) ?? 0) + Number(l.amount_aed)));
+  return bills
+    .map((b) => {
+      const gross = r2(Number(b.total_aed) || 0);
+      // Paid by the old one-bill form (before the Supplier payments tab took lathe bills): paid in full.
+      const p = b.paid_at && !(paid.get(b.id) ?? 0) ? gross : (paid.get(b.id) ?? 0);
+      return { poId: latheKeyOf(b.id), label: `${b.bill_number} · Lathe`, date: String(b.bill_date).slice(0, 10), due: r2(gross - p), gross, paid: r2(p), jobId: null };
+    })
+    .filter((x) => x.due > 0.004);
+}
+
+/** The lathe bills still owed, per supplier, for the Supplier payments tab's "Due by supplier". */
+export async function latheDueBySupplier(): Promise<{ supplierId: string | null; supplier: string; count: number; total: number; oldest: string | null }[]> {
+  if (!(await lathePayReady())) return [];
+  const { data } = await createAdminClient().from("lathe_bills").select("supplier_id, supplier_name").eq("is_active", true).is("voided_at", null).is("paid_at", null);
+  const seen = new Map<string, { supplierId: string | null; supplier: string }>();
+  for (const b of (data ?? []) as { supplier_id: string | null; supplier_name: string }[]) seen.set(b.supplier_id ?? b.supplier_name.toUpperCase(), { supplierId: b.supplier_id, supplier: b.supplier_name });
+  const out = [];
+  for (const v of seen.values()) {
+    const open = await latheOpenOf(v.supplierId, v.supplier);
+    if (open.length) out.push({ ...v, count: open.length, total: r2(open.reduce((a, o) => a + o.due, 0)), oldest: open.map((o) => o.date).filter(Boolean).sort()[0] ?? null });
+  }
+  return out;
+}
+
 /** The supplier's invoices still owed (entered, not cancelled), each with what is left, oldest first. */
 export async function openInvoicesOf(supplierId: string | null, supplierName: string): Promise<(OpenInvoice & { gross: number; paid: number; jobId: string | null })[]> {
   const admin = createAdminClient();
@@ -26,7 +76,8 @@ export async function openInvoicesOf(supplierId: string | null, supplierName: st
   q = supplierId ? q.eq("supplier_id", supplierId) : q.ilike("supplier_name", supplierName);
   const { data } = await q;
   const pos = ((data ?? []) as PoRow[]).map((p) => ({ ...p, total_cost_aed: Number(p.total_cost_aed) || 0, supplier_invoice_amount: p.supplier_invoice_amount === null ? null : Number(p.supplier_invoice_amount) }));
-  if (!pos.length) return [];
+  const lathe = await latheOpenOf(supplierId, supplierName);
+  if (!pos.length) return lathe;
   const [amounts, paidMap] = await Promise.all([lpoAmounts(pos, { withFurther: false }), paidOnPos(pos.map((p) => p.id))]);
   // 10 November 2026 (Section 3): each further supplier invoice on an LPO is paid on its own (key "<po>~<invoice>").
   const extrasMap = await loadLpoInvoices(pos.map((p) => p.id));
@@ -45,7 +96,7 @@ export async function openInvoicesOf(supplierId: string | null, supplierName: st
       // The old one-LPO "Paid to supplier" (before payments were recorded with their amount) counts as paid in full.
       const paid = p.supplier_paid_at && !p.supplier_payment_id && !(paidMap.get(p.id) ?? 0) ? gross : (paidMap.get(p.id) ?? 0);
       return { poId: p.id, label: `${p.supplier_invoice_number ?? p.number} · ${p.number}`, date: p.supplier_invoice_date, due: r2(gross - paid), gross, paid: r2(paid), jobId: p.job_id };
-    }), ...extraOpen]
+    }), ...extraOpen, ...lathe]
     .filter((i) => i.due > 0.004)
     .sort((a, b) => String(a.date ?? "9999").localeCompare(String(b.date ?? "9999")));
 }
@@ -169,7 +220,7 @@ export async function recordSupplierPayment(input: SupplierPaymentInput, by: { i
   if (error || !pay) return { error: error?.message ?? "Couldn't save – nothing was recorded." };
   if (lines.length) {
     const invReady = await lpoInvoicesReady();
-    const { error: lErr } = await admin.from("supplier_payment_lines").insert(lines.map((l) => { const k = splitPayKey(l.poId); return { payment_id: pay.id, po_id: k.poId, ...(invReady ? { lpo_invoice_id: k.invoiceId } : {}), amount_aed: l.amount, created_by: by.id, updated_by: by.id }; }), { defaultToNull: false });
+    const { error: lErr } = await admin.from("supplier_payment_lines").insert(lines.map((l) => ({ payment_id: pay.id, ...lineTarget(l.poId, invReady), amount_aed: l.amount, created_by: by.id, updated_by: by.id })), { defaultToNull: false });
     if (lErr) {
       await admin.from("supplier_payments").update({ status: "void", void_reason: "Its invoices could not be saved", updated_by: by.id }).eq("id", pay.id);
       return { error: lErr.message };
@@ -191,7 +242,10 @@ export async function recordSupplierPayment(input: SupplierPaymentInput, by: { i
     await admin.from("lpo_invoices").update({ paid_at: now, paid_by: by.id, updated_by: by.id }).eq("id", splitPayKey(key).invoiceId!).is("paid_at", null);
   }
   const owingPos = new Set(stillOwing.map((k) => splitPayKey(k).poId));
-  for (const poId of Array.from(new Set(touched.map((k) => splitPayKey(k).poId))).filter((id) => !owingPos.has(id))) {
+  for (const key of touched.filter((k) => isLatheKey(k) && !stillOwing.includes(k))) {
+    await admin.from("lathe_bills").update({ paid_at: now, paid_method: input.method === "link" ? "card" : input.method, paid_reference: [pay.number, input.reference].filter(Boolean).join(" · ").slice(0, 120), paid_by: by.id, updated_by: by.id }).eq("id", key.slice(6)).is("paid_at", null);
+  }
+  for (const poId of Array.from(new Set(touched.filter((k) => !isLatheKey(k)).map((k) => splitPayKey(k).poId))).filter((id) => !owingPos.has(id))) {
     await admin.from("purchase_orders").update({ supplier_paid_at: now, supplier_paid_by: by.id, supplier_paid_method: input.method === "link" ? "card" : input.method, supplier_paid_reference: [pay.number, input.reference].filter(Boolean).join(" · ").slice(0, 120), supplier_payment_id: pay.id, ...(input.proofPath ? { supplier_paid_proof_path: input.proofPath, supplier_paid_proof_at: now, supplier_paid_proof_by: by.id } : {}), updated_by: by.id }).eq("id", poId).is("supplier_paid_at", null);
   }
   const words = [`${pay.number}: AED ${amount.toFixed(2)} to ${input.supplierName}`, lines.length ? `on ${lines.length} invoice${lines.length === 1 ? "" : "s"}` : null, excess > 0.004 ? (input.excessKind === "fee" ? `AED ${excess.toFixed(2)} as a fee` : `AED ${excess.toFixed(2)} kept as an advance`) : null, applied.length ? applied.join("; ") : null].filter(Boolean).join(" · ");
@@ -229,7 +283,7 @@ export async function applyAdvanceUses(supplierId: string | null, supplierName: 
   const bad = checkAdvanceUses(uses, held, open);
   if (bad) return { error: bad, words: "", paymentIds: [] };
   const invReady = await lpoInvoicesReady();
-  const rows = uses.map((u) => { const k = splitPayKey(u.poId); return { payment_id: u.paymentId, po_id: k.poId, ...(invReady ? { lpo_invoice_id: k.invoiceId } : {}), amount_aed: r2(u.amount), applied_later: true, created_by: by.id, updated_by: by.id }; });
+  const rows = uses.map((u) => ({ payment_id: u.paymentId, ...lineTarget(u.poId, invReady), amount_aed: r2(u.amount), applied_later: true, created_by: by.id, updated_by: by.id }));
   const { error } = await admin.from("supplier_payment_lines").insert(rows, { defaultToNull: false });
   if (error) return { error: error.message, words: "", paymentIds: [] };
   const numberOf = new Map(held.map((h) => [h.paymentId, h.number]));
@@ -254,9 +308,12 @@ async function markSettled(supplierId: string | null, supplierName: string, touc
   for (const key of touchedKeys.filter((id) => !stillOwing.includes(id) && splitPayKey(id).invoiceId)) {
     await admin.from("lpo_invoices").update({ paid_at: now, paid_by: by.id, updated_by: by.id }).eq("id", splitPayKey(key).invoiceId!).is("paid_at", null);
   }
+  for (const key of touchedKeys.filter((k) => isLatheKey(k) && !stillOwing.includes(k))) {
+    await admin.from("lathe_bills").update({ paid_at: now, paid_method: method === "link" ? "card" : method, paid_by: by.id, updated_by: by.id }).eq("id", key.slice(6)).is("paid_at", null);
+  }
   const owingPos = new Set(stillOwing.map((k) => splitPayKey(k).poId));
   const { data: pay } = paymentId ? await admin.from("supplier_payments").select("number").eq("id", paymentId).maybeSingle() : { data: null };
-  for (const poId of Array.from(new Set(touchedKeys.map((k) => splitPayKey(k).poId))).filter((id) => !owingPos.has(id))) {
+  for (const poId of Array.from(new Set(touchedKeys.filter((k) => !isLatheKey(k)).map((k) => splitPayKey(k).poId))).filter((id) => !owingPos.has(id))) {
     await admin.from("purchase_orders").update({ supplier_paid_at: now, supplier_paid_by: by.id, supplier_paid_method: method === "link" ? "card" : method, supplier_paid_reference: (pay?.number as string | undefined) ?? null, supplier_payment_id: paymentId, updated_by: by.id }).eq("id", poId).is("supplier_paid_at", null);
   }
 }
@@ -264,7 +321,7 @@ async function markSettled(supplierId: string | null, supplierName: string, touc
 /** Undo one applied advance line (owner and accounts, with a remark): the line is turned off, the invoice owes again. */
 export async function undoAdvanceUse(lineId: string, remark: string, by: { id: string; display_name: string }): Promise<{ error?: string; words?: string; paymentId?: string }> {
   const admin = createAdminClient();
-  const { data: line } = await admin.from("supplier_payment_lines").select("id, payment_id, po_id, amount_aed, applied_later, is_active").eq("id", lineId).maybeSingle();
+  const { data: line } = await admin.from("supplier_payment_lines").select(`id, payment_id, po_id, amount_aed, applied_later, is_active${(await lathePayReady()) ? ", lathe_bill_id" : ""}`).eq("id", lineId).maybeSingle() as unknown as { data: { id: string; payment_id: string; po_id: string | null; amount_aed: number; applied_later: boolean; is_active: boolean; lathe_bill_id?: string | null } | null };
   if (!line || !line.is_active) return { error: "That advance line is already undone." };
   if (!line.applied_later) return { error: "Only an advance applied later can be undone here (void the payment itself instead)." };
   const { error } = await admin.from("supplier_payment_lines").update({ is_active: false, updated_by: by.id }).eq("id", lineId).eq("is_active", true);
@@ -273,6 +330,7 @@ export async function undoAdvanceUse(lineId: string, remark: string, by: { id: s
   const hist = [...((p?.edit_history as unknown[]) ?? []), { at: new Date().toISOString(), by: by.display_name, remark, changes: [{ field: "applied", old: `AED ${Number(line.amount_aed).toFixed(2)}`, new: "undone" }] }];
   await admin.from("supplier_payments").update({ edit_history: hist, updated_by: by.id }).eq("id", line.payment_id);
   // The LPO owes again: its paid stamp comes off.
-  await admin.from("purchase_orders").update({ supplier_paid_at: null, supplier_paid_by: null, supplier_paid_reference: null, supplier_payment_id: null, updated_by: by.id }).eq("id", line.po_id).not("supplier_paid_at", "is", null);
+  if (line.po_id) await admin.from("purchase_orders").update({ supplier_paid_at: null, supplier_paid_by: null, supplier_paid_reference: null, supplier_payment_id: null, updated_by: by.id }).eq("id", line.po_id).not("supplier_paid_at", "is", null);
+  if (line.lathe_bill_id) await admin.from("lathe_bills").update({ paid_at: null, paid_by: null, paid_reference: null, updated_by: by.id }).eq("id", line.lathe_bill_id);
   return { words: `AED ${Number(line.amount_aed).toFixed(2)} of ${p?.number ?? "the advance"} undone. The invoice owes it again; the advance holds it again.`, paymentId: line.payment_id as string };
 }

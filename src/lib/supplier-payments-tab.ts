@@ -1,7 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadSupplierInvoices } from "@/lib/supplier-invoices";
 import { unpaidBySupplier, type InvoiceRow, type UnpaidSupplier } from "@/lib/supplier-invoice-rows";
-import { advancesBySupplier, supplierPaymentsReadyNow } from "@/lib/supplier-payments";
+import { advancesBySupplier, latheDueBySupplier, supplierPaymentsReadyNow } from "@/lib/supplier-payments";
 
 /**
  * THE SUPPLIER PAYMENTS TAB (10 November 2026, Section 5): owner + accounts only. What is due by supplier (oldest
@@ -52,7 +52,14 @@ export async function loadPaymentsTab(opts: { from?: string | null; to?: string 
   const awaiting = awaitingBySupplier(inv?.rows ?? []);
   const { data: supList } = await createAdminClient().from("suppliers").select("id, name").eq("is_active", true).order("name").limit(1000);
   const suppliers = ((supList ?? []) as { id: string; name: string }[]).filter((x) => !/^our stock$/i.test(x.name.trim()));
-  const due = unpaidBySupplier(inv?.rows ?? []).sort((a, b) => (a.oldest ?? "9999").localeCompare(b.oldest ?? "9999") || b.total - a.total);
+  const dueRaw = unpaidBySupplier(inv?.rows ?? []);
+  // Lathe bills (11 November 2026, Section 6) are due like any supplier invoice (no VAT split: the total as printed).
+  for (const l of await latheDueBySupplier()) {
+    const cur = dueRaw.find((d) => (l.supplierId && d.supplierId === l.supplierId) || d.supplier.toUpperCase() === l.supplier.toUpperCase());
+    if (cur) { cur.count += l.count; cur.total = Math.round((cur.total + l.total) * 100) / 100; cur.net = Math.round((cur.net + l.total) * 100) / 100; if (l.oldest && (!cur.oldest || l.oldest < cur.oldest)) cur.oldest = l.oldest; }
+    else dueRaw.push({ supplier: l.supplier, supplierId: l.supplierId, count: l.count, total: l.total, net: l.total, vat: 0, vatCharged: false, oldest: l.oldest });
+  }
+  const due = dueRaw.sort((a, b) => (a.oldest ?? "9999").localeCompare(b.oldest ?? "9999") || b.total - a.total);
   if (!ready) return { ready, due, advances: new Map(), history: [], read: !!inv, awaiting, suppliers };
   const admin = createAdminClient();
   const advances = await advancesBySupplier();

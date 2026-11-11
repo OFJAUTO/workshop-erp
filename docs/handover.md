@@ -1,15 +1,16 @@
 # Handover – 11 November 2026, evening (11 Nov list of 16 sections: IN PROGRESS)
 
-**Done so far:** S1 stock LPOs in Supplier invoices and payments (41df358) · S2 parts belong to one quotation (dormant until apply) · S3 apply supplier advances without a new payment + invoice date check · S4 approvals box + Approvals page · S5 void a duplicate receipt + one cheque never more than its amount.
+**Done so far:** S1 stock LPOs in Supplier invoices and payments (41df358) · S2 parts belong to one quotation (dormant until apply) · S3 apply supplier advances without a new payment + invoice date check · S4 approvals box + Approvals page · S5 void a duplicate receipt + one cheque never more than its amount · S6 lathe bills.
 
 **NEEDS OMAR (11 Nov list):**
 - Supplier invoice dates to correct (Edit invoice on the LPO page, Mathew): LPO-00043-1 and LPO-00044-1 (GARGASH, dated 11 May 2026: likely 5 November, day and month swapped), LPO-00035-2 (SPARE HUB, dated 29 Oct 2016: likely 2026).
 - Mathew checks AL ALI's invoices total AED 6,693.75 (cheques 019383 + 019409), then voids RCT-00062; Omar approves. (On live: cheque 019383 = RCT-00057 2,236.50 + RCT-00058 2,131.50 = 4,368.00, both cleared in STL-00017; RCT-00062 2,236.50 on J-00860 is the duplicate still waiting; 019409 = RCT-00071 2,325.75.) After the apply: Accounts posting > Cheque > RCT-00062 > Void – duplicate.
+- Mathew moves KA-673205 to the right shop and ticks its tickets. (On live: KA-673205, AED 630, 9 Nov, is under ABU DHABI MOTORS L.L.C, which is not a lathe shop, and carries one ticket whose shop is KHALID & ALAM LATHE WORKSHOP. After the apply: Parts management > Lathe > KA-673205 > Correct > Lathe shop.)
 - Reply "apply" for the waiting list (docs/waiting-for-apply.md).
 - Q-00078 (J-00317): Peter re-links the parts on Q-00078. On live: 13 of the job's priced parts are on the approved Q-00020 and stay there; three (FRONT BRAKE PAD, MAIN BATTERY, TRANSMISSION MOUNT) were priced before Q-00078 existed and are on no quotation: after the apply they show on Q-00078 under "Parts priced for this job on another quote (3) – Add here".
 - Zoho mapping: pick the stock account for "Stock purchases (inventory)" on Settings > Zoho Books > Mapping (OFJ TEST makes "Inventory Asset" by itself).
 
-**WAITING FOR APPLY:** 1. part_quote_link (S2) · 2. receipt_void_request_cheque_total (S5). Backup backups/2026-11-11T13-52-56.
+**WAITING FOR APPLY:** 1. part_quote_link (S2) · 2. receipt_void_request_cheque_total (S5) · 3. lathe_bills_v2 (S6). Backup backups/2026-11-11T13-52-56.
 
 ---
 

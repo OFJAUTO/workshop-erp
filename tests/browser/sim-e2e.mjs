@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -3176,6 +3176,8 @@ await section("sec8", "outsourced lathe work", async () => {
     await form.scrollIntoViewIfNeeded().catch(() => null);
     await acc.page.screenshot({ path: `${proof}/s8-open-tickets-matching-bill-1440.png`, fullPage: true }).catch(() => null);
     await form.locator("[data-lathe-bill-save]").click();
+    // 11 November 2026: one confirm sentence first ("Record bill … from …, AED … covering n tickets?").
+    await acc.page.locator('[data-confirm-yes-money="lathe-bill"]').click({ timeout: 8000 }).catch(() => null);
     const billed = ((await form.locator("[data-lathe-done], [data-lathe-error]").first().textContent({ timeout: 30000 }).catch(() => "")) ?? "");
     check("l6: the bill is recorded (2 tickets, 1 line Parts told)", /2 tickets billed/.test(billed) && /Parts told/.test(billed), billed);
     const after = await sql("select id, lathe_bill_amount_aed, final_cost_aed from public.part_items where id in ($1, $2, $3) order by lathe_ticket", [t1.id, t2.id, t3.id]);
@@ -3199,9 +3201,18 @@ await section("sec8", "outsourced lathe work", async () => {
     const money = (n) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     check(`l8: the report (3 tickets, cost ${money(ourCost)}, charged ${money(charged)}, profit ${money(charged - ourCost)})`, /3 tickets \(2 billed\)/.test(rep) && rep.includes(money(ourCost)) && rep.includes(money(charged)) && rep.includes(money(charged - ourCost)), rep.slice(0, 220));
     await acc.page.locator("[data-lathe-report]").screenshot({ path: `${proof}/s8-lathe-report-1440.png` }).catch(() => null);
-    // l9. One payment for the whole bill.
-    await acc.page.locator(`[data-lathe-bill="E2E-LB-1"] input[name=paid_on]`).fill(today);
-    await acc.page.locator(`[data-lathe-bill="E2E-LB-1"] button[type=submit]`).click();
+    // l9. Paid through Supplier payments like any supplier invoice (11 November 2026, Section 6), or the old form before the apply.
+    if ((await acc.page.locator(`[data-lathe-bill="E2E-LB-1"] [data-lathe-pay-link]`).count()) === 1) {
+      const sup = (await sql("select supplier_id from public.lathe_bills where id = $1", [bill?.id]))[0]?.supplier_id;
+      await go(acc.page, `${base}/supplier-payments?supplier=${encodeURIComponent(sup ?? "name:E2E Lathe Works")}#pay`);
+      const box = acc.page.locator("[data-sp-pay-card] [data-supplier-pay-box]");
+      await box.locator(`[data-supplier-pay-invoice="lathe:${bill?.id}"]`).waitFor({ timeout: 20000 });
+      await box.locator("[data-supplier-pay-save]").click();
+      await acc.page.locator("[data-confirm-yes-money]").click({ timeout: 8000 });
+    } else {
+      await acc.page.locator(`[data-lathe-bill="E2E-LB-1"] input[name=paid_on]`).fill(today);
+      await acc.page.locator(`[data-lathe-bill="E2E-LB-1"] button[type=submit]`).click();
+    }
     const paid = await until(async () => (await sql("select paid_at is not null as p from public.lathe_bills where id = $1", [bill?.id]))[0]?.p === true, 40);
     check("l9: the bill paid as one supplier payment", paid === true);
     // l10. A ticket not billed after a month is flagged.
@@ -4249,6 +4260,97 @@ await section("e5", "void a duplicate receipt, one cheque never more than its am
   const after = Number((await sql("select count(*)::int as n from public.payments where cheque_number = '919383' and status = 'recorded'"))[0].n);
   check(`c4: refused without the cheque's full amount (${err.slice(0, 110)})`, after === before && /already recorded/.test(err));
   await acc.browser.close();
+});
+
+/* ================================================================================================= */
+/* e6 (11 November 2026, Section 6, KA-673205): the Lathe shop box starts EMPTY and lists only lathe   */
+/* shops with their open tickets; the confirm names the bill and warns (0 tickets, the same number      */
+/* twice); an unpaid bill not in Zoho is corrected (logged) and voided at once; one in Zoho needs the  */
+/* owner's approval to void; the invoice is attached ("No invoice attached" goes).                      */
+/* ================================================================================================= */
+await section("e6", "lathe bills: shop box, confirm, correct, void, attach", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-lathe-bills";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  await sql("insert into public.suppliers (name, is_active, vat_registered, created_by, updated_by) select 'E2E KHALID LATHE', true, false, $1, $1 where not exists (select 1 from public.suppliers where name = 'E2E KHALID LATHE')", [ownerId]);
+  await sql("insert into public.suppliers (name, is_active, vat_registered, created_by, updated_by) select 'E2E AAA MOTORS', true, true, $1, $1 where not exists (select 1 from public.suppliers where name = 'E2E AAA MOTORS')", [ownerId]);
+  const t = (await sql("insert into public.part_items (job_id, description, quantity, cost_aed, supplier, availability, priced_at, lathe_ticket, lathe_item, lathe_sent_at, created_by, updated_by) values ($1, 'E2E Brake disc resurfacing', 1, 300, 'E2E KHALID LATHE', 'in_stock', now(), 'SUB-E2E-61', 'Brake disc', now() - interval '2 days', $2, $2) returning id", [jobId, ownerId]))[0];
+  if (!t) throw new Error("seed failed: the ticket");
+  const acc = await browserFor("accounts", { viewport: { width: 1440, height: 900 } });
+  const ap = acc.page;
+  await go(ap, `${base}/parts/lathe`);
+  const form = ap.locator("[data-lathe-bill-form]");
+  const sel = form.locator("[data-lathe-bill-supplier]");
+  const opts = await sel.locator("option").evaluateAll((els) => els.map((e) => e.textContent ?? ""));
+  check(`k1: the Lathe shop box starts empty (${await sel.inputValue()})`, (await sel.inputValue()) === "");
+  check(`k1: only lathe shops, each with its open tickets (${opts.filter((o) => /E2E/.test(o)).join(" | ")})`, opts.some((o) => /E2E KHALID LATHE · 1 open ticket/.test(o)) && !opts.some((o) => /E2E AAA MOTORS/.test(o)));
+  await sel.selectOption("E2E KHALID LATHE");
+  check("k2: the shop's open tickets are listed", (await form.locator('[data-lathe-bill-tick="SUB-E2E-61"]').count()) === 1);
+  // k3. A bill covering no ticket: the confirm says so in words.
+  await form.locator("[data-lathe-bill-number]").fill("E2E-KA-1");
+  await form.locator("[data-lathe-bill-date]").fill((await sql("select (now() at time zone 'Asia/Dubai')::date::text as d"))[0].d);
+  await form.locator("[data-lathe-bill-net]").fill("600");
+  await form.locator("[data-lathe-bill-vat]").fill("30");
+  await sleep(500);
+  const warn = ((await form.locator("[data-lathe-bill-warnings]").textContent().catch(() => "")) ?? "");
+  check(`k3: the warning: 0 tickets, this cost won't be charged to any car (${warn.slice(0, 80)})`, /0 tickets: this cost won't be charged to any car/.test(warn));
+  await form.locator("[data-lathe-bill-save]").click();
+  const title = ((await ap.locator('[data-confirm-money="lathe-bill"] h2').first().textContent({ timeout: 8000 }).catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check(`k3: the confirm names the bill (${title.slice(0, 110)})`, /Record bill E2E-KA-1 from E2E KHALID LATHE, AED 630\.00 incl\. VAT, covering 0 tickets/.test(title));
+  await ap.screenshot({ path: `${proof}/e6-confirm-0-tickets-1440.png` }).catch(() => null);
+  await ap.locator('[data-confirm-yes-money="lathe-bill"]').click();
+  const bill = await until(async () => (await sql("select id, extra_lines::text as x from public.lathe_bills where bill_number = 'E2E-KA-1'"))[0], 40, 500);
+  check("k3: recorded as one line with no ticket", !!bill && /no ticket/.test(bill.x ?? ""));
+  // k4. The same number again warns.
+  await go(ap, `${base}/parts/lathe`);
+  await form.locator("[data-lathe-bill-supplier]").selectOption("E2E KHALID LATHE");
+  await form.locator("[data-lathe-bill-number]").fill("E2E-KA-1");
+  await form.locator("[data-lathe-bill-date]").fill((await sql("select (now() at time zone 'Asia/Dubai')::date::text as d"))[0].d);
+  await form.locator("[data-lathe-bill-net]").fill("100");
+  await sleep(400);
+  check("k4: the same bill number for the shop warns", /already entered/.test((await form.locator("[data-lathe-bill-warnings]").textContent().catch(() => "")) ?? ""));
+  // k5. Correct it (unpaid, not in Zoho): logged.
+  const row = ap.locator('[data-lathe-bill="E2E-KA-1"]');
+  check("k5: No invoice attached shows", (await row.locator("[data-lathe-no-file]").count()) === 1);
+  await row.locator('[data-lathe-edit-open="E2E-KA-1"]').click();
+  await row.locator('[data-lathe-edit-form] input[name="bill_number"]').fill("E2E-KA-1B");
+  await row.locator("[data-lathe-edit-remark]").fill("Typed the number wrong");
+  await row.locator("[data-lathe-edit-save]").click();
+  const edited = await until(async () => (await sql("select bill_number, jsonb_array_length(edit_history) as n from public.lathe_bills where id = $1", [bill.id]))[0]?.bill_number === "E2E-KA-1B", 40, 500);
+  check("k5: corrected, the change kept in its history", !!edited && Number((await sql("select jsonb_array_length(edit_history) as n from public.lathe_bills where id = $1", [bill.id]))[0]?.n) === 1);
+  // k6. Attach the invoice: the tag goes.
+  await go(ap, `${base}/parts/lathe`);
+  const row2 = ap.locator('[data-lathe-bill="E2E-KA-1B"]');
+  await row2.locator('[data-lathe-attach-open="E2E-KA-1B"]').click();
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  await row2.locator('[data-lathe-attach] input[type="file"]').first().setInputFiles({ name: "lathe-bill.png", mimeType: "image/png", buffer: png });
+  const filed = await until(async () => Number((await sql("select count(*)::int as n from public.job_files where kind = 'supplier_invoice' and ref_id = $1 and removed_at is null", [bill.id]))[0].n) === 1, 60, 500);
+  await go(ap, `${base}/parts/lathe`);
+  check("k6: the invoice is attached, No invoice attached gone", !!filed && (await ap.locator('[data-lathe-bill="E2E-KA-1B"] [data-lathe-no-file]').count()) === 0);
+  // k7. A bill already in Zoho: accounts ask, the owner approves the void.
+  await sql("update public.lathe_bills set zoho_bill_id = 'e2e-zb-1' where id = $1", [bill.id]);
+  await go(ap, `${base}/parts/lathe`);
+  const row3 = ap.locator('[data-lathe-bill="E2E-KA-1B"]');
+  check("k7: in Zoho it can no longer be corrected", (await row3.locator('[data-lathe-edit-open]').count()) === 0);
+  await row3.locator('[data-lathe-void-open="E2E-KA-1B"]').click();
+  await row3.locator("[data-lathe-void-reason]").fill("Billed to the wrong shop");
+  await row3.locator("[data-lathe-void-save]").click();
+  const asked = await until(async () => (await sql("select void_requested_at from public.lathe_bills where id = $1", [bill.id]))[0]?.void_requested_at, 40, 500);
+  check("k7: the void waits for the owner", !!asked);
+  await acc.browser.close();
+  const own = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  await go(own.page, `${base}/approvals`);
+  const box = own.page.locator(`[data-approval-box="lathe_void:${bill.id}"]`);
+  check("k7: on the owner's Approvals", (await box.count()) === 1);
+  await box.locator("[data-approval-approve]").click();
+  const voided = await until(async () => !!(await sql("select voided_at from public.lathe_bills where id = $1", [bill.id]))[0]?.voided_at, 40, 500);
+  check("k7: voided, kept on the list marked VOID", !!voided);
+  await go(own.page, `${base}/parts/lathe`);
+  check("k7: the list shows it VOID", (await own.page.locator('[data-lathe-bill="E2E-KA-1B"][data-lathe-bill-voided="1"]').count()) === 1);
+  await own.browser.close();
 });
 
 const failed = summary();

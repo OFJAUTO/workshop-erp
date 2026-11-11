@@ -28,6 +28,8 @@ export function contentTypeOf(raw: unknown): string {
 /** The place's id: a uuid (a job, an inspection, an LPO, a commission payment, a part). */
 export function scopeIdOf(body: UploadBody): string | null {
   const s = String(body.scopeId ?? "");
+  // "nocar" (11 November 2026): a supplier invoice of a stock LPO or a lathe bill; the job-file place checks the rest.
+  if (s === "nocar" && body.target === "job_file") return s;
   return UUID_RE.test(s) ? s.toLowerCase() : null;
 }
 

@@ -14,6 +14,22 @@ export const JOB_FILE_KINDS = ["work_photo", "additional_work", "wash_photo", "g
 const kindOf = (body: UploadBody) => String(body.kind ?? "");
 
 const jobExists = (jobId: string) => rowExists("jobs", jobId);
+/** 11 November 2026: the scope of a supplier invoice with no car (a stock LPO or a lathe bill). */
+export const NO_CAR_SCOPE = "nocar";
+/** The no-car scope holds supplier invoices only, tied to an LPO with no car or to a lathe bill. */
+async function noCarRefOk(body: Record<string, unknown>): Promise<boolean | null> {
+  if (kindOf(body) !== "supplier_invoice") return false;
+  const refId = body.refId ? String(body.refId) : "";
+  if (!isUuid(refId)) return false;
+  const admin = createAdminClient();
+  const { data: po, error: e1 } = await admin.from("purchase_orders").select("id, job_id").eq("id", refId).maybeSingle();
+  if (e1) return null;
+  if (po) return !po.job_id;
+  const { data: lb, error: e2 } = await admin.from("lathe_bills").select("id").eq("id", refId).maybeSingle();
+  if (e2) return null;
+  return !!lb;
+}
+const scopeThere = async (jobId: string, body: Record<string, unknown>) => (jobId === NO_CAR_SCOPE ? noCarRefOk(body) : jobExists(jobId));
 
 /** A team leader adds bodyshop photos only (the old /api/files/register rule, kept), and the film plotter photo of the Materials card. */
 function kindAllowed(roleId: string | null, kind: string, caption?: unknown): boolean {
@@ -56,7 +72,7 @@ export const jobFileTarget: TargetSpec = {
     if (!staff) return refuse("Signed out. Sign in again and it will send.", false, 401);
     if (staff.viewingAs) return refuse("You are viewing as someone else: files can't be added.", true);
     if (!kindAllowed(staff.role_id, kindOf(body), body.caption) && !(await chargeBillAllowed(staff.role_id, body))) return refuse(NOT_ALLOWED, true);
-    const there = await jobExists(jobId);
+    const there = await scopeThere(jobId, body);
     if (there === null) return checkLater();
     if (!there) return refuse("This car's record no longer exists.", true, 404);
     return { staffId: staff.id, roleId: staff.role_id, via: "login" } satisfies Actor;
@@ -69,7 +85,7 @@ export const jobFileTarget: TargetSpec = {
     if (!actor.staffId || (!kindAllowed(actor.roleId, kindOf(body), body.caption) && !(await chargeBillAllowed(actor.roleId ?? null, body)))) return refuse(NOT_ALLOWED, true);
     // A section tablet's PIN permit opens only what its PIN step was for: the bodyshop photo.
     if (grant.via === "pin" && kindOf(body) !== "bodyshop_photo") return refuse(NOT_ALLOWED, true);
-    const there = await jobExists(jobId);
+    const there = await scopeThere(jobId, body);
     if (there === null) return checkLater();
     if (!there) return refuse("This car's record no longer exists.", true, 404);
     return actor;
@@ -97,12 +113,12 @@ export const jobFileTarget: TargetSpec = {
     // A second register of the same file (the answer was lost on the way back) answers with the first one.
     const { data: had } = await admin.from("job_files").select("id, job_id, kind, uploaded_by").eq("storage_path", path).maybeSingle();
     // A repeat answers only the person who recorded it, for the same kind (never someone else's file and its address).
-    if (had && (had.job_id !== jobId || had.kind !== kind || had.uploaded_by !== actor.staffId)) return refuse(NOT_ALLOWED, true);
+    if (had && ((had.job_id ?? NO_CAR_SCOPE) !== jobId || had.kind !== kind || had.uploaded_by !== actor.staffId)) return refuse(NOT_ALLOWED, true);
     let id = (had?.id as string | undefined) ?? null;
     if (!had) {
       const { data: row, error } = await admin
         .from("job_files")
-        .insert({ job_id: jobId, kind, ref_id: refId, storage_path: path, content_type: contentType ? contentType.slice(0, 80) : null, caption, taken_at: takenAt, uploaded_by: actor.staffId, created_by: actor.staffId, updated_by: actor.staffId })
+        .insert({ job_id: jobId === NO_CAR_SCOPE ? null : jobId, kind, ref_id: refId, storage_path: path, content_type: contentType ? contentType.slice(0, 80) : null, caption, taken_at: takenAt, uploaded_by: actor.staffId, created_by: actor.staffId, updated_by: actor.staffId })
         .select("id")
         .single();
       if (error || !row) {

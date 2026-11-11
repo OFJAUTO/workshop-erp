@@ -14,6 +14,7 @@ import { decideFreeChargeAction } from "@/app/(app)/jobs/charge-actions";
 import { decideInspectionChange } from "@/app/(app)/jobs/inspection-actions";
 import { confirmComeback } from "@/app/(app)/jobs/comeback-actions";
 import { runMoreDecision } from "@/lib/approval-decisions";
+import { voidLatheBill } from "@/lib/lathe";
 
 export type ApprovalAnswer = { ok?: boolean; error?: string; message?: string } | null;
 
@@ -121,6 +122,23 @@ export async function decideApprovalAction(kind: ApprovalKind, id: string, decis
         }
       } else {
         await clearVoidRequest(id, staff, note);
+        answer = { ok: true, message: "Kept. Accounts are told why." };
+      }
+      break;
+    }
+    case "lathe_void": {
+      if (staff.role_id !== "owner") return { error: "Only the owner decides this." };
+      const admin = createAdminClient();
+      const { data: lb } = await admin.from("lathe_bills").select("bill_number, void_request_reason, void_requested_by").eq("id", id).maybeSingle();
+      if (yes) {
+        const r = await voidLatheBill(id, `${String(lb?.void_request_reason ?? "")}${note ? ` · owner: ${note}` : ""}`, staff);
+        answer = r.error ? { error: r.error } : { ok: true, message: r.words };
+      } else {
+        await admin.from("lathe_bills").update({ void_requested_at: null, void_requested_by: null, void_request_reason: null, updated_by: staff.id }).eq("id", id);
+        if (lb?.void_requested_by) {
+          const { notifyStaff } = await import("@/lib/notifications");
+          await notifyStaff([String(lb.void_requested_by)], { type: "owner_approval_needed", title: `Void refused · lathe bill ${lb.bill_number}`, body: `${staff.display_name}: ${note}`, href: "/parts/lathe" });
+        }
         answer = { ok: true, message: "Kept. Accounts are told why." };
       }
       break;

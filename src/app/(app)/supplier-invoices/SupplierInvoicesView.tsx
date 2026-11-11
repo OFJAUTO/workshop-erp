@@ -1,3 +1,4 @@
+import { latheV2Ready } from "@/lib/lathe";
 import { SupplierAmount } from "@/components/SupplierAmount";
 import { rowMoney } from "@/lib/supplier-money";
 import Link from "next/link";
@@ -257,6 +258,7 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome }: { ro
           jobId={row.shares[0].jobId}
           poTotal={row.shares[0].lpoTotal}
           lpoDate={row.lpoDate}
+          noCarUploads={!row.shares[0].jobId && (await latheV2Ready())}
           lines={((lines ?? []) as { id: string; po_id: string; description: string; unit_cost: number }[]).filter((l) => l.po_id === row.shares[0].poId).map((l) => ({ id: l.id, description: l.description, unit_cost: Number(l.unit_cost) }))}
           action={enterInvoiceFromList.bind(null, row.shares[0].poId, row.key)}
         />

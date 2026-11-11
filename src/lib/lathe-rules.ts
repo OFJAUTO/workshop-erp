@@ -80,7 +80,8 @@ export function splitBill(beforeVat: number, extra: number, tickets: BillTicket[
 /** The bill check: the ticked tickets plus the extra lines must come to the bill before VAT (to the fils). */
 export function billProblem(beforeVat: number, extra: number, tickets: BillTicket[]): string | null {
   if (!(beforeVat > 0)) return "Type the bill's amount before VAT.";
-  if (!tickets.length) return "Tick the tickets this bill covers.";
+  // No ticket ticked is allowed (11 November 2026): the confirm warns, and the bill posts as one line with no ticket.
+  if (!tickets.length) return null;
   const typedSum = tickets.reduce((a, t) => a + (t.typed ?? 0), 0);
   const allTyped = tickets.every((t) => t.typed !== null);
   const pool = Math.round((beforeVat - extra) * 100) / 100;
@@ -99,3 +100,21 @@ export function ticketStatus(t: { lathe_sent_at: string | null; lathe_back_at: s
 
 /** Unbilled after a month: listed in red. */
 export const unbilledTooLong = (sentAt: string | null, billed: boolean, nowMs: number) => !billed && !!sentAt && nowMs - Date.parse(sentAt) > 31 * 86400_000;
+
+/**
+ * The question before a lathe bill is recorded (11 November 2026, Section 6, KA-673205): the sentence and every warning
+ * - no ticket (the cost reaches no car), the amount not matching the tickets, the same number twice for one shop, a
+ * suspicious date. Warnings never block; the person reads them in the confirm.
+ */
+export function latheBillQuestion(i: { shop: string; number: string; total: number; beforeVat: number; tickets: number; ticketsTotal: number; duplicate: boolean; dateWarning: string | null }): { title: string; warnings: string[] } {
+  const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const warnings: string[] = [];
+  if (!i.tickets) warnings.push("0 tickets: this cost won't be charged to any car.");
+  else if (Math.abs(i.beforeVat - i.ticketsTotal) > 0.5) warnings.push(`The bill (${aed(i.beforeVat)} before VAT) is different from the tickets' total (${aed(i.ticketsTotal)}).`);
+  if (i.duplicate) warnings.push(`Bill ${i.number} from ${i.shop} is already entered.`);
+  if (i.dateWarning) warnings.push(i.dateWarning);
+  return { title: `Record bill ${i.number || "(no number)"} from ${i.shop || "(no shop)"}, ${aed(i.total)} incl. VAT, covering ${i.tickets} ticket${i.tickets === 1 ? "" : "s"}?`, warnings };
+}
+
+/** THE lathe shops: suppliers on a lathe ticket, or with "lathe" in their name. */
+export const isLatheShopName = (name: string) => /lathe/i.test(name);

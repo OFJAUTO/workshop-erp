@@ -35,8 +35,10 @@ export function LatheTicketForm({ jobId, items, suppliers, today, minMarkup }: {
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Lathe shop</span>
-              <select name="supplier" required defaultValue={suppliers[0] ?? ""} className="min-h-11 w-56 rounded-control border border-line-strong bg-white px-2 text-sm" data-lathe-supplier>
-                {suppliers.map((s) => <option key={s} value={s}>{s}</option>)}
+              <select name="supplier" required defaultValue="" className="min-h-11 w-56 rounded-control border border-line-strong bg-white px-2 text-sm" data-lathe-supplier>
+                {/* 11 November 2026: never a pre-selected supplier; lathe shops first. */}
+                <option value="" disabled>Choose the lathe shop</option>
+                {[...suppliers.filter((s) => /lathe/i.test(s)), ...suppliers.filter((s) => !/lathe/i.test(s))].map((s) => <option key={s} value={s}>{s}</option>)}
               </select>
             </label>
             <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Sent on</span><Input name="sent_on" type="date" required defaultValue={today} max={today} className="w-44" data-lathe-sent /></label>

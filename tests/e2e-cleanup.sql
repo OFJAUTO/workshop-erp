@@ -25,6 +25,9 @@ begin
   -- Lathe bills (9 November 2026): the test lathe shop's bills and their Zoho rows.
   if to_regclass('public.lathe_bills') is not null then
     update public.part_items set lathe_bill_id = null where lathe_bill_id in (select id from public.lathe_bills where supplier_name ilike 'e2e %');
+    if exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'supplier_payment_lines' and column_name = 'lathe_bill_id') then
+      execute $q$delete from public.supplier_payment_lines where lathe_bill_id in (select id from public.lathe_bills where supplier_name ilike 'e2e %')$q$;
+    end if;
     delete from public.zoho_outbox where kind = 'lathebill' and record_id in (select id from public.lathe_bills where supplier_name ilike 'e2e %');
     delete from public.lathe_bills where supplier_name ilike 'e2e %';
   end if;

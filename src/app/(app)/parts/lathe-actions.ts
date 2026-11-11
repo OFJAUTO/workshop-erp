@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createLatheTicket, markLatheBack, recordLatheBill } from "@/lib/lathe";
+import { createLatheTicket, editLatheBill, markLatheBack, recordLatheBill, requestLatheVoid } from "@/lib/lathe";
 import { parsePriceList } from "@/lib/lathe-rules";
 import { logAppError, SAVE_FAILED } from "@/lib/app-errors";
 
@@ -88,4 +88,22 @@ export async function saveLatheSettingsAction(_prev: LatheAnswer | null, formDat
   if (error) { await logAppError("lathe: settings", error, { staffId: staff.id }); return { error: SAVE_FAILED, at: Date.now() }; }
   revalidatePath("/parts/lathe");
   return { message: `Saved: ${items.length} item${items.length === 1 ? "" : "s"} on the price list.`, at: Date.now() };
+}
+
+/** Correct a lathe bill (11 November 2026, Section 6): unpaid and not in Zoho; the remark and every change kept. */
+export async function editLatheBillAction(billId: string, _prev: LatheAnswer | null, formData: FormData): Promise<LatheAnswer> {
+  const staff = await requireStaff();
+  if (staff.viewingAs) return { error: "View as is read-only.", at: Date.now() };
+  const r = await editLatheBill(billId, { supplier: String(formData.get("supplier") ?? ""), billNumber: String(formData.get("bill_number") ?? ""), billDate: String(formData.get("bill_date") ?? ""), beforeVat: num(formData.get("before_vat")), vat: num(formData.get("vat")), remark: String(formData.get("remark") ?? "") }, actorOf(staff));
+  if (r.ok) revalidatePath("/parts/lathe");
+  return { error: r.error, message: r.words, at: Date.now() };
+}
+
+/** Void a lathe bill: at once while unpaid and not in Zoho (or by the owner); else the owner approves. */
+export async function voidLatheBillAction(billId: string, _prev: LatheAnswer | null, formData: FormData): Promise<LatheAnswer> {
+  const staff = await requireStaff();
+  if (staff.viewingAs) return { error: "View as is read-only.", at: Date.now() };
+  const r = await requestLatheVoid(billId, String(formData.get("reason") ?? ""), actorOf(staff));
+  if (r.ok) { revalidatePath("/parts/lathe"); revalidatePath("/approvals"); }
+  return { error: r.error, message: r.words, at: Date.now() };
 }

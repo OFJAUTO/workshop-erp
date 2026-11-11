@@ -92,6 +92,10 @@ export async function voidSupplierPaymentAction(paymentId: string, _prev: PaySta
   const { error } = await admin.from("supplier_payments").update({ status: "void", void_reason: remark, edit_history: history, updated_by: staff.id }).eq("id", paymentId).eq("status", "recorded");
   if (error) return { error: dbWords(error, "parts/supplier-payment-void", { staffId: staff.id }) };
   await admin.from("purchase_orders").update({ supplier_paid_at: null, supplier_paid_by: null, supplier_paid_reference: null, supplier_payment_id: null, updated_by: staff.id }).eq("supplier_payment_id", paymentId);
+  // Lathe bills it paid (11 November 2026, Section 6) owe again too.
+  const { data: latheLines } = await admin.from("supplier_payment_lines").select("lathe_bill_id").eq("payment_id", paymentId).not("lathe_bill_id", "is", null);
+  const latheIds = ((latheLines ?? []) as { lathe_bill_id: string | null }[]).map((l) => l.lathe_bill_id).filter((x): x is string => !!x);
+  if (latheIds.length) await admin.from("lathe_bills").update({ paid_at: null, paid_by: null, paid_reference: null, updated_by: staff.id }).in("id", latheIds);
   await tryEnqueueZoho("supplierpay", paymentId, null, staff.id);
   revalidatePath("/parts/orders", "layout");
   revalidatePath("/supplier-invoices");
