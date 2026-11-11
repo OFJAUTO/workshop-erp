@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -3323,6 +3323,121 @@ await section("d2", "Autel post-scan files itself into QC", async () => {
   await go(o.page, `${base}/scans`);
   check("a8: the unmatched report is listed on Scan reports", ((await o.page.locator("main").textContent().catch(() => "")) ?? "").includes("audi.pdf"));
   await o.browser.close();
+});
+
+/* ================================================================================================= */
+/* d3 (10 November 2026, Section 3): one LPO, several supplier invoices. LPO-00043-3 recreated (two  */
+/* lines recorded together as 10670962) and split into two invoices, its Zoho bill reopened for      */
+/* each further invoice checked, queued as its own bill and paid on its own.                          */
+/* ================================================================================================= */
+await section("d3", "one LPO, several supplier invoices", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-10-several-invoices";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const sup = (await sql("insert into public.suppliers (name, trn, vat_registered, created_by, updated_by) values ('E2E GARGASH SPLIT', '100200300400777', true, $1, $1) returning id", [ownerId]))[0];
+  if (!sup?.id) throw new Error("seed failed: the supplier");
+  const today = (await sql("select (now() at time zone 'Asia/Dubai')::date::text as d"))[0].d;
+  const mkPo = async (number, net, invNumber, amount, vat) => (await sql("insert into public.purchase_orders (number, job_id, supplier_id, supplier_name, kind, status, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_vat_aed, supplier_invoice_at, created_by, updated_by) values ($1, $2, $3, 'E2E GARGASH SPLIT', 'supplier', 'received', $4, 'received', $5, $6, $7, $8, now(), $9, $9) returning id", [number, jobId, sup.id, net, invNumber, today, amount, vat, ownerId]))[0]?.id;
+  const mkLine = async (poId, pos, desc, qty, cost) => (await sql("insert into public.purchase_order_lines (po_id, position, description, quantity, unit_cost, received_qty, received_at, created_by, updated_by) values ($1, $2, $3, $4, $5, $4, now(), $6, $6) returning id", [poId, pos, desc, qty, cost, ownerId]))[0]?.id;
+  // A. LPO-00043-3: RADIATOR COOLANT HOSE 683.32 and UNDER COVER 990.44 recorded together as 10670962 (1,673.76 + VAT 83.69), already in Zoho.
+  const A = await mkPo("E2E-LPO-43-3", 1673.76, "E2E10670962", 1673.76, 83.69);
+  const hose = await mkLine(A, 1, "RADIATOR COOLANT HOSE", 1, 683.32);
+  const cover = await mkLine(A, 2, "UNDER COVER", 1, 990.44);
+  await sql("update public.purchase_orders set zoho_bill_id = 'e2e-bill-43-3', zoho_bill_taxed = true where id = $1", [A]);
+  await sql("insert into public.zoho_outbox (kind, record_id, job_id, status, zoho_id, zoho_result, synced_at) values ('bill', $1, $2, 'synced', 'e2e-bill-43-3', '{}'::jsonb, now())", [A, jobId]);
+  // B. Three lines: the first invoice covers two of them; the third comes on its own invoice.
+  const B = await mkPo("E2E-LPO-3L", 350, "E2E-INV-A", 250, 12.5);
+  const b1 = await mkLine(B, 1, "OIL FILTER", 1, 100);
+  const b2 = await mkLine(B, 2, "AIR FILTER", 1, 150);
+  const b3 = await mkLine(B, 3, "WIPER BLADE", 2, 50);
+  await sql("update public.purchase_orders set supplier_invoice_path = 'e2e/lpo-3l-invoice.pdf' where id = $1", [B]); // the scan is on file (no payment without it)
+  if (![A, hose, cover, B, b1, b2, b3].every(Boolean)) throw new Error("seed failed: the LPOs");
+
+  const acc = await browserFor("accounts", { viewport: { width: 1440, height: 900 } });
+  const page = acc.page;
+  let visit = 0;
+  const open = async (po) => { await go(page, `${base}/parts/orders/${po}?v=${++visit}`); };
+  const summary = async () => ((await page.locator("[data-lpo-invoices-summary]").textContent().catch(() => "")) ?? "").trim();
+  const answer = async (scope) => ((await page.locator(`${scope} [role=alert], ${scope} .bg-red-soft, ${scope} .bg-green-soft`).first().textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+  const tick = async (scope, lineId, qty) => {
+    const row = page.locator(`${scope} [data-pick-line$="${lineId}"]`);
+    await row.locator("input[type=checkbox]").check();
+    if (qty !== undefined) await row.locator(`input[name="qty__${lineId}"]`).fill(String(qty));
+  };
+  const fill = async (scope, { number, amount, vat }) => {
+    await page.locator(`${scope} [data-inv-number]`).fill(number);
+    await page.locator(`${scope} [data-inv-date]`).fill(today);
+    await page.locator(`${scope} [data-inv-amount]`).fill(String(amount));
+    await page.locator(`${scope} [data-inv-vat]`).fill(String(vat));
+  };
+
+  // i1. B: the first invoice covers lines 1-2 → line 3 waits for its own invoice.
+  await open(B);
+  check(`i1: one invoice, fully invoiced at first (${await summary()})`, /1 invoice · fully invoiced/.test(await summary()));
+  await page.locator("[data-not-on-first] summary").click();
+  await tick("[data-not-on-first]", b3);
+  await page.locator("[data-not-on-first-save]").click();
+  await until(async () => (await sql("select supplier_invoice_lines from public.purchase_orders where id = $1", [B]))[0]?.supplier_invoice_lines, 30, 500);
+  await open(B);
+  check(`i1: "1 invoice · 1 line still waiting for an invoice" (${await summary()})`, /1 invoice · 1 line still waiting for an invoice/.test(await summary()));
+  check("i1: the waiting line says Waiting for invoice", (await page.locator(`[data-lpo-invoice-line="${b3}"] [data-line-waiting]`).count()) === 1);
+  await page.locator("[data-add-invoice] summary").click();
+  await tick("[data-add-invoice]", b3, 3);
+  await fill("[data-add-invoice]", { number: "E2E-INV-B", amount: 100, vat: 5 });
+  await page.locator("[data-add-invoice-save]").click();
+  await sleep(2500);
+  const twiceLine = await answer("[data-add-invoice]");
+  await open(B);
+  await page.locator("[data-add-invoice] summary").click();
+  await tick("[data-add-invoice]", b3, 2);
+  await fill("[data-add-invoice]", { number: "E2E-INV-A", amount: 100, vat: 5 });
+  await page.locator("[data-add-invoice-save]").click();
+  await sleep(2500);
+  const twiceNumber = await answer("[data-add-invoice]");
+  // i4. The second invoice for line 3.
+  await open(B);
+  await page.locator("[data-add-invoice] summary").click();
+  await tick("[data-add-invoice]", b3, 2);
+  await fill("[data-add-invoice]", { number: "E2E-INV-B", amount: 100, vat: 5 });
+  await page.locator("[data-add-invoice-save]").click();
+  const invB = await until(async () => (await sql("select id, amount_aed::float as a from public.lpo_invoices where po_id = $1 and is_active", [B]))[0], 30, 500);
+  check(`i4: the second invoice saved (${JSON.stringify(invB)})`, invB?.a === 100);
+  await open(B);
+  check(`i4: "2 invoices · fully invoiced" (${await summary()})`, /2 invoices · fully invoiced/.test(await summary()));
+  // i5. Checked on its own → its own Zoho bill waits for Sync to Zoho.
+  await page.locator("[data-lpo-extra-invoice='E2E-INV-B'] [data-extra-check]").click();
+  const zrow = await until(async () => (await sql("select status from public.zoho_outbox where kind = 'lpoinvoice' and record_id = $1", [invB?.id]))[0], 30, 500);
+  check(`i5: checked, queued as its own Zoho bill (${zrow?.status})`, !!zrow);
+  // i6. Paid on its own: it is its own line in the payment box.
+  await open(B);
+  const payKeys = await page.locator("[data-supplier-pay-invoice]").evaluateAll((els) => els.map((e) => e.getAttribute("data-supplier-pay-invoice")));
+  check(`i6: the further invoice is its own line to pay (${payKeys.length})`, payKeys.some((k) => String(k).includes(`~${invB?.id}`)) && payKeys.includes(B));
+  // i7. The Supplier invoices list shows it as its own row.
+  await go(page, `${base}/supplier-invoices?q=E2E-INV-B`);
+  check("i7: the further invoice is a row on Supplier invoices", ((await page.locator("main").textContent().catch(() => "")) ?? "").includes("E2E-INV-B"));
+
+  // s1. LPO-00043-3 split: UNDER COVER moves to its own invoice; both amounts as printed.
+  await open(A);
+  await page.locator("[data-split-invoice] summary").click();
+  await tick("[data-split-invoice]", cover);
+  await fill("[data-split-invoice]", { number: "E2E10670963", amount: 990.44, vat: 49.52 });
+  await page.locator("[data-split-first-amount]").fill("683.32");
+  await page.locator("[data-split-first-vat]").fill("34.17");
+  await page.locator("[data-split-save]").click();
+  const split = await until(async () => (await sql("select number, amount_aed::float as a, vat_aed::float as v from public.lpo_invoices where po_id = $1 and is_active", [A]))[0], 30, 500);
+  check(`s1: the other invoice split off at 990.44 + 49.52 (${JSON.stringify(split)})`, split?.a === 990.44 && split?.v === 49.52);
+  const firstNow = (await sql("select supplier_invoice_amount::float as a, supplier_invoice_vat_aed::float as v, supplier_invoice_lines from public.purchase_orders where id = $1", [A]))[0];
+  check(`s1: 10670962 now covers the hose only, 683.32 + 34.17 (${JSON.stringify(firstNow)})`, firstNow?.a === 683.32 && firstNow?.v === 34.17 && JSON.stringify(firstNow?.supplier_invoice_lines ?? []).includes(hose) && !JSON.stringify(firstNow?.supplier_invoice_lines ?? []).includes(cover));
+  const reopened = (await sql("select status from public.zoho_outbox where kind = 'bill' and record_id = $1", [A]))[0]?.status;
+  check(`s1: the first invoice's Zoho bill is reopened for correction (${reopened})`, reopened === "pending");
+  await open(A);
+  check(`s1: "2 invoices · fully invoiced" (${await summary()})`, /2 invoices · fully invoiced/.test(await summary()));
+  await page.locator("[data-lpo-invoices]").scrollIntoViewIfNeeded().catch(() => null);
+  await page.locator("[data-lpo-invoices]").screenshot({ path: `${proof}/d3-lpo-00043-3-split-1440.png` }).catch(() => null);
+  await acc.browser.close();
 });
 
 const failed = summary();

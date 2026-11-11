@@ -1,4 +1,6 @@
 import { countsAsPaid } from "@/lib/bank-status";
+import { LpoInvoicesCard } from "./LpoInvoicesCard";
+import { lpoInvoiceGross, lpoInvoiceState, lpoInvoicesReady } from "@/lib/lpo-invoices";
 import Link from "next/link";
 import { SupplierPayBox } from "@/components/SupplierPayBox";
 import { advancesOf, openInvoicesOf, paymentsOnPo, supplierPaymentsReadyNow } from "@/lib/supplier-payments";
@@ -99,6 +101,10 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const editOn = invoiceEntered && canPay ? await invoiceEditReady() : false;
   const invoiceVat = invoiceEntered && (await invoiceVatReady()) ? (((await admin.from("purchase_orders").select("supplier_invoice_vat_aed").eq("id", po.id).maybeSingle()).data as { supplier_invoice_vat_aed?: number | null } | null)?.supplier_invoice_vat_aed ?? null) : null;
   const invoiceEdits = !isMain ? await loadInvoiceEdits([po.id]) : [];
+  // One LPO, several supplier invoices (10 November 2026, Section 3).
+  const invReady = !isMain ? await lpoInvoicesReady() : false;
+  const invState = !isMain && invoiceEntered ? await lpoInvoiceState(po.id) : null;
+  const lineDesc = new Map(lines.map((l) => [l.id, l.description]));
   const vsApproved = invoiceEntered ? approvedVsInvoiced(Number(po.total_cost_aed) || 0, po.supplier_invoice_amount) : null;
   const scanUrl = po.supplier_invoice_path ? (await signJobFiles([po.supplier_invoice_path]))[po.supplier_invoice_path] : null;
   // Every file of the supplier invoice (several pages photographed one by one are fine), removed ones left out.
@@ -464,6 +470,20 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
         </div>
 
         <div className="flex flex-col gap-4">
+          {invState ? (
+            <LpoInvoicesCard
+              poId={po.id}
+              jobId={po.job_id}
+              canPay={canPay}
+              ready={invReady}
+              summary={invState.summary}
+              coverage={invState.coverage}
+              first={{ number: po.supplier_invoice_number, amount: po.supplier_invoice_amount, vat: invState.po.supplier_invoice_vat_aed }}
+              extras={invState.extras.map((e) => ({ id: e.id, number: e.number, date: e.invoice_date, amount: e.amount_aed, vat: e.vat_aed, gross: lpoInvoiceGross(e, invState.chargesVat), lines: e.lines.map((c) => ({ lineId: c.line_id, description: lineDesc.get(c.line_id) ?? "", qty: c.qty })), checked: !!e.checked_at, paid: !!e.paid_at, query: e.query, inZoho: !!e.zoho_bill_id }))}
+              paid={!!po.supplier_paid_at}
+              today={today}
+            />
+          ) : null}
           <Card className="flex flex-col gap-2">
             <SectionLabel>Record</SectionLabel>
             <DescriptionList

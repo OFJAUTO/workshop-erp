@@ -44,6 +44,7 @@ export const KIND_WORDS: Record<ZohoKind, [string, string]> = {
   settlement: ["Bank posting", "Bank postings"],
   paygroup: ["Combined payment", "Combined payments"],
   lathebill: ["Lathe bill", "Lathe bills"],
+  lpoinvoice: ["Further supplier invoice", "Further supplier invoices"],
 };
 
 export const ZOHO_KINDS = Object.keys(KIND_WORDS) as ZohoKind[];
@@ -176,7 +177,7 @@ export function resultWords(kind: string, result: Record<string, unknown> | null
  * invoice that applies them, the invoice before its credit notes and payments, the bill before its payment and
  * credits). A manual sync sorts the WHOLE list this way, so a parent always goes before its children in one run.
  */
-export const POSTING_ORDER: Record<ZohoKind, number> = { contact: 0, vendor: 1, deposit: 2, paygroup: 2, invoice: 3, creditnote: 4, payment: 5, cnrefund: 6, bill: 7, vendorcredit: 8, billpayment: 9, supplierpay: 9, lathebill: 8, commission: 10, recovery: 11, settlement: 12 };
+export const POSTING_ORDER: Record<ZohoKind, number> = { contact: 0, vendor: 1, deposit: 2, paygroup: 2, invoice: 3, creditnote: 4, payment: 5, cnrefund: 6, bill: 7, vendorcredit: 8, billpayment: 9, supplierpay: 9, lathebill: 8, lpoinvoice: 7, commission: 10, recovery: 11, settlement: 12 };
 
 export function sortForPosting<T extends { kind: string; enqueued_at: string }>(rows: T[]): T[] {
   const rank = (k: string) => (POSTING_ORDER as Record<string, number>)[k] ?? 99;
@@ -191,7 +192,7 @@ export const PREVIEW_GROUPS: { key: string; label: string; kinds: ZohoKind[]; mo
   { key: "payments", label: "Payments and deposits", kinds: ["payment", "deposit", "paygroup"], money: "in" },
   { key: "creditnotes", label: "Credit notes", kinds: ["creditnote"], money: null },
   { key: "refunds", label: "Customer refunds", kinds: ["cnrefund"], money: "out" },
-  { key: "bills", label: "Supplier bills (lathe bills too)", kinds: ["bill", "lathebill"], money: null },
+  { key: "bills", label: "Supplier bills (lathe bills and further invoices on an LPO too)", kinds: ["bill", "lathebill", "lpoinvoice"], money: null },
   { key: "billpayments", label: "Supplier payments", kinds: ["billpayment", "supplierpay"], money: "out" },
   { key: "vendorcredits", label: "Supplier credits", kinds: ["vendorcredit"], money: null },
   { key: "settlements", label: "Bank postings (card, link, cheque, transfer)", kinds: ["settlement"], money: null },
@@ -281,7 +282,7 @@ export const CLAIM_FRESH_MS = 10 * 60 * 1000;
 export const RUN_CAP_TEST_ROWS = 120;
 
 /** Rough Zoho calls per row (search, create, check), for the "about N Zoho calls" line. */
-export const CALLS_PER_KIND: Record<ZohoKind, number> = { contact: 2, vendor: 2, deposit: 3, payment: 3, invoice: 6, creditnote: 4, cnrefund: 4, bill: 6, billpayment: 4, supplierpay: 5, vendorcredit: 4, commission: 3, recovery: 3, settlement: 4, paygroup: 3, lathebill: 5 };
+export const CALLS_PER_KIND: Record<ZohoKind, number> = { contact: 2, vendor: 2, deposit: 3, payment: 3, invoice: 6, creditnote: 4, cnrefund: 4, bill: 6, billpayment: 4, supplierpay: 5, vendorcredit: 4, commission: 3, recovery: 3, settlement: 4, paygroup: 3, lathebill: 5, lpoinvoice: 6 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 

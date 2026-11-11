@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadLpoInvoices, type LpoInvoiceRow } from "./lpo-invoices";
 import { supplierChargesVat } from "./supplier-rules";
 import { addSupplierMoney, lpoMoney, originalNetOf, supplierMoney, type SupplierMoney } from "./supplier-money";
 import { pageAllIn } from "./page-all";
@@ -14,7 +15,7 @@ type LineIn = { po_id: string; part_item_id: string | null; quantity: number | s
  * each supplier charge) - exactly as the approval screen does; a supplier or stock LPO by its supplier (an entered
  * invoice's own figures); a cancelled one at its ORIGINAL amount (every line it had), never counted.
  */
-export async function lpoAmounts(pos: PoIn[]): Promise<Map<string, LpoAmount>> {
+export async function lpoAmounts(pos: PoIn[], opts: { withFurther?: boolean } = {}): Promise<Map<string, LpoAmount>> {
   const out = new Map<string, LpoAmount>();
   if (!pos.length) return out;
   const admin = createAdminClient();
@@ -27,6 +28,7 @@ export async function lpoAmounts(pos: PoIn[]): Promise<Map<string, LpoAmount>> {
   const charges = mainIds.length ? await pageAllIn<{ id: string; po_id: string; supplier_name: string; amount_aed: number | string }>(mainIds, (chunk, a, b) => admin.from("supplier_charges").select("id, po_id, supplier_name, amount_aed").in("po_id", chunk).eq("is_active", true).order("id").range(a, b) as unknown as PromiseLike<{ data: { id: string; po_id: string; supplier_name: string; amount_aed: number | string }[] | null; error: { message: string } | null }>) : [];
   const entered = pos.filter((p) => p.supplier_invoice_status === "received").map((p) => p.id);
   const typed = new Map(entered.length && (await invoiceVatReady()) ? ((await admin.from("purchase_orders").select("id, supplier_invoice_vat_aed").in("id", entered)).data ?? []).map((r) => [String(r.id), r.supplier_invoice_vat_aed === null ? null : Number(r.supplier_invoice_vat_aed)]) : []);
+  const further = opts.withFurther === false ? new Map<string, LpoInvoiceRow[]>() : await loadLpoInvoices(pos.filter((p) => p.kind !== "main" && p.supplier_invoice_status === "received").map((p) => p.id)).catch(() => new Map<string, LpoInvoiceRow[]>());
   for (const po of pos) {
     const mine = lines.filter((l) => l.po_id === po.id);
     if (po.kind === "main") {
@@ -43,7 +45,10 @@ export async function lpoAmounts(pos: PoIn[]): Promise<Map<string, LpoAmount>> {
       continue;
     }
     const original = po.status === "cancelled" ? originalNetOf(mine) : null;
-    out.set(po.id, lpoMoney({ ...po, supplier_invoice_vat_aed: typed.get(po.id) ?? null }, vatOf(po.supplier_id, po.supplier_name), original));
+    const base = lpoMoney({ ...po, supplier_invoice_vat_aed: typed.get(po.id) ?? null }, vatOf(po.supplier_id, po.supplier_name), original);
+    // 10 November 2026 (Section 3): an LPO with several supplier invoices is worth all of them.
+    const more = further.get(po.id) ?? [];
+    out.set(po.id, more.length && po.supplier_invoice_status === "received" ? { ...base, ...addSupplierMoney([base, ...more.map((e) => supplierMoney(e.amount_aed, { chargesVat: vatOf(po.supplier_id, po.supplier_name), typedVat: e.vat_aed }))]) } : base);
   }
   return out;
 }

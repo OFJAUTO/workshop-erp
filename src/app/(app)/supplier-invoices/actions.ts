@@ -47,6 +47,13 @@ export async function checkInvoiceAction(key: string, formData?: FormData) {
   const now = new Date().toISOString();
   const clearQuery = (await siQueryReady()) ? { supplier_invoice_query: null, supplier_invoice_query_at: null, supplier_invoice_query_by: null } : {};
   for (const s of row.shares) {
+    // A further invoice on the LPO (10 November 2026): its own check and its own Zoho bill.
+    if (s.invoiceId) {
+      await admin.from("lpo_invoices").update({ checked_at: now, checked_by: staff.id, query: null, updated_by: staff.id }).eq("id", s.invoiceId).is("checked_at", null);
+      await tryEnqueueZoho("lpoinvoice", s.invoiceId, s.jobId, staff.id);
+      if (s.jobId) await admin.from("job_events").insert({ job_id: s.jobId, event_type: "supplier_invoice_checked", note: `Supplier invoice ${row.number} (${row.supplier}, ${s.poNumber}) checked by ${staff.display_name}`, created_by: staff.id });
+      continue;
+    }
     await admin.from("purchase_orders").update({ supplier_invoice_checked_at: now, supplier_invoice_checked_by: staff.id, ...clearQuery, updated_by: staff.id }).eq("id", s.poId).is("supplier_invoice_checked_at", null);
     if (Object.keys(clearQuery).length) await admin.from("purchase_orders").update({ ...clearQuery, updated_by: staff.id }).eq("id", s.poId);
     // The bill goes to Zoho Books when accounts have checked the invoice (1 November 2026).
@@ -70,6 +77,10 @@ export async function queryInvoiceAction(key: string, formData: FormData) {
   const admin = createAdminClient();
   const now = new Date().toISOString();
   for (const s of row.shares) {
+    if (s.invoiceId) {
+      await admin.from("lpo_invoices").update({ query: comment, query_at: now, query_by: staff.id, checked_at: null, checked_by: null, updated_by: staff.id }).eq("id", s.invoiceId);
+      continue;
+    }
     await admin.from("purchase_orders").update({ supplier_invoice_query: comment, supplier_invoice_query_at: now, supplier_invoice_query_by: staff.id, supplier_invoice_checked_at: null, supplier_invoice_checked_by: null, updated_by: staff.id }).eq("id", s.poId);
     if (s.jobId) await admin.from("job_events").insert({ job_id: s.jobId, event_type: "supplier_invoice_query", note: `Supplier invoice ${row.number ?? ""} (${row.supplier}, ${s.poNumber}) queried by ${staff.display_name}: ${comment}`, created_by: staff.id });
   }

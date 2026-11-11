@@ -9,6 +9,8 @@ import { createAdminClient } from "./supabase/admin";
 import { formatPlate } from "./types";
 import { MATCH_WORDS, STATUS_WORDS, groupInvoices, invoiceKeyNumber, invoiceNoticeTitle, type InvoiceRow, type SiJob, type SiLine, type SiPo, type SiSupplier } from "./supplier-invoice-rows";
 import type { XlsxSheet } from "./xlsx";
+import { loadLpoInvoices } from "./lpo-invoices";
+import { coverageOf, payKeyOf, type CoveredLine } from "./lpo-invoice-rules";
 
 /** Migration 20261202130000_supplier_invoice_query: accounts' query back to the parts desk. */
 export const siQueryReady = () => schemaReady("purchase_orders", "supplier_invoice_query, supplier_invoice_query_at, supplier_invoice_query_by");
@@ -40,7 +42,7 @@ export async function loadSupplierInvoices(opts: { jobId?: string; poIds?: strin
 
 async function readSupplierInvoices(opts: { jobId?: string; poIds?: string[] }): Promise<SupplierInvoices> {
   const admin = createAdminClient();
-  const queryCols = ((await siQueryReady()) ? ", supplier_invoice_query, supplier_invoice_query_at" : "") + ((await invoiceVatReady()) ? ", supplier_invoice_vat_aed" : "");
+  const queryCols = ((await siQueryReady()) ? ", supplier_invoice_query, supplier_invoice_query_at" : "") + ((await invoiceVatReady()) ? ", supplier_invoice_vat_aed" : "") + ((await schemaReady("purchase_orders", "supplier_invoice_lines")) ? ", supplier_invoice_lines" : "");
   // Every row, page by page (PostgREST answers 1,000 rows at most; the old .limit(1500) stopped silently at 1,000).
   const page = (from: number, to: number) => {
     let q = admin.from("purchase_orders").select(PO_COLS + queryCols).eq("is_active", true).neq("kind", "main").in("supplier_invoice_status", ["received", "to_follow"]).order("created_at", { ascending: false }).order("id").range(from, to);
@@ -83,6 +85,7 @@ async function readSupplierInvoices(opts: { jobId?: string; poIds?: string[] }):
     paid_by: (r.supplier_paid_by as string | null) ?? null,
     query: (r.supplier_invoice_query as string | null | undefined) ?? null,
     query_at: (r.supplier_invoice_query_at as string | null | undefined) ?? null,
+    line_ids: Array.isArray(r.supplier_invoice_lines) ? (r.supplier_invoice_lines as CoveredLine[]).map((c) => String(c.line_id)) : null,
   }));
   if (!pos.length) return none();
   // Part payments (6 November 2026): what the recorded supplier payments put on each LPO.
@@ -96,10 +99,33 @@ async function readSupplierInvoices(opts: { jobId?: string; poIds?: string[] }):
     pageAllIn<Record<string, unknown>>(jobIds, (ids, a, b) => admin.from("jobs").select("id, job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))").in("id", ids).order("id").range(a, b) as unknown as PromiseLike<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>),
     pageAllIn<Record<string, unknown>>(supIds, (ids, a, b) => admin.from("suppliers").select("id, name, trn, vat_registered").in("id", ids).order("id").range(a, b) as unknown as PromiseLike<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>),
   ]);
-  const lines: SiLine[] = lineRows.map((l) => ({ po_id: String(l.po_id), description: String(l.description ?? ""), quantity: Number(l.quantity) || 0, received_qty: Number(l.received_qty) || 0, unit_cost: Number(l.unit_cost) || 0, invoice_unit_cost: l.invoice_unit_cost === null || l.invoice_unit_cost === undefined ? null : Number(l.invoice_unit_cost), invoice_check: (l.invoice_check as string | null) ?? null }));
+  const lines: SiLine[] = lineRows.map((l) => ({ id: String(l.id), po_id: String(l.po_id), description: String(l.description ?? ""), quantity: Number(l.quantity) || 0, received_qty: Number(l.received_qty) || 0, unit_cost: Number(l.unit_cost) || 0, invoice_unit_cost: l.invoice_unit_cost === null || l.invoice_unit_cost === undefined ? null : Number(l.invoice_unit_cost), invoice_check: (l.invoice_check as string | null) ?? null }));
   type J = { id: string; job_number: string; vehicle: (Parameters<typeof formatPlate>[0] & { make: { name: string } | null; model: { name: string } | null }) | null };
   const jobs: SiJob[] = (jobRows as unknown as J[]).map((j) => ({ id: j.id, job_number: j.job_number, plate: j.vehicle ? formatPlate(j.vehicle) : "", car: [j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" ") }));
   const suppliers = supRows as unknown as SiSupplier[];
+  // 10 November 2026 (Section 3): one LPO, several supplier invoices - each further invoice is a row of its own, and
+  // what no invoice covers yet waits as "Waiting for invoice".
+  const extras = await loadLpoInvoices(pos.filter((p) => !p.invoice_id).map((p) => p.id));
+  if (extras.size || pos.some((p) => p.line_ids)) {
+    const more: SiPo[] = [];
+    for (const p of pos) {
+      const mineExtras = extras.get(p.id) ?? [];
+      if (!mineExtras.length && !p.line_ids) continue;
+      for (const e of mineExtras) {
+        more.push({ ...p, invoice_id: e.id, line_ids: e.lines.map((c) => c.line_id), supplier_invoice_status: "received", supplier_invoice_number: e.number, supplier_invoice_date: e.invoice_date, supplier_invoice_amount: e.amount_aed, supplier_invoice_vat_aed: e.vat_aed, supplier_invoice_at: e.created_at, checked_at: e.checked_at, zoho_bill_id: e.zoho_bill_id, paid_at: e.paid_at, paid_method: null, paid_reference: null, proof_path: null, paid_by: null, query: e.query, query_at: null, paid_aed: paidOn.get(payKeyOf(p.id, e.id)) ?? 0 });
+      }
+      if (p.supplier_invoice_status !== "received") continue;
+      const mine = lines.filter((l) => l.po_id === p.id);
+      const cov = coverageOf(mine.map((l) => ({ id: l.id!, description: l.description, quantity: l.quantity, received_qty: l.received_qty })), { entered: true, number: p.supplier_invoice_number, date: p.supplier_invoice_date, lines: p.line_ids ? (raw.find((r) => String(r.id) === p.id)?.supplier_invoice_lines as CoveredLine[]) : null }, mineExtras.map((e) => ({ id: e.id, number: e.number, date: e.invoice_date, lines: e.lines })));
+      if (!p.line_ids) p.line_ids = cov.filter((c) => c.onFirst > 0.0005).map((c) => c.lineId);
+      const waiting = cov.filter((c) => c.waiting > 0.0005);
+      if (waiting.length) {
+        const cost = waiting.reduce((a, c) => a + c.waiting * (mine.find((l) => l.id === c.lineId)?.unit_cost ?? 0), 0);
+        more.push({ ...p, invoice_id: "waiting", line_ids: waiting.map((c) => c.lineId), supplier_invoice_status: "to_follow", supplier_invoice_number: null, supplier_invoice_date: null, supplier_invoice_amount: null, supplier_invoice_vat_aed: null, total_cost_aed: Math.round(cost * 100) / 100, checked_at: null, zoho_bill_id: null, paid_at: null, query: null, paid_aed: 0 });
+      }
+    }
+    pos.push(...more);
+  }
   const partNames = new Map<string, string[]>();
   for (const l of lines) partNames.set(l.po_id, [...(partNames.get(l.po_id) ?? []), l.description]);
   return { rows: groupInvoices(pos, lines, jobs, suppliers), partNames, lines };

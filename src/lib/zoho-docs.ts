@@ -125,6 +125,12 @@ export async function outboxDocs(rows: { kind: ZohoKind; record_id: string; zoho
     const amount = round2(Number(b.total_aed) || 0);
     put(`lathebill:${b.id}`, `Lathe bill ${b.bill_number} · ${b.supplier_name} · ${aed(amount)}`, amount, { inZoho: !!b.zoho_bill_id, notForZoho: null });
   });
+  // A further supplier invoice on an LPO (10 November 2026, Section 3): its own bill, with VAT as printed (else 5%).
+  await each<{ id: string; number: string; supplier_name: string; amount_aed: number | string; vat_aed: number | string | null; is_active: boolean; zoho_bill_id: string | null }>("lpo_invoices", "id, number, supplier_name, amount_aed, vat_aed, is_active, zoho_bill_id", idsOf("lpoinvoice"), (b) => {
+    const net = round2(Number(b.amount_aed) || 0);
+    const amount = round2(net + (b.vat_aed === null ? round2(net * 0.05) : round2(Number(b.vat_aed) || 0)));
+    put(`lpoinvoice:${b.id}`, `Supplier invoice ${b.number} · ${b.supplier_name} · ${aed(amount)}`, amount, { inZoho: !!b.zoho_bill_id, notForZoho: b.is_active === false ? "the invoice was taken off the LPO" : null });
+  });
   await each<{ id: string; number: string; recipient: string; amount_aed: number | string; is_active: boolean; zoho_expense_id: string | null }>("commission_payments", "id, number, recipient, amount_aed, is_active, zoho_expense_id", idsOf("commission"), (v) => {
     const amount = round2(Number(v.amount_aed) || 0);
     put(`commission:${v.id}`, `${v.number} · ${v.recipient} · ${aed(amount)}`, amount, { inZoho: !!v.zoho_expense_id, notForZoho: v.is_active === false ? "the voucher is inactive in the ERP" : null });

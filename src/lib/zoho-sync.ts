@@ -372,7 +372,7 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
 
 /* ------------------------------------------------------- the outbox ------------------------------------------------------- */
 
-export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery" | "vendorcredit" | "cnrefund" | "settlement" | "supplierpay" | "paygroup" | "lathebill";
+export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery" | "vendorcredit" | "cnrefund" | "settlement" | "supplierpay" | "paygroup" | "lathebill" | "lpoinvoice";
 export type OutboxRow = {
   id: string;
   kind: ZohoKind;
@@ -1011,6 +1011,73 @@ async function syncLatheBillRow(org: string, accounts: Resolved, billId: string)
   return { zohoId: zid, result: { lathe_bill: b.bill_number, lines: line_items.length, total: round2(Number(b.total_aed) || 0), payment: payId ?? null } };
 }
 
+/**
+ * A FURTHER SUPPLIER INVOICE ON AN LPO (10 November 2026, Section 3): its own Zoho bill. The bill number is the supplier's
+ * invoice number, the parts go as one line at the invoice's net (the VAT as printed: Zoho's 5% plus any fils of rounding
+ * as the adjustment), reference "<LPO>/<number>", the scan attached. Searched before it is made; an edit since it posted
+ * is corrected once while nothing was paid on it in Zoho. Posts only once accounts checked it.
+ */
+async function syncLpoInvoiceRow(org: string, accounts: Resolved, invoiceId: string): Promise<HandlerOut> {
+  const admin = createAdminClient();
+  const { data: raw } = await admin.from("lpo_invoices").select("id, po_id, number, invoice_date, amount_aed, vat_aed, lines, checked_at, is_active, zoho_bill_id, zoho_bill_taxed").eq("id", invoiceId).maybeSingle();
+  const inv = raw as { id: string; po_id: string; number: string; invoice_date: string; amount_aed: number | string; vat_aed: number | string | null; lines: { line_id: string; qty: number }[] | null; checked_at: string | null; is_active: boolean; zoho_bill_id: string | null; zoho_bill_taxed: boolean | null } | null;
+  if (!inv) throw new ZohoError("The supplier invoice no longer exists in the ERP.");
+  if (!inv.is_active && !inv.zoho_bill_id) return { result: { skipped: "Taken off the LPO before it was posted. Nothing went to Zoho." } };
+  if (!inv.is_active) throw new ZohoError(`Supplier invoice ${inv.number} was taken off its LPO after its bill reached Zoho: void that bill in Zoho by hand, then press "Done by hand".`);
+  if (!inv.checked_at) return { wait: "Waiting for accounts to check the invoice." };
+  const po = await poForZoho(inv.po_id);
+  if (/^our stock$/i.test(po.supplier_name.trim())) return { result: { skipped: "An Our-stock LPO is internal (our own shelf): no supplier bill." } };
+  const gate = await startDateSkip(String(inv.invoice_date).slice(0, 10), ["lpoinvoice"], inv.id);
+  if (gate) return gate;
+  const vendor = await poVendor(org, po);
+  const taxed = inv.zoho_bill_taxed ?? (await vendorVatRegistered(org, po, vendor));
+  const purchases = needAccounts(accounts.purchases, accounts.purchasesError);
+  const net = roundHalfUp(Number(inv.amount_aed) || 0);
+  const vat = taxed ? (inv.vat_aed === null ? roundHalfUp(net * 0.05) : roundHalfUp(Number(inv.vat_aed) || 0)) : 0;
+  const gross = roundHalfUp(net + vat);
+  const count = (inv.lines ?? []).length;
+  const line_items = [{ name: cut(`Parts per ${po.number} (invoice ${inv.number}) – ${count} item${count === 1 ? "" : "s"}`, 100), rate: net, quantity: 1, account_id: purchases.parts, ...(taxed ? { tax_id: accounts.taxId } : {}) }];
+  const zohoVat = taxed ? roundHalfUp(net * 0.05) : 0;
+  const vatAdjust = roundHalfUp(vat - zohoVat);
+  if (Math.abs(vatAdjust) > 1) throw new ZohoError(`${po.number}: the VAT typed for invoice ${inv.number} (${vat.toFixed(2)}) is more than AED 1 away from 5% of ${net.toFixed(2)} (${zohoVat.toFixed(2)}): check it on the LPO page.`);
+  const adjustment = Math.abs(vatAdjust) > 0.004 ? { adjustment: vatAdjust, adjustment_description: "VAT rounding as printed on the supplier's invoice" } : {};
+  const reference = cut(`${po.number}/${inv.number}`, 50);
+  const body = { vendor_id: vendor.vendorId, bill_number: inv.number, date: String(inv.invoice_date).slice(0, 10), reference_number: reference, line_items, notes: `ERP ${po.number}: a further supplier invoice on this LPO`, is_inclusive_tax: false, tax_treatment: taxed ? "vat_registered" : "vat_not_registered", ...adjustment };
+  const matches = (z: ZohoBill) => near(z.sub_total, net) && near(round2(z.total - z.sub_total), vat) && near(z.total, gross);
+  let z: ZohoBill | null = inv.zoho_bill_id ? await zohoBillById(org, inv.zoho_bill_id) : null;
+  if (!z) {
+    const j = await zohoFetch<{ bills?: ZohoBill[] }>(`/bills?bill_number=${encodeURIComponent(inv.number)}&vendor_id=${encodeURIComponent(vendor.vendorId)}`, { org });
+    const found = j.bills?.find((x) => x.bill_number === inv.number) ?? null;
+    const full = found ? await zohoBillById(org, found.bill_id) : null;
+    if (full && !near(full.sub_total, net)) throw new ZohoError(`A bill numbered ${inv.number} already exists in Zoho for this supplier with different figures (${full.sub_total.toFixed(2)} there, ${net.toFixed(2)} here): the accountant checks it in Zoho.`);
+    z = full;
+  }
+  if (!z) {
+    const j = await zohoFetch<{ bill?: ZohoBill }>("/bills", { org, method: "POST", body });
+    z = j.bill ?? null;
+    if (!z) throw new ZohoError("Zoho did not return the new bill.");
+  }
+  if (!matches(z)) {
+    if (z.balance + 0.004 < z.total) throw new ZohoError(`Zoho differs: ${billDiffWords(z, net, vat, gross)}. The bill ${inv.number} (${po.number}) is already part paid in Zoho: correct it there by hand, then press "Done by hand".`);
+    await zohoFetch(`/bills/${z.bill_id}`, { org, method: "PUT", body: { ...body, adjustment: (adjustment as { adjustment?: number }).adjustment ?? 0, adjustment_description: (adjustment as { adjustment_description?: string }).adjustment_description ?? "" } });
+    z = (await zohoBillById(org, z.bill_id)) ?? z;
+  }
+  if (!matches(z)) throw new ZohoError(`Zoho differs: ${billDiffWords(z, net, vat, gross)} (the bill ${inv.number}, ${po.number}).`);
+  await admin.from("lpo_invoices").update({ zoho_bill_id: z.bill_id, zoho_bill_taxed: taxed }).eq("id", inv.id);
+  let attached = (z.documents?.length ?? 0) > 0;
+  if (!attached) {
+    const { data: files } = await admin.from("job_files").select("storage_path").eq("kind", "supplier_invoice").eq("ref_id", inv.id).is("removed_at", null).order("created_at").limit(5);
+    for (const f of (files ?? []) as { storage_path: string }[]) {
+      const file = await bucketFile("job-files", f.storage_path);
+      if (!file || !BILL_ATTACH_EXTS.has(file.ext)) continue;
+      await zohoFetch(`/bills/${z.bill_id}/attachment`, { org, method: "POST", upload: { field: "attachment", filename: file.name, contentType: file.contentType, data: file.data } });
+      attached = true;
+      break;
+    }
+  }
+  return { zohoId: z.bill_id, result: { bill: inv.number, lpo: po.number, zoho: { net: z.sub_total, vat: z.tax_total, total: z.total, balance: z.balance }, erp: { net, vat, total: gross }, ...(Math.abs(vatAdjust) > 0.004 ? { vat_adjustment: vatAdjust } : {}), attached } };
+}
+
 async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string): Promise<HandlerOut> {
   const admin = createAdminClient();
   const groupCol = (await schemaReady("payments", "group_id")) ? ", group_id" : "";
@@ -1621,11 +1688,23 @@ async function syncSupplierPayRow(org: string, accounts: Resolved, paymentId: st
   const gate = await startDateSkip(pay.paid_on, "supplierpay", pay.id);
   if (gate) return gate;
   if (!pay.supplier_id) throw new ZohoError(`${pay.number}: the supplier ${pay.supplier_name} is not on the suppliers list, so Zoho has no vendor for it. Add it on Parts > Suppliers, then Retry.`);
-  const { data: lineRows } = await admin.from("supplier_payment_lines").select("po_id, amount_aed, applied_later").eq("payment_id", pay.id).eq("is_active", true);
-  const lines = ((lineRows ?? []) as { po_id: string; amount_aed: number; applied_later: boolean }[]).map((l) => ({ poId: l.po_id, amount: round2(Number(l.amount_aed) || 0), later: !!l.applied_later }));
+  // A line may pay a FURTHER invoice on the LPO (10 November 2026, Section 3): its own bill.
+  const invCol = (await schemaReady("supplier_payment_lines", "lpo_invoice_id")) ? ", lpo_invoice_id" : "";
+  const { data: lineRows } = await admin.from("supplier_payment_lines").select("po_id, amount_aed, applied_later" + invCol).eq("payment_id", pay.id).eq("is_active", true);
+  const lines = ((lineRows ?? []) as unknown as { po_id: string; amount_aed: number; applied_later: boolean; lpo_invoice_id?: string | null }[]).map((l) => ({ poId: l.po_id, invoiceId: l.lpo_invoice_id ?? null, amount: round2(Number(l.amount_aed) || 0), later: !!l.applied_later }));
   // Every bill first: a payment applies only to bills Zoho already has.
   const bills: { bill_id: string; amount_applied: number }[] = [];
   for (const l of lines) {
+    if (l.invoiceId) {
+      const { data: inv } = await admin.from("lpo_invoices").select("number, zoho_bill_id").eq("id", l.invoiceId).maybeSingle();
+      const row = inv as { number: string; zoho_bill_id: string | null } | null;
+      if (!row?.zoho_bill_id) {
+        await ensureQueued("lpoinvoice", l.invoiceId, null);
+        return { wait: `Waiting for the bill of invoice ${row?.number ?? ""} to reach Zoho first (accounts check it on the LPO).` };
+      }
+      bills.push({ bill_id: row.zoho_bill_id, amount_applied: l.amount });
+      continue;
+    }
     const po = await poForZoho(l.poId);
     if (!po.zoho_bill_id) {
       await ensureQueued("bill", po.id, po.job_id);
@@ -2349,6 +2428,7 @@ async function processOutboxRow(row: WorkRow, ctx: RunCtx): Promise<RowDone> {
           : row.kind === "settlement" ? await syncSettlementRow(org, accounts, row.record_id)
           : row.kind === "paygroup" ? await syncPayGroupRow(org, accounts, row.record_id)
           : row.kind === "lathebill" ? await syncLatheBillRow(org, accounts, row.record_id)
+          : row.kind === "lpoinvoice" ? await syncLpoInvoiceRow(org, accounts, row.record_id)
           : await syncPaymentRow(org, accounts, row.record_id);
       }
     }

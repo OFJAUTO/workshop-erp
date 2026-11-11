@@ -10,6 +10,10 @@ import { supplierChargesVat } from "./supplier-rules";
 
 export type SiPo = {
   id: string;
+  /** A FURTHER supplier invoice on this LPO (10 November 2026, Section 3): the row is that invoice; null = the LPO's first. */
+  invoice_id?: string | null;
+  /** The LPO lines this invoice covers (null = all of them). */
+  line_ids?: string[] | null;
   /** What the recorded supplier payments put on this LPO (6 November 2026); a part payment shows as part paid. */
   paid_aed?: number;
   number: string;
@@ -38,7 +42,7 @@ export type SiPo = {
   query?: string | null;
   query_at?: string | null;
 };
-export type SiLine = { po_id: string; description: string; quantity: number; received_qty: number; unit_cost: number; invoice_unit_cost: number | null; invoice_check: string | null };
+export type SiLine = { id?: string; po_id: string; description: string; quantity: number; received_qty: number; unit_cost: number; invoice_unit_cost: number | null; invoice_check: string | null };
 export type SiJob = { id: string; job_number: string; plate: string; car: string };
 export type SiSupplier = { id: string; name: string; trn: string | null; vat_registered: boolean | null };
 
@@ -64,7 +68,7 @@ export const MATCH_WORDS: Record<InvoiceMatch, string> = {
  * One LPO's part of a supplier invoice. Payment is recorded LPO by LPO ("Paid to supplier" on each LPO page), so each
  * share carries its own paid stamp: a split invoice can be partly paid.
  */
-export type InvoiceShare = { poId: string; poNumber: string; jobId: string | null; jobNumber: string | null; plate: string; car: string; amount: number; /** This share's VAT (the LPO's typed VAT when one was entered, else 5% of the amount) and the share with it. */ vat: number; withVat: number; lpoTotal: number; parts: number; paidAt: string | null; /** Fix 4 (4 November 2026): the payment's own facts, so the proof box reads per LPO. */ paidMethod: string | null; paidReference: string | null; proofPath: string | null; paidBy: string | null };
+export type InvoiceShare = { /** The further invoice this share is (null = the LPO's first invoice). */ invoiceId: string | null; poId: string; poNumber: string; jobId: string | null; jobNumber: string | null; plate: string; car: string; amount: number; /** This share's VAT (the LPO's typed VAT when one was entered, else 5% of the amount) and the share with it. */ vat: number; withVat: number; lpoTotal: number; parts: number; paidAt: string | null; /** Fix 4 (4 November 2026): the payment's own facts, so the proof box reads per LPO. */ paidMethod: string | null; paidReference: string | null; proofPath: string | null; paidBy: string | null };
 export type InvoiceRow = {
   key: string;
   supplier: string;
@@ -129,7 +133,7 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
     const inv = po.supplier_invoice_status;
     if (inv !== "received" && inv !== "to_follow") continue;
     const supKey = po.supplier_id ?? po.supplier_name.trim().toLowerCase();
-    const key = inv === "to_follow" || !invoiceKeyNumber(po.supplier_invoice_number) ? `follow:${po.id}` : `${supKey}|${invoiceKeyNumber(po.supplier_invoice_number)}`;
+    const key = inv === "to_follow" || !invoiceKeyNumber(po.supplier_invoice_number) ? `follow:${po.id}${po.invoice_id ? `:${po.invoice_id}` : ""}` : `${supKey}|${invoiceKeyNumber(po.supplier_invoice_number)}`;
     groups.set(key, [...(groups.get(key) ?? []), po]);
   }
   const rows: InvoiceRow[] = [];
@@ -143,12 +147,12 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
     const waiting = items.every((p) => p.supplier_invoice_status === "to_follow");
     const shares: InvoiceShare[] = items.map((p) => {
       const j = p.job_id ? jobOf.get(p.job_id) : null;
-      const mine = lines.filter((l) => l.po_id === p.id);
+      const mine = lines.filter((l) => l.po_id === p.id && (!p.line_ids || (l.id !== undefined && p.line_ids.includes(l.id))));
       const amount = r2(waiting ? p.total_cost_aed : (p.supplier_invoice_amount ?? p.total_cost_aed));
       // The LPO's own typed VAT wins (supplier invoice edit, 5 November 2026); an unentered invoice has none yet.
       const typedVat = waiting ? null : (p.supplier_invoice_vat_aed ?? null);
       const vat = supplierMoney(amount, { chargesVat, typedVat, vatPercent }).vat;
-      return { poId: p.id, poNumber: p.number, jobId: p.job_id, jobNumber: j?.job_number ?? null, plate: j?.plate ?? "", car: j?.car ?? "", amount, vat, withVat: r2(amount + vat), lpoTotal: p.total_cost_aed, parts: mine.length, paidAt: p.paid_at, paidMethod: p.paid_method ?? null, paidReference: p.paid_reference ?? null, proofPath: p.proof_path ?? null, paidBy: p.paid_by ?? null };
+      return { invoiceId: p.invoice_id ?? null, poId: p.id, poNumber: p.number, jobId: p.job_id, jobNumber: j?.job_number ?? null, plate: j?.plate ?? "", car: j?.car ?? "", amount, vat, withVat: r2(amount + vat), lpoTotal: p.total_cost_aed, parts: mine.length, paidAt: p.paid_at, paidMethod: p.paid_method ?? null, paidReference: p.paid_reference ?? null, proofPath: p.proof_path ?? null, paidBy: p.paid_by ?? null };
     });
     const beforeVat = r2(shares.reduce((a, s) => a + s.amount, 0));
     const vat = r2(shares.reduce((a, s) => a + s.vat, 0));
@@ -156,9 +160,9 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
     // Paid LPO by LPO: the paid shares with their VAT, the rest still to pay (all or nothing is exactly the total).
     const paidShares = shares.filter((s) => s.paidAt);
     // A recorded payment may cover part of an LPO (6 November 2026): what it put on each LPO counts, never more than it owes.
-    const paidOf = (s: InvoiceShare) => (s.paidAt ? s.withVat : Math.min(r2(items.find((p) => p.id === s.poId)?.paid_aed ?? 0), s.withVat));
+    const paidOf = (s: InvoiceShare) => (s.paidAt ? s.withVat : Math.min(r2(items.find((p) => p.id === s.poId && (p.invoice_id ?? null) === s.invoiceId)?.paid_aed ?? 0), s.withVat));
     const paidAmount = paidShares.length === shares.length ? total : r2(shares.reduce((a, s) => a + paidOf(s), 0));
-    const mine = lines.filter((l) => items.some((p) => p.id === l.po_id));
+    const mine = lines.filter((l) => items.some((p) => p.id === l.po_id && (!p.line_ids || (l.id !== undefined && p.line_ids.includes(l.id)))));
     const match: InvoiceMatch[] = [];
     if (!mine.length) match.push("not_linked");
     else {

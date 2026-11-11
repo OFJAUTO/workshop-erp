@@ -1,7 +1,10 @@
 import "server-only";
 import { pageAllIn } from "./page-all";
 import { createAdminClient } from "./supabase/admin";
-import { lpoAmounts } from "./supplier-vat";
+import { lpoAmounts, supplierVatLookup } from "./supplier-vat";
+import { loadLpoInvoices, lpoInvoiceGross, lpoInvoicesReady } from "./lpo-invoices";
+import { payKeyOf, splitPayKey } from "./lpo-invoice-rules";
+import { schemaReady } from "./schema-ready";
 import { advanceLeft, checkAllocations, type Allocation, type OpenInvoice, type SupplierPayMethod, SUPPLIER_PAY_METHOD_KEYS } from "./supplier-payment-rules";
 
 /**
@@ -24,14 +27,25 @@ export async function openInvoicesOf(supplierId: string | null, supplierName: st
   const { data } = await q;
   const pos = ((data ?? []) as PoRow[]).map((p) => ({ ...p, total_cost_aed: Number(p.total_cost_aed) || 0, supplier_invoice_amount: p.supplier_invoice_amount === null ? null : Number(p.supplier_invoice_amount) }));
   if (!pos.length) return [];
-  const [amounts, paidMap] = await Promise.all([lpoAmounts(pos), paidOnPos(pos.map((p) => p.id))]);
-  return pos
+  const [amounts, paidMap] = await Promise.all([lpoAmounts(pos, { withFurther: false }), paidOnPos(pos.map((p) => p.id))]);
+  // 10 November 2026 (Section 3): each further supplier invoice on an LPO is paid on its own (key "<po>~<invoice>").
+  const extrasMap = await loadLpoInvoices(pos.map((p) => p.id));
+  const vatOf = extrasMap.size ? await supplierVatLookup() : null;
+  const extraOpen = pos.flatMap((p) =>
+    (extrasMap.get(p.id) ?? []).map((inv) => {
+      const gross = lpoInvoiceGross(inv, vatOf ? vatOf(p.supplier_id, p.supplier_name) : true);
+      const key = payKeyOf(p.id, inv.id);
+      const paid = inv.paid_at && !(paidMap.get(key) ?? 0) ? gross : (paidMap.get(key) ?? 0);
+      return { poId: key, label: `${inv.number} · ${p.number}`, date: inv.invoice_date, due: r2(gross - paid), gross, paid: r2(paid), jobId: p.job_id };
+    }),
+  );
+  return [...pos
     .map((p) => {
       const gross = amounts.get(p.id)?.gross ?? 0;
       // The old one-LPO "Paid to supplier" (before payments were recorded with their amount) counts as paid in full.
       const paid = p.supplier_paid_at && !p.supplier_payment_id && !(paidMap.get(p.id) ?? 0) ? gross : (paidMap.get(p.id) ?? 0);
       return { poId: p.id, label: `${p.supplier_invoice_number ?? p.number} · ${p.number}`, date: p.supplier_invoice_date, due: r2(gross - paid), gross, paid: r2(paid), jobId: p.job_id };
-    })
+    }), ...extraOpen]
     .filter((i) => i.due > 0.004)
     .sort((a, b) => String(a.date ?? "9999").localeCompare(String(b.date ?? "9999")));
 }
@@ -41,11 +55,16 @@ export async function paidOnPos(poIds: string[]): Promise<Map<string, number>> {
   const out = new Map<string, number>();
   if (!poIds.length || !(await supplierPaymentsReadyNow())) return out;
   const admin = createAdminClient();
-  const lines = await pageAllIn<{ po_id: string; amount_aed: number; payment_id: string }>(poIds, (chunk, a, b) => admin.from("supplier_payment_lines").select("po_id, amount_aed, payment_id").in("po_id", chunk).eq("is_active", true).order("id").range(a, b).abortSignal(fresh()));
+  const invCol = (await schemaReady("supplier_payment_lines", "lpo_invoice_id")) ? ", lpo_invoice_id" : "";
+  const lines = await pageAllIn<{ po_id: string; amount_aed: number; payment_id: string; lpo_invoice_id?: string | null }>(poIds, (chunk, a, b) => admin.from("supplier_payment_lines").select("po_id, amount_aed, payment_id" + invCol).in("po_id", chunk).eq("is_active", true).order("id").range(a, b).abortSignal(fresh()) as unknown as PromiseLike<{ data: { po_id: string; amount_aed: number; payment_id: string; lpo_invoice_id?: string | null }[] | null; error: { message: string } | null }>);
   const payIds = Array.from(new Set(lines.map((l) => l.payment_id)));
   const { data: pays } = payIds.length ? await admin.from("supplier_payments").select("id, status").in("id", payIds).abortSignal(fresh()) : { data: [] as { id: string; status: string }[] };
   const live = new Set((pays ?? []).filter((p) => p.status === "recorded").map((p) => p.id as string));
-  for (const l of lines) if (live.has(l.payment_id)) out.set(l.po_id, r2((out.get(l.po_id) ?? 0) + Number(l.amount_aed)));
+  for (const l of lines) {
+    if (!live.has(l.payment_id)) continue;
+    const key = payKeyOf(l.po_id, l.lpo_invoice_id ?? null);
+    out.set(key, r2((out.get(key) ?? 0) + Number(l.amount_aed)));
+  }
   return out;
 }
 
@@ -134,7 +153,8 @@ export async function recordSupplierPayment(input: SupplierPaymentInput, by: { i
     .single();
   if (error || !pay) return { error: error?.message ?? "Couldn't save – nothing was recorded." };
   if (lines.length) {
-    const { error: lErr } = await admin.from("supplier_payment_lines").insert(lines.map((l) => ({ payment_id: pay.id, po_id: l.poId, amount_aed: l.amount, created_by: by.id, updated_by: by.id })));
+    const invReady = await lpoInvoicesReady();
+    const { error: lErr } = await admin.from("supplier_payment_lines").insert(lines.map((l) => { const k = splitPayKey(l.poId); return { payment_id: pay.id, po_id: k.poId, ...(invReady ? { lpo_invoice_id: k.invoiceId } : {}), amount_aed: l.amount, created_by: by.id, updated_by: by.id }; }), { defaultToNull: false });
     if (lErr) {
       await admin.from("supplier_payments").update({ status: "void", void_reason: "Its invoices could not be saved", updated_by: by.id }).eq("id", pay.id);
       return { error: lErr.message };
@@ -150,7 +170,8 @@ export async function recordSupplierPayment(input: SupplierPaymentInput, by: { i
       if (take <= 0.004) break;
       const amt = r2(Math.min(take, inv.due));
       if (amt <= 0.004) continue;
-      await admin.from("supplier_payment_lines").insert({ payment_id: a.paymentId, po_id: inv.poId, amount_aed: amt, applied_later: true, created_by: by.id, updated_by: by.id });
+      const k = splitPayKey(inv.poId);
+      await admin.from("supplier_payment_lines").insert({ payment_id: a.paymentId, po_id: k.poId, ...(k.invoiceId ? { lpo_invoice_id: k.invoiceId } : {}), amount_aed: amt, applied_later: true, created_by: by.id, updated_by: by.id });
       applied.push(`AED ${amt.toFixed(2)} of the advance on ${inv.label}`);
       appliedPos.push(inv.poId);
       take = r2(take - amt);
@@ -160,7 +181,11 @@ export async function recordSupplierPayment(input: SupplierPaymentInput, by: { i
   const stillOwing = (await openInvoicesOf(input.supplierId, input.supplierName)).map((i) => i.poId);
   const touched = Array.from(new Set([...lines.map((l) => l.poId), ...appliedPos]));
   const now = new Date().toISOString();
-  for (const poId of touched.filter((id) => !stillOwing.includes(id))) {
+  for (const key of touched.filter((id) => !stillOwing.includes(id) && splitPayKey(id).invoiceId)) {
+    await admin.from("lpo_invoices").update({ paid_at: now, paid_by: by.id, updated_by: by.id }).eq("id", splitPayKey(key).invoiceId!).is("paid_at", null);
+  }
+  const owingPos = new Set(stillOwing.map((k) => splitPayKey(k).poId));
+  for (const poId of Array.from(new Set(touched.map((k) => splitPayKey(k).poId))).filter((id) => !owingPos.has(id))) {
     await admin.from("purchase_orders").update({ supplier_paid_at: now, supplier_paid_by: by.id, supplier_paid_method: input.method === "link" ? "card" : input.method, supplier_paid_reference: [pay.number, input.reference].filter(Boolean).join(" · ").slice(0, 120), supplier_payment_id: pay.id, ...(input.proofPath ? { supplier_paid_proof_path: input.proofPath, supplier_paid_proof_at: now, supplier_paid_proof_by: by.id } : {}), updated_by: by.id }).eq("id", poId).is("supplier_paid_at", null);
   }
   const words = [`${pay.number}: AED ${amount.toFixed(2)} to ${input.supplierName}`, lines.length ? `on ${lines.length} invoice${lines.length === 1 ? "" : "s"}` : null, excess > 0.004 ? (input.excessKind === "fee" ? `AED ${excess.toFixed(2)} as a fee` : `AED ${excess.toFixed(2)} kept as an advance`) : null, applied.length ? applied.join("; ") : null].filter(Boolean).join(" · ");
