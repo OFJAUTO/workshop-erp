@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -3659,6 +3659,99 @@ await section("d6", "proof on every payment method", async () => {
   await go(p, `${base}/invoices/${seed.invoice.id}`);
   check("e4: the invoice page's receipt line shows the proof tile", (await p.locator("[data-proof-link] img, [data-proof-link] [data-slip-kind]").count()) >= 1);
   await acc.browser.close();
+});
+
+/* ================================================================================================= */
+/* d7 (10 November 2026, Section 7): clocking on the bodyshop tablet. Face → PIN → Start / Pause /   */
+/* Stop (nothing changes until a button); the break pauses by itself and the face asks "Back on this  */
+/* car?"; Pause asks why; starting another car pauses the first ("moved to another car"); Stop = my   */
+/* part is done; the clocked minutes only.                                                           */
+/* ================================================================================================= */
+await section("d7", "clocking start pause stop", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-10-clocking";
+  mkdirSync(proof, { recursive: true });
+  const { createHash, randomBytes } = await import("node:crypto");
+  const seed = (await api("/api/e2e/stage", { stage: "bodyshop", at: "in_work" })).json;
+  const jobId = seed?.jobId;
+  const installer = seed?.people?.installer;
+  if (!jobId || !installer) throw new Error("seed failed");
+  const other = (await sql("select id from public.jobs where is_open and id <> $1 and status not in ('booked') order by created_at desc limit 1", [jobId]))[0]?.id;
+  const clocks = async () => sql("select job_id, ended_at, closed_reason, minutes from public.bodyshop_clockings where staff_id = $1 and is_active order by created_at", [installer]);
+  // Nothing running for the installer to start with.
+  await sql("update public.bodyshop_clockings set ended_at = now(), minutes = 1 where staff_id = $1 and ended_at is null", [installer]);
+  // k1. The break pauses by itself: a clocking from 13:00 today, the break job run at 13:45 (bodyshop break 13:30-14:30).
+  const today = (await sql("select (now() at time zone 'Asia/Dubai')::date::text as d"))[0].d;
+  const dow = new Date(`${today}T12:00:00+04:00`).getUTCDay();
+  const startAt = dow === 5 ? `${today}T12:00:00+04:00` : `${today}T13:00:00+04:00`;
+  const runAt = dow === 5 ? `${today}T12:45:00+04:00` : `${today}T13:45:00+04:00`;
+  await sql("insert into public.bodyshop_clockings (job_id, staff_id, source, started_at) values ($1, $2, 'tablet', $3)", [jobId, installer, startAt]);
+  const brk = await api("/api/e2e/breaks", { staffIds: [installer], now: runAt });
+  const afterBreak = (await clocks()).at(-1);
+  check(`k1: the break paused the clock by itself (${brk.json?.paused}, ${afterBreak?.closed_reason})`, brk.json?.paused === 1 && afterBreak?.closed_reason === "pause:Break" && !!afterBreak?.ended_at);
+  const ev = (await sql("select note from public.job_events where job_id = $1 and event_type = 'bodyshop_clock' order by created_at desc limit 1", [jobId]))[0]?.note ?? "";
+  check(`k1: in the log ("${ev}")`, /paused for the break/i.test(ev));
+
+  const devToken = randomBytes(16).toString("hex");
+  await sql("insert into public.devices (name, location, kind, section, token_hash) values ('E2e PPF tablet', 'bodyshop', 'shared', 'ppf', $1)", [createHash("sha256").update(devToken).digest("hex")]);
+  const { browser: tb, page: tp } = await browserFor("owner", { viewport: { width: 1024, height: 1366 }, hasTouch: true });
+  await tp.context().addCookies([{ name: "erp_device", value: devToken, domain: "localhost", path: "/" }]);
+  const openCar = async () => {
+    await go(tp, `${base}/tablet/bodyshop?v=${Date.now()}`);
+    await tp.locator(`[data-tablet-car='${jobId}']`).click();
+    await tp.locator(`[data-tablet-person='${installer}']`).waitFor({ timeout: 20000 });
+  };
+  const pin = async () => {
+    await tp.locator(`[data-tablet-person='${installer}']`).click();
+    await until(async () => ((await tp.locator("[data-pin-pad], [data-tablet-mode-clock]").count()) ? 1 : null), 20, 300);
+    if (await tp.locator("[data-tablet-mode-clock]").count()) await tp.locator("[data-tablet-mode-clock]").click();
+    await tp.locator("[data-pin-pad]").waitFor({ timeout: 20000 });
+    for (const k of ["1", "2", "3", "4"]) await tp.locator("[data-pin-pad] button", { hasText: new RegExp(`^${k}$`) }).click();
+    await tp.locator("[data-clock-choice]").waitFor({ timeout: 20000 });
+  };
+  const note = async () => until(async () => (await tp.locator("[data-tablet-note]").textContent().catch(() => null)) || null, 30, 300);
+  // k2. After the break the face asks "Back on this car?"; the PIN shows the three buttons and changes nothing.
+  await openCar();
+  check("k2: the face asks \"Back on this car?\"", (await tp.locator(`[data-tablet-person='${installer}'] [data-tablet-back-on]`).count()) === 1);
+  await tp.screenshot({ path: `${proof}/d7-back-on-this-car-1024.png` }).catch(() => null);
+  const before = (await clocks()).length;
+  await pin();
+  check("k2: Start / Pause / Stop after the PIN", (await tp.locator("[data-clock-start]").count()) === 1 && (await tp.locator("[data-clock-pause]").count()) === 1 && (await tp.locator("[data-clock-stop]").count()) === 1 && /Back on this car/.test((await tp.locator("[data-clock-start]").textContent()) ?? ""));
+  await tp.locator("[data-clock-choice]").screenshot({ path: `${proof}/d7-three-buttons-after-pin-1024.png` }).catch(() => null);
+  check("k2: nothing changed before a button is pressed", (await clocks()).length === before);
+  await tp.locator("[data-clock-start]").click();
+  const n1 = await note();
+  check(`k2: back on the car ("${n1}")`, /back on/i.test(n1 ?? "") && (await clocks()).at(-1)?.ended_at === null);
+  // k3. Pause asks why: "waiting for parts".
+  await until(async () => ((await tp.locator("[data-tablet-note]").count()) === 0 ? 1 : null), 30, 300);
+  await openCar();
+  await pin();
+  await tp.locator("[data-clock-pause]").click();
+  await tp.locator('[data-clock-reason="Waiting for parts"]').click();
+  const n2 = await note();
+  check(`k3: paused with the reason ("${n2}")`, /paused on .+\(waiting for parts\)/i.test(n2 ?? "") && (await clocks()).at(-1)?.closed_reason === "pause:Waiting for parts");
+  // k4. Starting this car while on another pauses the other ("moved to another car").
+  if (other) {
+    await sql("insert into public.bodyshop_clockings (job_id, staff_id, source) values ($1, $2, 'tablet')", [other, installer]);
+    await until(async () => ((await tp.locator("[data-tablet-note]").count()) === 0 ? 1 : null), 30, 300);
+    await openCar();
+    await pin();
+    check("k4: the tablet says it is on another car", (await tp.locator("[data-clock-on-other]").count()) === 1);
+    await tp.locator("[data-clock-start]").click();
+    const n3 = await note();
+    const moved = (await sql("select closed_reason from public.bodyshop_clockings where staff_id = $1 and job_id = $2 order by created_at desc limit 1", [installer, other]))[0]?.closed_reason;
+    check(`k4: the other car paused, moved to another car ("${n3}")`, moved === "pause:Moved to another car" && /moved to another car/i.test(n3 ?? ""));
+    check("k4: one car at a time", (await sql("select count(*)::int as n from public.bodyshop_clockings where staff_id = $1 and ended_at is null and is_active", [installer]))[0].n === 1);
+  }
+  // k5. Stop: my part is done; the clocked minutes only.
+  await until(async () => ((await tp.locator("[data-tablet-note]").count()) === 0 ? 1 : null), 30, 300);
+  await openCar();
+  await pin();
+  await tp.locator("[data-clock-stop]").click();
+  const n4 = await note();
+  const last = (await clocks()).at(-1);
+  check(`k5: Stop = my part is done ("${n4}")`, /my part is done/i.test(n4 ?? "") && last?.closed_reason === "done" && last?.ended_at !== null);
+  check("k5: nothing is left running", (await sql("select count(*)::int as n from public.bodyshop_clockings where staff_id = $1 and ended_at is null and is_active", [installer]))[0].n === 0);
+  await tb.close();
 });
 
 const failed = summary();

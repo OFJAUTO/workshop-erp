@@ -3,12 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Avatar } from "@/components/ui";
+import { ClockChoice, type ClockState } from "@/components/ClockChoice";
+import type { PauseReason } from "@/lib/clock-choice";
 import { enqueue, listRecords, onSendEvent, removeQueued, retryNow, type SendRecord } from "@/lib/send-queue";
 import { reportUploadFailure, shrinkPhoto } from "@/lib/upload-client";
 import { pendingWords, type PendingFile } from "@/lib/use-send-queue";
 
 export type TabletCar = { jobId: string; plate: string; title: string; colour: string | null; stage: string; due: string | null; tone: "red" | "amber" | "normal"; pictureUrl: string | null; onCar: { id: string; name: string; clocked: boolean }[]; coming: boolean; readyParts?: { id: string; description: string; quantity: number }[]; /** Section 10: the PPF cutting method badge (HAND-CUT / PRE-CUT / MIXED). */ cut?: { badge: string; note: string | null } | null; /** Section 11: the tint choice per window, in the documents' words. */ tint?: string | null };
-export type TabletPerson = { id: string; name: string; photoUrl: string | null; clockedOn: string | null };
+export type TabletPerson = { id: string; name: string; photoUrl: string | null; clockedOn: string | null; /** Paused today (the break, waiting for parts…) and not clocked anywhere: the car and why (Section 7). */ pausedOn?: { jobId: string; reason: string } | null };
 
 /** A tint photo kept on this tablet until OFJ's server has it: its picture, its car, who took it and what is happening. */
 type SendingPhoto = PendingFile & { plate: string; by: string };
@@ -36,6 +38,9 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
   const [photo, setPhoto] = useState<{ blob: Blob; type: string; url: string; takenAt: number } | null>(null);
   const [unticked, setUnticked] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  // Section 7 (10 November 2026): after the PIN, the clock choice (Start / Pause / Stop); the PIN is kept in memory only
+  // until a button is pressed or Back.
+  const [clock, setClock] = useState<{ state: ClockState; pin: string } | null>(null);
   const [note, setNote] = useState<Note | null>(null);
   const [sending, setSending] = useState<SendingPhoto[]>([]);
   const urls = useRef(new Map<string, string>());
@@ -119,7 +124,6 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
 
   const car = cars.find((c) => c.jobId === carId) ?? null;
   const person = people.find((p) => p.id === personId) ?? null;
-  const direction: "in" | "out" = person && car && person.clockedOn === car.jobId ? "out" : "in";
 
   const readyParts = car?.readyParts ?? [];
   const tickedParts = readyParts.filter((p) => !unticked.has(p.id));
@@ -134,9 +138,9 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
       ? { jobId: car.jobId, staffId: person.id, pin: fullPin, action: "tint_photo" }
       : receiving
         ? { jobId: car.jobId, staffId: person.id, pin: fullPin, action: "receive_parts", partIds: tickedParts.map((p) => p.id) }
-        : { jobId: car.jobId, staffId: person.id, pin: fullPin, action: direction };
+        : { jobId: car.jobId, staffId: person.id, pin: fullPin, action: "check" };
     let ok = false;
-    let data: { ok?: boolean; error?: string; message?: string; grant?: string; stageId?: string | null; caption?: string } = {};
+    let data: { ok?: boolean; error?: string; message?: string; grant?: string; stageId?: string | null; caption?: string; state?: ClockState } = {};
     try {
       const res = await fetch("/api/tablet/bodyshop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload), signal: AbortSignal.timeout(30_000), cache: "no-store" });
       data = (await res.json().catch(() => ({}))) as typeof data;
@@ -151,6 +155,11 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
     setPin("");
     if (!ok) {
       setNote({ text: data.error ?? "Try again.", tone: "bad" });
+      return;
+    }
+    if (data.state && !tintPhoto && !receiving) {
+      // The PIN is right: nothing has changed yet. The person now chooses Start, Pause or Stop.
+      setClock({ state: data.state, pin: fullPin });
       return;
     }
     let tone: Note["tone"] = "ok";
@@ -176,6 +185,32 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
     setUnticked(new Set());
     if (photo) URL.revokeObjectURL(photo.url);
     setPhoto(null);
+    router.refresh();
+  }
+  async function choose(action: "start" | "pause" | "stop", reason?: PauseReason) {
+    if (!car || !person || !clock || busy) return;
+    setBusy(true);
+    let data: { ok?: boolean; error?: string; message?: string } = {};
+    let ok = false;
+    try {
+      const res = await fetch("/api/tablet/bodyshop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jobId: car.jobId, staffId: person.id, pin: clock.pin, action, reason }), signal: AbortSignal.timeout(30_000), cache: "no-store" });
+      data = (await res.json().catch(() => ({}))) as typeof data;
+      ok = res.ok && !!data.ok;
+    } catch {
+      setBusy(false);
+      setNote({ text: "No connection – nothing was saved. Try again.", tone: "bad" });
+      return;
+    }
+    setBusy(false);
+    if (!ok) {
+      setNote({ text: data.error ?? "Try again.", tone: "bad" });
+      return;
+    }
+    setNote({ text: data.message ?? "Done.", tone: action === "pause" ? "wait" : "ok" });
+    setClock(null);
+    setPersonId(null);
+    setCarId(null);
+    setMode(null);
     router.refresh();
   }
   const press = (d: string) => {
@@ -244,10 +279,18 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
               <button key={p.id} type="button" onClick={() => setPersonId(p.id)} className={`flex flex-col items-center gap-2 rounded-card border-2 bg-white p-3 min-h-28 ${p.clockedOn === car.jobId ? "border-green" : "border-line-strong"}`} data-tablet-person={p.id}>
                 <Avatar name={p.name} photoUrl={p.photoUrl} size={64} />
                 <span className="text-base font-bold text-center leading-tight">{p.name}</span>
-                {p.clockedOn === car.jobId ? <span className="text-xs font-bold text-green-text">On this car · tap to clock out</span> : p.clockedOn ? <span className="text-xs text-muted">On another car</span> : null}
+                {p.clockedOn === car.jobId ? <span className="text-xs font-bold text-green-text">On this car</span> : p.clockedOn ? <span className="text-xs text-muted">On another car</span> : p.pausedOn?.jobId === car.jobId ? <span className="text-xs font-bold text-amber-text" data-tablet-back-on>Paused ({p.pausedOn.reason.toLowerCase()}) · Back on this car?</span> : null}
               </button>
             ))}
           </div>
+        </div>
+      ) : clock ? (
+        <div className="flex flex-col items-center gap-4">
+          <div className="flex items-center gap-3">
+            <Avatar name={person.name} photoUrl={person.photoUrl} size={56} />
+            <span className="text-xl font-extrabold">{person.name}</span>
+          </div>
+          <ClockChoice name={person.name} car={`${car.plate} · ${car.title}`} state={clock.state} busy={busy} onChoose={(a, r) => void choose(a, r)} onBack={() => { setClock(null); setPersonId(null); setMode(null); }} />
         </div>
       ) : (readyParts.length || car.tint) && mode === null ? (
         <div className="flex flex-col items-center gap-4">
@@ -257,7 +300,7 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
           </div>
           <p className="text-base"><span className="font-bold">{car.plate} · {car.title}</span>: what are you doing?</p>
           <div className="flex flex-wrap justify-center gap-3">
-            <button type="button" onClick={() => setMode("clock")} className="min-h-16 rounded-card border-2 border-line-strong bg-white px-6 text-lg font-extrabold" data-tablet-mode-clock>{direction === "in" ? "Clock in" : "Clock out"}</button>
+            <button type="button" onClick={() => setMode("clock")} className="min-h-16 rounded-card border-2 border-line-strong bg-white px-6 text-lg font-extrabold" data-tablet-mode-clock>Start / Pause / Stop</button>
             {readyParts.length ? <button type="button" onClick={() => setMode("parts")} className="min-h-16 rounded-card border-2 border-ink bg-white px-6 text-lg font-extrabold" data-tablet-mode-parts>Receive {readyParts.length} part{readyParts.length === 1 ? "" : "s"}</button> : null}
             {car.tint ? <button type="button" onClick={() => setMode("tint")} className="min-h-16 rounded-card border-2 border-ink bg-white px-6 text-lg font-extrabold" data-tablet-mode-tint>Tint fitted · photo</button> : null}
           </div>
@@ -298,7 +341,7 @@ export function SectionTablet({ section, cars, people }: { section: string; cars
               <p className="text-base mt-1">{photo ? "Then your PIN:" : "Take the photo, then your PIN."}</p>
             </div>
           ) : (
-            <p className="text-base">{direction === "in" ? "Clock in on" : "Clock out of"} <span className="font-bold">{car.plate} · {car.title}</span>. Your PIN:</p>
+            <p className="text-base"><span className="font-bold">{car.plate} · {car.title}</span>. Your PIN, then Start, Pause or Stop:</p>
           )}
           <div className="flex gap-3" aria-label="PIN">{[0, 1, 2, 3].map((i) => <span key={i} className={`h-4 w-4 rounded-full ${pin.length > i ? "bg-ink" : "border border-line-strong"}`} />)}</div>
           <div className="grid grid-cols-3 gap-3" data-pin-pad>

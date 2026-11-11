@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { pausedTodayOf } from "@/lib/bodyshop";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PublicShell } from "@/components/Shell";
 import { Card } from "@/components/ui";
@@ -54,7 +55,9 @@ export default async function BodyshopTabletPage({ searchParams }: { searchParam
       coming: isComing,
     };
   });
-  const tabletPeople: TabletPerson[] = sectionStaff.map((p) => ({ id: p.id, name: p.name, photoUrl: p.photoUrl, clockedOn: openOf.get(p.id) ?? null }));
+  // Who paused today and where (Section 7): the face says "Back on this car?".
+  const paused = await pausedTodayOf(sectionStaff.map((p) => p.id));
+  const tabletPeople: TabletPerson[] = sectionStaff.map((p) => ({ id: p.id, name: p.name, photoUrl: p.photoUrl, clockedOn: openOf.get(p.id) ?? null, pausedOn: openOf.get(p.id) ? null : paused.get(p.id) ?? null }));
   // Parts marked ready at the desk for the section's cars: the technician receives them here with his PIN.
   const jobIds = cars.map((c) => c.jobId);
   const { data: readyRows } = jobIds.length ? await createAdminClient().from("part_items").select("id, job_id, description, received_qty, confirmed_quantity, quantity").in("job_id", jobIds).eq("is_active", true).not("ready_for_handover_at", "is", null).neq("issue_status", "confirmed") : { data: [] as { id: string; job_id: string; description: string; received_qty: number | null; confirmed_quantity: number | null; quantity: number | null }[] };

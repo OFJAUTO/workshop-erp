@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { clockIn, clockOut } from "@/lib/bodyshop";
+import { clockIn, clockOut, openClockingOf, pausedTodayOf } from "@/lib/bodyshop";
+import { CLOSE_DONE, CLOSE_MOVED, clockWords, isPauseReason, pauseClose, type PauseReason } from "@/lib/clock-choice";
 import { receivePartsByTechnician } from "@/lib/handover";
 import { getSettings } from "@/lib/settings";
 import { getCurrentDevice } from "@/lib/devices";
@@ -28,7 +29,7 @@ export async function POST(request: NextRequest) {
   // A tablet opened before 31 October 2026 sends the tint photo with the PIN, as a form; everything else is JSON.
   const isForm = (request.headers.get("content-type") ?? "").includes("multipart/form-data");
   const form = isForm ? await request.formData().catch(() => null) : null;
-  const body = (form ? { jobId: form.get("jobId"), staffId: form.get("staffId"), pin: form.get("pin"), action: form.get("action") } : await request.json().catch(() => ({}))) as { jobId?: string; staffId?: string; pin?: string; action?: string; partIds?: string[] };
+  const body = (form ? { jobId: form.get("jobId"), staffId: form.get("staffId"), pin: form.get("pin"), action: form.get("action") } : await request.json().catch(() => ({}))) as { jobId?: string; staffId?: string; pin?: string; action?: string; partIds?: string[]; reason?: string };
   const jobId = String(body.jobId ?? "");
   const staffId = String(body.staffId ?? "");
   const pin = String(body.pin ?? "").trim();
@@ -73,6 +74,44 @@ export async function POST(request: NextRequest) {
     await admin.from("job_events").insert({ job_id: jobId, event_type: "tint_photo", note: `Tint fitted: photo taken by ${person.display_name} on the PPF tablet`, created_by: staffId });
     const { grant, expiresAt } = mintGrant({ t: "job_file", s: String(job.id).toLowerCase(), u: person.id as string, via: "pin" });
     return NextResponse.json({ ok: true, message: `${person.display_name}: tint photo saved on this tablet – sending…`, grant, expiresAt, stageId, caption: TINT_CAPTION });
+  }
+  // CLOCKING: START / PAUSE / STOP AFTER THE PIN (10 November 2026, Section 7). "check" only reads where the person is;
+  // nothing changes until Start, Pause (with its reason) or Stop is pressed. One car at a time per person.
+  const carWords = async (id: string) => {
+    const { data: j } = await admin.from("jobs").select("job_number, vehicle:vehicles(make:vehicle_makes(name), model:vehicle_models(name))").eq("id", id).maybeSingle();
+    const v = (j as { job_number?: string; vehicle?: { make?: { name?: string } | null; model?: { name?: string } | null } | null } | null)?.vehicle;
+    return [v?.make?.name, v?.model?.name].filter(Boolean).join(" ") || String((j as { job_number?: string } | null)?.job_number ?? "the car");
+  };
+  if (body.action === "check") {
+    const open = await openClockingOf(staffId);
+    const paused = (await pausedTodayOf([staffId])).get(staffId) ?? null;
+    return NextResponse.json({ ok: true, state: { onThisCar: open?.job_id === jobId, onOtherCar: open && open.job_id !== jobId ? await carWords(open.job_id) : null, pausedHere: paused && paused.jobId === jobId && !open ? paused.reason : null } });
+  }
+  if (body.action === "pause" || body.action === "stop") {
+    const open = await openClockingOf(staffId);
+    if (open?.job_id !== jobId) return NextResponse.json({ error: `${person.display_name} is not clocked on this car.` }, { status: 400 });
+    const reason = String(body.reason ?? "").trim();
+    if (body.action === "pause" && !isPauseReason(reason)) return NextResponse.json({ error: "Tap why you pause." }, { status: 400 });
+    await clockOut(staffId, staffId, body.action === "pause" ? pauseClose(reason as PauseReason) : CLOSE_DONE);
+    const car = await carWords(jobId);
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "bodyshop_clock", note: body.action === "pause" ? `${person.display_name}: paused (${reason}) on the tablet` : `${person.display_name}: my part is done (tablet)`, created_by: staffId });
+    return NextResponse.json({ ok: true, message: clockWords(person.display_name, body.action, car, { reason }) });
+  }
+  if (body.action === "start") {
+    const open = await openClockingOf(staffId);
+    const wasPaused = (await pausedTodayOf([staffId])).get(staffId) ?? null;
+    let movedFrom: string | null = null;
+    if (open && open.job_id !== jobId) {
+      movedFrom = await carWords(open.job_id);
+      await clockOut(staffId, staffId, CLOSE_MOVED);
+      await admin.from("job_events").insert({ job_id: open.job_id, event_type: "bodyshop_clock", note: `${person.display_name}: paused (moved to another car)`, created_by: staffId });
+    } else if (open) {
+      return NextResponse.json({ ok: true, message: `${person.display_name}: already on this car.` });
+    }
+    const r = await clockIn(jobId, staffId, "tablet", staffId);
+    if (r.error) return NextResponse.json({ error: r.error }, { status: 400 });
+    const startWords = clockWords(person.display_name, "start", await carWords(jobId), { movedFrom, back: wasPaused?.jobId === jobId });
+    return NextResponse.json({ ok: true, message: r.stage ? startWords.replace(/\.$/,` · ${r.stage}.`) : startWords });
   }
   if (body.action === "out") {
     const { minutes } = await clockOut(staffId, staffId);

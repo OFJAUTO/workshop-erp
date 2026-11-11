@@ -1,9 +1,11 @@
 import { dbWords } from "@/lib/app-errors";
+import { CLOSE_BREAK, CLOSE_MOVED, pauseReasonOf } from "@/lib/clock-choice";
 import { advanceSplit } from "./estimate-money-rules";
 import { getSettings } from "@/lib/settings";
 import { ppfByCutMethod } from "./ppf-cut-data";
 import { workingTimeOf } from "@/lib/jobs";
-import { countedMinutes, type WorkingTime } from "@/lib/working-time";
+import { breakNow, countedMinutes, type WorkingTime } from "@/lib/working-time";
+import { breakOf } from "@/lib/breaks";
 import "server-only";
 import { randomBytes } from "node:crypto";
 import { STAGE_DEFS, addDaysIso, neededSignoffs, sectionOfDepartment, spreadDueDates, stageDef, stageKeysFor, stageLabelFor, workingDaysBetween, type Section, type SignoffKey, type StageSection } from "./bodyshop-kinds";
@@ -590,18 +592,67 @@ export async function clockIn(jobId: string, staffId: string, source: "tablet" |
   }
   return { stage: stage?.label };
 }
-export async function clockOut(staffId: string, by: string | null): Promise<{ minutes: number }> {
+export async function clockOut(staffId: string, by: string | null, reason: string | null = null): Promise<{ minutes: number; jobIds: string[] }> {
   const admin = createAdminClient();
-  const { data: open } = await admin.from("bodyshop_clockings").select("id, started_at").eq("staff_id", staffId).is("ended_at", null).eq("is_active", true);
+  const { data: open } = await admin.from("bodyshop_clockings").select("id, started_at, job_id").eq("staff_id", staffId).is("ended_at", null).eq("is_active", true);
   let total = 0;
   const now = new Date();
   const wt = workingTimeOf(await getSettings(), "bodyshop");
   for (const c of open ?? []) {
     const minutes = Math.max(1, countedMinutes(c.started_at, now, wt));
     total += minutes;
-    await admin.from("bodyshop_clockings").update({ ended_at: now.toISOString(), minutes, updated_by: by }).eq("id", c.id);
+    await admin.from("bodyshop_clockings").update({ ended_at: now.toISOString(), minutes, updated_by: by, ...(reason ? { closed_reason: reason } : {}) }).eq("id", c.id);
   }
-  return { minutes: total };
+  return { minutes: total, jobIds: Array.from(new Set((open ?? []).map((c) => c.job_id as string))) };
+}
+
+/**
+ * Who paused today and where (10 November 2026, Section 7): each person's last clocking of the Dubai day when it ended
+ * as a pause (break, waiting for parts, …) and nothing is running for them now. The tablet asks "Back on this car?".
+ */
+export async function pausedTodayOf(staffIds: string[]): Promise<Map<string, { jobId: string; reason: string; at: string }>> {
+  const out = new Map<string, { jobId: string; reason: string; at: string }>();
+  if (!staffIds.length) return out;
+  const dayStart = new Date(new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10) + "T00:00:00+04:00").toISOString();
+  const { data } = await createAdminClient().from("bodyshop_clockings").select("staff_id, job_id, ended_at, closed_reason").in("staff_id", staffIds).eq("is_active", true).gte("started_at", dayStart).order("created_at", { ascending: false });
+  const seen = new Set<string>();
+  for (const c of (data ?? []) as { staff_id: string; job_id: string; ended_at: string | null; closed_reason: string | null }[]) {
+    if (seen.has(c.staff_id)) continue;
+    seen.add(c.staff_id);
+    const reason = pauseReasonOf(c.closed_reason);
+    if (c.ended_at && reason && c.closed_reason !== CLOSE_MOVED) out.set(c.staff_id, { jobId: c.job_id, reason, at: c.ended_at });
+  }
+  return out;
+}
+
+/**
+ * Breaks pause by themselves on the bodyshop side (10 November 2026, Section 7): at the person's break (Settings >
+ * Breaks: bodyshop 13:30–14:30, Friday 12:30–14:00) an open clocking that started before it ends at the break's start,
+ * as a pause "Break"; the tablet then asks "Back on this car?".
+ */
+export async function autoPauseBodyshopBreaks(settings: Settings, opts: { now?: number; staffIds?: string[] } = {}): Promise<number> {
+  const admin = createAdminClient();
+  let q = admin.from("bodyshop_clockings").select("id, job_id, staff_id, started_at").is("ended_at", null).eq("is_active", true);
+  if (opts.staffIds) q = q.in("staff_id", opts.staffIds);
+  const { data: open } = await q;
+  const rows = (open ?? []) as { id: string; job_id: string; staff_id: string; started_at: string }[];
+  if (!rows.length) return 0;
+  const { data: people } = await admin.from("staff").select("id, department_id, break_start, break_end").in("id", Array.from(new Set(rows.map((r) => r.staff_id))));
+  const byId = new Map((people ?? []).map((p) => [p.id as string, p]));
+  const wt = workingTimeOf(settings, "bodyshop");
+  let n = 0;
+  for (const c of rows) {
+    const now = opts.now ?? Date.now();
+    const b = breakNow(breakOf(settings, byId.get(c.staff_id)), now);
+    if (!b) continue;
+    if (now < b.startsAt || Date.parse(c.started_at) >= b.startsAt || now > b.endsAt + 65 * 60000) continue;
+    const at = new Date(b.startsAt).toISOString();
+    const { data: done } = await admin.from("bodyshop_clockings").update({ ended_at: at, minutes: Math.max(1, countedMinutes(c.started_at, at, wt)), closed_reason: CLOSE_BREAK }).eq("id", c.id).is("ended_at", null).select("id");
+    if (!done?.length) continue;
+    await admin.from("job_events").insert({ job_id: c.job_id, event_type: "bodyshop_clock", note: "Clock paused for the break", created_by: null });
+    n++;
+  }
+  return n;
 }
 export async function openClockingOf(staffId: string): Promise<{ job_id: string; started_at: string } | null> {
   const { data } = await createAdminClient().from("bodyshop_clockings").select("job_id, started_at").eq("staff_id", staffId).is("ended_at", null).eq("is_active", true).limit(1).maybeSingle();

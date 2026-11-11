@@ -167,31 +167,34 @@ await section("3-10 stages, leader, tablet, updates", async () => {
   await tp.context().addCookies([{ name: "erp_device", value: devToken, domain: "localhost", path: "/" }]);
   await go(tp, `${base}/tablet/bodyshop`);
   check("10: the section tablet shows the PPF cars", (await tp.locator("[data-tablet-car]").count()) >= 1, (await tp.textContent("body"))?.slice(0, 160));
-  await tp.locator("[data-tablet-car]").first().click();
+  await tp.locator(`[data-tablet-car='${jobId}']`).click();
   await until(async () => ((await tp.locator("[data-tablet-person]").count()) ? 1 : null), 20, 300);
   check("10: a tap on the car shows the section's people with their faces", (await tp.locator("[data-tablet-person]").count()) >= 1);
   await shot(tp, "03-shared-section-tablet");
   // The seed clocked the installer in on Old PPF removal; Done on that stage closed his clocking with its minutes.
   // So the first tap clocks him in on the current stage (Strip) and a second tap clocks him out again.
-  const tapPin = async () => {
+  // 10 November 2026 (Section 7): after the PIN the person chooses Start, Pause or Stop.
+  const tapPin = async (choice = "start") => {
     await tp.locator(`[data-tablet-person='${people.installer}']`).click();
     // A car with a tint choice (or parts ready) asks first what the person is doing: here, clocking.
     await until(async () => ((await tp.locator("[data-pin-pad], [data-tablet-mode-clock]").count()) ? 1 : null), 20, 300);
     if (await tp.locator("[data-tablet-mode-clock]").count()) await tp.locator("[data-tablet-mode-clock]").click();
     await until(async () => ((await tp.locator("[data-pin-pad]").count()) ? 1 : null), 20, 300);
     for (const k of ["1", "2", "3", "4"]) await tp.locator("[data-pin-pad] button", { hasText: new RegExp(`^${k}$`) }).click();
+    await tp.locator("[data-clock-choice]").waitFor({ timeout: 20000 });
+    await tp.locator(choice === "stop" ? "[data-clock-stop]" : "[data-clock-start]").click();
     return until(async () => (await tp.locator("[data-tablet-note]").textContent().catch(() => null)) || null, 30, 300);
   };
   const noteIn = await tapPin();
-  check("10: the PIN clocks the installer in on the car's current stage (Done on the first stage had closed the seed's clocking)", /clocked in/i.test(noteIn ?? "") && /strip/i.test(noteIn ?? ""), noteIn ?? "no note");
+  check("10: the PIN clocks the installer in on the car's current stage (Done on the first stage had closed the seed's clocking)", /started on/i.test(noteIn ?? "") && /strip/i.test(noteIn ?? ""), noteIn ?? "no note");
   const clk = (await sql("select count(*)::int as n from public.bodyshop_clockings where job_id = $1 and staff_id = $2 and ended_at is not null and minutes >= 1", [jobId, people.installer]))[0]?.n ?? 0;
   check("10: Done on a stage closed the open clocking with its minutes", clk >= 1);
   await until(async () => ((await tp.locator("[data-tablet-note]").count()) === 0 ? 1 : null), 30, 300);
   await until(async () => ((await tp.locator(`[data-tablet-car='${jobId}']`).count()) ? 1 : null), 20, 300);
   await tp.locator(`[data-tablet-car='${jobId}']`).click();
-  await until(async () => ((await tp.locator(`[data-tablet-person='${people.installer}']`, { hasText: /clock out/i }).count()) ? 1 : null), 30, 300);
-  const noteOut = await tapPin();
-  check("10: a second tap with the PIN clocks the installer out with his minutes", /clocked out/i.test(noteOut ?? ""), noteOut ?? "no note");
+  await until(async () => ((await tp.locator(`[data-tablet-person='${people.installer}']`, { hasText: /On this car/i }).count()) ? 1 : null), 30, 300);
+  const noteOut = await tapPin("stop");
+  check("10: a second tap with the PIN clocks the installer out with his minutes", /my part is done/i.test(noteOut ?? ""), noteOut ?? "no note");
   const openNow = (await sql("select count(*)::int as n from public.bodyshop_clockings where job_id = $1 and staff_id = $2 and ended_at is null and is_active", [jobId, people.installer]))[0]?.n ?? 0;
   check("10: no clocking is left open after the clock-out", openNow === 0);
   await tb.close();

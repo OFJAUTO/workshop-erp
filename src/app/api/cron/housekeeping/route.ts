@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { autoPauseBodyshopBreaks } from "@/lib/bodyshop";
 import { lpoReviewHourly } from "@/lib/lpo-review";
 import { archiveOldNotices, clearDoneNotices } from "@/lib/bell-clear";
 import { checkLateJobs, recordJobRun } from "@/lib/background-jobs";
@@ -270,6 +271,12 @@ async function runHousekeeping(): Promise<Record<string, number>> {
   // 10. The job clocks pause themselves at the end of the shift.
   report.clocksPaused = await autoPauseEndOfShift(settings);
   report.breaksPaused = await autoPauseBreaks(settings);
+  // The bodyshop side too (10 November 2026, Section 7): its break pauses by itself, the tablet asks "Back on this car?".
+  try {
+    report.bodyshopBreaksPaused = await autoPauseBodyshopBreaks(settings);
+  } catch {
+    report.bodyshopBreaksPaused = -1;
+  }
 
   // 10b. The next morning (the first run after opening): "Clock left running overnight: [car], [person]" to the manager, once per clock.
   {
