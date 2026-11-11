@@ -8,7 +8,7 @@
 
 **Live (10 Nov list, all ten):** S1 paid means paid · S2 Autel post-scan · S3 several invoices per LPO · S4 send LPO for owner approval · S5 supplier payments tab · S6 proof on every payment method · S7 clocking Start/Pause/Stop · S8 stock reverse · S9 comeback at our cost · S10 view as customer. Notes in docs/*-10-nov-note.md.
 
-**WAITING FOR APPLY:** nothing. Applied 11 Nov morning (backup ): lpo_invoices, lpo_owner_review, stock_reversals, comeback_at_our_cost; live check 33/33.
+**WAITING FOR APPLY:** nothing. Applied 11 Nov morning (backup `backups/2026-11-11T06-28-27`): lpo_invoices, lpo_owner_review, stock_reversals, comeback_at_our_cost; live check 33/33.
 
 **Tests:** full simulation 550/550 (every path, every role) · security all passed · layout check clean · live check 33/33. Known stale: test-docs' Q-00039 checks (TEST's copy of Q-00039 is now an approved AED 37,930 quotation, not the package-only draft it expects) and test-i check 4 (team leader one-tap pick).
 
