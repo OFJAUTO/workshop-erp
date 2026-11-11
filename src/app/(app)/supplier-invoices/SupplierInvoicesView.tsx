@@ -95,6 +95,7 @@ export async function SupplierInvoicesView({ sp: spIn, staff, place }: { sp: SiS
           <span className="font-extrabold">{rows.length} invoice{rows.length === 1 ? "" : "s"} · AED {money(rows.filter((r) => r.status !== "waiting").reduce((a, r) => a + r.total, 0))} with VAT</span>
           {seesPay && unpaid.length ? <span className="text-muted">Unpaid:</span> : null}
           {(seesPay ? unpaid : []).slice(0, 8).map((u) => <span key={u.supplierId ?? u.supplier} className="rounded-full border border-line-strong px-2.5 py-0.5 text-xs font-semibold" data-si-unpaid>{u.supplier} · {u.count} · AED {money(u.total)}</span>)}
+          {all.filter((r) => r.dateWarning).length ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2.5 py-0.5 text-xs font-bold text-amber-text" data-si-date-count>Dates to check · {all.filter((r) => r.dateWarning).length}</span> : null}
           {all.filter((r) => r.proofMissing).length ? <Link href={siHref(place, [...invoiceFilterParams({ no_proof: "1" })])} className="rounded-full border border-red-bar px-2.5 py-0.5 text-xs font-bold text-red" data-si-no-proof-count>Paid without proof · {all.filter((r) => r.proofMissing).length}</Link> : null}
         </div>
       </Card>
@@ -132,6 +133,7 @@ function InvoiceCard({ r, href, open }: { r: InvoiceRow; href: string; open: boo
         <Badge tone={STATUS_TONE[r.status]}>{STATUS_WORDS[r.status]}</Badge>
         {r.notReceived ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text" data-si-not-received>Not received yet</span> : null}
         {r.stock ? <Badge tone="ink">Stock purchase</Badge> : null}
+        {r.dateWarning ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text" title={r.dateWarning} data-si-date-warning>Check the date</span> : null}
         {r.partlyPaid ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text" data-si-partly-paid>Partly paid · AED {money(r.unpaidAmount)} to pay</span> : null}
         {r.proofMissing ? <span className="rounded-full border border-red-bar bg-white px-2 py-0.5 text-xs font-bold text-red" data-si-proof-missing-tag>Proof missing – upload</span> : null}
         <MatchChips r={r} />
@@ -254,6 +256,7 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome }: { ro
           rowKey={row.key}
           jobId={row.shares[0].jobId}
           poTotal={row.shares[0].lpoTotal}
+          lpoDate={row.lpoDate}
           lines={((lines ?? []) as { id: string; po_id: string; description: string; unit_cost: number }[]).filter((l) => l.po_id === row.shares[0].poId).map((l) => ({ id: l.id, description: l.description, unit_cost: Number(l.unit_cost) }))}
           action={enterInvoiceFromList.bind(null, row.shares[0].poId, row.key)}
         />

@@ -4,10 +4,10 @@ import { revalidatePath } from "next/cache";
 import { dbWords } from "@/lib/app-errors";
 import { requireStaff } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { recordSupplierPayment } from "@/lib/supplier-payments";
+import { recordSupplierPayment, undoAdvanceUse } from "@/lib/supplier-payments";
 import { objectExists } from "@/lib/upload-targets/common";
 import { JOB_FILES_BUCKET } from "@/lib/work-data";
-import { tryEnqueueZoho } from "@/lib/zoho-sync";
+import { reopenZoho, tryEnqueueZoho } from "@/lib/zoho-sync";
 
 /**
  * SUPPLIER PAYMENTS (6 November 2026, Section 4): record one payment (amount, method, spread over the supplier's
@@ -24,14 +24,16 @@ export async function recordSupplierPaymentAction(_prev: PayState, formData: For
   const staff = await requireStaff();
   if (!(staff.role_id === "owner" || staff.role_id === "accounts") || staff.viewingAs) return { error: "Only the owner or accounts record supplier payments." };
   const lines: { poId: string; amount: number }[] = [];
-  const useAdvances: { paymentId: string; amount: number }[] = [];
+  const advanceUses: { paymentId: string; poId: string; amount: number }[] = [];
   formData.forEach((v, k) => {
     if (k.startsWith("alloc__")) {
       const amount = num(v);
       if (amount > 0) lines.push({ poId: k.slice(7), amount });
-    } else if (k.startsWith("advance__")) {
+    } else if (k.startsWith("use__")) {
+      // use__<advance payment id>__<invoice key>: how much of that advance goes on that invoice (11 November 2026).
+      const [paymentId, poId] = k.slice(5).split("__");
       const amount = num(v);
-      if (amount > 0) useAdvances.push({ paymentId: k.slice(9), amount });
+      if (paymentId && poId && amount > 0) advanceUses.push({ paymentId, poId, amount });
     }
   });
   const excessRaw = String(formData.get("excess_kind") ?? "");
@@ -47,11 +49,20 @@ export async function recordSupplierPaymentAction(_prev: PayState, formData: For
       excessKind: excessRaw === "advance" || excessRaw === "fee" ? excessRaw : null,
       proofPath: /^supplier-payments\/[\w./-]+$/.test(String(formData.get("proof_path") ?? "")) ? String(formData.get("proof_path")) : null,
       note: String(formData.get("note") ?? "").trim().slice(0, 500) || null,
-      useAdvances,
+      advanceUses,
     },
     staff,
   );
-  if (res.error || !res.id) return { error: res.error ? dbWords({ message: res.error }, "parts/supplier-payment") : "Couldn't save – nothing was recorded." };
+  if (res.error) return { error: dbWords({ message: res.error }, "parts/supplier-payment") };
+  // Advances applied with no new payment (11 November 2026, Section 3): each advance's vendor payment is applied again in Zoho.
+  for (const pid of [...(res.appliedOnly ?? []), ...(res.advancesUsed ?? [])]) await reopenZoho("supplierpay", pid).catch(() => null);
+  if (!res.id) {
+    revalidatePath("/parts/orders", "layout");
+    revalidatePath("/supplier-invoices");
+    revalidatePath("/supplier-payments");
+    revalidatePath("/parts-accounts");
+    return res.appliedOnly ? { ok: true, message: `Advance applied, no new payment: ${res.words}.` } : { error: "Couldn't save – nothing was recorded." };
+  }
   // A proof that arrived WHILE the payment was being saved (its record step looked at the LPO a moment too early) joins
   // the payment and the LPOs it settled; one still on its way lands on the LPO by itself when it arrives.
   const pending = String(formData.get("proof_pending") ?? "").trim();
@@ -86,4 +97,20 @@ export async function voidSupplierPaymentAction(paymentId: string, _prev: PaySta
   revalidatePath("/supplier-invoices");
   revalidatePath("/parts-accounts");
   return { ok: true, message: `${pay.number} voided. Its invoices are unpaid again.` };
+}
+
+/** Undo one applied advance (owner and accounts, a remark of a few words): the invoice owes again, the advance holds it again, Zoho follows. */
+export async function undoAdvanceUseAction(lineId: string, _prev: PayState, formData: FormData): Promise<PayState> {
+  const staff = await requireStaff();
+  if (!(staff.role_id === "owner" || staff.role_id === "accounts") || staff.viewingAs) return { error: "Only the owner or accounts change a supplier payment." };
+  const remark = String(formData.get("remark") ?? "").trim();
+  if (remark.length < 5) return { error: "Write why (a few words) – it stays in the history." };
+  const r = await undoAdvanceUse(lineId, remark.slice(0, 300), staff);
+  if (r.error) return { error: dbWords({ message: r.error }, "parts/advance-undo", { staffId: staff.id }) };
+  if (r.paymentId) await reopenZoho("supplierpay", r.paymentId).catch(() => null);
+  revalidatePath("/parts/orders", "layout");
+  revalidatePath("/supplier-invoices");
+  revalidatePath("/supplier-payments");
+  revalidatePath("/parts-accounts");
+  return { ok: true, message: r.words };
 }

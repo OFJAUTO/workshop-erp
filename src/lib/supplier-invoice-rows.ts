@@ -7,6 +7,7 @@
  */
 import { supplierMoney } from "./supplier-money";
 import { supplierChargesVat } from "./supplier-rules";
+import { invoiceDateWarning } from "./supplier-payment-rules";
 
 export type SiPo = {
   id: string;
@@ -30,6 +31,8 @@ export type SiPo = {
   supplier_invoice_vat_aed?: number | null;
   supplier_invoice_at: string | null;
   received_at: string | null;
+  /** The LPO's own date (approved, else made): the invoice date is checked against it (11 November 2026). */
+  lpo_date?: string | null;
   checked_at: string | null;
   zoho_bill_id: string | null;
   paid_at: string | null;
@@ -75,6 +78,10 @@ export type InvoiceRow = {
   notReceived: boolean;
   /** Every LPO of the row is a stock purchase with no car. */
   stock: boolean;
+  /** 11 November 2026 (Section 3): the invoice date looks wrong (future, or long before the LPO: day and month swapped?). */
+  dateWarning: string | null;
+  /** The earliest LPO date of the row. */
+  lpoDate: string | null;
   supplier: string;
   supplierId: string | null;
   trn: string | null;
@@ -126,12 +133,13 @@ export function approvedVsInvoiced(lpoTotal: number, invoiced: number | null | u
   return `Approved ${fmt(lpoTotal)} → Invoiced ${fmt(invoiced)} (${diff < 0 ? "−" : "+"}${fmt(Math.abs(diff))})`;
 }
 
+
 /** THE "ordered, not delivered yet" rule of the invoice list: sent to the supplier, no invoice, nothing received. */
 export const isOrderedNotReceived = (po: { status: string; supplier_invoice_status: string | null; received_at?: string | null }) =>
   po.status === "ordered" && (po.supplier_invoice_status ?? "none") === "none" && !po.received_at;
 
 /** The rows, newest first. */
-export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppliers: SiSupplier[], vatPercent = 5): InvoiceRow[] {
+export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppliers: SiSupplier[], vatPercent = 5, today: string | null = null): InvoiceRow[] {
   const jobOf = new Map(jobs.map((j) => [j.id, j]));
   const supOf = new Map(suppliers.map((s) => [s.id, s]));
   const supByName = new Map(suppliers.map((s) => [s.name.trim().toLowerCase(), s]));
@@ -209,6 +217,8 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
       key,
       notReceived,
       stock: items.every((p) => !p.job_id),
+      lpoDate: items.map((p) => p.lpo_date ?? null).filter((x): x is string => !!x).sort()[0] ?? null,
+      dateWarning: !waiting && today ? invoiceDateWarning(first.supplier_invoice_date, items.map((p) => p.lpo_date ?? null).filter(Boolean).sort()[0] ?? null, today) : null,
       supplier: sup?.name ?? first.supplier_name,
       supplierId: first.supplier_id,
       trn: sup?.trn ?? null,

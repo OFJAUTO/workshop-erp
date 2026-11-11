@@ -1,5 +1,6 @@
 "use client";
 
+import { invoiceDateWarning } from "@/lib/supplier-payment-rules";
 import { useState } from "react";
 import { JobFileUpload, type FilesWaiting, type JobFile } from "./JobFileUpload";
 import { Input } from "./ui";
@@ -23,7 +24,10 @@ export function SupplierInvoiceBox({
   formTag,
   onWaiting,
   prefill = null,
+  lpoDate,
 }: {
+  /** The LPO's own date: an invoice dated long before it is flagged (11 November 2026). */
+  lpoDate?: string | null;
   jobId: string | null;
   poId: string | null;
   poTotal: number | null;
@@ -61,6 +65,8 @@ export function SupplierInvoiceBox({
   const amountOff = !toFollow && amountNum !== null && amountNum > 0 && poTotal !== null && poTotal > 0 && Math.abs(amountNum - poTotal) / poTotal > 0.05;
   const numberBad = !toFollow && number.trim().length > 0 && !invoiceNumberLooksReal(number);
   const dateBad = !toFollow && date !== "" && date > dubaiToday();
+  // 11 November 2026 (Section 3): long before the LPO (day and month swapped?) - a warning, never a block.
+  const dateWarn = !toFollow && date !== "" && !dateBad ? invoiceDateWarning(date, lpoDate ?? null, dubaiToday()) : null;
 
   return (
     <div className="flex flex-col gap-2 rounded-control border border-line bg-canvas p-3" data-supplier-invoice-box>
@@ -83,6 +89,7 @@ export function SupplierInvoiceBox({
               <span className="text-xs font-semibold text-muted">Date on the invoice</span>
               <Input name="invoice_date" type="date" value={date} onChange={(e) => setDate(e.target.value)} max={dubaiToday()} required data-invoice-date />
               {dateBad ? <span className="text-xs font-semibold text-red" data-date-bad>The invoice date cannot be in the future.</span> : null}
+              {dateWarn ? <span className="text-xs font-semibold text-amber-text" data-invoice-date-warning>{dateWarn} Check the paper.</span> : null}
             </label>
             <label className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">Total before VAT (optional)</span>

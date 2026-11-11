@@ -1,8 +1,9 @@
 # Handover – 11 November 2026, evening (11 Nov list of 16 sections: IN PROGRESS)
 
-**Done so far:** S1 stock LPOs in Supplier invoices and payments (41df358) · S2 parts belong to one quotation (dormant until apply).
+**Done so far:** S1 stock LPOs in Supplier invoices and payments (41df358) · S2 parts belong to one quotation (dormant until apply) · S3 apply supplier advances without a new payment + invoice date check.
 
 **NEEDS OMAR (11 Nov list):**
+- Supplier invoice dates to correct (Edit invoice on the LPO page, Mathew): LPO-00043-1 and LPO-00044-1 (GARGASH, dated 11 May 2026: likely 5 November, day and month swapped), LPO-00035-2 (SPARE HUB, dated 29 Oct 2016: likely 2026).
 - Reply "apply" for the waiting list (docs/waiting-for-apply.md).
 - Q-00078 (J-00317): Peter re-links the parts on Q-00078. On live: 13 of the job's priced parts are on the approved Q-00020 and stay there; three (FRONT BRAKE PAD, MAIN BATTERY, TRANSMISSION MOUNT) were priced before Q-00078 existed and are on no quotation: after the apply they show on Q-00078 under "Parts priced for this job on another quote (3) – Add here".
 - Zoho mapping: pick the stock account for "Stock purchases (inventory)" on Settings > Zoho Books > Mapping (OFJ TEST makes "Inventory Asset" by itself).

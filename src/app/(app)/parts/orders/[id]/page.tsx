@@ -491,7 +491,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             <Card className={`flex flex-col gap-2 ${po.supplier_invoice_status === "to_follow" ? "!border-amber-bar" : ""}`}>
               <SectionLabel>Supplier invoice{po.supplier_invoice_status === "to_follow" ? " · with accounts" : ""}</SectionLabel>
               {po.supplier_invoice_status === "to_follow" ? <p className="text-sm font-semibold text-amber-bar" data-invoice-missing>{canPay ? `Collect the supplier's invoice from Parts, scan it and enter it here (or on the Supplier invoices page).` : `Invoice with accounts: they collect the supplier's paper from the desk and scan it. Keep it ready for them.`}</p> : null}
-              {canPay ? <SupplierInvoiceForm jobId={po.job_id} poId={po.id} lines={formLines} action={supplierInvoice.bind(null, po.id)} poTotal={po.total_cost_aed} /> : null}
+              {canPay ? <SupplierInvoiceForm jobId={po.job_id} poId={po.id} lines={formLines} action={supplierInvoice.bind(null, po.id)} poTotal={po.total_cost_aed} lpoDate={String(po.approved_at ?? po.created_at ?? "").slice(0, 10) || null} /> : null}
             </Card>
           ) : null}
         </div>

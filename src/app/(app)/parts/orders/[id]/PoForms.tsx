@@ -65,10 +65,10 @@ export function ReceiveForm({ lines, action, invoiceOpen = false }: { lines: Lin
 }
 
 /** The supplier invoice entered on its own, after the delivery: the same ONE box. */
-export function SupplierInvoiceForm({ jobId, poId, lines, action, poTotal = null }: { jobId: string | null; poId: string; lines: Line[]; action: (formData: FormData) => void; poTotal?: number | null }) {
+export function SupplierInvoiceForm({ jobId, poId, lines, action, poTotal = null, lpoDate = null }: { jobId: string | null; poId: string; lines: Line[]; action: (formData: FormData) => void; poTotal?: number | null; lpoDate?: string | null }) {
   return (
     <form action={action} className="flex flex-col gap-3">
-      <SupplierInvoiceBox jobId={jobId} poId={poId} poTotal={poTotal} />
+      <SupplierInvoiceBox jobId={jobId} poId={poId} poTotal={poTotal} lpoDate={lpoDate} />
       <LinePrices lines={lines} word="PO" />
       <div><Button type="submit" size="md" data-save-invoice>Save the supplier invoice</Button></div>
     </form>

@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -4063,6 +4063,64 @@ await section("e2", "parts belong to one quotation", async () => {
   const onApproved = tags.filter((t) => orig && t.startsWith(`${orig.number}|`));
   check("b5: a part on the approved quotation reads approved", !orig || onApproved.every((t) => /approved/.test(t)));
   await pt.browser.close();
+});
+
+/* ================================================================================================= */
+/* e3 (11 November 2026, Section 3, Mathew): apply a supplier advance with NO new payment. An advance  */
+/* of AED 12,840 on an invoice of AED 12,269.06: the amount and method boxes are gone, "Left on this    */
+/* advance: AED 570.94", Apply advance; the invoice is paid; Undo with a remark puts it back. A         */
+/* supplier invoice dated 11 May on a November LPO is flagged "Check the date".                       */
+/* ================================================================================================= */
+await section("e3", "apply supplier advance without a new payment", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-supplier-advances";
+  mkdirSync(proof, { recursive: true });
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const today = (await sql("select (now() at time zone 'Asia/Dubai')::date::text as d"))[0].d;
+  const sup = (await sql("insert into public.suppliers (name, trn, vat_registered, created_by, updated_by) values ('E2E GARGASH', '100200300400555', true, $1, $1) returning id", [ownerId]))[0];
+  const po = (await sql("insert into public.purchase_orders (number, job_id, supplier_id, supplier_name, kind, order_type, status, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_at, supplier_invoice_checked_at, created_by, updated_by) values ('LPO-E2E-ADV-1', null, $1, 'E2E GARGASH', 'stock', 'stock_parts', 'received', 11684.82, 'received', 'E2E-10670029', $2, 11684.82, now(), now(), $3, $3) returning id", [sup.id, today, ownerId]))[0]?.id;
+  await sql("insert into public.purchase_order_lines (po_id, position, description, quantity, unit_cost, received_qty, received_at, created_by, updated_by) values ($1, 1, 'E2E HEADLIGHT', 1, 11684.82, 1, now(), $2, $2)", [po, ownerId]);
+  const adv = (await sql("insert into public.supplier_payments (number, supplier_id, supplier_name, paid_on, method, amount_aed, excess_kind, fee_aed, status, created_by, updated_by) values ('E2E-SPAY-14', $1, 'E2E GARGASH', $2, 'transfer', 12840, 'advance', 0, 'recorded', $3, $3) returning id", [sup.id, today, ownerId]))[0]?.id;
+  if (!po || !adv) throw new Error("seed failed");
+  const acc = await browserFor("accounts", { viewport: { width: 1440, height: 900 } });
+  const ap = acc.page;
+  await go(ap, `${base}/supplier-payments?supplier=${sup.id}#pay`);
+  const box = ap.locator("[data-sp-pay-card] [data-supplier-pay-box]");
+  await box.waitFor({ timeout: 20000 });
+  check("a1: the advance is offered with its likely invoice", (await box.locator('[data-use-advance="E2E-SPAY-14"]').count()) === 1 && (await box.locator("[data-advance-likely]").count()) >= 1);
+  await box.locator('[data-use-advance="E2E-SPAY-14"]').check();
+  await sleep(400);
+  const left = await box.locator('[data-advance-left="E2E-SPAY-14"]').getAttribute("data-advance-left-aed");
+  const leftWords = ((await box.locator('[data-advance-left="E2E-SPAY-14"]').textContent()) ?? "").trim();
+  check(`a2: Left on this advance: AED 570.94 (${leftWords})`, left === "570.94" && /Left on this advance: AED 570\.94/.test(leftWords));
+  check("a2: no Amount paid and no How it was paid when the advance covers everything", (await box.locator("[data-supplier-pay-amount]").count()) === 0 && (await box.locator("[data-pay-method]").count()) === 0 && (await box.locator("[data-supplier-pay-covered]").count()) === 1);
+  await ap.screenshot({ path: `${proof}/e3-apply-advance-1440.png` }).catch(() => null);
+  await box.locator("[data-supplier-pay-save]").click();
+  await ap.locator("[data-confirm-yes-money]").click({ timeout: 8000 });
+  const line = await until(async () => (await sql("select id, amount_aed::float8 as a from public.supplier_payment_lines where payment_id = $1 and po_id = $2 and is_active and applied_later", [adv, po]))[0], 60, 500);
+  check(`a3: AED 12,269.06 of the advance applied, no new payment (${line?.a})`, line?.a === 12269.06 && Number((await sql("select count(*)::int as n from public.supplier_payments where supplier_id = $1", [sup.id]))[0].n) === 1);
+  const paid = await until(async () => (await sql("select supplier_paid_at from public.purchase_orders where id = $1", [po]))[0]?.supplier_paid_at, 40, 500);
+  check("a3: the invoice is marked paid", !!paid);
+  // Undo with a remark (on the LPO's payment history).
+  await go(ap, `${base}/parts/orders/${po}#paid`);
+  const undo = ap.locator('[data-advance-undo-open="E2E-SPAY-14"]');
+  check("a4: Undo this advance is offered on the LPO", (await undo.count()) === 1);
+  if (await undo.count()) {
+    await undo.click();
+    const form = ap.locator("form:has(input[name=remark])").filter({ has: ap.locator('[data-confirm-open="advance-undo"]') }).first();
+    await form.locator("input[name=remark]").fill("Applied to the wrong invoice");
+    await form.locator('[data-confirm-open="advance-undo"]').click();
+    await ap.locator('[data-confirm-yes-money="advance-undo"]').click({ timeout: 8000 });
+    const off = await until(async () => (await sql("select is_active from public.supplier_payment_lines where id = $1", [line.id]))[0]?.is_active === false, 40, 500);
+    const unpaid = await until(async () => !(await sql("select supplier_paid_at from public.purchase_orders where id = $1", [po]))[0]?.supplier_paid_at, 40, 500);
+    const hist = (await sql("select edit_history::text as h from public.supplier_payments where id = $1", [adv]))[0]?.h ?? "";
+    check("a4: undone with the remark kept in the history, the invoice owes again", !!off && !!unpaid && /Applied to the wrong invoice/.test(hist));
+  }
+  // The date check: an invoice dated 11 May on a November LPO.
+  const po2 = (await sql("insert into public.purchase_orders (number, job_id, supplier_id, supplier_name, kind, order_type, status, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_at, created_by, updated_by) values ('LPO-E2E-ADV-2', null, $1, 'E2E GARGASH', 'stock', 'stock_parts', 'received', 100, 'received', 'E2E-25630196', '2026-05-11', 100, now(), $2, $2) returning id", [sup.id, ownerId]))[0]?.id;
+  await go(ap, `${base}/supplier-invoices?q=E2E-25630196`);
+  const row = ap.locator("[data-si-row]").filter({ hasText: "E2E-25630196" }).first();
+  check("a5: an invoice dated 11 May on a November LPO is flagged Check the date", !!po2 && (await row.locator("[data-si-date-warning]").count()) === 1);
+  await acc.browser.close();
 });
 
 const failed = summary();

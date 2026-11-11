@@ -18,7 +18,7 @@ export const siQueryReady = () => schemaReady("purchase_orders", "supplier_invoi
 export const invoiceEditReady = () => schemaReady("supplier_invoice_edits", "id, po_id, remark, changes");
 export const invoiceVatReady = () => schemaReady("purchase_orders", "supplier_invoice_vat_aed");
 
-const PO_COLS = "id, number, job_id, supplier_id, supplier_name, status, kind, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_at, supplier_invoice_path, received_at, supplier_invoice_checked_at, zoho_bill_id, supplier_paid_at, supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path, supplier_paid_by";
+const PO_COLS = "id, number, created_at, approved_at, job_id, supplier_id, supplier_name, status, kind, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_at, supplier_invoice_path, received_at, supplier_invoice_checked_at, zoho_bill_id, supplier_paid_at, supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path, supplier_paid_by";
 
 export type SupplierInvoices = { rows: InvoiceRow[]; partNames: Map<string, string[]>; lines: SiLine[] };
 
@@ -76,6 +76,7 @@ async function readSupplierInvoices(opts: { jobId?: string; poIds?: string[] }):
     supplier_invoice_vat_aed: r.supplier_invoice_vat_aed === null || r.supplier_invoice_vat_aed === undefined ? null : Number(r.supplier_invoice_vat_aed),
     supplier_invoice_at: (r.supplier_invoice_at as string | null) ?? null,
     received_at: (r.received_at as string | null) ?? null,
+    lpo_date: String((r.approved_at as string | null) ?? (r.created_at as string | null) ?? "").slice(0, 10) || null,
     checked_at: (r.supplier_invoice_checked_at as string | null) ?? null,
     zoho_bill_id: (r.zoho_bill_id as string | null) ?? null,
     paid_at: (r.supplier_paid_at as string | null) ?? null,
@@ -128,7 +129,8 @@ async function readSupplierInvoices(opts: { jobId?: string; poIds?: string[] }):
   }
   const partNames = new Map<string, string[]>();
   for (const l of lines) partNames.set(l.po_id, [...(partNames.get(l.po_id) ?? []), l.description]);
-  return { rows: groupInvoices(pos, lines, jobs, suppliers), partNames, lines };
+  const today = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
+  return { rows: groupInvoices(pos, lines, jobs, suppliers, 5, today), partNames, lines };
 }
 
 const sum2 = (xs: number[]) => Math.round(xs.reduce((a, x) => a + x, 0) * 100) / 100;
