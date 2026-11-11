@@ -115,6 +115,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/scans", label: "Scan reports", show: role === "owner" || role === "workshop_manager" || role === "qc_inspector" },
     { href: "/workshop", label: "Workshop list", show: role === "technician" || role === "qc_inspector" },
     { href: "/gate-in", label: "Gate in", show: can(role, "gateIn") },
+    // 11 November 2026 (Section 11): the gate-in desk lets cleared cars out from its dashboard's Ready to go out.
+    { href: "/dashboard?tile=ready", label: "Gate out", show: role === "gate_in" },
     { href: "/jobs", label: "Jobs", show: can(role, "viewJobs") && role !== "accounts" },
     { href: "/parts", label: "Parts", show: can(role, "priceParts"), badge: role === "parts" ? partsPending : undefined },
     { ...partsManagement, show: partsManagement.items.length > 0 },

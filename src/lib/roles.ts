@@ -76,7 +76,7 @@ export const PERMISSIONS = {
   requestMove: ["owner", "workshop_manager", "service_advisor"],
   noteToManager: ["owner", "service_advisor"],
   setPriority: ["owner", "workshop_manager", "service_advisor", "gate_in"],
-  gateOut: ["owner", "service_advisor", "accounts"],
+  gateOut: ["owner", "service_advisor", "accounts", "gate_in"],
   overrideKeys: ["owner", "workshop_manager"],
   approveRelease: ["owner", "accounts"],
   // Fix 2.6 (4 November 2026): the gate-in role sees the board READ-ONLY (cars and stages, no customers, no money).

@@ -5,7 +5,7 @@ import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { ModelYearSelect } from "@/components/ModelYearSelect";
 import { SearchSelect } from "@/components/SearchSelect";
 import { Button, Card, ChoiceButtons, Field, Input, LinkButton, SectionLabel, Select } from "@/components/ui";
-import { makeFromVin, modelYearFromVin } from "@/lib/vin";
+import { makeFromVin, modelYearFromVin, vinProblem } from "@/lib/vin";
 import { checkCustomerPhone } from "../actions";
 import { EMIRATES, FUEL_TYPES, PLATE_COUNTRIES, type VehicleMakeRow, type VehicleModelRow } from "@/lib/types";
 
@@ -242,6 +242,7 @@ function Fields({ v, makes, models, variants, fixed }: { v: Record<string, strin
                 autoCapitalize="characters"
               />
             </Field>
+            {vinProblem(vin) && vin.length >= 11 ? <p className="-mt-2 text-sm font-bold text-red" data-vin-problem>{vinProblem(vin)}</p> : null}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <SearchSelect name="make" label="Make" options={makeOptions} value={make} onChange={(m) => { setMake(m); setModel({ id: "", text: "" }); }} placeholder="Type to search…" warning={makeWarning} />
               <SearchSelect name="model" label="Model" options={modelOptions} value={model} onChange={setModel} placeholder={make.text ? "Type to search…" : "Choose the make first"} disabled={!make.text} />

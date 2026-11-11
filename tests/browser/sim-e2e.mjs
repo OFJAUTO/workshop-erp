@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6,e7,e8,e9,e10").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -4569,6 +4569,57 @@ await section("e10", "inspection type and could not check", async () => {
   const changed = await until(async () => (await sql("select inspection_scope from public.jobs where id = $1", [jobId]))[0]?.inspection_scope === "complaints", 40, 500);
   check("i8: the owner allows it on Approvals", !!changed);
   await own.browser.close();
+});
+
+/* ================================================================================================= */
+/* e11 (11 November 2026, Section 11): car-card dashboards. The parts desk: car cards with the parts   */
+/* progress bar, a status line and the next button, the tiles filter the cards, search and make chips. */
+/* Gate-in: a large search, tiles as filters (Ready to go out first), car cards with no customer or     */
+/* price, Gate out only when cleared (otherwise why, never an amount); the gate-out form has no amount.*/
+/* ================================================================================================= */
+await section("e11", "car-card dashboards: parts desk and gate-in", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-car-card-dashboards";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  // c1. The parts desk.
+  const pt = await browserFor("parts", { viewport: { width: 1440, height: 900 } });
+  const pp = pt.page;
+  await go(pp, `${base}/dashboard`);
+  const card = pp.locator(`[data-parts-car="${jobId}"]`);
+  check("c1: the parts desk shows car cards", (await card.count()) === 1 && (await card.locator("[data-car-plate]").count()) === 1);
+  check("c1: the parts progress bar and a status line on the card", (await card.locator("[data-parts-progress]").count()) === 1 && /\S/.test((await card.textContent()) ?? ""));
+  check("c1: no customer name on the parts desk card", !/STAGE TEST CUSTOMER/i.test((await card.textContent()) ?? ""));
+  await pp.screenshot({ path: `${proof}/e11-parts-desk-1440.png` }).catch(() => null);
+  const tile = pp.locator("[data-parts-tile]").first();
+  const key = await tile.getAttribute("data-parts-tile");
+  await tile.click();
+  await pp.waitForURL(/tile=/, { timeout: 15000 }).catch(() => null);
+  check(`c2: a tile filters the cards on the dashboard (${key})`, new RegExp(`tile=${key}`).test(pp.url()));
+  const make = (await sql("select m.name from public.jobs j join public.vehicles v on v.id = j.vehicle_id join public.vehicle_makes m on m.id = v.make_id where j.id = $1", [jobId]))[0]?.name ?? "";
+  await go(pp, `${base}/dashboard?q=${encodeURIComponent(make)}`);
+  check(`c2: the search finds the car by its make (${make})`, (await pp.locator(`[data-parts-car="${jobId}"]`).count()) === 1);
+  await pt.browser.close();
+  // c3. Gate-in.
+  const gs = (await api("/api/e2e/stage", { stage: "ready" })).json;
+  const readyJob = gs?.jobId;
+  const gi = await browserFor("gate_in", { viewport: { width: 800, height: 1280 } });
+  const gp = gi.page;
+  await go(gp, `${base}/dashboard`);
+  check("c3: the gate-in dashboard opens on Ready to go out", (await gp.locator('[data-gatein-tile="ready"][aria-current="page"]').count()) === 1 && (await gp.locator("[data-gatein-search-input]").count()) === 1);
+  check("c3: Gate out is in the gate-in menu", (await gp.locator('a[href="/dashboard?tile=ready"]').count()) >= 1);
+  const jn = (await sql("select job_number from public.jobs where id = $1", [readyJob]))[0]?.job_number;
+  const rc = gp.locator(`[data-gatein-car="${jn}"]`);
+  const words = ((await rc.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check(`c3: the ready car: no customer, no price (${words.slice(0, 120)})`, (await rc.count()) === 1 && !/AED/.test(words) && !/STAGE TEST CUSTOMER/i.test(words));
+  check("c3: blocked with words, or Gate out", (await rc.locator("[data-gateout-blocked], [data-gateout-go]").count()) === 1);
+  await gp.screenshot({ path: `${proof}/e11-gate-in-800.png` }).catch(() => null);
+  // c4. The gate-out form for the gate-in desk: no amount anywhere.
+  await go(gp, `${base}/jobs/${readyJob}/gate-out`);
+  const body = ((await gp.locator("main").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check("c4: the gate-out form opens for the gate-in desk without an amount", (await gp.locator("[data-gateout-payment-words]").count()) === 1 && !/AED \d/.test(body));
+  await gi.browser.close();
 });
 
 const failed = summary();

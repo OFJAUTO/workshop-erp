@@ -33,6 +33,7 @@ export function GateOutForm({
   canOverride,
   canApproveRelease,
   balance,
+  noAmounts = false,
   reasons = { keys: [], release: [] },
   finalCheck = null,
   creditDays = 0,
@@ -53,6 +54,8 @@ export function GateOutForm({
   canOverride: boolean;
   canApproveRelease: boolean;
   balance: BalanceInfo;
+  /** The gate-in desk: words, never an amount. */
+  noAmounts?: boolean;
   /** One-tap reasons for the keys override and for releasing (Settings). */
   reasons?: { keys: string[]; release: string[] };
   /** A PPF car: the final check visit, 7 to 14 days after the handover. */
@@ -100,7 +103,8 @@ export function GateOutForm({
   // Nothing to pay on a declined job: no invoice at all, or none owed.
   const declinedFree = declinedOut && balance.balance <= 0 && (balance.state === "no_invoice" || balance.state === "nothing");
   const blocked = ((balance.state === "no_invoice" && !declinedFree) || balance.balance > 0) && !onCredit;
-  const blockedText = balance.state === "no_invoice" ? "No invoice has been issued for this job." : `Balance due AED ${balance.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}${balance.invoiceNumber ? ` on ${balance.invoiceNumber}` : ""}.`;
+  // 11 November 2026 (Section 11): the gate-in desk never sees an amount.
+  const blockedText = noAmounts ? "Payment not complete: call accounts." : balance.state === "no_invoice" ? "No invoice has been issued for this job." : `Balance due AED ${balance.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}${balance.invoiceNumber ? ` on ${balance.invoiceNumber}` : ""}.`;
 
   return (
     <ActionForm action={action}>
@@ -295,7 +299,7 @@ export function GateOutForm({
           ) : declinedFree ? (
             <div data-declined-free><Notice tone="info">Declined quotation, no charge: the car leaves free of charge. This is written on the job.</Notice></div>
           ) : onCredit ? (
-            <div data-credit-release><Notice tone="info">Credit terms ({creditDays} days): the balance of AED {balance.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })} is due within {creditDays} days. The car may leave; this is written on the job.</Notice></div>
+            <div data-credit-release><Notice tone="info">Credit terms ({creditDays} days): {noAmounts ? "the balance" : <>the balance of AED {balance.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</>} is due within {creditDays} days. The car may leave; this is written on the job.</Notice></div>
           ) : balance.state === "paid" ? (
             <Notice tone="success">Paid in full{balance.invoiceNumber ? ` (${balance.invoiceNumber})` : ""}.</Notice>
           ) : null}

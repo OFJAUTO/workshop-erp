@@ -42,7 +42,9 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
   const staff = await requirePermission("gateOut");
   const { id } = await params;
   const { message, error } = await searchParams;
-  const supabase = await createClient();
+  // 11 November 2026 (Section 11): the gate-in login uses the same form, read through the server, with no amounts.
+  const gateInRole = staff.role_id === "gate_in";
+  const supabase = gateInRole ? createAdminClient() : await createClient();
   const [card, bal, settings] = await Promise.all([loadJobCard(supabase, id), jobBalance(id), getSettings()]);
   if (!card) return refuseRecord("job", id);
   if (!card.job.is_open) redirect(`/jobs/${id}`);
@@ -109,11 +111,12 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
             </Card>
           ) : (
             <Card>
-              {bankHold.length ? <div className="mb-3 rounded-control border-2 border-amber-bar bg-amber-soft p-3 text-sm font-semibold" data-gateout-bank-hold>Waiting for the bank: {bankHold.map((w) => `${w.method === "cheque" ? "cheque" : "transfer"} ${w.number} (AED ${w.amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })})`).join(", ")} has not cleared. The car stays until accounts mark it cleared{role === "owner" ? " – or release it now with a reason (logged)" : ", unless the owner approves"}.</div> : null}
+              {bankHold.length && gateInRole ? <div className="mb-3 rounded-control border-2 border-amber-bar bg-amber-soft p-3 text-sm font-semibold" data-gateout-bank-hold>Waiting for the bank to clear a payment: call accounts.</div> : null}
+              {bankHold.length && !gateInRole ? <div className="mb-3 rounded-control border-2 border-amber-bar bg-amber-soft p-3 text-sm font-semibold" data-gateout-bank-hold>Waiting for the bank: {bankHold.map((w) => `${w.method === "cheque" ? "cheque" : "transfer"} ${w.number} (AED ${w.amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })})`).join(", ")} has not cleared. The car stays until accounts mark it cleared{role === "owner" ? " – or release it now with a reason (logged)" : ", unless the owner approves"}.</div> : null}
               <GateOutForm
             mileage={mileage}
             drivers={drivers}
-            lastPin={lastPin} customer={card.customer ? { name: card.customer.full_name, phone: card.customer.phone } : null} contacts={contacts} recoveryCompanies={(settings.recovery_companies ?? []) as string[]} finalCheck={finalCheck} creditDays={creditDays} declinedOut={declinedOut} jobId={id} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={can(role, "approveRelease")} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
+            lastPin={lastPin} customer={card.customer ? { name: card.customer.full_name, phone: card.customer.phone } : null} contacts={contacts} recoveryCompanies={(settings.recovery_companies ?? []) as string[]} finalCheck={finalCheck} creditDays={creditDays} declinedOut={declinedOut} jobId={id} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={can(role, "approveRelease")} noAmounts={gateInRole} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
             </Card>
           )}
         </div>
@@ -125,11 +128,11 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
             </Card>
           ) : null}
           <Card className="flex flex-col gap-2">
-            <SectionLabel>Balance</SectionLabel>
-            {bal.state === "nothing" ? <p className="text-sm text-muted">Nothing to invoice on this job.</p> : bal.state === "no_invoice" ? <p className="text-sm font-semibold text-red">No invoice issued yet.</p> : (
+            <SectionLabel>{gateInRole ? "Payment" : "Balance"}</SectionLabel>
+            {gateInRole ? <p className={`text-sm font-semibold ${blocked ? "text-red" : "text-green-text"}`} data-gateout-payment-words>{blocked ? "Payment not complete: call accounts." : "Paid, or credit approved."}</p> : bal.state === "nothing" ? <p className="text-sm text-muted">Nothing to invoice on this job.</p> : bal.state === "no_invoice" ? <p className="text-sm font-semibold text-red">No invoice issued yet.</p> : (
               <DescriptionList items={[{ label: "Invoice", value: bal.invoice?.number ?? null }, { label: "Paid", value: `AED ${m(bal.paid)}` }, { label: "Balance due", value: <span className={bal.balance > 0 ? "font-bold text-red" : "font-bold text-green-text"}>AED {m(bal.balance)}</span> }, { label: "Cheques pending", value: bal.pending ? `AED ${m(bal.pending)}` : null }]} />
             )}
-            {bal.invoice ? <LinkButton href={`/invoices/${bal.invoice.id}`} tone="secondary" size="md">Open the invoice</LinkButton> : can(role, "issueInvoices") && bal.state === "no_invoice" ? <LinkButton href={`/jobs/${id}/invoice`} size="md">Issue the invoice</LinkButton> : null}
+            {!gateInRole && bal.invoice ? <LinkButton href={`/invoices/${bal.invoice.id}`} tone="secondary" size="md">Open the invoice</LinkButton> : can(role, "issueInvoices") && bal.state === "no_invoice" ? <LinkButton href={`/jobs/${id}/invoice`} size="md">Issue the invoice</LinkButton> : null}
             {blocked && !can(role, "approveRelease") && job.status !== "in_delivery" ? (
               <form action={askReleaseApproval.bind(null, id)}>
                 <Button type="submit" tone="secondary" size="md">Ask the owner to approve the release</Button>

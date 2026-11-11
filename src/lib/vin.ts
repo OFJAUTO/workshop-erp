@@ -48,3 +48,13 @@ export function modelYearFromVin(vin: string, now = new Date()): number | null {
   while (year + 30 <= latestAllowed) year += 30;
   return year;
 }
+
+/** THE VIN shape check (11 November 2026, Section 11): 17 characters, letters and digits, never I, O or Q. Null = fine. */
+export function vinProblem(vin: string): string | null {
+  const v = vin.trim().toUpperCase();
+  if (!v) return null;
+  if (/[IOQ]/.test(v)) return "A VIN never has I, O or Q: check those letters (1 and 0?).";
+  if (/[^A-Z0-9]/.test(v)) return "A VIN has only letters and digits.";
+  if (v.length !== 17) return `A VIN has 17 characters: this one has ${v.length}.`;
+  return null;
+}

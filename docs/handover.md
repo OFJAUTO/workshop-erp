@@ -1,6 +1,6 @@
 # Handover – 11 November 2026, evening (11 Nov list of 16 sections: IN PROGRESS)
 
-**Done so far:** S1 stock LPOs in Supplier invoices and payments (41df358) · S2 parts belong to one quotation (dormant until apply) · S3 apply supplier advances without a new payment + invoice date check · S4 approvals box + Approvals page · S5 void a duplicate receipt + one cheque never more than its amount · S6 lathe bills · S7 complimentary in one tap · S8 department tablets · S9 jobs to do · S10 inspection type + could not check.
+**Done so far:** S1 stock LPOs in Supplier invoices and payments (41df358) · S2 parts belong to one quotation (dormant until apply) · S3 apply supplier advances without a new payment + invoice date check · S4 approvals box + Approvals page · S5 void a duplicate receipt + one cheque never more than its amount · S6 lathe bills · S7 complimentary in one tap · S8 department tablets · S9 jobs to do · S10 inspection type + could not check · S11 car-card dashboards (parts desk, gate-in) + VIN checks.
 
 **NEEDS OMAR (11 Nov list):**
 - Supplier invoice dates to correct (Edit invoice on the LPO page, Mathew): LPO-00043-1 and LPO-00044-1 (GARGASH, dated 11 May 2026: likely 5 November, day and month swapped), LPO-00035-2 (SPARE HUB, dated 29 Oct 2016: likely 2026).
@@ -8,6 +8,7 @@
 - Mathew moves KA-673205 to the right shop and ticks its tickets. (On live: KA-673205, AED 630, 9 Nov, is under ABU DHABI MOTORS L.L.C, which is not a lathe shop, and carries one ticket whose shop is KHALID & ALAM LATHE WORKSHOP. After the apply: Parts management > Lathe > KA-673205 > Correct > Lathe shop.)
 - After the apply: set each shared tablet's department (Team > Tablets and phones: Workshop / Bodyshop / Both). Today: Test tablet, Mechanic Tablet 1, Mechanic Tablet 2, Mechanic 1, Mechanical 2, Mech 3 and Bodyshop shared read "Department: not set".
 - After the apply: set the fee per inspection type if wanted (Settings > Inspection checklist > Inspection types – fee and time allowed); empty keeps today's fee. From the apply an inspection waits until the advisor picks its type on the job card; cars already in inspection show "Type: not set".
+- VIN from a photo (Section 11): not built - the barcode scan and typing stay, with the checks (17 characters, no I/O/Q, make from the VIN). Reading a VIN from a photo needs a paid service to be reliable, e.g. Google Cloud Vision text reading: USD 1.50 per 1,000 photos after the first 1,000 free each month; at 30 cars a day about USD 0-2 a month, worst case under USD 5. Say yes if you want it.
 - Reply "apply" for the waiting list (docs/waiting-for-apply.md).
 - Q-00078 (J-00317): Peter re-links the parts on Q-00078. On live: 13 of the job's priced parts are on the approved Q-00020 and stay there; three (FRONT BRAKE PAD, MAIN BATTERY, TRANSMISSION MOUNT) were priced before Q-00078 existed and are on no quotation: after the apply they show on Q-00078 under "Parts priced for this job on another quote (3) – Add here".
 - Zoho mapping: pick the stock account for "Stock purchases (inventory)" on Settings > Zoho Books > Mapping (OFJ TEST makes "Inventory Asset" by itself).

@@ -67,7 +67,7 @@ type Row = JobRow & {
 
 const CONDITION_SHORT: Record<string, string> = { runs_drives: "Runs and drives", needs_assistance: "Needs assistance", does_not_run: "Does not run" };
 
-export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ pending?: string }> }) {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ pending?: string; q?: string; make?: string; tile?: string; done?: string }> }) {
   const staff = await requirePermission("viewDashboard");
   const { pending } = await searchParams;
   const role = staff.role_id as RoleId;
@@ -75,10 +75,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   // Accounts see money, not the workshop: their dashboard is the money screen.
   if (role === "accounts") return <AccountsDashboard staff={staff} settings={settings} />;
   // Parts see parts, not the workshop chips: their dashboard is the parts screen.
-  if (role === "parts") return <PartsDashboard staff={staff} />;
+  if (role === "parts") return <PartsDashboard staff={staff} sp={await searchParams} />;
   // Fix 2.6 (4 November 2026): the gate-in role sees the board read-only - cars, stages and the inspection
   // reports, to help the parts desk. No customer names or phones, no money, no buttons that change anything.
-  if (role === "gate_in") return <GateInView staff={staff} />;
+  if (role === "gate_in") return <GateInView staff={staff} sp={await searchParams} />;
   const workingTime = workingTimeOf(settings);
 
   const supabase = await createClient();
