@@ -11,7 +11,11 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Live backup before these: `backups/2026-11-11T03-53-15` (121 tables, 268,409 rows).
+Nothing.
+
+## Applied on 11 November 2026, morning
+
+The owner replied "apply". A fresh backup was taken first: `backups/2026-11-11T06-28-27` (121 tables, 270,689 rows). The four migrations were run with `scripts/db-sql.mjs` in order without an error and recorded with `scripts/db-record-migration.mjs`. `npm run check:live`: 33 passed, 0 failed.
 
 | # | What | What it does on live | Size |
 |---|---|---|---|
@@ -19,6 +23,7 @@ Live backup before these: `backups/2026-11-11T03-53-15` (121 tables, 268,409 row
 | 2 | `supabase/migrations/20261212100000_lpo_owner_review.sql` (10 Nov, Section 4) | Adds the server-only `lpo_owner_reviews` table (accounts send an LPO or one supplier block to the owner with a note; the owner's reply or decision; the reminder stamp) and the setting `lpo_accounts_limit_aed` (0 = off). Until then the LPO page shows Approve and Refuse only, as before. | 1 table + 1 settings row |
 | 3 | `supabase/migrations/20261212110000_stock_reversals.sql` (10 Nov, Section 8) | Adds the server-only `stock_reversals` table (a request to reverse a stock entry or move it to a job, the owner's decision, the opposite movement) and `stock_items.archived_at/archived_by`. Until then the stock page shows no "Reverse this entry" (Archive already works for an empty item). | 1 table + 2 columns |
 | 4 | `supabase/migrations/20261212120000_comeback_at_our_cost.sql` (10 Nov, Section 9) | Adds `jobs.comeback_reason`, `comeback_original_ref` (old invoice number when the original job is before the ERP), `comeback_deduct_original` (default on), `comeback_marked_by/at` (granted column by column), and the setting `comeback_vat_mode` = no_vat. Until then the job card has no "Comeback – at our cost" button; the existing comeback flow works as before. | 5 columns + 1 settings row |
+
 
 ## Applied on 9 November 2026, night
 

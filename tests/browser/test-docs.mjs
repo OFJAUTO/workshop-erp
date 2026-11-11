@@ -110,7 +110,7 @@ try {
   const rc = await one(`select p.id, i.token from public.payments p join public.invoices i on i.id = p.invoice_id where p.is_active and i.token is not null order by p.created_at desc limit 1`);
   const r = await document("receipt", rc ? `/api/pdf/receipt/${rc.id}?t=${rc.token}` : null);
   if (r) check("receipt: AED on the amount, no dirham symbol", /AED/.test(r.text));
-  const lpo = await one("select verify_token from public.purchase_orders where verify_token is not null and is_active order by created_at desc limit 1");
+  const lpo = await one("select verify_token from public.purchase_orders where verify_token is not null and is_active and status in ('approved', 'ordered', 'partly_received', 'received') order by created_at desc limit 1");
   await document("lpo", lpo ? `/api/pdf/lpo/${lpo.verify_token}` : null);
   const war = await one("select warranty_token from public.jobs where warranty_token is not null order by updated_at desc limit 1");
   await document("warranty-certificate", war ? `/api/pdf/warranty/${war.warranty_token}` : null);

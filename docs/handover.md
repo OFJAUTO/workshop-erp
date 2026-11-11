@@ -1,18 +1,18 @@
-# Handover – 11 November 2026, 10:00 Dubai (10 Nov list, in progress)
+# Handover – 11 November 2026, 11:30 Dubai (10 Nov list: ALL DONE)
 
-**NEEDS OMAR (now):**
-1. Reply **"apply"** when convenient for the one waiting database change (several invoices per LPO); see WAITING FOR APPLY below.
-2. **J-00490 (comeback):** no earlier job of this car is in the ERP (record made 26 Oct). After "apply": on the job card press "Comeback – at our cost", tick "Original job not in the ERP", type the old invoice number and what went wrong; then approve it on the same card.
-3. **Zoho "Warranty / rework" expense (Section 9):** tell me the expense account name from the accountant; posting it to Zoho is not built yet.
-4. **Accounts:** confirm VAT on warranty repairs (now: no VAT on lines at our cost).
+**NEEDS OMAR:**
+1. **J-00490:** job card → Comeback – at our cost → tick Original job not in the ERP, old invoice number, what went wrong → Send to the owner → approve At our cost on the same card.
+2. **Zoho "Warranty / rework" expense:** the account name from the accountant (posting at-our-cost costs to Zoho is not built yet).
+3. **Accounts:** confirm no VAT on warranty repairs (lines at our cost carry none now).
+4. **Accounts limit for LPOs** (optional): Settings > Money, "Accounts approve LPOs up to AED …" (0 = off).
 
-**Live (10 Nov list):** S1 paid means paid (deafd90) · S2 Autel post-scan (c6b74c2) · S3 several invoices per LPO (6ebd1f0, after apply) · S4 send LPO for owner approval (103e877, after apply) · S5 supplier payments tab (c5ae8b3) · S6 proof on every payment method (15b8557) · S7 clocking Start / Pause / Stop (0088d3f) · S8 stock reverse (after apply) · S9 comeback at our cost (after apply) · S10 view as customer. Pushed 07:55 to 10:00 Dubai.
+**Live (10 Nov list, all ten):** S1 paid means paid · S2 Autel post-scan · S3 several invoices per LPO · S4 send LPO for owner approval · S5 supplier payments tab · S6 proof on every payment method · S7 clocking Start/Pause/Stop · S8 stock reverse · S9 comeback at our cost · S10 view as customer. Notes in docs/*-10-nov-note.md.
 
-**WAITING FOR APPLY:** 1 `20261212090000_lpo_invoices.sql` · 2 `20261212100000_lpo_owner_review.sql` · 3 `20261212110000_stock_reversals.sql` · 4 `20261212120000_comeback_at_our_cost.sql` (backup `backups/2026-11-11T03-53-15`; a fresh one is taken at apply).
+**WAITING FOR APPLY:** nothing. Applied 11 Nov morning (backup ): lpo_invoices, lpo_owner_review, stock_reversals, comeback_at_our_cost; live check 33/33.
 
-**Working on:** the end-of-batch checks (full layout, security, full simulation, live check).
+**Tests:** full simulation 550/550 (every path, every role) · security all passed · layout check clean · live check 33/33. Known stale: test-docs' Q-00039 checks (TEST's copy of Q-00039 is now an approved AED 37,930 quotation, not the package-only draft it expects) and test-i check 4 (team leader one-tap pick).
 
-**Known stale test:** test-i check 4 (the team leader's one-tap pick on My team) fails on the TEST copy; not caused by this batch, to look at with the end-of-batch run.
+**Queue:** empty.
 
 ---
 
