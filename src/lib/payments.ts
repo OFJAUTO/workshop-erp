@@ -1,3 +1,5 @@
+import { chequeCapProblem } from "./cheque-cap";
+import { schemaReady } from "./schema-ready";
 import { awaitsBank, countsAsPaid, duplicateWords, isBankMethod } from "@/lib/bank-status";
 import "server-only";
 import { DEFAULT_UNDO_MINUTES, mayUndo } from "./money-undo";
@@ -35,6 +37,8 @@ export type PaymentInput = {
    */
   authCode?: string | null;
   cheque?: { number: string | null; bank: string | null; date: string | null } | null;
+  /** 11 November 2026 (Section 5): the cheque's full amount, when one cheque pays for more than one receipt. */
+  chequeTotal?: number | null;
   notes?: string | null;
   clientKey?: string | null;
   /** 1 November 2026: no job and no invoice - an UNALLOCATED ADVANCE on this customer's account (`notes` says what it is for). */
@@ -48,7 +52,7 @@ export type PaymentInput = {
   /** 9 November 2026: why another payment is recorded while a cheque or transfer already waiting for the bank covers the balance. */
   duplicateReason?: string | null;
 };
-export type PaymentResult = { error?: string; ok?: boolean; number?: string; paymentId?: string; pendingOwner?: boolean; message?: string; /** The same client key was already used: this is that earlier receipt (its amount and method). */ repeat?: { amount: number; method: string }; /** More than what is left and no note yet: the form asks for one. */ needsOverNote?: { balance: number }; token?: string | null; /** A cheque or transfer already waiting for the bank covers what is due: the form asks why another one (9 November 2026). */ needsDuplicateReason?: string };
+export type PaymentResult = { error?: string; ok?: boolean; number?: string; paymentId?: string; pendingOwner?: boolean; message?: string; /** The same client key was already used: this is that earlier receipt (its amount and method). */ repeat?: { amount: number; method: string }; /** More than what is left and no note yet: the form asks for one. */ needsOverNote?: { balance: number }; token?: string | null; /** A cheque or transfer already waiting for the bank covers what is due: the form asks why another one (9 November 2026). */ needsDuplicateReason?: string; /** The same cheque number is already on receipts: the form asks for the cheque's full amount. */ needsChequeTotal?: boolean };
 
 const money = (n: number) => `AED ${round2(n).toLocaleString("en-GB", { minimumFractionDigits: 2 })}`;
 
@@ -163,6 +167,18 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   // A bank transfer waits for the bank like a cheque (9 November 2026): accounts confirm it in Accounts posting.
   const cheque = method === "cheque" ? { cheque_number: input.cheque?.number ?? null, cheque_bank: input.cheque?.bank ?? null, cheque_date: input.cheque?.date ?? null, cheque_status: "pending" as const } : method === "transfer" ? { cheque_status: "pending" as const } : {};
   if (method === "cheque" && (!cheque.cheque_number || !cheque.cheque_date)) return { error: "A cheque needs its number and date." };
+  // ONE CHEQUE, NEVER MORE THAN ITS AMOUNT (11 November 2026, Section 5): the receipts already on this cheque number.
+  const totalReady = await schemaReady("payments", "cheque_total_aed");
+  if (method === "cheque" && cheque.cheque_number) {
+    const { data: sibs } = await admin.from("payments").select(`number, amount_aed, cheque_bank, cheque_status, client_key${totalReady ? ", cheque_total_aed" : ""}, job:jobs!payments_job_id_fkey(job_number)`).eq("cheque_number", cheque.cheque_number).eq("is_active", true).in("status", ["recorded", "pending_owner"]);
+    const sameBank = (b: string | null) => !b || !cheque.cheque_bank || b.trim().toLowerCase() === cheque.cheque_bank.trim().toLowerCase();
+    const siblings = ((sibs ?? []) as unknown as { number: string; amount_aed: number | string; cheque_bank: string | null; cheque_status: string | null; client_key: string | null; cheque_total_aed?: number | string | null; job: { job_number: string } | null }[])
+      .filter((x) => sameBank(x.cheque_bank) && (!input.clientKey || x.client_key !== input.clientKey))
+      .map((x) => ({ number: x.number, amount: Number(x.amount_aed) || 0, jobNumber: x.job?.job_number ?? null, cleared: x.cheque_status === "cleared", chequeTotal: x.cheque_total_aed === null || x.cheque_total_aed === undefined ? null : Number(x.cheque_total_aed) }));
+    const cap = chequeCapProblem({ chequeNumber: cheque.cheque_number, amount, siblings, typedTotal: input.chequeTotal && input.chequeTotal > 0 ? input.chequeTotal : null });
+    if (cap) return { error: cap.error, ...(cap.needsTotal ? { needsChequeTotal: true } : {}) };
+    if (totalReady) Object.assign(cheque, { cheque_total_aed: input.chequeTotal && input.chequeTotal > 0 ? input.chequeTotal : siblings.length ? Math.max(0, ...siblings.map((x) => x.chequeTotal ?? 0)) || null : amount });
+  }
   // No duplicates (9 November 2026, J-00858: RCT-00058 was recorded twice more while the cheque waited): money already
   // waiting for the bank that covers what is due asks why another payment is recorded; the reason is kept on it.
   let dupWords: string | null = null;
@@ -414,4 +430,42 @@ export async function undoPayment(paymentId: string, actor: Actor, settings: Set
   const { reopenReportsOfPayment } = await import("./payment-reports");
   await reopenReportsOfPayment(paymentId, { id: actor.id, display_name: actor.display_name }).catch(() => null);
   return { ok: true, number: p.number, message: `${p.number} undone.` };
+}
+
+/**
+ * "Void - duplicate / entered by mistake" (11 November 2026, Section 5, AL ALI RCT-00062): accounts ASK the owner with a
+ * reason (his Approvals box decides, through voidPayment - the one void, nothing deleted); the owner's own press voids
+ * at once. A receipt that is part of a bank settlement still has to have the settlement undone first (voidPayment says so).
+ */
+export async function requestPaymentVoid(paymentId: string, actor: Actor & { display_name: string }, reason: string): Promise<PaymentResult> {
+  const clean = reason.trim().slice(0, 300);
+  if (clean.length < 5) return { error: "Write why it is a duplicate or a mistake (a few words): the owner reads it." };
+  if (actor.role_id === "owner") return voidPayment(paymentId, actor, `Duplicate / entered by mistake: ${clean}`);
+  if (actor.role_id !== "accounts") return { error: "Only accounts or the owner ask for a void." };
+  if (!(await schemaReady("payments", "void_requested_at"))) return { error: "Asking the owner for a void switches on once the database change is applied." };
+  const admin = createAdminClient();
+  const { data: p } = await admin.from("payments").select("id, number, amount_aed, status, job_id, settlement_id, void_requested_at").eq("id", paymentId).maybeSingle();
+  if (!p || !["recorded", "pending_owner"].includes(p.status as string)) return { error: "This receipt is already voided or reversed." };
+  if (p.void_requested_at) return { error: `The owner is already asked to void ${p.number}.` };
+  if (p.settlement_id) {
+    const { data: st } = await admin.from("card_settlements").select("number").eq("id", p.settlement_id).maybeSingle();
+    return { error: `${p.number} is part of the bank settlement ${(st as { number: string } | null)?.number ?? ""}. Undo that settlement on Accounts posting first.` };
+  }
+  const { error } = await admin.from("payments").update({ void_requested_at: new Date().toISOString(), void_requested_by: actor.id, void_request_reason: clean, updated_by: actor.id }).eq("id", paymentId).is("void_requested_at", null);
+  if (error) return { error: SAVE_FAILED };
+  if (p.job_id) await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment_void_asked", note: `${p.number} (${money(Number(p.amount_aed))}): void asked by ${actor.display_name} – ${clean}`, created_by: actor.id });
+  const { notifyRoles } = await import("./notifications");
+  await notifyRoles(["owner"], { type: "owner_approval_needed", title: `Void a receipt? ${p.number} · ${money(Number(p.amount_aed))}`, body: `${actor.display_name}: ${clean}`, jobId: (p.job_id as string | null) ?? null, href: `/approvals#approval-void:${paymentId}` });
+  return { ok: true, number: p.number as string, message: `${p.number}: the owner is asked to void it. It stays as it is until he decides.` };
+}
+
+/** The owner refused the void (or it was decided): the request comes off; the one who asked hears the answer. */
+export async function clearVoidRequest(paymentId: string, by: { id: string; display_name: string }, refused: string | null): Promise<void> {
+  const admin = createAdminClient();
+  const { data: p } = await admin.from("payments").select("number, job_id, void_requested_by").eq("id", paymentId).maybeSingle();
+  await admin.from("payments").update({ void_requested_at: null, void_requested_by: null, void_request_reason: null, updated_by: by.id }).eq("id", paymentId);
+  if (refused && p?.void_requested_by) {
+    const { notifyStaff } = await import("./notifications");
+    await notifyStaff([p.void_requested_by as string], { type: "owner_approval_needed", title: `Void refused · ${p.number}`, body: `${by.display_name}: ${refused}`, jobId: (p.job_id as string | null) ?? null, href: "/accounts-posting?tab=cheque" });
+  }
 }

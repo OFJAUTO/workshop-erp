@@ -186,3 +186,13 @@ export async function bounceBankAction(paymentId: string, _prev: BankAnswer | nu
   if (r.ok) bankRefresh();
   return { error: r.error, message: r.words, at: Date.now() };
 }
+
+/** "Void - duplicate / entered by mistake" on a waiting row (11 November 2026, Section 5): asks the owner (accounts), or voids (the owner). */
+export async function requestVoidAction(paymentId: string, _prev: BankAnswer | null, formData: FormData): Promise<BankAnswer> {
+  const staff = await requirePermission("recordPayments");
+  if (staff.viewingAs) return { error: "View as is read-only – use Act as to change it.", at: Date.now() };
+  const { requestPaymentVoid } = await import("@/lib/payments");
+  const r = await requestPaymentVoid(paymentId, { ...staff, is_head_accountant: (staff as { is_head_accountant?: boolean }).is_head_accountant ?? false }, String(formData.get("reason") ?? ""));
+  if (r.ok || !r.error) bankRefresh();
+  return { error: r.error, message: r.message ?? (r.ok ? "Voided." : undefined), at: Date.now() };
+}

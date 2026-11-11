@@ -151,6 +151,18 @@ export async function loadApprovals(scope: Scope = {}): Promise<ApprovalItem[]> 
   for (const r of rows(overs)) {
     push({ kind: "overpayment", id: String(r.id), title: `Payment above the balance · ${r.receipt_number ?? ""}`, what: jw(r.job_id), askedBy: nm(r.created_by), askedAt: (r.created_at as string) ?? null, money: aed(r.amount_aed), href: r.job_id ? `/jobs/${r.job_id}/invoice` : "/invoices", jobId: (r.job_id as string) ?? null, quotationId: null, poId: null });
   }
+  // Receipt voids asked by accounts (11 November 2026, Section 5).
+  if (await schemaReady("payments", "void_requested_at")) {
+    const { data: voids } = await admin.from("payments").select("id, number, job_id, amount_aed, method, cheque_number, void_request_reason, void_requested_by, void_requested_at").not("void_requested_at", "is", null).in("status", ["recorded", "pending_owner"]);
+    const vr = (voids ?? []) as R[];
+    const extraStaff = vr.map((v) => String(v.void_requested_by)).filter((x) => x && !who.has(x));
+    const extraJobs = vr.map((v) => String(v.job_id ?? "")).filter((x) => x && !jobWords.has(x));
+    if (extraStaff.length) for (const st of ((await admin.from("staff").select("id, display_name").in("id", extraStaff)).data ?? []) as R[]) who.set(String(st.id), String(st.display_name));
+    if (extraJobs.length) for (const j of ((await admin.from("jobs").select("id, job_number").in("id", extraJobs)).data ?? []) as R[]) jobWords.set(String(j.id), String(j.job_number));
+    for (const r of vr) {
+      push({ kind: "void", id: String(r.id), title: `Void receipt ${r.number}${r.cheque_number ? ` · cheque ${r.cheque_number}` : ""}`, what: `${String(r.void_request_reason ?? "")}${r.job_id ? ` · ${jw(r.job_id)}` : ""}`, askedBy: nm(r.void_requested_by), askedAt: (r.void_requested_at as string) ?? null, money: aed(r.amount_aed), href: r.job_id ? `/jobs/${r.job_id}/invoice` : "/accounts-posting?tab=cheque", jobId: (r.job_id as string) ?? null, quotationId: null, poId: null, approveLabel: "Void it", refuseLabel: "Keep the receipt" });
+    }
+  }
   for (const extra of await moreApprovals(scope)) out.push(extra);
   const kept = out.filter((i) => (!scope.jobId || i.jobId === scope.jobId) && (!scope.quotationId || i.quotationId === scope.quotationId) && (!scope.poId || i.poId === scope.poId));
   return kept.sort((a, b) => String(a.askedAt ?? "").localeCompare(String(b.askedAt ?? "")));

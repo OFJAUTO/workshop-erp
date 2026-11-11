@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -4180,6 +4180,75 @@ await section("e4", "approval box and approvals page", async () => {
   const cleared = await until(async () => (await sql("select inspection_fee_request_aed from public.jobs where id = $1", [jobId]))[0]?.inspection_fee_request_aed === null, 40, 500);
   check("p5: refused with the reason, the request is gone", !!cleared);
   await own.browser.close();
+});
+
+/* ================================================================================================= */
+/* e5 (11 November 2026, Section 5, AL ALI cheque 019383): a duplicate receipt on a cheque already     */
+/* cleared. The waiting row warns "Cheque … is already recorded"; accounts press "Void – duplicate /    */
+/* entered by mistake" with a reason; the owner approves it on Approvals; the receipt stays in the     */
+/* history marked VOID with who and why. Entering the same cheque again warns and is refused until     */
+/* the cheque's full amount is typed, and never above it.                                              */
+/* ================================================================================================= */
+await section("e5", "void a duplicate receipt, one cheque never more than its amount", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-cheque-void";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "ready" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId || !seed?.invoice?.id) throw new Error("seed failed");
+  await sql("update public.invoices set sent_at = now() where id = $1", [seed.invoice.id]);
+  const j = (await sql("select customer_id from public.jobs where id = $1", [jobId]))[0];
+  const accId = (await sql("select id from public.staff where role_id = 'accounts' and is_active order by created_at limit 1"))[0].id;
+  const ins = (n, amount, status) => sql("insert into public.payments (number, job_id, customer_id, method, amount_aed, status, cheque_number, cheque_bank, cheque_date, cheque_status, received_at, received_by, created_by, updated_by) values ($1, $2, $3, 'cheque', $4, 'recorded', '919383', 'ENBD', current_date, $5, now(), $6, $6, $6) returning id, number", [n, jobId, j.customer_id, amount, status, accId]);
+  await ins("E2E-RCT-57", 2236.5, "cleared");
+  await ins("E2E-RCT-58", 2131.5, "cleared");
+  const dup = (await ins("E2E-RCT-62", 2236.5, "pending"))[0];
+  if (!dup) throw new Error("seed failed: the receipts");
+  const acc = await browserFor("accounts", { viewport: { width: 1440, height: 900 } });
+  const ap = acc.page;
+  await go(ap, `${base}/accounts-posting?tab=cheque`);
+  const row = ap.locator(`[data-bank-row="${dup.number}"]`);
+  const also = ((await row.locator("[data-bank-cheque-also]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check(`c1: the waiting row warns the cheque is already recorded (${also.slice(0, 120)})`, /already recorded: E2E-RCT-5/.test(also));
+  await row.locator('[data-bank-open="void"]').click();
+  await row.locator("[data-bank-void-reason]").fill("Same cheque already cleared in the settlement");
+  await row.locator('[data-bank-save="void"]').click();
+  const asked = await until(async () => (await sql("select void_requested_at from public.payments where id = $1", [dup.id]))[0]?.void_requested_at, 40, 500);
+  check("c2: the void is asked of the owner (nothing changes yet)", !!asked && (await sql("select status from public.payments where id = $1", [dup.id]))[0]?.status === "recorded");
+  await ap.screenshot({ path: `${proof}/e5-void-asked-1440.png` }).catch(() => null);
+  // c3. The owner approves on Approvals; the receipt is VOID with who and why.
+  const own = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  await go(own.page, `${base}/approvals`);
+  const box = own.page.locator(`[data-approval-box="void:${dup.id}"]`);
+  check("c3: the void is on the owner's Approvals", (await box.count()) === 1);
+  await box.locator("[data-approval-approve]").click();
+  const voided = await until(async () => (await sql("select status, void_reason, voided_by from public.payments where id = $1", [dup.id]))[0]?.status === "voided", 40, 500);
+  const v = (await sql("select status, void_reason, voided_by, void_requested_at from public.payments where id = $1", [dup.id]))[0];
+  check(`c3: VOID, kept in the history with who and why (${v?.status} · ${v?.void_reason?.slice(0, 40)} · by ${v?.voided_by ? "set" : "none"} · request ${v?.void_requested_at ? "still" : "cleared"})`, !!voided && /Duplicate/.test(v?.void_reason ?? "") && !!v?.voided_by && v?.void_requested_at === null);
+  await own.browser.close();
+  // c4. The same cheque again from the Record a payment window: warned, refused without the full amount.
+  await go(ap, `${base}/jobs/${jobId}`);
+  await ap.locator("[data-record-payment-open]").first().click();
+  const form = ap.locator("[data-record-payment-dialog] [data-payment-form]").first();
+  await form.waitFor({ timeout: 30000 });
+  await form.locator('[data-method="cheque"]').click();
+  await form.locator('input[name="cheque_bank"]').fill("ENBD");
+  await form.locator('input[name="cheque_number"]').fill("919383");
+  await form.locator('input[name="cheque_date"]').fill("2026-11-10");
+  await form.locator('input[name="cheque_date"]').focus();
+  await until(async () => (await form.locator("[data-cheque-already]").count()) === 1, 20, 500);
+  check("c4: typing the same cheque warns with what is already recorded", (await form.locator("[data-cheque-already]").count()) === 1);
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  await form.locator('[data-job-file-upload] input[type="file"]').first().setInputFiles({ name: "cheque.png", mimeType: "image/png", buffer: png });
+  await until(async () => (await form.locator("[data-proof-missing]").count()) === 0, 40, 500);
+  if ((await form.locator("[data-amount-full]").count()) === 1) await form.locator("[data-amount-full]").click();
+  await form.screenshot({ path: `${proof}/e5-same-cheque-warning-1440.png` }).catch(() => null);
+  const before = Number((await sql("select count(*)::int as n from public.payments where cheque_number = '919383' and status = 'recorded'"))[0].n);
+  await pressRecord(form);
+  await until(async () => (await ap.locator("[data-record-payment-done], [data-record-payment-error]").count()) > 0, 40, 500);
+  const err = ((await ap.locator("[data-record-payment-error]").first().textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+  const after = Number((await sql("select count(*)::int as n from public.payments where cheque_number = '919383' and status = 'recorded'"))[0].n);
+  check(`c4: refused without the cheque's full amount (${err.slice(0, 110)})`, after === before && /already recorded/.test(err));
+  await acc.browser.close();
 });
 
 const failed = summary();

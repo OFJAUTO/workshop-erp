@@ -83,6 +83,7 @@ export async function paymentFromForm(staff: { id: string; display_name: string;
     reference: blankToNull(formData.get("reference")),
     authCode: blankToNull(formData.get("auth_code")),
     cheque: { number: blankToNull(formData.get("cheque_number")), bank: blankToNull(formData.get("cheque_bank")), date: blankToNull(formData.get("cheque_date")) },
+    chequeTotal: Number(String(formData.get("cheque_total") ?? "").replace(/,/g, "")) || null,
     notes: blankToNull(formData.get("notes")),
     clientKey: clientKeyIn,
     unallocated: unallocatedCustomer ? { customerId: unallocatedCustomer, vehicleId: vehicleIn } : null,

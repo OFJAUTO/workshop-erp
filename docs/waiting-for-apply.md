@@ -16,6 +16,7 @@ Backup taken before building: `backups/2026-11-11T13-52-56` (124 tables, 274,663
 | # | What | What it does on live | Size |
 |---|---|---|---|
 | 1 | `supabase/migrations/20261213090000_part_quote_link.sql` (11 Nov, Section 2) | Adds `for_quote` (the quotation number a request or part is for) to `part_requests` and `part_items`, a rule that fills it in when one is made (the quotation it was asked from, or the one being prepared; a part takes its request's), and fills it for existing parts from the quotation whose line carries them (nothing else guessed; Q-00078 itself is not touched). Until then the counter counts the whole job, as before, and there is no tag, move or Add here. | 2 columns + 1 rule |
+| 2 | `supabase/migrations/20261213100000_receipt_void_request_cheque_total.sql` (11 Nov, Section 5) | Adds `payments.void_requested_at/by/void_request_reason` (accounts ask the owner to void a duplicate receipt; his Approvals decide) and `payments.cheque_total_aed` (a cheque's full amount, so receipts on one cheque never total more than it), with two indexes. Until then "Void – duplicate" answers that it switches on with the apply (the owner's own void and the cheque check without a stored total work already). | 4 columns + 2 indexes |
 
 ## Applied on 11 November 2026, morning
 

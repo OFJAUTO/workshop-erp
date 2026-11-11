@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadApprovals, type ApprovalKind } from "@/lib/approvals";
-import { decideOverpayment } from "@/lib/payments";
+import { clearVoidRequest, decideOverpayment, voidPayment } from "@/lib/payments";
 import { decideCommission, decideQuoteApproval, decideRevision } from "@/app/(app)/quotes/actions";
 import { decideInvoiceCheck, decidePurchaseOrder } from "@/app/(app)/parts/order-actions";
 import { decideDiscountApproval } from "@/app/(app)/parts/remove-actions";
@@ -106,6 +106,25 @@ export async function decideApprovalAction(kind: ApprovalKind, id: string, decis
       if (staff.role_id !== "owner") return { error: "Only the owner decides this." };
       answer = await run(() => decideOverpayment(id, staff, yes, note || null));
       break;
+    case "void": {
+      if (staff.role_id !== "owner") return { error: "Only the owner decides a void." };
+      const { data: p } = await createAdminClient().from("payments").select("void_request_reason").eq("id", id).maybeSingle();
+      if (yes) {
+        // The request comes off FIRST: a voided receipt takes no more changes.
+        await clearVoidRequest(id, staff, null);
+        const r = await voidPayment(id, staff, `Duplicate / entered by mistake: ${String(p?.void_request_reason ?? "")}${note ? ` · owner: ${note}` : ""}`);
+        if (r.error) {
+          await createAdminClient().from("payments").update({ void_requested_at: new Date().toISOString(), void_request_reason: String(p?.void_request_reason ?? "") }).eq("id", id);
+          answer = { error: r.error };
+        } else {
+          answer = { ok: true, message: `Voided. It stays in the history marked VOID; the balance and Zoho follow.` };
+        }
+      } else {
+        await clearVoidRequest(id, staff, note);
+        answer = { ok: true, message: "Kept. Accounts are told why." };
+      }
+      break;
+    }
     default:
       answer = await runMoreDecision(kind, id, yes, note, staff);
   }

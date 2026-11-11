@@ -1,5 +1,6 @@
 "use client";
 
+import { chequeAlreadyAction } from "@/app/(app)/invoices/cheque-actions";
 import { proofLabel, proofRequired } from "@/lib/payment-proof";
 import { ProofFileInput } from "@/components/ProofFileInput";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -81,6 +82,8 @@ export function PaymentForm({
 }) {
   const first = prefill && methods.includes(prefill.method) ? prefill.method : expected && methods.includes(expected) ? expected : methods[0] ?? "";
   const [method, setMethod] = useState(first);
+  // "Cheque 019383 is already recorded: …" (11 November 2026, Section 5).
+  const [chequeWords, setChequeWords] = useState<string | null>(null);
   const prefillFull = !!prefill && !!balance && Math.abs(prefill.amount - balance) < 0.005;
   const [mode, setMode] = useState<"full" | "partial">(prefill ? (prefillFull ? "full" : "partial") : balance && balance > 0 ? "full" : "partial");
   const [amount, setAmount] = useState(prefill && !prefillFull ? prefill.amount.toFixed(2) : "");
@@ -161,9 +164,11 @@ export function PaymentForm({
         ) : null}
         {method === "cheque" ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cheque number</span><Input name="cheque_number" inputMode="numeric" required data-cheque-number /></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cheque number</span><Input name="cheque_number" inputMode="numeric" required data-cheque-number onBlur={(e) => { const form = e.currentTarget.form; const bank = (form?.elements.namedItem("cheque_bank") as HTMLInputElement | null)?.value ?? null; void chequeAlreadyAction(e.currentTarget.value, bank).then(setChequeWords).catch(() => setChequeWords(null)); }} /></label>
             <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Bank</span><Input name="cheque_bank" placeholder="e.g. Emirates NBD" data-cheque-bank /></label>
             <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cheque date</span><Input name="cheque_date" type="date" required data-cheque-date /></label>
+            {chequeWords ? <p className="sm:col-span-3 rounded-control border border-amber-bar bg-amber-soft px-3 py-2 text-sm font-semibold text-amber-text" data-cheque-already>{chequeWords} Same payment again? Do not record it. A share of a cheque for more than one car? Type its full amount.</p> : null}
+            <label className="flex flex-col gap-1 sm:col-span-3"><span className="text-xs font-semibold text-muted">Cheque full amount (only when one cheque pays for more than one car)</span><Input name="cheque_total" inputMode="decimal" placeholder="Leave empty when the cheque is this payment" data-cheque-total /></label>
           </div>
         ) : null}
         {needsAuthCode(method) ? (

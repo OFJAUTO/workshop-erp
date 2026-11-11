@@ -116,6 +116,8 @@ export async function receiveCombined(customerId: string, input: CombinedInput, 
       reference: input.reference ?? null,
       authCode: input.authCode ?? null,
       cheque,
+      // The whole group is ONE cheque: its full amount caps the shares (11 November 2026, Section 5).
+      chequeTotal: method === "cheque" ? amount : null,
       notes: part.invoiceId ? `${words} · ${group.number}` : `Left over from ${group.number} (${payWhat(method, cheque?.number ?? null, input.reference ?? null)}): an advance on the account`,
       clientKey: `${input.clientKey}:${part.invoiceId ?? "advance"}`,
       unallocated: part.invoiceId ? null : { customerId },

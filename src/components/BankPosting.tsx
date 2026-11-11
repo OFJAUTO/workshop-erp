@@ -4,7 +4,7 @@ import { useActionState, useEffect, useMemo, useState, useSyncExternalStore } fr
 import { Button, Input } from "@/components/ui";
 import { MoneyDate } from "@/components/MoneyDate";
 import { SlipTile } from "@/components/PaymentReport";
-import { bounceBankAction, clearBankAction, markDepositedAction, type BankAnswer } from "@/app/(app)/accounts-posting/actions";
+import { bounceBankAction, clearBankAction, markDepositedAction, requestVoidAction, type BankAnswer } from "@/app/(app)/accounts-posting/actions";
 import type { BankWaiting } from "@/lib/bank-posting";
 
 /*
@@ -49,13 +49,14 @@ function Answer({ state }: { state: BankAnswer | null }) {
 
 /** One cheque or transfer with its buttons (the money page and Accounts posting). */
 export function BankRow({ row, today, canSave, ready, proofUrl = null, withTick = false, ticked = false, onTick }: { row: BankWaiting; today: string; canSave: boolean; ready: boolean; proofUrl?: string | null; withTick?: boolean; ticked?: boolean; onTick?: (on: boolean) => void }) {
-  const [open, setOpen] = useState<"deposit" | "clear" | "bounce" | null>(null);
+  const [open, setOpen] = useState<"deposit" | "clear" | "bounce" | "void" | null>(null);
+  const [vd, vdAction, vdBusy] = useActionState(requestVoidAction.bind(null, row.id), null);
   const [dep, depAction, depBusy] = useActionState(markDepositedAction.bind(null, row.id), null);
   const [clr, clrAction, clrBusy] = useActionState(clearBankAction, null);
   const [bnc, bncAction, bncBusy] = useActionState(bounceBankAction.bind(null, row.id), null);
   const cheque = row.method === "cheque";
   const done = !!clr?.message || !!bnc?.message;
-  useEffect(() => { for (const st of [dep, clr, bnc]) if (st?.message) showAnswer(st.message, st.at); }, [dep, clr, bnc]);
+  useEffect(() => { for (const st of [dep, clr, bnc, vd]) if (st?.message) showAnswer(st.message, st.at); }, [dep, clr, bnc, vd]);
   const received = day(row.receivedAt);
   return (
     <li className="flex flex-col gap-2 py-3" data-bank-row={row.number} data-bank-method={row.method}>
@@ -72,6 +73,8 @@ export function BankRow({ row, today, canSave, ready, proofUrl = null, withTick 
         {row.depositedAt ? <span className="rounded-control border border-line bg-white px-2 py-0.5 text-xs font-bold" data-bank-deposited>Deposited {row.depositedAt}{row.depositedTo ? ` · ${row.depositedTo}` : ""}</span> : cheque ? <span className="text-xs font-semibold text-amber-text" data-bank-received>Received – not deposited yet</span> : <span className="text-xs font-semibold text-amber-text" data-bank-received>Waiting for the bank</span>}
         {row.late ? <span className="text-xs font-semibold text-amber-text">older than 3 working days</span> : null}
         {row.group ? <span className="w-full text-xs font-bold" data-bank-group={row.group.number}>{row.group.words} · {row.group.number}: clears and bounces as one</span> : null}
+        {row.chequeAlso ? <span className="w-full rounded-control border border-red-bar bg-red-soft px-2 py-1 text-xs font-bold text-red" data-bank-cheque-also>{row.chequeAlso} Is this a duplicate?</span> : null}
+        {row.voidAsked ? <span className="w-full rounded-control border border-amber-bar bg-amber-soft px-2 py-1 text-xs font-bold text-amber-text" data-bank-void-asked>Void asked{row.voidAsked.by ? ` by ${row.voidAsked.by}` : ""}: {row.voidAsked.reason} · waiting for the owner</span> : null}
         {proofUrl ? <SlipTile url={proofUrl} path={row.proofPath} label={`${row.number} proof`} hook={row.number} size="h-9 w-9" /> : null}
       </div>
       {canSave && !done ? (
@@ -79,6 +82,7 @@ export function BankRow({ row, today, canSave, ready, proofUrl = null, withTick 
           {cheque && ready && !row.depositedAt ? <Button type="button" size="md" tone={open === "deposit" ? "primary" : "secondary"} disabled={!!row.notDue} onClick={() => setOpen(open === "deposit" ? null : "deposit")} data-bank-open="deposit">Mark deposited</Button> : null}
           <Button type="button" size="md" tone={open === "clear" ? "primary" : "secondary"} disabled={!!row.notDue} onClick={() => setOpen(open === "clear" ? null : "clear")} data-bank-open="clear">{cheque ? "Mark cleared" : "Confirmed in bank"}</Button>
           <Button type="button" size="md" tone="ghost" onClick={() => setOpen(open === "bounce" ? null : "bounce")} data-bank-open="bounce">{cheque ? "Bounced" : "Never arrived"}</Button>
+          {!row.voidAsked && !vd?.message ? <Button type="button" size="md" tone="ghost" onClick={() => setOpen(open === "void" ? null : "void")} data-bank-open="void">Void – duplicate / entered by mistake</Button> : null}
         </div>
       ) : null}
       {open === "deposit" && !dep?.message ? (
@@ -109,6 +113,14 @@ export function BankRow({ row, today, canSave, ready, proofUrl = null, withTick 
         </form>
       ) : null}
       <Answer state={bnc} />
+      {open === "void" && !vd?.message ? (
+        <form action={vdAction} className="flex flex-wrap items-end gap-2 rounded-control border border-red-bar bg-white p-3" data-bank-form="void">
+          <label className="flex min-w-64 flex-1 flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Why is it a duplicate or a mistake?</span><Input name="reason" required minLength={5} placeholder="e.g. Same cheque 019383 already cleared in STL-00017" data-bank-void-reason /></label>
+          <Button type="submit" size="md" tone="danger" disabled={vdBusy} data-bank-save="void">{vdBusy ? "Sending…" : "Ask the owner to void it"}</Button>
+          <span className="w-full text-xs text-muted">Nothing is deleted: once the owner approves, the receipt stays in the history marked VOID with who, when and why; the invoice balance and Zoho are reversed.</span>
+        </form>
+      ) : null}
+      <Answer state={vd} />
     </li>
   );
 }
