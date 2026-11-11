@@ -22,8 +22,11 @@ export function Shell({
   viewingAs = null,
   actingAs = null,
   sounds,
+  tabletLabel = null,
   children,
 }: {
+  /** 11 November 2026 (Section 8): "WORKSHOP TABLET" on a shared tablet with a department. */
+  tabletLabel?: string | null;
   nav?: NavEntry[];
   /** May this person find a car by its customer? (the search box's words) */
   searchCustomers?: boolean;
@@ -41,6 +44,7 @@ export function Shell({
 }) {
   return (
     <div className="min-h-screen flex flex-col nav:flex-row" data-erp-staff>
+      {tabletLabel ? <span className="pointer-events-none fixed bottom-1 left-1 z-40 rounded-full bg-ink/80 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-[0.08em] text-on-dark" data-tablet-label>{tabletLabel}</span> : null}
       <aside className="hidden nav:flex bg-sidebar text-sidebar-text flex-col items-stretch gap-6 px-5 py-6 w-60 shrink-0 h-screen sticky top-0 overflow-y-auto" data-sidebar>
         {/* The logo starts where the menu text starts (the links' own 14 px padding), about 130 px wide, about
             28 px above the first menu item (the aside's 24 px gap + 4 px). */}

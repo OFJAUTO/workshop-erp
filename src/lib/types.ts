@@ -35,6 +35,8 @@ export type StaffPrivateRow = {
 export type DeviceRow = {
   id: string;
   name: string;
+  /** 11 November 2026 (Section 8): Workshop, Bodyshop or Both; empty = not set. */
+  department?: string | null;
   location: "workshop" | "bodyshop" | "office" | "personal";
   kind: "shared" | "personal";
   staff_id: string | null;

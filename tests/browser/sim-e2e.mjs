@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6,e7").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6,e7,e8").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -4391,6 +4391,50 @@ await section("e7", "complimentary in one tap", async () => {
   await p.locator("[data-comp-box]").screenshot({ path: `${proof}/e7-comp-box-1440.png` }).catch(() => null);
   check("f3: the box shows Saved ✓ and the earlier job", (await p.locator("[data-comp-box] [data-comp-saved]").count()) === 1 && (await p.locator("[data-comp-box] [data-comp-original]").inputValue()) === old);
   await adv.browser.close();
+});
+
+/* ================================================================================================= */
+/* e8 (11 November 2026, Section 8): a shared tablet belongs to a department. Its sign-in screen shows */
+/* that department's people first, clocked-in first, with "Someone else?" for the rest and a small     */
+/* department label; the owner sets the department on Devices ("Department: not set" until then);      */
+/* registering a shared tablet asks for it.                                                            */
+/* ================================================================================================= */
+await section("e8", "department tablets", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-department-tablets";
+  mkdirSync(proof, { recursive: true });
+  const crypto = await import("node:crypto");
+  const token = `e2e-tablet-${Date.now()}`;
+  const hash = crypto.createHash("sha256").update(token).digest("hex");
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const dev = (await sql("insert into public.devices (name, kind, location, department, token_hash, registered_by, created_by, updated_by) values ('E2e Bodyshop tablet', 'shared', 'bodyshop', 'bodyshop', $1, $2, $2, $2) returning id", [hash, ownerId]))[0];
+  const old = (await sql("insert into public.devices (name, kind, location, token_hash, registered_by, created_by, updated_by) values ('E2e Old tablet', 'shared', 'workshop', $1, $2, $2, $2) returning id", [crypto.createHash("sha256").update(token + "-old").digest("hex"), ownerId]))[0];
+  if (!dev || !old) throw new Error("seed failed: the tablets");
+  // t1. The bodyshop tablet's sign-in screen.
+  const { chromium } = await import("playwright-core");
+  const browser = await chromium.launch({ channel: "msedge", headless: true });
+  const ctx = await browser.newContext({ viewport: { width: 800, height: 1280 } });
+  await ctx.addCookies([{ name: "erp_device", value: token, url: base }]);
+  const tp = await ctx.newPage();
+  await tp.goto(`${base}/tablet`, { waitUntil: "domcontentloaded" });
+  await tp.locator("[data-tablet-department]").waitFor({ timeout: 20000 });
+  check("t1: the department label on the tablet", (await tp.locator('[data-tablet-department="bodyshop"]').count()) === 1);
+  const first = Number(await tp.locator("[data-tablet-people]").getAttribute("data-tablet-people"));
+  const bodyshopPeople = Number((await sql("select count(*)::int as n from public.staff where is_active and login_type in ('pin', 'both') and department_id in ('bodyshop', 'paint', 'ppf_tint', 'detailing')"))[0].n);
+  check(`t1: only the Bodyshop people at first (${first} of the bodyshop's ${bodyshopPeople})`, first === bodyshopPeople && (await tp.locator("[data-tablet-someone-else]").count()) === 1);
+  await tp.screenshot({ path: `${proof}/e8-bodyshop-tablet-800.png` }).catch(() => null);
+  await tp.locator("[data-tablet-someone-else]").click();
+  check("t1: Someone else? opens the rest", Number(await tp.locator("[data-tablet-people]").getAttribute("data-tablet-people")) > first);
+  await browser.close();
+  // t2. The owner's Devices page: not set, then set by the owner only.
+  const own = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  await go(own.page, `${base}/team/tablets`);
+  check("t2: an older tablet reads Department: not set", (await own.page.locator(`[data-device="${old.id}"] [data-device-department="none"]`).count()) === 1);
+  await own.page.locator(`[data-device="${old.id}"] [data-device-department-set="workshop"]`).click();
+  const set = await until(async () => (await sql("select department from public.devices where id = $1", [old.id]))[0]?.department === "workshop", 40, 500);
+  check("t2: the owner sets it to Workshop", !!set);
+  await go(own.page, `${base}/tablet/register`);
+  check("t3: registering a shared tablet asks for its department", (await own.page.locator("[data-register-department]").count()) === 1);
+  await own.browser.close();
 });
 
 const failed = summary();

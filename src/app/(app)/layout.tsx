@@ -1,3 +1,4 @@
+import { deviceDepartmentWords } from "@/lib/device-department";
 import { approvalsCount } from "@/lib/approvals";
 import { Suspense } from "react";
 import { chargesReady } from "@/lib/charges";
@@ -97,6 +98,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const partsManagement = { group: "parts-management", label: "Parts management", items: partsManagementItems.filter((i) => i.show).map(({ href, label, badge }) => ({ href, label, badge })) };
 
   const pkReady = await passkeysReady();
+  const tabletDevice = await getCurrentDevice().catch(() => null);
   // 11 November 2026 (Section 4): the owner's Approvals with its count.
   const approvalsWaiting = role === "owner" ? await approvalsCount().catch(() => 0) : 0;
   const entries: ((NavItem | typeof partsManagement) & { show: boolean })[] = [
@@ -164,6 +166,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <SpellHost />
       {staff.login_type === "pin" && !staff.actingAs && device?.kind !== "personal" ? <IdleLock seconds={Number(settings.tablet_idle_lock_seconds) || 120} /> : null}
       <Shell
+        tabletLabel={tabletDevice?.kind === "shared" && tabletDevice.department ? `${deviceDepartmentWords(tabletDevice.department)} tablet` : null}
         searchCustomers={can(role, "viewCustomers")}
         search={role !== "gate_in"}
         nav={nav}

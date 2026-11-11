@@ -1,5 +1,6 @@
 "use server";
 import { dbDetail } from "@/lib/app-errors";
+import { schemaReady } from "@/lib/schema-ready";
 
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -17,11 +18,13 @@ export async function registerThisTablet(formData: FormData) {
   const location = String(formData.get("location") ?? "workshop");
   const staffId = String(formData.get("staff_id") ?? "");
   const section = String(formData.get("section") ?? "");
+  const department = String(formData.get("department") ?? "");
   if (name.length < 2) redirect("/tablet/register?error=" + encodeURIComponent("Give the device a name."));
   if (!["shared", "personal"].includes(kind)) redirect("/tablet/register?error=" + encodeURIComponent("Choose shared or personal."));
   if (kind === "shared" && !["workshop", "bodyshop", "office"].includes(location)) {
     redirect("/tablet/register?error=" + encodeURIComponent("Choose where the device lives."));
   }
+  if (kind === "shared" && !["workshop", "bodyshop", "both"].includes(department)) redirect("/tablet/register?error=" + encodeURIComponent("Choose the tablet's department: Workshop, Bodyshop or Both."));
 
   const admin = createAdminClient();
   if (kind === "personal") {
@@ -38,6 +41,7 @@ export async function registerThisTablet(formData: FormData) {
     location: kind === "personal" ? "personal" : location,
     staff_id: kind === "personal" ? staffId : null,
     section: kind === "shared" && ["ppf", "paint", "detailing", "strip_refit"].includes(section) ? section : null,
+    ...(kind === "shared" && (await schemaReady("devices", "department")) ? { department } : {}),
     token_hash: hashDeviceToken(token),
     registered_by: owner.id,
     created_by: owner.id,

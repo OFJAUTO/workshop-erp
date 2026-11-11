@@ -33,6 +33,21 @@ export function RegisterForm({
         </div>
       </Field>
       {kind === "shared" ? (
+        <Field label="Department" hint="Its sign-in screen shows this department's people first; its car list opens on this department's cars.">
+          <div data-register-department>
+            <ChoiceButtons
+              name="department"
+              columns={3}
+              options={[
+                { value: "workshop", label: "Workshop" },
+                { value: "bodyshop", label: "Bodyshop" },
+                { value: "both", label: "Both" },
+              ]}
+            />
+          </div>
+        </Field>
+      ) : null}
+      {kind === "shared" ? (
         <Field label="Where it lives">
           <ChoiceButtons
             name="location"

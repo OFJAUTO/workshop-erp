@@ -1,3 +1,4 @@
+import { schemaReady } from "./schema-ready";
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
@@ -34,7 +35,7 @@ export async function getCurrentDevice(): Promise<DeviceRow | null> {
   const admin = createAdminClient();
   const { data } = await admin
     .from("devices")
-    .select("id, name, location, kind, staff_id, is_active, registered_at, registered_by, last_seen_at, last_staff_id, section")
+    .select(`id, name, location, kind, staff_id, is_active, registered_at, registered_by, last_seen_at, last_staff_id, section${(await schemaReady("devices", "department")) ? ", department" : ""}`)
     .eq("token_hash", hashDeviceToken(token))
     .eq("is_active", true)
     .maybeSingle();

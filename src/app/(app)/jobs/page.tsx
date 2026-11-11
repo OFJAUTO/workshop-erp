@@ -1,3 +1,5 @@
+import { getCurrentDevice } from "@/lib/devices";
+import { jobDeptOfTablet } from "@/lib/device-department";
 import { cookies } from "next/headers";
 import { CarCard } from "@/components/CarCard";
 import { JobListControls } from "@/components/JobListControls";
@@ -35,7 +37,9 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
   // The address wins; with none, this person's remembered choice; "Clear all" (reset) starts from the default.
   const cookieName = jobListCookie(staff.id);
   const remembered = (await cookies()).get(cookieName)?.value;
-  const filters = hasListParams(params) || params.reset ? readJobFilters(params) : remembered ? readJobFilters(Object.fromEntries(new URLSearchParams(safeDecode(remembered)))) : DEFAULT_JOB_FILTERS;
+  const tablet = await getCurrentDevice().catch(() => null);
+  const tabletDept = tablet?.kind === "shared" ? jobDeptOfTablet(tablet.department ?? null) : null;
+  const filters = hasListParams(params) || params.reset ? readJobFilters(params) : tabletDept ? { ...DEFAULT_JOB_FILTERS, dept: tabletDept } : remembered ? readJobFilters(Object.fromEntries(new URLSearchParams(safeDecode(remembered)))) : DEFAULT_JOB_FILTERS;
 
   const supabase = await createClient();
   const { data } = await supabase

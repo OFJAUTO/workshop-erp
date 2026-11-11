@@ -1,3 +1,6 @@
+import { DEVICE_DEPARTMENTS, deviceDepartmentWords } from "@/lib/device-department";
+import { schemaReady } from "@/lib/schema-ready";
+import { setDeviceDepartment } from "@/app/(app)/team/device-department-actions";
 import { Badge, Button, Card, Empty, Notice, PageHeader } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
@@ -19,7 +22,7 @@ export default async function TabletsPage({ searchParams }: { searchParams: Prom
   const supabase = await createClient();
   const { data } = await supabase
     .from("devices")
-    .select("id, name, location, kind, staff_id, is_active, registered_at, registered_by, last_seen_at, last_staff_id, owner:staff!devices_staff_id_fkey(display_name), last_user:staff!devices_last_staff_id_fkey(display_name)")
+    .select(`id, name, location, kind, staff_id, is_active, registered_at, registered_by, last_seen_at, last_staff_id${(await schemaReady("devices", "department")) ? ", department" : ""}, owner:staff!devices_staff_id_fkey(display_name), last_user:staff!devices_last_staff_id_fkey(display_name)`)
     .order("is_active", { ascending: false })
     .order("kind")
     .order("name");
@@ -51,13 +54,14 @@ export default async function TabletsPage({ searchParams }: { searchParams: Prom
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
           {active.map((d) => (
-            <Card key={d.id} className="flex flex-col gap-3">
+            <Card key={d.id} className="flex flex-col gap-3" data-device={d.id}>
               <div className="flex items-start justify-between gap-2">
                 <span className="flex flex-col">
                   <span className="font-bold">{d.name}</span>
                   <span className="text-xs text-muted">
                     {d.kind === "personal" ? `Personal · ${d.owner?.display_name ?? "unassigned"}` : `Shared · ${LOCATION_LABEL[d.location]}`}
                   </span>
+                  {d.kind === "shared" ? <span className={`text-xs font-bold ${(d as { department?: string | null }).department ? "" : "text-amber-text"}`} data-device-department={(d as { department?: string | null }).department ?? "none"}>Department: {deviceDepartmentWords((d as { department?: string | null }).department)}</span> : null}
                 </span>
                 <Badge tone={d.kind === "personal" ? "outline" : "neutral"}>{d.kind === "personal" ? "Personal" : "Shared"}</Badge>
               </div>
@@ -70,6 +74,13 @@ export default async function TabletsPage({ searchParams }: { searchParams: Prom
               </dl>
               {canManage ? (
                 <div className="flex flex-col gap-2 border-t border-line pt-2">
+                  {d.kind === "shared" && staff.role_id === "owner" ? (
+                    <form action={setDeviceDepartment.bind(null, d.id)} className="flex flex-wrap items-center gap-2" data-device-department-form>
+                      {DEVICE_DEPARTMENTS.map((x) => (
+                        <Button key={x.key} type="submit" name="department" value={x.key} size="md" tone={(d as { department?: string | null }).department === x.key ? "primary" : "secondary"} data-device-department-set={x.key}>{x.label}</Button>
+                      ))}
+                    </form>
+                  ) : null}
                   <form action={setDeviceKind.bind(null, d.id)} className="flex flex-wrap items-center gap-2">
                     {d.kind === "personal" ? (
                       <><input type="hidden" name="kind" value="shared" /><Button type="submit" tone="secondary" size="md">Switch to shared</Button></>

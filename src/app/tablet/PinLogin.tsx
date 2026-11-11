@@ -15,6 +15,10 @@ export type TabletPerson = {
   unread?: boolean;
   /** A passkey user with a phone set up: the passkey button instead of the PIN pad (7 November 2026). */
   passkey?: boolean;
+  /** 11 November 2026 (Section 8): clocked in now (shown first). */
+  clockedIn?: boolean;
+  /** One of the tablet's own department (the rest behind "Someone else?"). */
+  mine?: boolean;
 };
 
 const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
@@ -23,7 +27,8 @@ const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "⌫"];
  * Name grid, then the PIN pad. A temporary PIN from the owner asks for a new one straight away:
  * the person types it twice and nobody else ever sees it.
  */
-export function PinLogin({ people, autoSelect = false }: { people: TabletPerson[]; autoSelect?: boolean }) {
+export function PinLogin({ people, autoSelect = false, departmentLabel = null }: { people: TabletPerson[]; autoSelect?: boolean; /** The tablet's department: its people first, the others behind "Someone else?". */ departmentLabel?: string | null }) {
+  const [everyone, setEveryone] = useState(false);
   const router = useRouter();
   const [selected, setSelected] = useState<TabletPerson | null>(autoSelect && people.length === 1 ? people[0] : null);
   const [pin, setPin] = useState("");
@@ -115,9 +120,12 @@ export function PinLogin({ people, autoSelect = false }: { people: TabletPerson[
     if (people.length === 0) {
       return <p className="text-center text-muted">No tablet users yet. The owner adds staff with PIN login from the Team page.</p>;
     }
+    const shown = departmentLabel && !everyone ? people.filter((p) => p.mine !== false) : people;
+    const others = people.length - shown.length;
     return (
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-        {people.map((p) => (
+      <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3" data-tablet-people={shown.length}>
+        {shown.map((p) => (
           <button
             key={p.id}
             type="button"
@@ -131,9 +139,16 @@ export function PinLogin({ people, autoSelect = false }: { people: TabletPerson[
             <span className="flex flex-col items-center gap-0.5">
               <span className="font-bold text-base leading-tight">{p.display_name}</span>
               {p.department ? <span className="text-xs text-muted">{p.department}</span> : null}
+              {p.clockedIn ? <span className="text-xs font-bold text-green-text" data-tablet-clocked-in>Clocked in</span> : null}
             </span>
           </button>
         ))}
+      </div>
+      {departmentLabel && !everyone && others > 0 ? (
+        <button type="button" onClick={() => setEveryone(true)} className="inline-flex min-h-11 items-center self-center text-base font-bold underline underline-offset-4" data-tablet-someone-else>
+          Someone else? ({others} from other departments)
+        </button>
+      ) : null}
       </div>
     );
   }

@@ -1,3 +1,4 @@
+import { deviceDepartmentWords, onTabletDepartment } from "@/lib/device-department";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PublicShell } from "@/components/Shell";
@@ -58,7 +59,16 @@ export default async function TabletPage() {
   const pkOn = !!passkeyRp() && (await passkeysReady());
   const rollout = pkOn ? await passkeyRollout() : "owner";
   const phones = pkOn ? await passkeyCounts(scoped.filter((r) => passkeyPerson(r, rollout)).map((r) => r.id)).catch(() => new Map<string, number>()) : new Map<string, number>();
+  // 11 November 2026 (Section 8): who is clocked in (an open work session or bodyshop clocking) comes first.
+  const ids = scoped.map((r) => r.id);
+  const [{ data: ws }, { data: bc }] = await Promise.all([
+    ids.length ? admin.from("work_sessions").select("technician_id").in("technician_id", ids).is("ended_at", null) : Promise.resolve({ data: [] }),
+    ids.length ? admin.from("bodyshop_clockings").select("staff_id").in("staff_id", ids).is("ended_at", null) : Promise.resolve({ data: [] }),
+  ]);
+  const clocked = new Set([...((ws ?? []) as { technician_id: string }[]).map((x) => x.technician_id), ...((bc ?? []) as { staff_id: string }[]).map((x) => x.staff_id)]);
   const people: TabletPerson[] = scoped.map((r) => ({
+    clockedIn: clocked.has(r.id),
+    mine: onTabletDepartment(device.department ?? null, r.department_id as string | null),
     unread: unread.has(r.id),
     passkey: (phones.get(r.id) ?? 0) > 0,
     id: r.id,
@@ -71,8 +81,11 @@ export default async function TabletPage() {
   return (
     <PublicShell note={device.name}>
       <div className="flex-1 flex flex-col gap-6 px-4 py-5 sm:px-6 lg:px-8">
-        <h1 className="text-2xl font-extrabold">{device.kind === "personal" ? "Enter your PIN" : "Tap your name"}</h1>
-        <PinLogin people={people} autoSelect={device.kind === "personal"} />
+        <div className="flex flex-wrap items-baseline gap-3">
+          <h1 className="text-2xl font-extrabold">{device.kind === "personal" ? "Enter your PIN" : "Tap your name"}</h1>
+          {device.kind === "shared" ? <span className="rounded-full border border-line-strong px-2.5 py-0.5 text-xs font-bold uppercase tracking-[0.06em]" data-tablet-department={device.department ?? "none"}>Department: {deviceDepartmentWords(device.department)}</span> : null}
+        </div>
+        <PinLogin people={[...people].sort((a, b) => Number(b.clockedIn) - Number(a.clockedIn))} autoSelect={device.kind === "personal"} departmentLabel={device.kind === "shared" && device.department && device.department !== "both" ? deviceDepartmentWords(device.department) : null} />
       </div>
     </PublicShell>
   );
