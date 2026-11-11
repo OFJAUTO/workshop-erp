@@ -1,4 +1,5 @@
 import { unbroken } from "@/lib/text-case";
+import { previewWords } from "@/lib/customer-preview-words";
 import type { ReactNode } from "react";
 import { Words } from "./Words";
 import { DocViewer } from "./DocViewer";
@@ -15,7 +16,7 @@ type Company = { tradingName: string; legalName: string; address: string[]; phon
  * no small print, no footers. "plain" header: the logo centred on a light grey band (the approval and
  * report links); "full": the company block and the TRN (quotations, proformas, invoices).
  */
-export function CustomerFront({ company, header = "full", title, titleAr, meta, boxes, children, view, action, contact }: {
+export function CustomerFront({ company, header = "full", title, titleAr, meta, boxes, children, view, action, contact, preview = null }: {
   company: Company;
   header?: "full" | "plain";
   title: string;
@@ -31,9 +32,12 @@ export function CustomerFront({ company, header = "full", title, titleAr, meta, 
   action?: ReactNode;
   /** Call and WhatsApp to the advisor. */
   contact?: ReactNode;
+  /** View as customer (10 November 2026, Section 10): a staff preview - the banner, and the action switched off. */
+  preview?: { notSent: boolean } | null;
 }) {
   return (
     <div className="min-h-screen bg-[#E9E9EC] text-[#111113]">
+      {preview ? <div className="sticky top-0 z-40 bg-[#111113] px-4 py-2 text-center text-xs font-bold text-white" data-staff-preview={preview.notSent ? "not-sent" : "sent"}>{previewWords(preview.notSent)}</div> : null}
       <main className="mx-auto w-full max-w-[640px] px-0 py-0 sm:px-4 sm:py-6 pb-10">
         <div className="bg-white sm:shadow-sm sm:rounded-lg px-4 sm:px-8 flex flex-col">
           {header === "plain" ? (
@@ -92,7 +96,7 @@ export function CustomerFront({ company, header = "full", title, titleAr, meta, 
             ) : null}
             {children}
             {view ? <DocViewer href={view.href} label={view.label} fileName={view.fileName ?? "document.pdf"} /> : null}
-            {action}
+            {preview && action ? <p className="rounded-lg border border-dashed border-[#A1A1AA] p-3 text-center text-sm text-[#5F6368]" data-preview-action-off>The customer approves or pays here. Switched off in the staff preview.</p> : action}
             {contact}
           </div>
         </div>

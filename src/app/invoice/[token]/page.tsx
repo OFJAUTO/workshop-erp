@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { staffPreview } from "@/lib/customer-preview";
 import { stillDueOf, WAITING_CLEAR } from "@/lib/still-due";
 import { unbroken } from "@/lib/text-case";
 import { customerWarrantyStatus, customerWarrantyTitle } from "@/lib/warranty";
@@ -39,9 +40,11 @@ export async function generateMetadata(): Promise<Metadata> {
  * "Paid in full", one View button, Pay now (a payment link that opens once) and the folded bank details.
  * "?view=1" opens the full document with Download PDF and a way back.
  */
-export default async function CustomerInvoicePage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ error?: string; paid?: string; notpaid?: string; cancelled?: string }> }) {
+export default async function CustomerInvoicePage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ error?: string; paid?: string; notpaid?: string; cancelled?: string; preview?: string }> }) {
   const { token } = await params;
-  const { error, paid: paidFlag, notpaid, cancelled } = await searchParams;
+  const { error, paid: paidFlag, notpaid, cancelled, preview } = await searchParams;
+  // View as customer (10 November 2026, Section 10): nothing can be paid from the staff preview.
+  const pv = await staffPreview(preview);
   const settings = await getSettings();
   const company = companyFromSettings(settings);
   const admin = createAdminClient();
@@ -97,6 +100,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
     const link = currentPaymentLink(links);
     return (
       <CustomerFront
+        preview={pv ? { notSent: false } : null}
         company={company}
         title={title}
         meta={meta}

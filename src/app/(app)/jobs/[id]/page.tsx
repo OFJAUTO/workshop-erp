@@ -1,4 +1,5 @@
 import { loadBankWaiting } from "@/lib/bank-posting";
+import { ViewAsCustomer } from "@/components/ViewAsCustomer";
 import { earlierJobsOfCar, loadComebackExtra } from "@/lib/comeback-cost";
 import { readyTemplateFor, stillDueOf } from "@/lib/still-due";
 import { pendingLine } from "@/lib/bank-status";
@@ -538,6 +539,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         }
         actions={
           <>
+            {latestApproval?.token && seesCustomerDetails ? <ViewAsCustomer href={`/approve/${latestApproval.token}`} notSent={!latestApproval.sent_at} /> : null}
             {loose ? (
               <LinkButton href={`/jobs/${id}/gate-in`} tone="secondary" data-gate-in-details>
                 Gate-in details

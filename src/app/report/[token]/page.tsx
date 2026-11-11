@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { staffPreview } from "@/lib/customer-preview";
 import { ContactButtons, CustomerFront } from "@/components/CustomerFront";
 import { InspectionReport, reportBoxes } from "@/components/InspectionReport";
 import { Notice } from "@/components/ui";
@@ -26,8 +27,10 @@ export async function generateMetadata(): Promise<Metadata> {
  * Photos open THE viewer. No inspection fee line (it stays on the gate-in approval page), no staff names, no parts,
  * no prices.
  */
-export default async function CustomerReportPage({ params }: { params: Promise<{ token: string }> }) {
+export default async function CustomerReportPage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ preview?: string }> }) {
   const { token } = await params;
+  // View as customer (10 November 2026, Section 10).
+  const pv = await staffPreview((await searchParams).preview);
   const admin = createAdminClient();
   const settings = await getSettings();
   const company = companyFromSettings(settings);
@@ -36,7 +39,7 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
   if (!link) return plain(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
   const [card, bundle, { data: rt }] = await Promise.all([loadJobCard(admin, link.job_id, { customerPage: true }), loadInspection(link.job_id), admin.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", link.job_id).maybeSingle()]);
   if (!card || !bundle || bundle.inspection.status !== "approved") return plain(<Notice tone="error">This report is not available yet.</Notice>);
-  if (!link.opened_at) {
+  if (!link.opened_at && !pv) {
     await admin.from("report_links").update({ opened_at: new Date().toISOString(), status: "opened" }).eq("id", link.id);
     await notifyStaff([link.created_by, card.job.gated_in_by].filter((x): x is string => !!x), { type: "report_opened", title: `Customer opened the inspection report · ${card.job.job_number}`, body: formatPlate(card.vehicle), jobId: card.job.id, href: `/jobs/${card.job.id}` });
   }
@@ -45,6 +48,7 @@ export default async function CustomerReportPage({ params }: { params: Promise<{
   const signedAt = Date.now();
   return (
     <CustomerFront
+      preview={pv ? { notSent: link.status === "created" } : null}
       company={company}
       header="plain"
       title="Inspection report"

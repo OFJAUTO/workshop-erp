@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -3922,6 +3922,48 @@ await section("d9", "comeback at our cost", async () => {
   const page = ((await op.locator("main").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
   check("y6: the Comebacks page lists it with the reason, At our cost", /Battery terminal left loose/i.test(page) && /At our cost/.test(page));
   await op.locator("main").screenshot({ path: `${proof}/d9-comebacks-page-1440.png` }).catch(() => null);
+  await own.browser.close();
+});
+
+/* ================================================================================================= */
+/* d10 (10 November 2026, Section 10): View as customer. Next to Job card on the inspection report     */
+/* and the quotation: the customer's own page in a phone-sized frame, read-only; "Preview – not sent  */
+/* yet" before sending; never counted as opened; nothing can be approved from it.                    */
+/* ================================================================================================= */
+await section("d10", "view as customer", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-10-view-as-customer";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "quote" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const q = (await sql("select id, status from public.quotations where job_id = $1 and is_active order by created_at desc limit 1", [jobId]))[0];
+  const own = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  const op = own.page;
+  const frame = () => op.frameLocator("[data-view-as-customer-frame]");
+  // v1. The inspection report: not sent yet.
+  await go(op, `${base}/jobs/${jobId}/inspection`);
+  check("v1: View as customer next to Job card on the inspection report", (await op.locator("[data-view-as-customer]").count()) === 1);
+  await op.locator("[data-view-as-customer]").click();
+  await op.locator("[data-view-as-customer-window]").waitFor({ timeout: 20000 });
+  await frame().locator("[data-staff-preview]").waitFor({ timeout: 30000 });
+  const label = ((await op.locator("[data-view-as-customer-label]").textContent()) ?? "").trim();
+  const banner = await frame().locator("[data-staff-preview]").getAttribute("data-staff-preview");
+  check(`v1: the customer's report in a phone frame, "Preview – not sent yet" (${label}, ${banner})`, label === "Preview – not sent yet" && banner === "not-sent");
+  const fw = await op.locator("[data-view-as-customer-frame]").evaluate((el) => el.getBoundingClientRect().width);
+  check(`v1: phone-sized (${Math.round(fw)} px)`, fw <= 392 && fw >= 300);
+  await op.waitForTimeout(800);
+  await op.locator("[data-view-as-customer-window] > div").screenshot({ path: `${proof}/d10-inspection-report-phone.png` }).catch(() => null);
+  const rl = (await sql("select opened_at, sent_at from public.report_links where job_id = $1 order by created_at desc limit 1", [jobId]))[0];
+  check("v1: staff viewing never counts as opened, never sent", rl && rl.opened_at === null && rl.sent_at === null);
+  await op.locator("[data-view-as-customer-close]").click();
+  // v2. The quotation, sent: read-only, the approve box switched off, never "opened".
+  await sql("update public.quotations set token = coalesce(token, $2), status = 'sent', sent_at = now(), valid_until = now() + interval '7 days' where id = $1", [q.id, `e2e-vac-${Date.now()}`]);
+  await go(op, `${base}/jobs/${jobId}/quote/${q.id}`);
+  await op.locator("[data-view-as-customer]").click();
+  await frame().locator("[data-staff-preview]").waitFor({ timeout: 30000 });
+  check("v2: the approve box is switched off in the preview", (await frame().locator("[data-preview-action-off]").count()) === 1);
+  const after = (await sql("select status, opened_at from public.quotations where id = $1", [q.id]))[0];
+  check(`v2: never counted as opened (${after?.status})`, after?.status === "sent" && after?.opened_at === null);
   await own.browser.close();
 });
 

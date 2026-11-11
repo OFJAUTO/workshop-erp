@@ -1,4 +1,5 @@
 import { compJobChoices } from "@/lib/quote-data";
+import { ViewAsCustomer } from "@/components/ViewAsCustomer";
 import { withAddressAs } from "@/lib/customer-address";
 import { QuoteSendButton } from "@/components/QuoteSendButton";
 import { sendStateOf } from "@/lib/quote-send-state";
@@ -276,6 +277,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         actions={
           <>
             <LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>
+            <ViewAsCustomer href={q.token ? `/quote/${q.token}` : null} notSent={q.status === "draft" || q.status === "pending_owner"} make={{ kind: "quote", id: q.id }} />
             {bundle.inspection ? <LinkButton href={`/jobs/${id}/inspection`} tone="secondary" size="lg">Inspection report</LinkButton> : null}
             <a href={`/api/pdf/quotation/${q.id}`} target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-14 px-6 text-base">
               Preview PDF

@@ -1,4 +1,5 @@
 import { VinCopy } from "@/components/VinCopy";
+import { ViewAsCustomer } from "@/components/ViewAsCustomer";
 import Link from "next/link";
 import { PositionsLine } from "@/components/PositionsLine";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
@@ -158,6 +159,12 @@ export default async function InspectionReportPage({ params }: { params: Promise
   }
   const insp = bundle.inspection;
   const canApprove = can(role, "approveInspections") && (role !== "workshop_manager" || isManager);
+  // View as customer (10 November 2026, Section 10): the customer's report link, or made when pressed (never sent).
+  const customerView = await (async () => {
+    if (!can(role, "sendReport") || bundle?.inspection.status !== "approved") return null;
+    const { data: rl } = await createAdminClient().from("report_links").select("token, sent_at").eq("job_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    return { href: rl?.token ? `/report/${rl.token}` : null, notSent: !rl?.sent_at };
+  })();
   const canDecide = can(role, "decideInspectionChanges");
   const canRequest = role === "technician" || can(role, "approveInspections");
   const locked = inspectionLocked(insp);
@@ -234,6 +241,7 @@ export default async function InspectionReportPage({ params }: { params: Promise
                 Job card
               </LinkButton>
             ) : null}
+            {customerView ? <ViewAsCustomer href={customerView.href} notSent={customerView.notSent} make={{ kind: "report", id }} /> : null}
             {role === "technician" || canApprove ? (
               <LinkButton href={`/my-jobs/${id}`} tone="secondary" size="lg">
                 Technician screen

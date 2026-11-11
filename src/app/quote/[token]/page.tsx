@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { staffPreview } from "@/lib/customer-preview";
 import { PackageCard } from "@/components/PackageCard";
 import { packageDocOf } from "@/lib/packages";
 import { CUT_EXPLAIN, cutWords, lineIsPpf } from "@/lib/ppf-cut";
@@ -41,9 +42,11 @@ export async function generateMetadata({ params }: { params: Promise<{ token: st
  * the grand total in large print, one "View quotation" button and one "Approved" button, then Call and
  * WhatsApp. "?view=1" opens the full document (recorded, so the job shows whether it was read before approving).
  */
-export default async function CustomerQuotePage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ error?: string }> }) {
+export default async function CustomerQuotePage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ error?: string; preview?: string }> }) {
   const { token } = await params;
-  const { error } = await searchParams;
+  const { error, preview } = await searchParams;
+  // View as customer (10 November 2026, Section 10): a staff preview never counts as opened and can show a draft.
+  const pv = await staffPreview(preview);
   const admin = createAdminClient();
   const settings = await getSettings();
   const company = companyFromSettings(settings);
@@ -57,7 +60,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   const { data: byToken } = await admin.from("quotations").select("id, kind, number, status, cancelled_at, version").eq("token", token).maybeSingle();
   if (!byToken) return plain(<Notice tone="error">This link is not valid. Please ask the workshop for a new one.</Notice>);
   const { data: latest } = await admin.from("quotations").select("id, kind, status, valid_until, viewed_full_at, token, version, sent_at").eq("number", byToken.number).eq("kind", byToken.kind).eq("is_active", true).not("status", "in", "(draft,pending_owner,cancelled)").order("version", { ascending: false }).limit(1).maybeSingle();
-  const row = latest ?? null;
+  const row = latest ?? (pv ? { id: byToken.id, kind: byToken.kind, status: byToken.status, valid_until: null, viewed_full_at: null, token, version: byToken.version, sent_at: null } : null);
   // A sent estimate or quotation withdrawn by the workshop (section 4, 23 October 2026).
   if (!row && byToken.status === "cancelled" && byToken.cancelled_at) return plain(<Notice tone="info">This {byToken.kind === "estimate" ? "estimate" : "quotation"} has been withdrawn. Please contact OFJ Automotive for an updated one.</Notice>);
   if (!row) return plain(<Notice tone="info">This quotation is being updated. The new version will be sent to you shortly.</Notice>);
@@ -75,19 +78,19 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   const isEstimate = row.kind === "estimate";
 
   // First opening: remembered and the advisor told. Opening the PDF is remembered by the PDF route.
-  if (row.status === "sent") await admin.from("quotations").update({ status: "opened", opened_at: new Date().toISOString() }).eq("id", row.id);
+  if (row.status === "sent" && !pv) await admin.from("quotations").update({ status: "opened", opened_at: new Date().toISOString() }).eq("id", row.id);
   const expired = (row.status === "sent" || row.status === "opened") && isPastNow(row.valid_until);
-  if (expired) await admin.from("quotations").update({ status: "expired" }).eq("id", row.id);
+  if (expired && !pv) await admin.from("quotations").update({ status: "expired" }).eq("id", row.id);
   const bundle = await loadQuotation(row.id);
   if (!bundle) return plain(<Notice tone="error">This quotation is no longer available.</Notice>);
   const { quotation: q, customer, vehicle, job } = bundle;
-  if (row.status === "sent") {
+  if (row.status === "sent" && !pv) {
     // 1 November 2026: the advisor in charge (who started it) hears it, whoever made the newest version.
     const ids = [...(await quoteLeadIds(q)), q.sent_by, job?.gated_in_by].filter((x): x is string => !!x);
     await notifyStaff(ids, { type: "quote_opened", title: `Customer opened ${isEstimate ? "the estimate" : "the quotation"} · ${q.number}`, body: vehicle ? formatPlate(vehicle) : "", jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}` : `/estimates/${q.id}` });
   }
   if (q.status === "cancelled" && q.cancelled_at) return plain(<Notice tone="info">This {isEstimate ? "estimate" : "quotation"} has been withdrawn. Please contact OFJ Automotive for an updated one.</Notice>);
-  if (q.status === "superseded" || q.status === "cancelled" || q.status === "draft" || q.status === "pending_owner") return plain(<Notice tone="info">This {isEstimate ? "estimate" : "quotation"} is being updated. The new version will be sent to you shortly.</Notice>);
+  if (q.status === "superseded" || q.status === "cancelled" || ((q.status === "draft" || q.status === "pending_owner") && !pv)) return plain(<Notice tone="info">This {isEstimate ? "estimate" : "quotation"} is being updated. The new version will be sent to you shortly.</Notice>);
 
   // Internal lines, unused options and parts left off never reach the customer.
   const lines = bundle.lines.filter((l) => l.is_active && !isHidden(l) && !isUnchosen(l) && !l.left_off);
@@ -148,6 +151,7 @@ export default async function CustomerQuotePage({ params, searchParams }: { para
   {
     return (
       <CustomerFront
+        preview={pv ? { notSent: q.status === "draft" || q.status === "pending_owner" } : null}
         company={company}
         title={title}
         meta={meta}

@@ -1,4 +1,5 @@
 import { awaitsBank, duplicateWords, pendingLine } from "@/lib/bank-status";
+import { ViewAsCustomer } from "@/components/ViewAsCustomer";
 import { readyTemplateFor, stillDueOf } from "@/lib/still-due";
 import { loadBankWaiting } from "@/lib/bank-posting";
 import { dubaiToday } from "@/lib/card-settlements";
@@ -278,7 +279,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={`Invoice · ${formatPlate(vehicle)}`}
         subtitle={<span className="flex flex-wrap items-center gap-2"><span>{vehicleTitle(vehicle)} · {job.job_number} · {STATUS_LABELS[job.status]} · {customerName}</span><VinCopy vin={vehicle.vin} /><Badge tone={chipTone}>{money.chip.text}</Badge>{money.waitingHours ? <Badge tone="red">Waiting {money.waitingHours} h</Badge> : null}</span>}
-        actions={<><LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>{live && can(role, "viewInvoices") ? <LinkButton href={`/invoices/${live.id}`} tone="secondary" size="lg">Full record</LinkButton> : null}</>}
+        actions={<><LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>{live && (live as { token?: string | null }).token ? <ViewAsCustomer href={`/invoice/${(live as { token?: string | null }).token}`} notSent={!(live as { sent_at?: string | null }).sent_at} /> : null}{live && can(role, "viewInvoices") ? <LinkButton href={`/invoices/${live.id}`} tone="secondary" size="lg">Full record</LinkButton> : null}</>}
       />
       {sp.message ? <Notice tone="success">{sp.message}</Notice> : null}
       {sp.error ? <Notice tone="error">{sp.error}</Notice> : null}

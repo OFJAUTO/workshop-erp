@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { staffPreview } from "@/lib/customer-preview";
 import Link from "next/link";
 import { ContactButtons, CustomerFront, customerBoxes } from "@/components/CustomerFront";
 import { Button, Field, Input, Notice } from "@/components/ui";
@@ -125,6 +126,7 @@ export default async function ApprovalPage({ params, searchParams }: { params: P
 
   return (
     <CustomerFront
+      preview={preview === "1" && (await staffPreview(preview)) ? { notSent: req.status === "created" } : null}
       company={company}
       header="plain"
       title={CHECK_IN.title}
