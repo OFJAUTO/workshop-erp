@@ -10,12 +10,12 @@
 import fs, { mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson, sendLpo, confirmMoney } from "./pw-lib.mjs";
+import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson, sendLpo, confirmMoney, pressRecord } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -2759,6 +2759,8 @@ await section("sec3", "one payment for several cars", async () => {
   const sA = await win.locator('[data-receive-share-amount="E2E-PRO-S3A"]').inputValue().catch(() => "");
   check(`c1: split oldest first (${sB} + ${sA})`, sB === "2236.50" && sA === "2131.50");
   await win.screenshot({ path: `${proof}/c1-receive-4368-two-cars-1440.png` }).catch(() => null);
+  // Proof on every payment method (10 November 2026): a cheque needs its photo.
+  await win.locator("[data-proof-input]").setInputFiles({ name: "cheque.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64") });
   await win.locator("[data-receive-save]").click();
   await win.locator("[data-receive-done], [data-receive-error]").first().waitFor({ timeout: 60000 });
   const doneWords = ((await win.textContent()) ?? "").replace(/\s+/g, " ");
@@ -2814,6 +2816,8 @@ await section("sec3", "one payment for several cars", async () => {
   await w2.locator("[data-receive-cheque-number]").fill("019400");
   await w2.locator("[data-receive-cheque-date]").fill(today);
   check("c4: AED 500.00 left over becomes an advance", /AED 500\.00 left over becomes an advance/.test((await w2.locator("[data-receive-leftover]").textContent().catch(() => "")) ?? ""));
+  // Proof on every payment method (10 November 2026): a cheque needs its photo.
+  await w2.locator("[data-proof-input]").setInputFiles({ name: "cheque.png", mimeType: "image/png", buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64") });
   await w2.locator("[data-receive-save]").click();
   await w2.locator("[data-receive-done], [data-receive-error]").first().waitFor({ timeout: 60000 });
   const g2 = await sql("select p.number, p.amount_aed::float as a, p.invoice_id from public.payments p join public.payment_groups g on g.id = p.group_id where g.customer_id = $1 and g.cheque_number = '019400' order by p.amount_aed", [job.customer_id]);
@@ -3604,6 +3608,57 @@ await section("d5", "supplier payments tab", async () => {
   await go(pp, `${base}/parts/suppliers`);
   check("t2: no unpaid or advance chips on the suppliers list", (await pp.locator("[data-supplier-unpaid], [data-supplier-advance]").count()) === 0);
   await pt.browser.close();
+});
+
+/* ================================================================================================= */
+/* d6 (10 November 2026, Section 6): proof on every payment method. In the Record a payment window    */
+/* (the J-00981 case) Payment link and Cash show "Add proof" and "Scan document" (optional); Cheque   */
+/* needs the photo of the cheque before Record works; the receipt line shows the proof as a picture.  */
+/* ================================================================================================= */
+await section("d6", "proof on every payment method", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-10-payment-proof";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "ready" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId || !seed?.invoice?.id) throw new Error("seed failed");
+  await sql("update public.invoices set sent_at = now() where id = $1", [seed.invoice.id]);
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  const acc = await browserFor("accounts", { viewport: { width: 1440, height: 900 } });
+  const p = acc.page;
+  await go(p, `${base}/jobs/${jobId}`);
+  await p.locator("[data-record-payment-open]").first().click();
+  const form = p.locator("[data-record-payment-dialog] [data-payment-form]").first();
+  await form.waitFor({ timeout: 30000 });
+  const words = async () => ((await form.locator("[data-proof-label]").textContent().catch(() => "")) ?? "").trim();
+  // e1. Every method has Add proof and Scan document; cash and link optional, cheque, card and transfer required.
+  for (const m of ["cash", "link", "card", "transfer", "cheque"]) {
+    await form.locator(`[data-method="${m}"]`).click();
+    const hasAdd = (await form.locator("[data-job-file-upload]").count()) >= 1;
+    const hasScan = (await form.getByText("Scan document").count()) >= 1;
+    const req = await form.locator("[data-proof-label]").getAttribute("data-proof-label").catch(() => null);
+    check(`e1 ${m}: Add proof + Scan document, ${req} (${await words()})`, hasAdd && hasScan && req === (["cash", "link"].includes(m) ? "optional" : "required"));
+    if (m === "link") await form.screenshot({ path: `${proof}/d6-payment-link-proof-1440.png` }).catch(() => null);
+  }
+  // e2. A cheque without its photo: Record is held with plain words.
+  await form.locator('[data-method="cheque"]').click();
+  await form.locator('input[name="cheque_number"]').fill("019500");
+  await form.locator('input[name="cheque_date"]').fill("2026-11-10");
+  check("e2: a cheque with no photo is held (\"Attach the proof first\")", (await form.locator("[data-proof-missing]").count()) === 1);
+  // e3. The cheque photo attached: recorded, the photo on the receipt.
+  await form.locator('[data-job-file-upload] input[type="file"]').first().setInputFiles({ name: "cheque.png", mimeType: "image/png", buffer: png });
+  await until(async () => (await form.locator("[data-proof-missing]").count()) === 0, 40, 500);
+  if ((await form.locator("[data-amount-full]").count()) === 1) await form.locator("[data-amount-full]").click();
+  await form.screenshot({ path: `${proof}/d6-cheque-with-photo-1440.png` }).catch(() => null);
+  await pressRecord(form);
+  await until(async () => (await p.locator("[data-record-payment-done], [data-record-payment-error]").count()) > 0, 60, 500);
+  const pay = await until(async () => (await sql("select number, method, proof_path from public.payments where job_id = $1 and is_active and method = 'cheque'", [jobId]))[0], 30, 500);
+  check(`e3: the cheque is recorded with its photo (${pay?.number})`, !!pay?.proof_path);
+  // e4. The receipt line shows the proof as a picture or PDF tile that opens it.
+  await go(p, `${base}/jobs/${jobId}/invoice`);
+  check("e4: the receipt line shows the proof", (await p.locator("[data-proof-link]").count()) >= 1);
+  await go(p, `${base}/invoices/${seed.invoice.id}`);
+  check("e4: the invoice page's receipt line shows the proof tile", (await p.locator("[data-proof-link] img, [data-proof-link] [data-slip-kind]").count()) >= 1);
+  await acc.browser.close();
 });
 
 const failed = summary();

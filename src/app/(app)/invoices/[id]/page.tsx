@@ -1,4 +1,5 @@
 import { awaitsBank, duplicateWords } from "@/lib/bank-status";
+import { SlipTile } from "@/components/PaymentReport";
 import Link from "next/link";
 import { signJobFiles } from "@/lib/work-data";
 import { PositionsLine } from "@/components/PositionsLine";
@@ -124,7 +125,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                       <span className="ml-auto font-semibold">AED {m(p.amount_aed)}</span>
                       {(p.actual_fee_aed ?? p.bank_charge_aed) && seesCost ? <span className="text-xs text-muted" data-fee-line>{p.settlement_id && p.actual_fee_aed !== null && p.actual_fee_aed !== undefined ? `bank fee ${m(p.actual_fee_aed)} (actual)` : `charge ${m(p.bank_charge_aed)}${p.method === "card" || p.method === "link" ? " (est.)" : ""}`}</span> : null}
                       {p.status === "recorded" ? <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Receipt</a> : null}
-                      {p.proof_path && proofUrls[p.proof_path] ? <a href={proofUrls[p.proof_path] ?? "#"} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4" data-proof-link>{p.method === "card" ? "Card slip" : "Proof"}</a> : null}
+                      {p.proof_path && proofUrls[p.proof_path] ? <span className="inline-flex" data-proof-link><SlipTile url={proofUrls[p.proof_path] ?? null} path={p.proof_path} label={p.method === "card" ? "Card slip" : p.method === "cheque" ? "Cheque" : "Proof"} hook={p.number} size="h-12 w-12" /></span> : null}
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs">
                       {p.status === "recorded" && !staff.viewingAs && (role === "owner" || p.received_by === staff.id) && p.created_at ? <UndoButton at={p.created_at} minutes={undoMinutes} done="Payment recorded" action={undoPaymentAction.bind(null, p.id, `/invoices/${invoice.id}`)} /> : null}

@@ -1,4 +1,5 @@
 import "server-only";
+import { proofMissingWords, proofRequired } from "@/lib/payment-proof";
 import { blankToNull } from "./format";
 import { loadInvoice } from "./invoice-data";
 import { PAYMENT_METHODS, methodsFor } from "./money-steps";
@@ -72,7 +73,7 @@ export async function paymentFromForm(staff: { id: string; display_name: string;
   // Accounts' own proofs move onto the receipt; the advisor's slips stay with his report (its record of what he sent).
   const uploaded = found.filter((f) => f.kind === "payment_proof");
   const proofPath = found[0]?.storage_path ?? report?.proofPath ?? null;
-  if ((method === "card" || method === "transfer") && !proofFile && !proofPath) return out({ error: method === "card" ? "Attach a photo of the card slip first." : "Attach the transfer proof (screenshot or photo) first." }, proofJobId);
+  if (proofRequired(method) && !proofFile && !proofPath) return out({ error: proofMissingWords(method) }, proofJobId);
   if (proofFile && proofFile.size > 25 * 1024 * 1024) return out({ error: "The proof photo is too large (over 25 MB)." }, proofJobId);
   const r = await recordPaymentCore(actor, {
     invoiceId,

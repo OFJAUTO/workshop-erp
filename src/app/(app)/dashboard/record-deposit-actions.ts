@@ -1,5 +1,6 @@
 "use server";
 
+import { proofMissingWords, proofRequired } from "@/lib/payment-proof";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
@@ -89,7 +90,7 @@ async function recordDeposit(staff: Awaited<ReturnType<typeof requirePermission>
     return { error: SAVE_FAILED };
   }
   const proofs = (proofRows ?? []) as { id: string; storage_path: string }[];
-  if ((method === "card" || method === "transfer") && proofs.length === 0) return { error: method === "card" ? "Attach a photo of the card slip first." : "Attach the transfer proof (screenshot or photo) first." };
+  if (proofRequired(method) && proofs.length === 0) return { error: proofMissingWords(method) };
 
   const before = await depositState(jobId);
   const actor: Actor = { id: staff.id, display_name: staff.display_name, role_id: staff.role_id, is_head_accountant: staff.is_head_accountant };

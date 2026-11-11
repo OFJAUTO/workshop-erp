@@ -1,5 +1,7 @@
 "use client";
 
+import { proofLabel, proofRequired } from "@/lib/payment-proof";
+import { ProofFileInput } from "@/components/ProofFileInput";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Button, Input } from "@/components/ui";
 import { PAYMENT_METHOD_LABELS, confirmFullText } from "@/lib/money-steps";
@@ -109,7 +111,8 @@ export function PaymentForm({
   const over = balance !== null && value > balance + 0.005;
   const settles = balance !== null && balance > 0 && value >= balance - 0.005 && !over;
   // A card or transfer payment is recorded only once the server has its proof - never on a file still on the device.
-  const needsProof = method === "card" || method === "transfer";
+  // Proof on every payment method (10 November 2026, Section 6): required for card, transfer and cheque.
+  const needsProof = proofRequired(method);
   const proofBlocked = needsProof && !!proofJobId && proofs.length === 0;
   const proofLine = !proofBlocked ? null : proofWait.stopped ? "The proof could not be sent – try again or remove it, then attach it again." : proofWait.count ? "The proof is still sending – Record works once it has arrived." : "Attach the proof first.";
   const blocked = !clientKey || proofBlocked;
@@ -168,11 +171,11 @@ export function PaymentForm({
         ) : method === "transfer" ? (
           <Input name="reference" value={reference} onChange={(e) => setReference(e.target.value)} placeholder="Transfer reference (optional)" className="max-w-72" data-reference />
         ) : null}
-        {needsProof ? (
+        {method ? (
           proofJobId ? (
             // A plain box, not a label: a tap on the words must never press the first button inside (a thumbnail, Try again).
             <div className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-muted">{method === "card" ? "Photo of the card slip (required)" : "Transfer proof: screenshot or photo (required)"}</span>
+              <span className="text-xs font-semibold text-muted" data-proof-label={needsProof ? "required" : "optional"}>{proofLabel(method)}</span>
               {clientKey ? (
                 <JobFileUpload
                   jobId={proofJobId}
@@ -181,7 +184,7 @@ export function PaymentForm({
                   form={{ tag: formTag, key: clientKey }}
                   files={proofs}
                   accept="any"
-                  label="Take photo / attach"
+                  label="Add proof"
                   compact
                   removable={!fixedKey}
                   alsoKinds={fixedKey ? ["payment_report"] : undefined}
@@ -195,10 +198,9 @@ export function PaymentForm({
           ) : (
             // An invoice without a job (an estimate's proforma, a pending charge): the proof goes with the form through
             // the server — unless the advisor's report already carries the slip (4 November 2026), which IS the proof.
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold text-muted">{proofs.length ? "Proof: the advisor's slip is attached ✓ (add a clearer one if needed)" : method === "card" ? "Photo of the card slip (required)" : "Transfer proof: screenshot or photo (required)"}</span>
-              <input type="file" name="proof" accept="image/*,.pdf" required={proofs.length === 0} className="min-h-11 w-full max-w-72 rounded-control border border-line-strong bg-white px-3 py-2 text-sm file:mr-3 file:rounded-control file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:font-bold file:text-on-dark" data-proof-input {...(proofs.length ? { "data-proof-from-report": "1" } : {})} />
-            </label>
+            <div className="flex flex-col gap-1" {...(proofs.length ? { "data-proof-from-report": "1" } : {})}>
+              <ProofFileInput label={proofs.length ? "Proof: the advisor's slip is attached ✓ (add a clearer one if needed)" : proofLabel(method)} required={needsProof && proofs.length === 0} />
+            </div>
           )
         ) : null}
         <p className="text-xs text-muted">
@@ -228,7 +230,7 @@ export function PaymentForm({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label={settles && invoiceId ? "Confirm full payment" : "Confirm the payment"} data-confirm-full>
           <div className="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-4 shadow-xl">
             <h2 className="text-lg font-extrabold">{settles && invoiceId ? "Confirm full payment" : "Confirm the payment"}</h2>
-            <p className="text-sm leading-relaxed" data-confirm-text>{settles && invoiceId ? confirmFullText({ amount: value, method, reference: needsAuthCode(method) ? (realAuthCode(authCode) ? `auth ${realAuthCode(authCode)}` : null) : reference || null, authMissing: needsAuthCode(method) && !realAuthCode(authCode), invoiceNumber, isProforma, nextTaxNumber }) : [`Record payment of ${money(value)}`, invoiceNumber ? `against ${invoiceNumber}` : jobId ? "as an advance on the job" : "on the customer's account", PAYMENT_METHOD_LABELS[method] ?? method, authConfirmWords(method, authCode) ?? (reference ? `ref ${reference}` : ""), method === "card" || method === "transfer" ? "proof attached ✓" : ""].filter(Boolean).join(" · ")}</p>
+            <p className="text-sm leading-relaxed" data-confirm-text>{settles && invoiceId ? confirmFullText({ amount: value, method, reference: needsAuthCode(method) ? (realAuthCode(authCode) ? `auth ${realAuthCode(authCode)}` : null) : reference || null, authMissing: needsAuthCode(method) && !realAuthCode(authCode), invoiceNumber, isProforma, nextTaxNumber }) : [`Record payment of ${money(value)}`, invoiceNumber ? `against ${invoiceNumber}` : jobId ? "as an advance on the job" : "on the customer's account", PAYMENT_METHOD_LABELS[method] ?? method, authConfirmWords(method, authCode) ?? (reference ? `ref ${reference}` : ""), needsProof || proofs.length ? (proofs.length ? "proof attached ✓" : "proof to attach") : ""].filter(Boolean).join(" · ")}</p>
             <Button
               type="button"
               size="lg"

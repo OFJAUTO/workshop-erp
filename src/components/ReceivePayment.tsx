@@ -1,5 +1,7 @@
 "use client";
 
+import { proofLabel, proofRequired } from "@/lib/payment-proof";
+import { ProofFileInput } from "@/components/ProofFileInput";
 import { useActionState, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button, Input } from "@/components/ui";
@@ -92,6 +94,7 @@ function ReceiveWindow({ customerId, docs, receipts, ready, firstJobTitle, repla
                 <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Customer&apos;s reference</span><Input name="reference" className="w-48" data-receive-reference /></label>
               ) : null}
             </div>
+            <ProofFileInput key={method} label={proofLabel(method)} required={proofRequired(method)} />
             <div className="flex flex-col gap-1" data-receive-shares>
               <span className="text-xs font-semibold uppercase text-muted">Paid against (oldest first – change any share)</span>
               {ordered.length ? ordered.map((d) => (

@@ -13,7 +13,7 @@ const until = async (fn, tries = 40, gap = 500) => { for (let i = 0; i < tries; 
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 14 * 60 * 1000).unref();
 const MATHEW = "e9894031-e253-4fc0-9552-026d3eaf6e88";
 const METHODS = ["cash", "card", "link", "transfer", "cheque"];
-const WITH_PROOF = new Set(["card", "transfer", "link"]);
+const WITH_PROOF = new Set(["card", "transfer", "link", "cheque"]);
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAGklEQVR4nGP4z8BAEmIY1TCqYVTDqIbhqgEAOK8f8Rf2cHcAAAAASUVORK5CYII=", "base64");
 const mark = (await sql("select now() as t"))[0].t;
 // Test files to remove from storage, gathered before every clean-up (which deletes the rows that name them).
@@ -96,7 +96,7 @@ try {
     if (m === "card" || m === "link") await form.locator("[data-auth-code]").fill(`P${m === "card" ? "C" : "L"}${String(Date.now()).slice(-4)}`);
     if ((await form.locator("[data-amount-full]").count()) === 1) await form.locator("[data-amount-full]").click();
     // 28 Oct: the slip goes straight to storage (no 1 MB form limit); the form sends only its key.
-    if (m === "card" || m === "transfer") {
+    if (m === "card" || m === "transfer" || m === "cheque") {
       await form.locator('[data-job-file-upload] input[type="file"]').first().setInputFiles({ name: `${m}-slip.png`, mimeType: "image/png", buffer: png });
       await until(async () => (await form.locator("[data-proof-missing]").count()) === 0, 40, 500);
     }
@@ -110,7 +110,7 @@ try {
     await settle(page);
     const pays = await sql("select number, method, amount_aed::float8 as a, proof_path from public.payments where job_id = $1 and is_active", [jobId]);
     check(`B ${m}: one receipt, ${m}, the full balance`, pays.length === 1 && pays[0].method === m && /^RCT-\d{5}$/.test(pays[0].number) && pays[0].a === Number(seed.invoice.total), JSON.stringify(pays) + " " + page.url().slice(-90));
-    if (m === "card" || m === "transfer") check(`B ${m}: the proof is kept with it`, !!pays[0]?.proof_path);
+    if (m === "card" || m === "transfer" || m === "cheque") check(`B ${m}: the proof is kept with it`, !!pays[0]?.proof_path);
     await go(page, `${base}/dashboard`);
     check(`B ${m}: the "Awaiting payment" line is gone`, (await rowOf(page, "Awaiting payment").count()) === 0);
     if (m === "cheque") {

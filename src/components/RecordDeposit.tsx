@@ -1,5 +1,6 @@
 "use client";
 
+import { proofLabel, proofRequired } from "@/lib/payment-proof";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { recordDepositPanel, type RecordDepositResult } from "@/app/(app)/dashboard/record-deposit-actions";
@@ -75,7 +76,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
 
   const value = Number(amount.replace(/[^\d.]/g, "")) || 0;
   const overBy = Math.max(0, Math.round((value - d.outstanding) * 100) / 100);
-  const needsProof = method === "card" || method === "transfer";
+  const needsProof = proofRequired(method);
   const rule = charges[method];
   const fee = feesFor(value, rule);
 
@@ -210,7 +211,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
                   <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Date received</span><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} data-deposit-date /></label>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <span className="text-xs font-semibold text-muted">Proof{needsProof ? " (required: the card slip or the transfer screenshot)" : " (optional)"}</span>
+                  <span className="text-xs font-semibold text-muted">{proofLabel(method)}</span>
                   {clientKey ? (
                     <JobFileUpload
                       jobId={d.jobId}
