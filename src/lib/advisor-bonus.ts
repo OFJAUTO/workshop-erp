@@ -1,4 +1,6 @@
 import "server-only";
+import { compCostOf, loadCompJobs, reworkByOriginal } from "@/lib/comp-data";
+import { notDeducted } from "@/lib/comeback-cost";
 import { BODYSHOP_KINDS } from "./bodyshop-kinds";
 import { dubaiDate } from "./jobs";
 import { costRateFor, jobProfits } from "./profit";
@@ -88,12 +90,18 @@ export async function bonusRowsOf(settings: Settings, periodKey?: string): Promi
     bsLabour.set(c.job_id, (bsLabour.get(c.job_id) ?? 0) + ((Number(c.minutes) || 0) / 60) * costRateFor(settings, c.department_id));
   }
   const defaultRate = Number(settings.advisor_bonus_percent) || 5;
+  // COMEBACK AT OUR COST (10 November 2026, Section 9): the cost of a comeback at our cost comes off its ORIGINAL job's
+  // bonus profit (unless the owner switched it off for that comeback).
+  const rework = await reworkByOriginal(settings, jobIds);
+  const off = await notDeducted(Array.from(rework.values()).flatMap((r) => r.jobs.map((c) => c.jobId).filter((x): x is string => !!x)));
+  const reworkOf = (jobId: string | null) => (jobId ? round2((rework.get(jobId)?.jobs ?? []).filter((c) => !c.jobId || !off.has(c.jobId)).reduce((a, c) => a + compCostOf(c), 0)) : 0);
   const rows: BonusRow[] = [];
   for (const p of fullyPaid) {
     const jobId = p.invoice.job_id;
     // Bodyshop work never counts toward the bonus: its revenue out, its costs back in (clocked labour, materials and,
     // since 30 October 2026, a package's installer hours when nobody clocked).
-    const bonusProfit = round2(p.profit - (jobId ? (bsRevenue.get(jobId) ?? 0) : 0) + (jobId ? bsLabour.get(jobId) ?? 0 : 0) + p.materialsCost + p.packageLabour);
+    const reworkCost = reworkOf(jobId);
+    const bonusProfit = round2(p.profit - (jobId ? (bsRevenue.get(jobId) ?? 0) : 0) + (jobId ? bsLabour.get(jobId) ?? 0 : 0) + p.materialsCost + p.packageLabour - reworkCost);
     if (bonusProfit < ADVISOR_BONUS_MIN_PROFIT) continue;
     const advisorId = jobId ? (advisorOf.get(jobId) ?? null) : null;
     const o = overrideOf.get(p.invoice.id);
@@ -109,7 +117,7 @@ export async function bonusRowsOf(settings: Settings, periodKey?: string): Promi
       advisorName: advisorId ? (nameOf.get(advisorId) ?? "Advisor") : "No advisor on the job",
       profit: bonusProfit,
       ratePercent: rate,
-      overrideReason: o?.reason ?? null,
+      overrideReason: o?.reason ?? (reworkCost > 0 ? `Comeback at our cost: AED ${reworkCost.toFixed(2)} taken off` : null),
       bonus: round2((bonusProfit * rate) / 100),
       clawback: false,
       cardFeeEstimated: p.provisionalWhy.includes("card fee estimated until the bank settles"),
@@ -124,6 +132,23 @@ export async function bonusRowsOf(settings: Settings, periodKey?: string): Promi
       for (const r of prior.rows ?? []) {
         if (!creditedIds.includes(r.invoiceId) || r.clawback || r.bonus <= 0) continue;
         rows.push({ ...r, date: period.start, bonus: -r.bonus, clawback: true, overrideReason: `Credit note on ${r.invoiceNumber}: the ${prior.period} bonus comes back off` });
+      }
+    }
+  }
+  // A comeback approved this period whose ORIGINAL bonus was already approved in a closed period: it comes off now,
+  // as its own line.
+  const lateRework = (await loadCompJobs(settings, { from: `${period.start}T00:00:00+04:00`, to: `${period.end}T23:59:59+04:00` })).filter((c) => c.originalJobId && c.reason !== "goodwill" && compCostOf(c) > 0);
+  if (lateRework.length) {
+    const lateOff = await notDeducted(lateRework.map((c) => c.jobId).filter((x): x is string => !!x));
+    const { data: priorPeriods } = await admin.from("advisor_bonus_periods").select("period, rows");
+    for (const c of lateRework) {
+      if (c.jobId && lateOff.has(c.jobId)) continue;
+      for (const prior of (priorPeriods ?? []) as { period: string; rows: BonusRow[] }[]) {
+        const r = (prior.rows ?? []).find((x) => x.jobId === c.originalJobId && !x.clawback && x.bonus > 0);
+        if (!r) continue;
+        const cost = compCostOf(c);
+        rows.push({ ...r, date: period.start, profit: -cost, bonus: -round2((cost * r.ratePercent) / 100), clawback: true, overrideReason: `Comeback ${c.jobNumber ?? c.number} at our cost (AED ${cost.toFixed(2)}) on ${r.jobNumber ?? r.invoiceNumber}: the ${prior.period} bonus comes off` });
+        break;
       }
     }
   }

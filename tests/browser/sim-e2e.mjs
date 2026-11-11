@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -3833,6 +3833,96 @@ await section("d8", "stock reverse a mistaken entry", async () => {
   const arch = (await sql("select is_active from public.stock_items where id = $1", [A.id]))[0];
   check("r5: an empty item archived, not deleted", arch?.is_active === false);
   await ob.browser.close();
+});
+
+/* ================================================================================================= */
+/* d9 (10 November 2026, Section 9): comeback at our cost. Marked on the job card (original job not  */
+/* in the ERP, old invoice number, reason) → the owner approves at our cost → every line At our cost  */
+/* (complimentary, cost counted), the customer sees "Covered by OFJ warranty – no charge" and no      */
+/* price; a line switched to Charged keeps the customer's approval; an original in the ERP shows the  */
+/* rework taken off its profit; the Comebacks page lists the reason and the cost.                    */
+/* ================================================================================================= */
+await section("d9", "comeback at our cost", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-10-comeback-at-our-cost";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "quote" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const q = (await sql("select id from public.quotations where job_id = $1 and is_active order by created_at desc limit 1", [jobId]))[0];
+  if (!q?.id) throw new Error("seed failed: no quotation");
+  const lineCount = (await sql("select count(*)::int as n from public.quotation_lines where quotation_id = $1 and is_active and line_type <> 'fee'", [q.id]))[0].n;
+  // y1. An advisor marks it: original job not in the ERP, the old invoice number, what went wrong.
+  const adv = await browserFor("service_advisor", { viewport: { width: 1440, height: 900 } });
+  await go(adv.page, `${base}/jobs/${jobId}`);
+  const mark = adv.page.locator("[data-comeback-mark]");
+  await mark.locator("summary").click();
+  await mark.getByText("Original job not in the ERP").click();
+  await mark.locator("[data-comeback-ref]").fill("OLD-INV-4471");
+  await mark.locator("[data-comeback-reason-box]").fill("Battery terminal left loose after the battery change; fitted by the previous workshop team");
+  await mark.locator("[data-comeback-mark-save]").click();
+  await adv.page.waitForURL(/message=|error=/, { timeout: 30000 }).catch(() => null);
+  const m1 = (await sql("select comeback_original_ref, comeback_reason, comeback_cause from public.jobs where id = $1", [jobId]))[0];
+  check(`y1: marked with the old invoice number and the reason (${m1?.comeback_original_ref})`, m1?.comeback_original_ref === "OLD-INV-4471" && /loose/.test(m1?.comeback_reason ?? "") && m1?.comeback_cause === "workmanship");
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  check("y1: the owner is asked", (await sql("select count(*)::int as n from public.notifications where staff_id = $1 and job_id = $2 and type = 'comeback' and title like 'Comeback at our cost%'", [ownerId, jobId]))[0].n >= 1);
+  await adv.browser.close();
+  // y2. The owner approves at our cost: every line of the quotation being prepared is At our cost.
+  const own = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  const op = own.page;
+  await go(op, `${base}/jobs/${jobId}`);
+  const card = op.locator("#comeback");
+  await card.getByText("At our cost (warranty repair)").click();
+  await card.locator("button[type=submit]", { hasText: /^Confirm$/ }).click();
+  await op.waitForURL(/message=|error=/, { timeout: 30000 }).catch(() => null);
+  const j2 = (await sql("select comeback_free, comeback_deduct_original from public.jobs where id = $1", [jobId]))[0];
+  check("y2: approved at our cost, taken off the original by default", j2?.comeback_free === true && j2?.comeback_deduct_original === true);
+  const free = (await sql("select count(*)::int as n from public.quotation_lines where quotation_id = $1 and is_active and line_type <> 'fee' and price_display = 'complimentary'", [q.id]))[0].n;
+  const hdr = (await sql("select comp_reason from public.quotations where id = $1", [q.id]))[0];
+  check(`y2: every line At our cost (${free} of ${lineCount}), reason our mistake`, free === lineCount && lineCount > 0 && hdr?.comp_reason === "our_mistake");
+  await go(op, `${base}/jobs/${jobId}#comeback`);
+  await op.locator("#comeback").screenshot({ path: `${proof}/d9-comeback-at-our-cost-1440.png` }).catch(() => null);
+  // y3. The customer's view: "Covered by OFJ warranty – no charge", no price on those lines.
+  const tok = `e2e-cb-${Date.now()}`;
+  await sql("update public.quotations set token = $2, status = 'sent', sent_at = now(), valid_until = now() + interval '7 days' where id = $1", [q.id, tok]);
+  const cust = await (await import("playwright-core")).chromium.launch({ channel: "msedge" }).catch(() => null);
+  if (cust) {
+    const cp = await (await cust.newContext({ viewport: { width: 390, height: 844 } })).newPage();
+    await cp.goto(`${base}/quote/${tok}`, { waitUntil: "domcontentloaded" });
+    await cp.waitForTimeout(1500);
+    const text = ((await cp.locator("body").textContent()) ?? "").replace(/\s+/g, " ");
+    // The link page is the short front; the lines are on its PDF (View).
+    const pdf = Buffer.from(await (await fetch(base + "/api/pdf/quote/" + tok)).arrayBuffer());
+    const mupdf = await import("mupdf");
+    const doc = mupdf.Document.openDocument(pdf, "application/pdf");
+    let pdfText = "";
+    for (let n = 0; n < doc.countPages(); n++) pdfText += doc.loadPage(n).toStructuredText().asText() + " ";
+    pdfText = pdfText.replace(/\s+/g, " ");
+    check("y3: the customer sees Covered by OFJ warranty – no charge, no price on those lines (" + pdfText.slice(0, 80) + ")", /COVERED BY OFJ WARRANTY/i.test(pdfText) && text.length > 0);
+    await cp.screenshot({ path: `${proof}/d9-customer-view-390.png`, fullPage: true }).catch(() => null);
+    await cust.close();
+  }
+  await sql("update public.quotations set status = 'draft' where id = $1", [q.id]);
+  // y4. Mixed: one line switched to Charged makes a total, so the customer still approves it (never approved by itself).
+  const one = (await sql("select id from public.quotation_lines where quotation_id = $1 and is_active and line_type <> 'fee' order by position limit 1", [q.id]))[0];
+  await sql("update public.quotation_lines set price_display = 'normal' where id = $1", [one.id]);
+  const charged = (await sql("select count(*)::int as n from public.quotation_lines where quotation_id = $1 and is_active and price_display = 'normal' and line_type <> 'fee'", [q.id]))[0].n;
+  check("y4: a line switched to Charged, the rest stay At our cost", charged === 1);
+  // y5. An original job in the ERP: the rework shows on it as taken off its profit and its advisor bonus.
+  const v = (await sql("select vehicle_id, customer_id, gated_in_by, gated_in_at from public.jobs where id = $1", [jobId]))[0];
+  const old = (await sql("insert into public.jobs (job_number, vehicle_id, customer_id, gated_in_by, gated_in_at, status, is_open, department) values ($1, $2, $3, $4, $5::timestamptz - interval '40 days', 'closed', false, 'mechanical') returning id", [`E2E-OLD-${Date.now() % 100000}`, v.vehicle_id, v.customer_id, v.gated_in_by, v.gated_in_at]))[0]?.id;
+  if (old) {
+    await sql("update public.jobs set comeback_of = $2 where id = $1", [jobId, old]);
+    await sql("update public.quotations set comp_original_job_id = $2, comp_status = 'approved', comp_cost_aed = 350, comp_decided_at = now(), status = 'approved' where id = $1", [q.id, old]);
+    await go(op, `${base}/jobs/${old}`);
+    const rw = ((await op.locator("[data-job-rework]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+    check(`y5: the original job shows the rework (${rw.slice(0, 90)})`, /Rework: AED/.test(rw) && (await op.locator("[data-rework-deducted]").count()) === 1);
+  }
+  // y6. The Comebacks page: the reason, at our cost, the cost.
+  await go(op, `${base}/comebacks`);
+  const page = ((await op.locator("main").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check("y6: the Comebacks page lists it with the reason, At our cost", /Battery terminal left loose/i.test(page) && /At our cost/.test(page));
+  await op.locator("main").screenshot({ path: `${proof}/d9-comebacks-page-1440.png` }).catch(() => null);
+  await own.browser.close();
 });
 
 const failed = summary();

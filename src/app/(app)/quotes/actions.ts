@@ -1,4 +1,5 @@
 "use server";
+import { atOurCostQuotations, comebackFreeJob, loadComebackExtra } from "@/lib/comeback-cost";
 import { dbWords, dbDetail } from "@/lib/app-errors";
 
 import { declinedItemsOf, saveDeclinedWork } from "@/lib/declined";
@@ -234,6 +235,13 @@ export async function startQuotation(jobId: string) {
     await refreshQuoteTotals(created!.id, settings, staff!.id);
   }
   if (job!.estimate_id) await checkCarry(job!.estimate_id, { id: created!.id, number: created!.number }, jobId, staff!, settings);
+  // Comeback at our cost (10 November 2026, Section 9): every line starts At our cost, the original job named.
+  if (await comebackFreeJob(jobId)) {
+    const extra = await loadComebackExtra(jobId);
+    const { data: cb } = await admin.from("jobs").select("comeback_of").eq("id", jobId).maybeSingle();
+    await atOurCostQuotations(jobId, (cb?.comeback_of as string | null) ?? null, extra?.reason ?? null, staff!.id);
+    await refreshQuoteTotals(created!.id, settings, staff!.id);
+  }
   refresh(jobId, created!.id);
   redirect(`/jobs/${jobId}/quote/${created!.id}`);
 }
@@ -718,7 +726,11 @@ export async function sendQuotation(quotationId: string, _prev: SendQuoteState, 
   }
   await logQuoteEvent(q.id, q.job_id, staff.id, "quote_link_created", `${q.number} v${q.version} link created by ${staff.display_name}`);
   // A free comeback (warranty repair): the owner has decided; the quotation is approved on sending, nothing goes to the customer.
-  if (q.job_id && bundle.job && (bundle.job as { comeback_free?: boolean }).comeback_free) {
+  if (q.job_id && bundle.job && (bundle.job as { comeback_free?: boolean }).comeback_free && q.comp_reason && q.comp_status !== "approved") {
+    const c = await stampComp(bundle, settings, staff.id, "approved", "Comeback at our cost, approved by the owner");
+    if (c) await logQuoteEvent(q.id, q.job_id, staff.id, "comp_auto_approved", `Comeback at our cost on ${q.number}: ${compCostWords(c.cost)}`);
+  }
+  if (q.job_id && bundle.job && (bundle.job as { comeback_free?: boolean }).comeback_free && !(Number(q.total_aed) > 0)) {
     const r = await applyCustomerResponse(q.id, { approve: true, name: `Warranty repair (${staff.display_name})`, by: staff.id, via: "warranty" });
     if (r.error) return { error: r.error };
     refresh(q.job_id, q.id);

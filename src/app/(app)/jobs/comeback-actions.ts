@@ -8,6 +8,7 @@ import { COMEBACK_CAUSES, COMEBACK_CAUSE_LABELS, isOurFault, type ComebackCause 
 import { blankToNull } from "@/lib/format";
 import { notifyRoles, notifyStaff } from "@/lib/notifications";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { atOurCostQuotations, loadComebackExtra, markComebackAtOurCost } from "@/lib/comeback-cost";
 
 const back = (jobId: string, msg: string, ok = true) => redirect(`/jobs/${jobId}?${ok ? "message" : "error"}=${encodeURIComponent(msg)}#comeback`);
 
@@ -35,16 +36,37 @@ export async function confirmComeback(jobId: string, formData: FormData) {
   const free = String(formData.get("free") ?? "no") === "yes";
   const note = blankToNull(formData.get("note"));
   const admin = createAdminClient();
-  const { data: job } = await admin.from("jobs").select("id, job_number, comeback_of, comeback_cause, gated_in_by, status").eq("id", jobId).maybeSingle();
-  if (!job || !job.comeback_of || !job.comeback_cause) back(jobId, "Set the cause first.", false);
+  const { data: job } = await admin.from("jobs").select("id, job_number, comeback_of, comeback_cause, gated_in_by, status, first_approval_at").eq("id", jobId).maybeSingle();
+  // Comeback at our cost (10 November 2026, Section 9): the original may be a job from before the ERP (its old invoice number).
+  const extra = await loadComebackExtra(jobId);
+  if (!job || !(job.comeback_of || extra?.originalRef) || !job.comeback_cause) back(jobId, "Set the cause first.", false);
   const now = new Date().toISOString();
+  const deduct = String(formData.get("deduct") ?? "yes") !== "no";
   await admin.from("jobs").update({ comeback_confirmed_by: staff.id, comeback_confirmed_at: now, comeback_free: free, comeback_claim_status: job!.comeback_cause === "faulty_part" ? "to_claim" : "none" }).eq("id", jobId);
-  await admin.from("job_events").insert({ job_id: jobId, event_type: "comeback", note: `Comeback confirmed by ${staff.display_name}: ${COMEBACK_CAUSE_LABELS[job!.comeback_cause as ComebackCause]}, ${free ? "free of charge (warranty repair)" : "the customer pays"}${note ? ` · ${note}` : ""}`, created_by: staff.id });
+  if (extra) await admin.from("jobs").update({ comeback_deduct_original: deduct }).eq("id", jobId);
+  if (free) {
+    // At our cost: no inspection fee (before the customer approved the check-in), and every line of a quotation being
+    // prepared defaults to At our cost (complimentary, cost counted), the original job named on it.
+    if (!job!.first_approval_at) await admin.from("jobs").update({ inspection_fee_aed: 0 }).eq("id", jobId);
+    await atOurCostQuotations(jobId, job!.comeback_of as string | null, extra?.reason ?? note ?? null, staff.id);
+  }
+  await admin.from("job_events").insert({ job_id: jobId, event_type: "comeback", note: `Comeback confirmed by ${staff.display_name}: ${COMEBACK_CAUSE_LABELS[job!.comeback_cause as ComebackCause]}, ${free ? `at our cost (warranty repair)${extra && !deduct ? ", not taken off the original job" : ""}` : "the customer pays"}${note ? ` · ${note}` : ""}`, created_by: staff.id });
   const advisors = await advisorsInCharge(jobId);
   await notifyStaff(advisors, { type: "comeback", title: `Comeback decided · ${job!.job_number}`, body: free ? "Free of charge: build the quotation as normal and send it; it is approved on sending without the customer." : "The customer pays: quote as normal.", jobId, href: `/jobs/${jobId}` });
   if (job!.comeback_cause === "faulty_part") await notifyRoles(["parts"], { type: "comeback", title: `Claim from the supplier · ${job!.job_number}`, body: "A part failed. Record the claim on the job card (supplier, LPO, amount).", jobId, href: `/jobs/${jobId}#comeback` });
   revalidatePath(`/jobs/${jobId}`);
   back(jobId, free ? "Confirmed: free of charge." : "Confirmed: the customer pays.");
+}
+
+/** "COMEBACK – AT OUR COST" on a job (10 November 2026, Section 9): the original job or the old invoice number, and the reason. */
+export async function markComebackAction(jobId: string, formData: FormData) {
+  const staff = await requirePermission("viewJobs");
+  if (!["owner", "service_advisor", "workshop_manager"].includes(staff.role_id) || staff.viewingAs) back(jobId, "Only the owner, an advisor or a manager marks a comeback.", false);
+  const outside = String(formData.get("original") ?? "") === "outside";
+  const r = await markComebackAtOurCost(jobId, { originalJobId: outside ? null : String(formData.get("original") ?? "") || null, originalRef: outside ? String(formData.get("original_ref") ?? "") : null, reason: String(formData.get("reason") ?? "") }, staff);
+  revalidatePath(`/jobs/${jobId}`);
+  revalidatePath("/comebacks");
+  back(jobId, r.error ?? r.words ?? "Marked.", !r.error);
 }
 
 /** Parts (or the owner) record the claim against the supplier for a failed part; paid claims reduce the loss. */

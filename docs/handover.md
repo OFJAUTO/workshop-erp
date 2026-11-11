@@ -1,14 +1,16 @@
-# Handover – 11 November 2026, 09:15 Dubai (10 Nov list, in progress)
+# Handover – 11 November 2026, 09:45 Dubai (10 Nov list, in progress)
 
 **NEEDS OMAR (now):**
 1. Reply **"apply"** when convenient for the one waiting database change (several invoices per LPO); see WAITING FOR APPLY below.
-2. **J-00490 (comeback):** the car has no earlier job in the ERP (its record was made on 26 Oct). The original work was before the ERP, so the comeback screen (Section 9) will offer "original job not in the ERP" with the old invoice number.
+2. **J-00490 (comeback):** no earlier job of this car is in the ERP (record made 26 Oct). After "apply": on the job card press "Comeback – at our cost", tick "Original job not in the ERP", type the old invoice number and what went wrong; then approve it on the same card.
+3. **Zoho "Warranty / rework" expense (Section 9):** tell me the expense account name from the accountant; posting it to Zoho is not built yet.
+4. **Accounts:** confirm VAT on warranty repairs (now: no VAT on lines at our cost).
 
-**Live (10 Nov list):** S1 paid means paid (deafd90) · S2 Autel post-scan (c6b74c2) · S3 several invoices per LPO (6ebd1f0, after apply) · S4 send LPO for owner approval (103e877, after apply) · S5 supplier payments tab (c5ae8b3) · S6 proof on every payment method (15b8557) · S7 clocking Start / Pause / Stop (0088d3f) · S8 stock reverse (after apply). Pushed 07:55 to 09:15 Dubai.
+**Live (10 Nov list):** S1 paid means paid (deafd90) · S2 Autel post-scan (c6b74c2) · S3 several invoices per LPO (6ebd1f0, after apply) · S4 send LPO for owner approval (103e877, after apply) · S5 supplier payments tab (c5ae8b3) · S6 proof on every payment method (15b8557) · S7 clocking Start / Pause / Stop (0088d3f) · S8 stock reverse (after apply) · S9 comeback at our cost (after apply). Pushed 07:55 to 09:45 Dubai.
 
-**WAITING FOR APPLY:** 1 `20261212090000_lpo_invoices.sql` · 2 `20261212100000_lpo_owner_review.sql` · 3 `20261212110000_stock_reversals.sql` (backup `backups/2026-11-11T03-53-15`; a fresh one is taken at apply).
+**WAITING FOR APPLY:** 1 `20261212090000_lpo_invoices.sql` · 2 `20261212100000_lpo_owner_review.sql` · 3 `20261212110000_stock_reversals.sql` · 4 `20261212120000_comeback_at_our_cost.sql` (backup `backups/2026-11-11T03-53-15`; a fresh one is taken at apply).
 
-**Working on:** Section 9 (comeback at our cost). Then 10.
+**Working on:** Section 10 (view as customer).
 
 **Known stale test:** test-i check 4 (the team leader's one-tap pick on My team) fails on the TEST copy; not caused by this batch, to look at with the end-of-batch run.
 

@@ -1,4 +1,5 @@
 import { dbWords } from "@/lib/app-errors";
+import { comebackFreeJob } from "@/lib/comeback-cost";
 import { capsText } from "@/lib/text-case";
 import { refuseIfLocked } from "@/lib/quote-lock-server";
 import { handBack, keepBaseline } from "@/lib/quote-lead";
@@ -742,6 +743,8 @@ export async function POST(request: NextRequest) {
     row.position = (Number(last?.position) || 0) + 1;
     if (typeof row.title === "string") row.title = capsText(row.title);
     if (typeof row.details === "string") row.details = capsText(row.details);
+    // Comeback at our cost (10 November 2026, Section 9): a new line starts At our cost; the advisor can switch it to Charged.
+    if (q.job_id && row.price_display === undefined && row.line_type !== "fee" && (await comebackFreeJob(q.job_id))) row.price_display = "complimentary";
     const { data: created, error } = await admin.from("quotation_lines").insert(row).select("id").single();
     if (error || !created) return NextResponse.json({ error: (error ? dbWords(error, "api/quote/save") : "Could not add the line.") }, { status: 500 });
     if (addGate && "stamps" in addGate) await stampAll(addGate.stamps, a.below_cost_reason, (l) => (l.id === NEW_ID ? created.id : l.id));

@@ -1,4 +1,5 @@
 import { loadBankWaiting } from "@/lib/bank-posting";
+import { earlierJobsOfCar, loadComebackExtra } from "@/lib/comeback-cost";
 import { readyTemplateFor, stillDueOf } from "@/lib/still-due";
 import { pendingLine } from "@/lib/bank-status";
 import { compCostOf, loadCompJobs, reworkByOriginal } from "@/lib/comp-data";
@@ -186,6 +187,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const [partsState, work, qc, wash, bal, plan, { data: comebackRows }] = await Promise.all([jobPartsState(id), laterStage ? loadWork(id) : Promise.resolve(null), laterStage ? latestQc(id) : Promise.resolve(null), laterStage ? loadWash(id) : Promise.resolve(null), laterStage ? jobBalance(id) : Promise.resolve(null), laterStage ? loadPlanning(job, settings) : Promise.resolve(null), admin.from("jobs").select("id, job_number, comeback_cause, comeback_free, gated_in_at").or(`comeback_of.eq.${id},id.eq.${job.comeback_of ?? id}`).neq("id", id)]);
   const comebackOriginal = job.comeback_of ? ((comebackRows ?? []).find((r) => r.id === job.comeback_of) ?? null) : null;
   const comebacksOfThis = (comebackRows ?? []).filter((r) => r.id !== job.comeback_of);
+  // Comeback at our cost (10 November 2026, Section 9).
+  const comebackExtra = await loadComebackExtra(id);
+  const comebackEarlier = comebackExtra && job.is_open && !job.comeback_of && !comebackExtra.originalRef ? await earlierJobsOfCar(id) : [];
 
   // Loose items: no inspection, no wash; the items card replaces the gate-in media.
   const loose = job.job_kind === "loose";
@@ -781,8 +785,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       {plan && (plan.active || ["approved", "waiting_parts"].includes(job.status)) ? (
         <PlanningCard jobId={id} status={job.status} plan={plan} role={role} viewingAs={!!staff.viewingAs} wt={wt} job={job} mySide={role === "owner" ? null : sideOfDepartment(staff.department_id)} people={people} customer={customer ? { name: customer.company_name ?? customer.full_name, phoneDigits: (customer.phone ?? "").replace(/[^\d]/g, "") } : null} carText={vehicleTitle(vehicle)} advisorName={staff.display_name} whatsapp={can(role, "sendApproval")} promisedTime={promisedTime} timeReady={promisedTimeReady} />
       ) : null}
-      {job.comeback_of || comebacksOfThis.length ? (
-        <ComebackCard jobId={id} job={job} role={role} viewingAs={!!staff.viewingAs} original={comebackOriginal} comebacks={comebacksOfThis} inspectionApproved={inspection?.inspection.status === "approved"} />
+      {job.comeback_of || comebacksOfThis.length || comebackExtra?.originalRef || (comebackExtra && job.is_open && ["owner", "service_advisor", "workshop_manager"].includes(role)) ? (
+        <ComebackCard jobId={id} job={job} role={role} viewingAs={!!staff.viewingAs} original={comebackOriginal} comebacks={comebacksOfThis} inspectionApproved={inspection?.inspection.status === "approved"} extra={comebackExtra} earlier={comebackEarlier} />
       ) : null}
       {stickerData ? <ServiceStickerCard jobId={id} data={stickerData} canPrint={(["owner", "gate_in", "parts", "service_advisor"].includes(role) || can(role, "manageWork")) && !staff.viewingAs && job.is_open} printedBy={null} /> : null}
       {job.summary ? <JobSummaryCard jobId={id} job={job} role={role} viewingAs={!!staff.viewingAs} /> : null}
@@ -997,7 +1001,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               <p key={c.quotationId} className="text-sm" data-job-comp-free><span className="font-bold">Complimentary ({c.reasonLabel}{c.originalJobNumber ? ` of ${c.originalJobNumber}` : ""}):</span> normal price {a(c.normal)} · {c.actualCost !== null ? <>approved at {a(c.cost)} → actual {a(c.actualCost)}</> : <>cost to us {a(c.cost)}</>}</p>
             ))}
             {later ? <p className="text-sm" data-job-rework><span className="font-bold">Rework: {a(later.total)}</span> <span className="text-muted">· done later free of charge on {later.jobs.map((c) => c.jobNumber ?? c.number).join(", ")} - a cost of this job</span></p> : null}
-            {later ? <p className="text-xs text-muted">Counted as a real cost in the daily profit; never in an advisor&apos;s bonus.</p> : null}
+            {later ? <p className="text-xs text-muted" data-rework-deducted>Taken off this job&apos;s profit and its advisor&apos;s bonus (the owner can switch that off on the comeback). Profit after the comeback is this job&apos;s profit less {a(later.total)}.</p> : null}
             {free.length && !later ? <p className="text-xs text-muted">{free.some((c) => compCostOf(c) > 0) ? "Counted as a real cost in the daily profit; never in an advisor's bonus." : ""}</p> : null}
           </Card>
         );

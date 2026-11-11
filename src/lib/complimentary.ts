@@ -118,7 +118,7 @@ export function compApprovalReason(lines: Line[], q: Q, originalJobNumber?: stri
  */
 export function customerCompWord(l: Pick<Line, "price_display"> & Partial<Line>, reason: string | null | undefined, value?: number | null): string {
   if (l.price_display === "included") return "Included";
-  if (reason === "our_mistake" || reason === "warranty") return "NO CHARGE";
+  if (reason === "our_mistake" || reason === "warranty") return "COVERED BY OFJ WARRANTY – NO CHARGE";
   // A quotation from before the reasons (or none chosen yet) keeps its old word.
   if (reason !== "goodwill") return "Complimentary";
   const v = value ?? (l.line_type ? normalPriceOf(l as Line) : 0);

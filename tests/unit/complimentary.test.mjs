@@ -42,7 +42,7 @@ const ppfPkg = line({ id: "k", line_type: "package", title: "OFJ FULL PROTECTION
 check("with a PPF package the free pick-up and drop-off is pre-approved", hasPpfPackage([ppfPkg, recovery]) && compLinesOf([ppfPkg, recovery], q).length === 0);
 
 check("goodwill on the customer's copy: COMPLIMENTARY (value AED 350.00)", customerCompWord(mirror, "goodwill") === "COMPLIMENTARY (value AED 350.00)");
-check("our mistake and warranty: NO CHARGE", customerCompWord(mirror, "our_mistake") === "NO CHARGE" && customerCompWord(mirror, "warranty") === "NO CHARGE");
+check("our mistake and warranty: COVERED BY OFJ WARRANTY – NO CHARGE (10 Nov)", customerCompWord(mirror, "our_mistake") === "COVERED BY OFJ WARRANTY – NO CHARGE" && customerCompWord(mirror, "warranty") === "COVERED BY OFJ WARRANTY – NO CHARGE");
 check("an older quotation with no reason keeps \"Complimentary\"; Included stays Included", customerCompWord(mirror, null) === "Complimentary" && customerCompWord({ price_display: "included" }, "goodwill") === "Included");
 console.log(failed ? `FAILED (${failed})` : "All passed");
 process.exit(failed ? 1 : 0);
