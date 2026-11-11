@@ -40,11 +40,15 @@ export function siHref(place: SiPlace, params: [string, string][] = []): string 
  * receiving panel). Opening a row shows the invoice next to the parts it covers, per car. The same view is the
  * /supplier-invoices page and the Supplier invoices tab of Parts accounts.
  */
-export async function SupplierInvoicesView({ sp, staff, place }: { sp: SiSearch; staff: CurrentStaff; place: SiPlace }) {
+export async function SupplierInvoicesView({ sp: spIn, staff, place }: { sp: SiSearch; staff: CurrentStaff; place: SiPlace }) {
   const acts = ["owner", "accounts"].includes(staff.role_id) && !staff.viewingAs;
+  // Supplier payments are for the owner and accounts only (10 November 2026, Section 5): the parts desk sees nothing
+  // about payments - no paid/unpaid words, no payment filters, no pay buttons, "Paid" reads as checked.
+  const seesPay = ["owner", "accounts"].includes(staff.role_id);
+  const sp: SiSearch = seesPay ? spIn : { ...spIn, unpaid: undefined, no_proof: undefined, status: spIn.status === "paid" ? undefined : spIn.status };
   // Strict: a list that could not be read says so, never "no supplier invoices".
   const read = await loadSupplierInvoices({ strict: true }).catch(() => null);
-  const all = read?.rows ?? [];
+  const all = (read?.rows ?? []).map((r) => (seesPay ? r : hidePay(r)));
   const partNames = read?.partNames ?? new Map<string, string[]>();
   const rows = filterInvoices(all, invoiceFilterOf((k) => sp[k]), partNames);
   const open = sp.open ? all.find((r) => r.key === sp.open) ?? null : null;
@@ -61,7 +65,7 @@ export async function SupplierInvoicesView({ sp, staff, place }: { sp: SiSearch;
     <>
       {!read ? <Notice tone="error">Couldn&apos;t read the supplier invoices just now: reload the page.</Notice> : null}
       {outcome && !open ? <Notice tone={outcome.tone}>{outcome.text}</Notice> : null}
-      {open ? <OpenInvoice row={open} acts={acts} queryOn={queryOn} place={place} outcome={outcome} /> : null}
+      {open ? <OpenInvoice row={open} acts={acts} seesPay={seesPay} queryOn={queryOn} place={place} outcome={outcome} /> : null}
 
       <Card className="flex flex-col gap-3" data-si-filters>
         <form method="get" action={`/${place}`} className="flex flex-wrap items-end gap-2">
@@ -76,21 +80,21 @@ export async function SupplierInvoicesView({ sp, staff, place }: { sp: SiSearch;
           <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Status
             <Select name="status" defaultValue={sp.status ?? ""} className="w-52" data-si-status-filter>
               <option value="">Any status</option>
-              {(Object.keys(STATUS_WORDS) as InvoiceStatus[]).map((s) => <option key={s} value={s}>{STATUS_WORDS[s]}</option>)}
+              {(Object.keys(STATUS_WORDS) as InvoiceStatus[]).filter((s) => seesPay || s !== "paid").map((s) => <option key={s} value={s}>{STATUS_WORDS[s]}</option>)}
             </Select>
           </label>
           <label className="flex flex-col gap-1 text-xs font-semibold text-muted">From<Input type="date" name="from" defaultValue={sp.from ?? ""} className="w-40" /></label>
           <label className="flex flex-col gap-1 text-xs font-semibold text-muted">To<Input type="date" name="to" defaultValue={sp.to ?? ""} className="w-40" /></label>
-          <label className="flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" name="unpaid" value="1" defaultChecked={sp.unpaid === "1"} className="h-5 w-5 accent-ink" />Unpaid</label>
+          {seesPay ? <label className="flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" name="unpaid" value="1" defaultChecked={sp.unpaid === "1"} className="h-5 w-5 accent-ink" />Unpaid</label> : null}
           <label className="flex min-h-11 items-center gap-2 text-sm font-semibold"><input type="checkbox" name="problems" value="1" defaultChecked={sp.problems === "1"} className="h-5 w-5 accent-ink" />Match problems</label>
-          <label className="flex min-h-11 items-center gap-2 text-sm font-semibold" data-si-no-proof-filter><input type="checkbox" name="no_proof" value="1" defaultChecked={sp.no_proof === "1"} className="h-5 w-5 accent-ink" />Paid without proof</label>
+          {seesPay ? <label className="flex min-h-11 items-center gap-2 text-sm font-semibold" data-si-no-proof-filter><input type="checkbox" name="no_proof" value="1" defaultChecked={sp.no_proof === "1"} className="h-5 w-5 accent-ink" />Paid without proof</label> : null}
           <Button type="submit" size="md" tone="secondary">Show</Button>
           {kept.length ? <Link href={siHref(place)} className="min-h-11 inline-flex items-center text-sm font-bold underline underline-offset-4">Clear</Link> : null}
         </form>
         <div className="flex flex-wrap items-center gap-2 text-sm" data-si-totals>
           <span className="font-extrabold">{rows.length} invoice{rows.length === 1 ? "" : "s"} · AED {money(rows.filter((r) => r.status !== "waiting").reduce((a, r) => a + r.total, 0))} with VAT</span>
-          {unpaid.length ? <span className="text-muted">Unpaid:</span> : null}
-          {unpaid.slice(0, 8).map((u) => <span key={u.supplierId ?? u.supplier} className="rounded-full border border-line-strong px-2.5 py-0.5 text-xs font-semibold" data-si-unpaid>{u.supplier} · {u.count} · AED {money(u.total)}</span>)}
+          {seesPay && unpaid.length ? <span className="text-muted">Unpaid:</span> : null}
+          {(seesPay ? unpaid : []).slice(0, 8).map((u) => <span key={u.supplierId ?? u.supplier} className="rounded-full border border-line-strong px-2.5 py-0.5 text-xs font-semibold" data-si-unpaid>{u.supplier} · {u.count} · AED {money(u.total)}</span>)}
           {all.filter((r) => r.proofMissing).length ? <Link href={siHref(place, [...invoiceFilterParams({ no_proof: "1" })])} className="rounded-full border border-red-bar px-2.5 py-0.5 text-xs font-bold text-red" data-si-no-proof-count>Paid without proof · {all.filter((r) => r.proofMissing).length}</Link> : null}
         </div>
       </Card>
@@ -101,6 +105,11 @@ export async function SupplierInvoicesView({ sp, staff, place }: { sp: SiSearch;
       </section>
     </>
   );
+}
+
+/** The parts desk's copy of an invoice row: nothing about payments ("Paid" reads as checked). */
+function hidePay(r: InvoiceRow): InvoiceRow {
+  return { ...r, status: r.status === "paid" ? "checked" : r.status, partlyPaid: false, proofMissing: false, paidAmount: 0, shares: r.shares.map((x) => ({ ...x, paidAt: null })) };
 }
 
 function MatchChips({ r }: { r: InvoiceRow }) {
@@ -136,7 +145,7 @@ function InvoiceCard({ r, href, open }: { r: InvoiceRow; href: string; open: boo
 }
 
 /** One invoice opened: the scan or photo (zoomable) next to the parts it covers, per car, with Checked and Query. */
-async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: InvoiceRow; acts: boolean; queryOn: boolean; place: SiPlace; outcome: { tone: "success" | "error"; text: string } | null }) {
+async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome }: { row: InvoiceRow; acts: boolean; seesPay: boolean; queryOn: boolean; place: SiPlace; outcome: { tone: "success" | "error"; text: string } | null }) {
   const admin = createAdminClient();
   const poIds = row.shares.map((s) => s.poId);
   const vatOn = await invoiceVatReady();
@@ -150,7 +159,7 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
   const poRows = (pos ?? []) as unknown as PaidPo[];
   // Fix 4 (4 November 2026): the proof of payment shows next to "Open the invoice (PDF)", signed like the scans.
   const paths = Array.from(new Set([...((files ?? []) as { storage_path: string }[]).map((f) => f.storage_path), ...poRows.map((p) => p.supplier_invoice_path).filter((x): x is string => !!x), ...poRows.map((p) => p.supplier_paid_proof_path).filter((x): x is string => !!x)]));
-  const urls = await signJobFiles(paths);
+  const urls = await signJobFiles(seesPay ? paths : paths.filter((p) => !poRows.some((x) => x.supplier_paid_proof_path === p)));
   const kinds = new Map(((files ?? []) as { storage_path: string; content_type: string | null }[]).map((f) => [f.storage_path, f.content_type ?? ""]));
   const isPdf = (p: string) => /pdf/i.test(kinds.get(p) ?? "") || /\.pdf$/i.test(p);
   // Paid LPO by LPO: each LPO of the invoice with its own payment (a split invoice can be partly paid).
@@ -206,7 +215,7 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
           ))}
           <div className="flex flex-wrap items-center gap-3 text-sm" data-si-open-amount><span className="font-bold">Invoice total</span><SupplierAmount money={rowMoney(row)} align="start" />{row.trn ? <span className="text-muted">TRN {row.trn}</span> : null}</div>
           {vsApproved ? <p className="text-sm font-bold" data-si-vs-approved>{vsApproved}</p> : null}
-          {row.status !== "waiting" && (row.paidAmount > 0 || row.shares.length > 1) ? (
+          {seesPay && row.status !== "waiting" && (row.paidAmount > 0 || row.shares.length > 1) ? (
             <ul className="flex flex-col gap-1.5 text-sm" data-si-paid-lines>
               {row.shares.map((s) => {
                 const p = payOf.get(s.poId);
@@ -289,7 +298,7 @@ async function OpenInvoice({ row, acts, queryOn, place, outcome }: { row: Invoic
               })
             : null}
           {/* Paid on each LPO's own page: one button per LPO still to pay, never one already paid. */}
-          {toPay.map((s) => <LinkButton key={s.poId} href={`/parts/orders/${s.poId}#paid`} tone="ghost" size="lg" data-si-pay={s.poId}>{toPay.length > 1 || row.shares.length > 1 ? `Pay ${s.poNumber} (on the LPO)` : "Paid to supplier (on the LPO)"}</LinkButton>)}
+          {(seesPay ? toPay : []).map((s) => <LinkButton key={s.poId} href={`/parts/orders/${s.poId}#paid`} tone="ghost" size="lg" data-si-pay={s.poId}>{toPay.length > 1 || row.shares.length > 1 ? `Pay ${s.poNumber} (on the LPO)` : "Paid to supplier (on the LPO)"}</LinkButton>)}
         </div>
       ) : null}
     </Card>

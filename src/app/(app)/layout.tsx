@@ -87,6 +87,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const partsManagementItems: (NavItem & { show: boolean })[] = [
     { href: "/parts/orders", label: "LPOs", show: can(role, "viewPurchaseOrders") && role !== "service_advisor", badge: lposPending || undefined },
     { href: "/supplier-invoices", label: "Supplier invoices", show: ["owner", "accounts", "parts"].includes(role), badge: invoicesToCheck || undefined },
+    { href: "/supplier-payments", label: "Supplier payments", show: can(role, "supplierPayments") },
     { href: "/parts-accounts", label: "Parts accounts", show: can(role, "viewPartsAccounts") },
     { href: "/parts/returns", label: "Purchase returns", show: ["owner", "accounts", "parts"].includes(role) },
     { href: "/parts/suppliers", label: "Suppliers", show: can(role, "manageSuppliers") },

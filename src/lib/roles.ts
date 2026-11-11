@@ -131,6 +131,8 @@ export const PERMISSIONS = {
   /** Parts accounts (3 November 2026): every part line, LPO, supplier invoice, supplier payment, return and problem with
    *  their costs. Accounts and the owner only; the page reads through the server (no SQL policy of its own). */
   viewPartsAccounts: ["owner", "accounts"],
+  // Supplier payments tab (10 November 2026, Section 5): owner and accounts only.
+  supplierPayments: ["owner", "accounts"],
 } as const satisfies Record<string, readonly RoleId[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

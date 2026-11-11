@@ -98,6 +98,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const canApprove = can(role, "approvePurchaseOrders") && (role === "owner" || staff.is_head_accountant) && !staff.viewingAs;
   const canManage = can(role, "managePurchaseOrders") && !staff.viewingAs;
   const canPay = (role === "owner" || role === "accounts") && !staff.viewingAs;
+  // Supplier payments are for the owner and accounts only (10 November 2026, Section 5): the parts desk sees nothing about payments.
+  const seesPay = role === "owner" || role === "accounts";
   // Supplier invoice edit (5 November 2026, the Gargash case): the typed VAT, the Edit button and the who/when record.
   const invoiceEntered = !isMain && po.supplier_invoice_status === "received" && !!po.supplier_invoice_number;
   const editOn = invoiceEntered && canPay ? await invoiceEditReady() : false;
@@ -243,7 +245,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             {po.job_id ? <JobTechnicianTag jobId={po.job_id} technicians={technicians} /> : null}
             <Badge tone={po.status === "pending_approval" ? "amber" : po.status === "received" ? "green" : po.status === "cancelled" ? "neutral" : "ink"}>{isMain && po.status === "approved" ? "Approved" : PO_STATUS_LABELS[po.status]}</Badge>
             {po.supplier_invoice_status === "to_follow" ? <Badge tone="amber">Invoice missing</Badge> : null}
-            {po.supplier_paid_at ? <Badge tone="green">Paid to supplier</Badge> : null}
+            {seesPay && po.supplier_paid_at ? <Badge tone="green">Paid to supplier</Badge> : null}
             {!isMain && (po.supplier_invoice_status === "received" || po.supplier_invoice_status === "to_follow") && ["owner", "accounts", "parts"].includes(role) ? <Link href={invoiceHref(po)} className="text-sm font-bold underline underline-offset-4" data-lpo-invoice-link>{po.supplier_invoice_number ? `INV ${po.supplier_invoice_number}` : "Invoice"} in Supplier invoices</Link> : null}
           </span>
         }
@@ -503,8 +505,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
               summary={invState.summary}
               coverage={invState.coverage}
               first={{ number: po.supplier_invoice_number, amount: po.supplier_invoice_amount, vat: invState.po.supplier_invoice_vat_aed }}
-              extras={invState.extras.map((e) => ({ id: e.id, number: e.number, date: e.invoice_date, amount: e.amount_aed, vat: e.vat_aed, gross: lpoInvoiceGross(e, invState.chargesVat), lines: e.lines.map((c) => ({ lineId: c.line_id, description: lineDesc.get(c.line_id) ?? "", qty: c.qty })), checked: !!e.checked_at, paid: !!e.paid_at, query: e.query, inZoho: !!e.zoho_bill_id }))}
-              paid={!!po.supplier_paid_at}
+              extras={invState.extras.map((e) => ({ id: e.id, number: e.number, date: e.invoice_date, amount: e.amount_aed, vat: e.vat_aed, gross: lpoInvoiceGross(e, invState.chargesVat), lines: e.lines.map((c) => ({ lineId: c.line_id, description: lineDesc.get(c.line_id) ?? "", qty: c.qty })), checked: !!e.checked_at, paid: seesPay && !!e.paid_at, query: e.query, inZoho: !!e.zoho_bill_id }))}
+              paid={seesPay && !!po.supplier_paid_at}
               today={today}
             />
           ) : null}
@@ -519,7 +521,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 { label: "Sent to supplier", value: po.sent_at ? `${formatDateTime(po.sent_at)} by ${po.sent_by ? (names.get(po.sent_by) ?? "") : ""}${po.sent_method ? ` (${po.sent_method})` : ""}` : null },
                 { label: "Received", value: po.received_at ? formatDateTime(po.received_at) : null },
                 { label: "Supplier invoice", value: po.supplier_invoice_status === "received" ? `${po.supplier_invoice_number}${po.supplier_invoice_date ? ` dated ${formatDate(po.supplier_invoice_date)}` : ""}${po.supplier_invoice_amount ? ` · ${payWords}` : ""} · entered ${formatDateTime(po.supplier_invoice_at)}` : po.supplier_invoice_status === "to_follow" ? "Missing (to follow)" : null },
-                { label: "Paid to supplier", value: po.supplier_paid_at ? `${formatDateTime(po.supplier_paid_at)} by ${po.supplier_paid_by ? (names.get(po.supplier_paid_by) ?? "") : ""}${po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}` : null },
+                { label: "Paid to supplier", value: seesPay && po.supplier_paid_at ? `${formatDateTime(po.supplier_paid_at)} by ${po.supplier_paid_by ? (names.get(po.supplier_paid_by) ?? "") : ""}${po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}` : null },
                 ...(po.parent_id ? [{ label: "Main LPO", value: <Link href={`/parts/orders/${po.parent_id}`} className="underline underline-offset-4 font-semibold">{po.number.replace(/-\d+$/, "")}</Link> }] : []),
                 ...(scanUrl ? [{ label: "Scan", value: <a href={scanUrl} target="_blank" rel="noreferrer" className="underline underline-offset-4 font-semibold">Open the supplier invoice</a> }] : []),
               ]}
@@ -544,7 +546,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             <InvoiceEditHistory entries={invoiceEdits} />
           </Card>
           {/* The payment box of every supplier LPO, a stock order (no car) included: "Pay on the LPO" lands here. */}
-          {!isMain && po.status !== "pending_approval" && po.status !== "cancelled" && (po.supplier_invoice_status !== "none" || invoiceFiles.length > 0 || po.status === "received") ? (
+          {seesPay && !isMain && po.status !== "pending_approval" && po.status !== "cancelled" && (po.supplier_invoice_status !== "none" || invoiceFiles.length > 0 || po.status === "received") ? (
             <Card className="flex flex-col gap-3 scroll-mt-4" id="paid" data-supplier-pay>
               <SectionLabel>{po.job_id ? <>Invoice files &amp; payment</> : "Payment"}</SectionLabel>
               <SupplierPaymentHistory rows={payHistory} canChange={canPay} />

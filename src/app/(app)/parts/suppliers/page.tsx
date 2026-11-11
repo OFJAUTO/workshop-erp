@@ -90,7 +90,7 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
       <PageHeader title="Suppliers" subtitle="Name, TRN, phone, email, address and payment terms. LPOs and supplier invoices pick from this list." actions={<LinkButton href="/parts/suppliers/totals" tone="secondary" size="lg">Purchase totals</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {!invoiceRead ? <Notice tone="error">The unpaid amounts could not be read just now: reload the page to see them.</Notice> : null}
+      {seesAccounts && !invoiceRead ? <Notice tone="error">The unpaid amounts could not be read just now: reload the page to see them.</Notice> : null}
       {apply && all.some((s) => s.id === apply) ? (
         <div className="rounded-card border border-ink bg-white p-5 flex flex-wrap items-center gap-3" data-apply-discount>
           <span className="text-sm font-semibold">Apply {all.find((s) => s.id === apply)?.default_discount_percent ?? 0}% to the {count ?? "?"} open {all.find((s) => s.id === apply)?.name} line{count === "1" ? "" : "s"}? (priced, not yet ordered; sent quotations are flagged)</span>
@@ -119,7 +119,7 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
             {q || filter ? <Link href={keep({ q: undefined, filter: undefined })} className="inline-flex min-h-11 items-center text-sm font-bold underline underline-offset-4" data-supplier-clear>Clear</Link> : null}
           </form>
           <div className="flex flex-wrap gap-1 text-xs font-bold" data-supplier-filters>
-            {(["no_trn", "unpaid"] as SupplierFilter[]).map((f) => {
+            {((seesAccounts ? ["no_trn", "unpaid"] : ["no_trn"]) as SupplierFilter[]).map((f) => {
               const on = filter === f;
               const n = searched.filter((s) => inFilter(s, f)).length;
               return (
@@ -152,10 +152,10 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
                   <Button type="submit" tone="ghost" size="md">{s.is_active ? "Take off the list" : "Put back on the list"}</Button>
                 </form>
               </details>
-              {(advanceOf.get(s.id) ?? advanceOf.get(s.name.toUpperCase())) ? <span className="inline-flex min-h-11 w-fit items-center rounded-card border border-green bg-green-soft px-3 py-1 text-xs font-bold text-green-text" data-supplier-advance>{advanceWords(s.name, advanceOf.get(s.id) ?? advanceOf.get(s.name.toUpperCase()) ?? 0)}</span> : null}
+              {seesAccounts && (advanceOf.get(s.id) ?? advanceOf.get(s.name.toUpperCase())) ? <span className="inline-flex min-h-11 w-fit items-center rounded-card border border-green bg-green-soft px-3 py-1 text-xs font-bold text-green-text" data-supplier-advance>{advanceWords(s.name, advanceOf.get(s.id) ?? advanceOf.get(s.name.toUpperCase()) ?? 0)}</span> : null}
               {(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase())) ? <Link href="/parts/returns?tab=credit" className="inline-flex min-h-11 w-fit items-center rounded-card border border-amber-bar bg-amber-soft px-3 py-1 text-xs font-bold text-amber-text" data-supplier-credit-expected={(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase()))!.amount.toFixed(2)}>Credit expected from {s.name} AED {(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase()))!.amount.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · not in the balance yet</Link> : null}
-              {(creditsToUse.get(s.id) ?? creditsToUse.get(s.name.toUpperCase())) ? <span className="inline-flex min-h-11 w-fit items-center rounded-card border border-green bg-green-soft px-3 py-1 text-xs font-bold text-green-text" data-supplier-credit-to-use>Credit to use AED {(creditsToUse.get(s.id) ?? creditsToUse.get(s.name.toUpperCase()))!.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (returns on paid invoices)</span> : null}
-              {unpaid ? (
+              {seesAccounts && (creditsToUse.get(s.id) ?? creditsToUse.get(s.name.toUpperCase())) ? <span className="inline-flex min-h-11 w-fit items-center rounded-card border border-green bg-green-soft px-3 py-1 text-xs font-bold text-green-text" data-supplier-credit-to-use>Credit to use AED {(creditsToUse.get(s.id) ?? creditsToUse.get(s.name.toUpperCase()))!.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (returns on paid invoices)</span> : null}
+              {seesAccounts && unpaid ? (
                 <Link href={unpaidHref(s.id)} className="inline-flex min-h-11 w-fit flex-wrap items-center gap-2 rounded-card border border-line-strong px-3 py-1 text-xs font-bold" data-supplier-unpaid={unpaid.total.toFixed(2)}>
                   <span>Unpaid ({unpaid.count})</span>
                   <SupplierAmount money={moneyFrom(unpaid.net, unpaid.vat, unpaid.vatCharged)} size="sm" align="start" />

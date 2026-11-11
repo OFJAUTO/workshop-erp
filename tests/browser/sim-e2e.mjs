@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -3550,6 +3550,60 @@ await section("d4", "LPO send for owner approval", async () => {
     else await sql("update public.settings set value = $1::jsonb where key = 'lpo_accounts_limit_aed'", [limitBefore]);
     if (!wasHead) await sql("update public.staff set is_head_accountant = false where id = $1", [head.id]);
   }
+});
+
+/* ================================================================================================= */
+/* d5 (10 November 2026, Section 5): the Supplier payments tab, owner + accounts only. Accounts see   */
+/* what is due by supplier and record from it, with the Excel export; the parts desk has no menu      */
+/* item, the server refuses the page and the export, and no payment facts on the LPO, the Supplier     */
+/* invoices page or the suppliers list.                                                               */
+/* ================================================================================================= */
+await section("d5", "supplier payments tab", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-10-supplier-payments-tab";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const sup = (await sql("insert into public.suppliers (name, trn, vat_registered, created_by, updated_by) values ('E2E PAY TAB', '100200300400999', true, $1, $1) returning id", [ownerId]))[0];
+  const today = (await sql("select (now() at time zone 'Asia/Dubai')::date::text as d"))[0].d;
+  const po = (await sql("insert into public.purchase_orders (number, job_id, supplier_id, supplier_name, kind, status, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_path, supplier_invoice_at, supplier_invoice_checked_at, created_by, updated_by) values ('E2E-LPO-PT-1', $1, $2, 'E2E PAY TAB', 'supplier', 'received', 400, 'received', 'E2E-PT-INV-1', $3, 400, 'e2e/pt-invoice.pdf', now(), now(), $4, $4) returning id", [jobId, sup.id, today, ownerId]))[0]?.id;
+  await sql("insert into public.purchase_order_lines (po_id, position, description, quantity, unit_cost, received_qty, received_at, created_by, updated_by) values ($1, 1, 'E2E PAY TAB PART', 1, 400, 1, now(), $2, $2)", [po, ownerId]);
+  if (!sup?.id || !po) throw new Error("seed failed: the LPO");
+
+  // t1. Accounts: the tab in the menu, due by supplier, Record payment opens the box for that supplier, the export.
+  const acc = await browserFor("accounts", { viewport: { width: 1440, height: 900 } });
+  const ap = acc.page;
+  await go(ap, `${base}/supplier-payments`);
+  check("t1: accounts see Supplier payments in the menu", (await ap.locator('[data-nav-sub][href="/supplier-payments"]').count()) >= 1);
+  const row = ap.locator('[data-sp-supplier="E2E PAY TAB"]');
+  check("t1: the supplier is due (AED 420.00 incl. VAT)", (await row.count()) === 1 && (await row.locator("[data-sp-due-amount]").getAttribute("data-sp-due-amount")) === "420.00");
+  await row.locator("[data-sp-pay]").click();
+  await ap.waitForURL(/supplier=/, { timeout: 20000 });
+  check("t1: Record payment opens the payment box with the invoice", (await ap.locator(`[data-sp-pay-card] [data-supplier-pay-invoice="${po}"]`).count()) === 1);
+  await ap.screenshot({ path: `${proof}/d5-tab-as-accounts-1440.png`, fullPage: false }).catch(() => null);
+  const ex = await ap.request.get(`${base}/api/export/supplier-payments`);
+  check(`t1: the Excel export (${ex.status()})`, ex.status() === 200 && /spreadsheetml/.test(ex.headers()["content-type"] ?? ""));
+  await acc.browser.close();
+
+  // t2. Parts: no menu item, the page and the export refused, no payment facts anywhere.
+  const pt = await browserFor("parts", { viewport: { width: 1440, height: 900 } });
+  const pp = pt.page;
+  await go(pp, `${base}/parts`);
+  check("t2: parts have no Supplier payments in the menu", (await pp.locator('[href="/supplier-payments"]').count()) === 0);
+  const res = await pp.goto(`${base}/supplier-payments`);
+  check(`t2: the server refuses the page for parts (${res?.status()})`, res?.status() === 404);
+  await pp.screenshot({ path: `${proof}/d5-refused-for-parts-1440.png` }).catch(() => null);
+  const ex2 = await pp.request.get(`${base}/api/export/supplier-payments`);
+  check(`t2: the server refuses the export for parts (${ex2.status()})`, ex2.status() === 403);
+  await go(pp, `${base}/parts/orders/${po}`);
+  check("t2: no payment box on the LPO for parts", (await pp.locator("[data-supplier-pay]").count()) === 0 && (await pp.locator("[data-supplier-pay-box]").count()) === 0);
+  await go(pp, `${base}/supplier-invoices`);
+  const siText = (await pp.locator("main").textContent().catch(() => "")) ?? "";
+  check("t2: no payment filters or unpaid figures on Supplier invoices", (await pp.locator("[data-si-no-proof-filter], [data-si-unpaid], [data-si-pay]").count()) === 0 && !/Paid to supplier/.test(siText));
+  await go(pp, `${base}/parts/suppliers`);
+  check("t2: no unpaid or advance chips on the suppliers list", (await pp.locator("[data-supplier-unpaid], [data-supplier-advance]").count()) === 0);
+  await pt.browser.close();
 });
 
 const failed = summary();
