@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
+import { Words } from "./Words";
 import { useRouter } from "next/navigation";
 import { decideApprovalAction, type ApprovalAnswer } from "@/app/(app)/approvals/actions";
 import type { ApprovalItem } from "@/lib/approvals";
@@ -35,7 +36,7 @@ export function ApprovalBox({ item, highlight = false, link = false, extra = nul
     <div ref={ref} id={`approval-${item.key}`} className={`flex flex-col gap-2 rounded-card border-2 px-4 py-3 ${done ? "border-green bg-green-soft" : "border-amber-bar bg-amber-soft"} ${highlight ? "ring-4 ring-amber-bar/60" : ""}`} data-approval-box={item.key} data-approval-kind={item.kind}>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="text-xs font-extrabold uppercase tracking-[0.08em] text-amber-text">{done ? "Decided" : "Needs your approval"}</span>
-        <span className="font-extrabold" data-approval-title>{item.title}</span>
+        <Words className="font-extrabold" text={item.title} data-approval-title="" />
         {item.money ? <span className="ml-auto font-extrabold" data-approval-money>{item.money}</span> : null}
       </div>
       {item.what ? <p className="text-sm" data-approval-what>{item.what}</p> : null}

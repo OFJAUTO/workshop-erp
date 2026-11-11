@@ -1,4 +1,5 @@
 import { AddPartsHere, type OtherPart } from "@/components/AddPartsHere";
+import { Words } from "@/components/Words";
 import { partsToAddHere } from "@/lib/part-quote";
 import { partQuoteMap, partQuoteReady } from "@/lib/part-quote-data";
 import { compJobChoices } from "@/lib/quote-data";
@@ -475,7 +476,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
           <ul className="flex flex-col divide-y divide-line text-xs">
             {bundle.events.map((e) => (
               <li key={e.id} className="py-1.5">
-                <span className="text-muted">{formatDateTime(e.created_at)}</span> · <span className="font-semibold">{e.by_name ?? "Customer"}</span> · {e.note}
+                <span className="text-muted">{formatDateTime(e.created_at)}</span> · <span className="font-semibold">{e.by_name ?? "Customer"}</span> · <Words text={e.note ?? ""} />
               </li>
             ))}
           </ul>

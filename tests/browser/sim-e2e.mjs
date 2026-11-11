@@ -2964,7 +2964,8 @@ await section("sec5", "simple part sticker", async () => {
   const anon = await (await import("playwright-core")).chromium.launch({ executablePath: "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe", headless: true });
   const pa = await anon.newPage();
   await pa.goto(`${base}${path}`);
-  check(`k6: not signed in sees nothing but the sign-in page (${pa.url().replace(base, "")})`, pa.url().includes("/login"));
+  // 11 November 2026 (Section 12): signed out = the one sentence on the QR page itself, no redirect to sign in.
+  check(`k6: not signed in sees only the sign-in sentence (${pa.url().replace(base, "")})`, !pa.url().includes("/login") && (await pa.locator("[data-qr-signed-out]").count()) === 1);
   await anon.close();
 });
 
@@ -4832,7 +4833,7 @@ await section("e15", "HR: people, documents, reminders, access", async () => {
   // The reminder and the tile.
   const sent = (await api("/api/e2e/hr-reminders", {})).json;
   const bell = (await sql("select title from public.notifications where type = 'hr_document_expiring' and staff_id = $1 and title ilike '%E2E HR%' order by created_at desc limit 1", [owner]))[0];
-  check(`h5: the reminder bell goes to the owner (${bell?.title})`, (sent?.sent ?? 0) >= 1 && /Passport expires in 2d days: E2E HR Cleaner/i.test(bell?.title ?? ""));
+  check(`h5: the reminder bell goes to the owner (${bell?.title})`, (sent?.sent ?? 0) >= 1 && /Passport expires in \d+ days?: E2E HR Cleaner/i.test(bell?.title ?? ""));
   const again = (await api("/api/e2e/hr-reminders", {})).json;
   const twice = (await sql("select count(*)::int n from public.notifications where type = 'hr_document_expiring' and staff_id = $1 and title ilike '%E2E HR%'", [owner]))[0].n;
   check(`h5: once per stage (${again?.sent}, ${twice} bell)`, twice === 1);
