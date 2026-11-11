@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { passwordSummaryDaily } from "@/lib/password-alerts";
 import { autoPauseBodyshopBreaks } from "@/lib/bodyshop";
 import { lpoReviewHourly } from "@/lib/lpo-review";
 import { archiveOldNotices, clearDoneNotices } from "@/lib/bell-clear";
@@ -631,6 +632,13 @@ async function runHousekeeping(): Promise<Record<string, number>> {
     report.passkeyChallengesRemoved = data?.length ?? 0;
   } catch {
     report.passkeyChallengesRemoved = -1;
+  }
+
+  // 33. Password sign-ins (11 November 2026, Section 14): one evening summary to the owner, never in the red badge.
+  try {
+    report.passwordSummary = await passwordSummaryDaily();
+  } catch {
+    report.passwordSummary = -1;
   }
 
   // 32. LPOs sent for owner approval (10 November 2026, Section 4): above the accounts limit go to the owner by

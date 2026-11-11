@@ -5,9 +5,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSettings } from "@/lib/settings";
 import { SENSITIVE_ROLES, type RoleId } from "@/lib/roles";
 import { LOGIN_KIND_COOKIE, SESSION_UNTIL_COOKIE, sessionCookieOptions, sessionWindow } from "@/lib/session";
-import { notifyStaff } from "@/lib/notifications";
 import { PASSWORD_REFUSED_WORDS, passkeyPerson, passwordRefusedFor, requiredRolesOf, rolloutOf } from "@/lib/passkey-rules";
-import { logSignIn, ownerIds, passkeyCount, passkeysReady, safeNext } from "@/lib/passkey-server";
+import { logSignIn, passkeyCount, passkeysReady, safeNext } from "@/lib/passkey-server";
+import { alertIfNewDevice } from "@/lib/password-alerts";
 
 /**
  * Office login with email and password. A plain form post, so browsers offer to save the password.
@@ -84,14 +84,9 @@ export async function POST(request: NextRequest) {
     await logSignIn({ staffId: staff.id, method: "password", ok: false, reason: "passkey required for this role" });
     return fail(PASSWORD_REFUSED_WORDS);
   }
+  // 11 November 2026 (Section 14): no bell for every password sign-in any more - one summary in the evening; the
+  // owner is told at once only when this person signs in from a browser they never used before.
+  if (role !== "owner") await alertIfNewDevice(staff).catch(() => false);
   await logSignIn({ staffId: staff.id, method: "password_backup", ok: true, reason: "password used instead of the phone" });
-  if (role !== "owner") {
-    await notifyStaff(await ownerIds(), {
-      type: "password_backup_sign_in",
-      title: `${staff.display_name} signed in with the password instead of a phone`,
-      body: "Lost phone, or someone else using the password? Check with them. Only you can remove a lost phone (Team).",
-      href: `/team/${staff.id}#sign-in`,
-    });
-  }
   return NextResponse.redirect(`${origin}${next}`, { status: 303 });
 }

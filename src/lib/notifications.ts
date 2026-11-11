@@ -176,7 +176,10 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   // Sign-in security (7 November 2026): always delivered.
   { type: "passkey_added", label: "A phone was set up to sign in (yours, or for the owner: anyone's)", locked: true },
   { type: "passkey_removed", label: "The owner removed a phone from your sign-in", locked: true },
-  { type: "password_backup_sign_in", label: "Owner: someone signed in with the password instead of their phone", locked: true },
+  { type: "password_backup_sign_in", label: "Owner: someone signed in with the password instead of their phone (before 11 November 2026)", locked: true },
+  // 11 November 2026 (Section 14): one evening summary instead of a bell per sign-in; a new device at once.
+  { type: "password_sign_in_summary", label: "Owner: the day's password sign-ins, in one evening summary", locked: true },
+  { type: "password_new_device", label: "Owner: someone signed in with the password from a new device", locked: true },
 ];
 
 /** Every hand-over of a car from one person to the next: these always arrive, whatever the person's preferences. */

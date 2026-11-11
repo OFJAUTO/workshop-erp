@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -4621,6 +4621,163 @@ await section("e11", "car-card dashboards: parts desk and gate-in", async () => 
   check("c4: the gate-out form opens for the gate-in desk without an amount", (await gp.locator("[data-gateout-payment-words]").count()) === 1 && !/AED \d/.test(body));
   await gi.browser.close();
 });
+
+/* ================================================================================================= */
+/* e12 (11 November 2026, Section 12): ONE Stickers tab - part stickers (search or today's arrivals,  */
+/* tick, print), warranty stickers (battery first, the owner's types, a batch only on PPF and tint),  */
+/* the history with reprint, the printer setup moved from Settings - and the QR page: signed in = the */
+/* part's page; signed out = one sentence, no redirect, no link.                                       */
+/* ================================================================================================= */
+await section("e12", "the Stickers tab and the QR page", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-stickers-tab";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const part = (await sql("update public.part_items set received_qty = 1 where job_id = $1 and is_active returning id, description", [jobId]))[0];
+  if (!part) throw new Error("seed failed: no part");
+  const jn = (await sql("select job_number from public.jobs where id = $1", [jobId]))[0]?.job_number;
+  // s1. The parts desk: the Stickers menu, the search, tick and print.
+  const pt = await browserFor("parts", { viewport: { width: 1440, height: 900 } });
+  const pp = pt.page;
+  await go(pp, `${base}/stickers?q=${encodeURIComponent(jn)}`);
+  check("s1: Stickers is in the parts desk's menu", (await pp.locator('a[href="/stickers"]').count()) >= 1);
+  const row = pp.locator(`[data-sticker-part="${part.id}"]`);
+  check("s1: the search finds the received part", (await row.count()) === 1);
+  await pp.screenshot({ path: `${proof}/e12-stickers-parts-1440.png` }).catch(() => null);
+  const pdf = await pp.request.get(`${base}/api/pdf/part-labels?parts=${part.id}&parts=${part.id}`);
+  check(`s1: the ticked parts print as one PDF (${pdf.status()})`, pdf.status() === 200 && /pdf/.test(pdf.headers()["content-type"] ?? ""));
+  const code = (await sql("select code from public.qr_links where kind = 'part' and ref_id = $1", [part.id]))[0]?.code;
+  check(`s1: the QR code is random and carries nothing of the car (${code})`, /^[A-HJKMNP-Z2-9]{8}$/.test(code ?? "") && !String(code).includes(jn));
+  // s2. Signed in: the QR opens the part's own page.
+  await go(pp, `${base}/s/${code}`);
+  await pp.waitForURL(/\/parts\/label\//, { timeout: 15000 }).catch(() => null);
+  check(`s2: signed in, the QR opens the part's page (${pp.url().replace(base, "")})`, pp.url().includes(`/parts/label/${part.id}`));
+  await pp.screenshot({ path: `${proof}/e12-qr-signed-in-1440.png` }).catch(() => null);
+  await pt.browser.close();
+  // s3. Signed out: one sentence, no redirect, nothing to tap.
+  const { chromium } = await import("playwright-core");
+  const anon = await chromium.launch({ channel: "msedge", headless: true });
+  const ap = await (await anon.newContext({ viewport: { width: 390, height: 844 } })).newPage();
+  await ap.goto(`${base}/s/${code}`, { waitUntil: "domcontentloaded" });
+  const words = ((await ap.locator("body").textContent()) ?? "").replace(/\s+/g, " ");
+  check("s3: signed out, the page stays on the QR address (no sign-in redirect)", new URL(ap.url()).pathname === `/s/${code}`);
+  check("s3: signed out, only the sentence", /OFJ AUTOMOTIVE - TO VIEW THIS LABEL YOU MUST BE SIGNED IN TO THE ERP\./.test(words) && !new RegExp(jn).test(words) && !new RegExp(part.description, "i").test(words));
+  check("s3: signed out, no link and no button", (await ap.locator("main a, main button").count()) === 0 && (await ap.locator("[data-qr-signed-out]").count()) === 1);
+  const metas = (await ap.locator('meta[name="description"], meta[property^="og:"], meta[name^="twitter:"]').evaluateAll((els) => els.map((e) => e.getAttribute("content") ?? ""))).join(" | ");
+  check(`s3: no details in the link preview (${metas.slice(0, 80)})`, (await ap.title()) === "OFJ Automotive" && !metas.includes(jn) && !new RegExp(part.description, "i").test(metas) && !metas.includes(code));
+  await ap.screenshot({ path: `${proof}/e12-qr-signed-out-390.png` }).catch(() => null);
+  await ap.goto(`${base}/s/ZZZZZZZZ`, { waitUntil: "domcontentloaded" });
+  check("s3: an unknown code says the same", (await ap.locator("[data-qr-signed-out]").count()) === 1);
+  await anon.close();
+  // s4. The owner: a PPF warranty sticker with its batch, the history with reprint, the printer setup moved here.
+  const ow = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  const op = ow.page;
+  await go(op, `${base}/print/warranty-sticker/${jobId}?type=ppf-film&batch=ab-1234`);
+  const st = ((await op.locator("[data-warranty-sticker]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
+  check(`s4: the PPF warranty sticker carries its batch (${st.slice(0, 80)})`, /BATCH AB-1234/.test(st));
+  await go(op, `${base}/stickers?tab=history`);
+  check("s4: the history lists the warranty and the part sticker with Reprint", (await op.locator('[data-sticker-history-row="warranty"] [data-sticker-reprint]').count()) >= 1 && (await op.locator(`[data-sticker-reprint="${code}"]`).count()) === 1);
+  await go(op, `${base}/settings/stickers`);
+  await op.waitForURL(/\/stickers/, { timeout: 15000 }).catch(() => null);
+  check("s4: Settings > Stickers opens the printer setup on the Stickers tab", /\/stickers\?/.test(op.url()) && (await op.locator('input[name="sticker_part_width_mm"]').count()) === 1);
+  await ow.browser.close();
+  // s5. An advisor has the tab; the warranty tab is battery first.
+  const ad = await browserFor("service_advisor", { viewport: { width: 800, height: 1280 } });
+  await go(ad.page, `${base}/stickers?tab=warranty`);
+  const order = await ad.page.locator("[data-warranty-battery], [data-warranty-cars]").evaluateAll((els) => els.map((e) => (e.hasAttribute("data-warranty-battery") ? "battery" : "cars")));
+  check(`s5: an advisor opens Warranty stickers, battery first (${order.join(",")})`, order[0] === "battery");
+  await ad.browser.close();
+});
+
+/* ================================================================================================= */
+/* e13 (11 November 2026, Section 13): neat pages. Every header button is the one 44 px button; the   */
+/* order is view buttons, then actions, then the bell; at most one black button in the header; the  */
+/* bell is a 44 × 44 square with a grey outline; on a tablet the header buttons share the row.        */
+/* Proof: the estimate, quotation, job and LPO pages on a computer and a tablet.                     */
+/* ================================================================================================= */
+await section("e13", "neat pages: one button, one order, one black button", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-neat-pages";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const qid = (await sql("select id from public.quotations where job_id = $1 order by version desc limit 1", [jobId]))[0]?.id;
+  const est = (await sql("select id from public.quotations where kind = 'estimate' and is_active order by created_at desc limit 1"))[0]?.id;
+  const po = (await sql("select id from public.purchase_orders where is_active order by created_at desc limit 1"))[0]?.id;
+  const pages = [
+    ["job", `/jobs/${jobId}`],
+    ["quotation", qid ? `/jobs/${jobId}/quote/${qid}` : null],
+    ["estimate", est ? `/estimates/${est}` : null],
+    ["lpo", po ? `/parts/orders/${po}` : null],
+  ].filter(([, p]) => p);
+  for (const [w, h, tag] of [[1440, 900, "1440"], [800, 1280, "800"]]) {
+    const ow = await browserFor("owner", { viewport: { width: w, height: h } });
+    const op = ow.page;
+    for (const [name, path] of pages) {
+      await go(op, `${base}${path}`);
+      const row = op.locator("[data-header-row]").first();
+      const facts = await row.evaluate((el) => {
+        const kids = Array.from(el.querySelectorAll("a, button")).filter((b) => b.offsetParent !== null && !b.closest("[data-bell-panel]") && !b.closest('[role="dialog"]'));
+        const heights = kids.map((b) => Math.round(b.getBoundingClientRect().height));
+        const black = kids.filter((b) => ["rgb(17, 17, 19)", "rgb(0, 0, 0)"].includes(getComputedStyle(b).backgroundColor)).length;
+        const bellSlot = el.querySelector("#header-bell-slot");
+        const last = el.lastElementChild === bellSlot;
+        const bell = bellSlot?.querySelector("button");
+        const br = bell?.getBoundingClientRect();
+        return { heights, black, last, bell: br ? [Math.round(br.width), Math.round(br.height)] : null, rowW: Math.round(el.getBoundingClientRect().width) };
+      }).catch(() => null);
+      if (!facts) { check(`${tag} ${name}: the header row is there`, false); continue; }
+      check(`${tag} ${name}: every header button is 44 px (${facts.heights.join(",")})`, facts.heights.length > 0 && facts.heights.every((x) => x >= 43 && x <= 46));
+      check(`${tag} ${name}: at most one black button in the header (${facts.black})`, facts.black <= 1);
+      check(`${tag} ${name}: the bell comes last`, facts.last);
+      if (facts.bell) check(`${tag} ${name}: the bell is a 44 × 44 square (${facts.bell.join("×")})`, facts.bell[0] === 44 && facts.bell[1] === 44);
+      if (tag === "800") check(`${tag} ${name}: on a tablet the header takes the full row (${facts.rowW})`, facts.rowW >= w - 120);
+      await op.screenshot({ path: `${proof}/e13-${name}-${tag}.png` }).catch(() => null);
+    }
+    await ow.browser.close();
+  }
+});
+
+/* ================================================================================================= */
+/* e14 (11 November 2026, Section 14): password sign-ins. One evening summary to the owner             */
+/* ("Password sign-ins today: ADARSH 3, MERT 1") that never counts in the red badge; the old pile of */
+/* per-sign-in bells does not count either. (A new device still alerts at once: unit test.)          */
+/* ================================================================================================= */
+await section("e14", "password sign-in alerts: one daily summary", async () => {
+  const people = await sql("select id, display_name from public.staff where is_active and role_id in ('technician', 'service_advisor') order by created_at limit 2");
+  if (people.length < 2) throw new Error("seed failed: two staff");
+  const owner = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  // Today at 21:30 Dubai.
+  const day = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
+  const at = new Date(`${day}T21:30:00+04:00`).getTime();
+  const dayStart = new Date(`${day}T00:00:00+04:00`).toISOString();
+  await sql("delete from public.notifications where type = 'password_sign_in_summary' and created_at >= $1", [dayStart]);
+  const ownerAs = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  const unreadOf = async () => ((await (await ownerAs.page.request.get(`${base}/api/notifications`)).json()).unread ?? 0);
+  const before = await unreadOf();
+  for (let i = 0; i < 3; i++) await sql("insert into public.sign_in_events (staff_id, method, ok, reason, user_agent, at) values ($1, 'password_backup', true, 'e2e', 'ERP-E2E summary', $2)", [people[0].id, dayStart]);
+  await sql("insert into public.sign_in_events (staff_id, method, ok, reason, user_agent, at) values ($1, 'password_backup', true, 'e2e', 'ERP-E2E summary', $2)", [people[1].id, dayStart]);
+  const early = (await api("/api/e2e/password-alerts", { nowMs: new Date(`${day}T15:00:00+04:00`).getTime() })).json;
+  check(`p1: nothing is sent before the evening (${JSON.stringify(early)})`, early?.counted === 0);
+  const r = (await api("/api/e2e/password-alerts", { nowMs: at })).json;
+  check(`p1: the evening summary counts the day's password sign-ins (${JSON.stringify(r)})`, (r?.counted ?? 0) >= 4);
+  const n = (await sql("select title from public.notifications where type = 'password_sign_in_summary' and staff_id = $1 and created_at >= $2 order by created_at desc limit 1", [owner, dayStart]))[0];
+  const a = people[0].display_name.toUpperCase();
+  const b = people[1].display_name.toUpperCase();
+  check(`p2: one summary in the owner's words (${n?.title})`, !!n && /^Password sign-ins today: /.test(n.title) && new RegExp(`${a} \\d`).test(n.title) && new RegExp(`${b} \\d`).test(n.title));
+  const again = (await api("/api/e2e/password-alerts", { nowMs: at + 3600000 })).json;
+  check("p2: once a day only", again?.counted === 0);
+  const after = await unreadOf();
+  check(`p3: the summary does not count in the red badge (${before} → ${after})`, after === before);
+  await go(ownerAs.page, `${base}/dashboard`);
+  await ownerAs.page.locator('button[aria-label^="Notifications"]').first().click().catch(() => null);
+  await ownerAs.page.locator("[data-bell-panel]").first().waitFor({ timeout: 8000 }).catch(() => null);
+  await ownerAs.page.screenshot({ path: "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-password-alerts/p-summary-bell-1440.png" }).catch(() => null);
+  await ownerAs.browser.close();
+  await sql("delete from public.notifications where type = 'password_sign_in_summary' and created_at >= $1", [dayStart]);
+});
+
 
 const failed = summary();
 cleanupDb();

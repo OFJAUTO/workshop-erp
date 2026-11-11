@@ -65,6 +65,9 @@ export const ACTION_RULES: Record<string, ActionRule> = {
   zoho_waiting: { open: "manual" },
   zoho_reconciliation: { open: "manual" },
   background_job_late: { open: "manual" },
+  // 11 November 2026 (Section 14): a password sign-in from a new device counts until the owner opens it; the daily
+  // summary and the old per-sign-in bells are information and never count.
+  password_new_device: { open: "manual" },
   catalog_review: { open: "manual" },
   parts_no_home: { open: "manual" },
   sticker_prompt: { open: "manual" },
