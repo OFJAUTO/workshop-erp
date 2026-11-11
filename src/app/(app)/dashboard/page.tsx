@@ -2,6 +2,8 @@ import { scopeReady } from "@/lib/inspection-scope-data";
 import { scopeLabel } from "@/lib/inspection-scope";
 import { loadSideProgress } from "@/lib/jobs-to-do-data";
 import { ApprovalsTile } from "@/components/ApprovalsTile";
+import { HrExpiringTile } from "@/components/HrExpiringTile";
+import { hrReady } from "@/lib/hr";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { lpoApprovalsWaiting } from "@/lib/accounts-waiting";
 import { zohoWaitingExtra } from "@/lib/zoho-manual";
@@ -217,6 +219,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <WaitingPanel staff={staff} extra={role === "service_advisor" || role === "owner" ? [...moneyWaiting, ...finalChecks, ...(role === "owner" ? [...(await lpoApprovalsWaiting("owner")), ...(await zohoWaitingExtra())] : [])] : []} />
 
       {role === "owner" ? <ApprovalsTile /> : null}
+      {role === "owner" && !staff.viewingAs && (await hrReady()) ? <HrExpiringTile /> : null}
       {role === "owner" && profit ? (
         <ProfitPanel live target={Number(settings.daily_profit_target_aed) || 0} data={profit} />
       ) : null}

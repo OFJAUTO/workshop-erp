@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { HrExpiringTile } from "@/components/HrExpiringTile";
+import { hrReady } from "@/lib/hr";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { HomeHeader } from "@/components/HomeHeader";
 import { MoneyRow } from "@/components/MoneyRow";
@@ -64,6 +66,8 @@ export async function AccountsDashboard({ staff, settings }: { staff: CurrentSta
       {/* No "quotations": approvals write the job too, and the editor's heartbeat would re-render this page (3 Nov). */}
       <LiveRefresh tables={["invoices", "payments", "jobs", "purchase_orders", ...(reportsOn ? ["payment_reports"] : [])]} />
       <HomeHeader staff={staff} actions={<LinkButton href="/invoices" tone="secondary" size="lg">Invoices and payments</LinkButton>} />
+      {/* 11 November 2026 (Section 15): the head accountant sees the HR documents tile. */}
+      {staff.is_head_accountant && !staff.viewingAs && (await hrReady()) ? <HrExpiringTile /> : null}
       <MoneyTilesRow t={tiles} />
       <WaitingPanel staff={staff} extra={await accountsWaitingExtra()} />
       {/* 2 November 2026: the advisors' payments to record (where the old counter-payments card was; advisors never record). */}

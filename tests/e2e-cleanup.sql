@@ -294,3 +294,17 @@ delete from public.advisor_bonus_periods where rows::text ilike '%E2E%';
 delete from public.advisor_bonus_overrides where invoice_id::text like '22222222%';
 set session_replication_role = default;
 
+-- HR (11 November 2026, Section 15): the test files (names starting "E2E HR") and every HR row of the e2e staff.
+set session_replication_role = replica;
+do $$
+declare pids uuid[];
+begin
+  if to_regclass('public.hr_people') is not null then
+    select coalesce(array_agg(id), '{}') into pids from public.hr_people where passport_name ilike 'E2E HR%' or staff_id in (select id from public.staff where display_name ilike 'E2e %');
+    delete from public.hr_access_log where person_id = any(pids);
+    delete from public.hr_documents where person_id = any(pids);
+    delete from public.hr_people where id = any(pids);
+    delete from public.notifications where type = 'hr_document_expiring' and title ilike '%E2E HR%';
+  end if;
+end $$;
+set session_replication_role = default;

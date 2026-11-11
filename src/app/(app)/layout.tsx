@@ -1,4 +1,5 @@
 import { deviceDepartmentWords } from "@/lib/device-department";
+import { mayOpenHr } from "@/lib/hr-rules";
 import { approvalsCount } from "@/lib/approvals";
 import { Suspense } from "react";
 import { chargesReady } from "@/lib/charges";
@@ -144,6 +145,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/customers", label: "Customers", show: can(role, "viewCustomers") },
     { href: "/vehicles", label: "Cars", show: can(role, "viewVehicles") && role !== "accounts" },
     { href: "/team", label: "Team", show: can(role, "manageTeam") },
+    // 11 November 2026 (Section 15): HR, under Team, for the owner and the head accountant only.
+    { href: "/team/hr", label: "HR", show: mayOpenHr(staff) && !staff.viewingAs },
     { href: "/team/sign-ins", label: "Sign-ins", show: can(role, "manageTeam") && pkReady },
     { href: "/team/tablets", label: "Tablets", show: can(role, "viewTablets") && !can(role, "manageTeam") },
     { href: "/settings", label: "Settings", show: can(role, "manageSettings") },

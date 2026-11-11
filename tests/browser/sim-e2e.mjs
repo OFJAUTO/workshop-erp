@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6,e7,e8,e9,e10,e11,e12,e13,e14,e15").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -4776,6 +4776,85 @@ await section("e14", "password sign-in alerts: one daily summary", async () => {
   await ownerAs.page.screenshot({ path: "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-password-alerts/p-summary-bell-1440.png" }).catch(() => null);
   await ownerAs.browser.close();
   await sql("delete from public.notifications where type = 'password_sign_in_summary' and created_at >= $1", [dayStart]);
+});
+
+/* ================================================================================================= */
+/* e15 (11 November 2026, Section 15): HR under Team, owner and head accountant only. A phone sign-in */
+/* is required; everyone on the Team page plus people with no login; a document with its number      */
+/* (masked until tapped, logged) and expiry; view and download through short private links, logged;  */
+/* "Download all"; the reminder bell and the dashboard tile; Left = login off, file archived.         */
+/* ================================================================================================= */
+await section("e15", "HR: people, documents, reminders, access", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-hr";
+  mkdirSync(proof, { recursive: true });
+  const owner = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  await sql("delete from public.staff_passkeys where name = 'E2E HR key'");
+  const ow = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  const op = ow.page;
+  await go(op, `${base}/team/hr`);
+  const hadKey = (await sql("select count(*)::int n from public.staff_passkeys where staff_id = $1 and removed_at is null", [owner]))[0].n > 0;
+  if (!hadKey) check("h1: without a phone sign-in HR asks for one first", (await op.locator('[data-hr-gate="passkey"]').count()) === 1);
+  await sql("insert into public.staff_passkeys (staff_id, credential_id, public_key, name) values ($1, $2, 'e2e', 'E2E HR key')", [owner, `e2e-hr-${Date.now()}`]);
+  await go(op, `${base}/team/hr`);
+  check("h1: HR opens for the owner with a phone sign-in", (await op.locator("[data-hr-list]").count()) === 1 && (await op.locator('a[href="/team/hr"]').count()) >= 1);
+  check("h1: everyone on the Team page is listed", (await op.locator("[data-hr-row]").count()) >= 3);
+  // A person with no ERP login.
+  await op.locator("[data-hr-add-name]").fill("E2E HR Cleaner");
+  await op.locator("[data-hr-add-save]").click();
+  await op.waitForURL(/\/team\/hr\/[0-9a-f-]{36}/, { timeout: 15000 });
+  const pid = op.url().match(/hr\/([0-9a-f-]{36})/)[1];
+  check("h2: a person with no ERP login is added", !!pid && /No ERP login/.test((await op.locator("main").textContent()) ?? ""));
+  // A passport expiring in 20 days.
+  const exp = new Date(Date.now() + 4 * 3600000 + 20 * 86400000).toISOString().slice(0, 10);
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
+  const form = op.locator("[data-hr-upload]");
+  await form.locator('select[name="kind"]').selectOption("passport");
+  await form.locator('input[name="doc_number"]').fill("N1234567");
+  await form.locator('input[name="expires_on"]').fill(exp);
+  await form.locator("[data-hr-file]").setInputFiles({ name: "passport.png", mimeType: "image/png", buffer: png });
+  await form.locator("[data-hr-upload-save]").click();
+  await op.locator('[data-hr-doc="passport"]').waitFor({ timeout: 20000 }).catch(() => null);
+  const docRow = op.locator('[data-hr-doc="passport"]');
+  check("h3: the passport is saved with its expiry (amber: 20 days)", (await docRow.count()) === 1 && (await docRow.locator('[data-hr-expiry="amber"]').count()) === 1);
+  check(`h3: the number is masked (${await docRow.locator("[data-hr-number]").textContent()})`, /^•+567$/.test(((await docRow.locator("[data-hr-number]").textContent()) ?? "").trim()));
+  await docRow.locator("[data-hr-reveal]").click();
+  await docRow.locator('[data-hr-number="shown"]').waitFor({ timeout: 10000 }).catch(() => null);
+  check("h3: tapping Show reveals it", ((await docRow.locator("[data-hr-number]").textContent()) ?? "").trim() === "N1234567");
+  const docId = (await sql("select id from public.hr_documents where person_id = $1 and kind = 'passport'", [pid]))[0]?.id;
+  const view = await op.request.get(`${base}/api/hr/file/${docId}`, { maxRedirects: 0 });
+  check(`h4: View answers with a short private link (${view.status()})`, view.status() === 303 && /token=/.test(view.headers()["location"] ?? ""));
+  const zip = await op.request.get(`${base}/api/hr/zip/${pid}`);
+  check(`h4: Download all gives one zip (${zip.status()})`, zip.status() === 200 && /zip/.test(zip.headers()["content-type"] ?? ""));
+  await go(op, `${base}/team/hr/${pid}`);
+  const logs = await op.locator("[data-hr-log-row]").evaluateAll((els) => els.map((e) => e.getAttribute("data-hr-log-row")));
+  check(`h4: every view, download and the number shown are logged (${Array.from(new Set(logs)).join(",")})`, ["number_shown", "viewed", "downloaded_all", "uploaded"].every((a) => logs.includes(a)));
+  await op.screenshot({ path: `${proof}/h-person-file-1440.png` }).catch(() => null);
+  // The reminder and the tile.
+  const sent = (await api("/api/e2e/hr-reminders", {})).json;
+  const bell = (await sql("select title from public.notifications where type = 'hr_document_expiring' and staff_id = $1 and title ilike '%E2E HR%' order by created_at desc limit 1", [owner]))[0];
+  check(`h5: the reminder bell goes to the owner (${bell?.title})`, (sent?.sent ?? 0) >= 1 && /Passport expires in 2d days: E2E HR Cleaner/i.test(bell?.title ?? ""));
+  const again = (await api("/api/e2e/hr-reminders", {})).json;
+  const twice = (await sql("select count(*)::int n from public.notifications where type = 'hr_document_expiring' and staff_id = $1 and title ilike '%E2E HR%'", [owner]))[0].n;
+  check(`h5: once per stage (${again?.sent}, ${twice} bell)`, twice === 1);
+  await go(op, `${base}/dashboard`);
+  check("h5: the dashboard tile counts documents expiring", Number((await op.locator('[data-tile="hr-expiring"]').getAttribute("data-tile-count").catch(() => "0")) ?? 0) >= 1);
+  // Nobody else.
+  const ad = await browserFor("service_advisor", { viewport: { width: 1440, height: 900 } });
+  const hrAd = await ad.page.request.get(`${base}/team/hr`);
+  const fileAd = await ad.page.request.get(`${base}/api/hr/file/${docId}`, { maxRedirects: 0 });
+  const zipAd = await ad.page.request.get(`${base}/api/hr/zip/${pid}`);
+  await go(ad.page, `${base}/dashboard`);
+  check(`h6: an advisor gets no HR page, file or zip (${hrAd.status()}, ${fileAd.status()}, ${zipAd.status()})`, hrAd.status() === 404 && [403, 404].includes(fileAd.status()) && [403, 404].includes(zipAd.status()) && (await ad.page.locator('a[href="/team/hr"]').count()) === 0);
+  await ad.browser.close();
+  // Left: archived, nothing deleted.
+  await go(op, `${base}/team/hr/${pid}`);
+  await op.locator("[data-hr-left-reason]").fill("Contract ended, last day 11 November");
+  await op.locator("[data-hr-left-save]").click();
+  await op.locator("[data-hr-left-notice]").waitFor({ timeout: 15000 }).catch(() => null);
+  const after = (await sql("select p.status, (select count(*)::int from public.hr_documents d where d.person_id = p.id and d.archived_at is not null) archived, (select count(*)::int from public.hr_documents d where d.person_id = p.id) docs from public.hr_people p where p.id = $1", [pid]))[0];
+  check(`h7: Left archives the file and deletes nothing (${JSON.stringify(after)})`, after?.status === "left" && after.archived === after.docs && after.docs === 1);
+  await ow.browser.close();
+  await sql("delete from public.staff_passkeys where name = 'E2E HR key'");
 });
 
 

@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { hrReady, hrRemindersHourly } from "@/lib/hr";
 import { passwordSummaryDaily } from "@/lib/password-alerts";
 import { autoPauseBodyshopBreaks } from "@/lib/bodyshop";
 import { lpoReviewHourly } from "@/lib/lpo-review";
@@ -639,6 +640,14 @@ async function runHousekeeping(): Promise<Record<string, number>> {
     report.passwordSummary = await passwordSummaryDaily();
   } catch {
     report.passwordSummary = -1;
+  }
+
+  // 34. HR documents (11 November 2026, Section 15): first warning (60 days passport and visa, 30 the others), 14, 7,
+  //     expired - one bell per stage to the owner and the head accountants.
+  try {
+    report.hrReminders = (await hrReady()) ? await hrRemindersHourly() : 0;
+  } catch {
+    report.hrReminders = -1;
   }
 
   // 32. LPOs sent for owner approval (10 November 2026, Section 4): above the accounts limit go to the owner by
