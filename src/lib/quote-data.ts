@@ -636,10 +636,13 @@ export async function packageCostingOf(settings: Settings, carTitle: string | nu
   const films = ((settings.film_types ?? []) as { name: string; roll_price: number; roll_m: number }[]).filter((f) => f?.name);
   const gloss = films.find((f) => /gloss/i.test(f.name)) ?? films[0] ?? { roll_price: 1429, roll_m: 15 };
   const matte = films.find((f) => /matt/i.test(f.name)) ?? gloss;
-  const consumablesPerCar = await consumablesPerCarThisMonth(settings);
+  // 11 November 2026 (Section 16, speed): the consumables count and the car at the same time.
+  const [consumablesPerCar, { data: car }] = await Promise.all([
+    consumablesPerCarThisMonth(settings),
+    vehicleId ? createAdminClient().from("vehicles").select("model_id, model:vehicle_models(name)").eq("id", vehicleId).maybeSingle() : Promise.resolve({ data: null }),
+  ]);
   const bigCar = isBigCar(carTitle, ((settings.big_car_models ?? []) as string[]).map(String));
   const bigRolls = Number(settings.big_car_film_rolls) || 1.5;
-  const { data: car } = vehicleId ? await createAdminClient().from("vehicles").select("model_id, model:vehicle_models(name)").eq("id", vehicleId).maybeSingle() : { data: null };
   const past = car?.model_id ? await rollsUsedOnModel(car.model_id as string, Number((gloss as { roll_m?: number }).roll_m) || 15) : null;
   const modelName = (car?.model as unknown as { name: string } | null)?.name ?? "this model";
   const defaultRolls = past ? past.rolls : bigCar ? bigRolls : 1;

@@ -50,7 +50,12 @@ const ALL_JOB_SELECT = "id, job_number, status, is_open, gated_in_at, gated_out_
 export default async function PartsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; q?: string; advisor?: string; tech?: string }> }) {
   const staff = await requirePermission("priceParts");
   // 30 October 2026: estimates whose parts were sent to the desk (or priced by the advisor, to check). The car is not here yet.
-  const estimatesToPrice = await loadEstimatesToPrice();
+  // 11 November 2026 (Section 16, speed): these three need nothing else on the page, so they start at once.
+  const estimatesP = loadEstimatesToPrice();
+  const noHomeP = Promise.all([partsWithNoHome(), creditNotesAwaited()]);
+  const pricesToFixP = pricesToFix();
+  for (const p of [estimatesP, noHomeP, pricesToFixP] as Promise<unknown>[]) p.catch(() => undefined);
+  const estimatesToPrice = await estimatesP;
   // Customers are for the owner, advisors and accounts only (29 October 2026): Parts find a car by plate, job number or VIN.
   const seesCust = seesCustomers(staff.role_id);
   const { message, error, q: rawQ, advisor: rawAdvisor, tech: rawTech } = await searchParams;
@@ -65,7 +70,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
   ]);
   const requests = (reqRows ?? []) as PartRequest[];
   // Parts without a home, and returns still waiting for the supplier's credit note (3 November 2026): one count on the tab.
-  const noHomeCount = (await partsWithNoHome()).length + (await creditNotesAwaited()).length;
+  const noHomeCount = (await noHomeP).reduce((n, list) => n + list.length, 0);
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPartFull).map((p) => ({ ...p, advisor_added_label: p.added_by_role === "service_advisor" && !p.part_request_id ? "Added by advisor" : null }));
   // Parts added after the customer's approval hold a car's dots open (5 November 2026, J-00985): which parts each job's approved quotations carry.
   const approvedMap = await approvedPartIds(Array.from(new Set(parts.map((p) => p.job_id))));
@@ -93,16 +98,19 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
     const l = toPoLine(r);
     onLines.set(l.po_id, [...(onLines.get(l.po_id) ?? []), l]);
   }
-  const onCharges = await chargesByPo(onIds);
   // Each ORDER NOW line's unit (pieces, litres, sets): "× 8 L" on the card and in the supplier copy.
-  const unitOfPart = await partUnitsOf(Array.from(onLines.values()).flat().map((l) => l.part_item_id));
-  const approverIds = Array.from(new Set(orderNowPos.map((p) => p.approved_by).filter((x): x is string => !!x)));
-  const { data: approverRows } = approverIds.length ? await admin.from("staff").select("id, display_name").in("id", approverIds) : { data: [] as { id: string; display_name: string }[] };
-  const approverName = new Map((approverRows ?? []).map((x) => [x.id, x.display_name]));
   // Supplier amounts with VAT (5 November 2026): THE rule, per supplier, for the LPO cards below.
-  const vatOf = await supplierVatLookup();
+  // 11 November 2026 (Section 16, speed): the five reads at the same time.
+  const approverIds = Array.from(new Set(orderNowPos.map((p) => p.approved_by).filter((x): x is string => !!x)));
   const supplierIds = Array.from(new Set(orderNowPos.map((p) => p.supplier_id).filter((x): x is string => !!x)));
-  const { data: supplierRows } = supplierIds.length ? await admin.from("suppliers").select("id, email").in("id", supplierIds) : { data: [] as { id: string; email: string | null }[] };
+  const [onCharges, unitOfPart, { data: approverRows }, vatOf, { data: supplierRows }] = await Promise.all([
+    chargesByPo(onIds),
+    partUnitsOf(Array.from(onLines.values()).flat().map((l) => l.part_item_id)),
+    approverIds.length ? admin.from("staff").select("id, display_name").in("id", approverIds) : Promise.resolve({ data: [] as { id: string; display_name: string }[] }),
+    supplierVatLookup(),
+    supplierIds.length ? admin.from("suppliers").select("id, email").in("id", supplierIds) : Promise.resolve({ data: [] as { id: string; email: string | null }[] }),
+  ]);
+  const approverName = new Map((approverRows ?? []).map((x) => [x.id, x.display_name]));
   const supplierEmail = new Map((supplierRows ?? []).map((x) => [x.id, x.email]));
   // Extra job lines for LPO jobs the request/part lists may not carry.
   const extraJobIds = [...orderNowPos, ...pendingPos].map((p) => p.job_id).filter((x): x is string => !!x && !jobs.has(x));
@@ -111,12 +119,12 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
     for (const j of ((extraJobs ?? []) as unknown as JobInfo[]).filter((j) => j.is_open)) jobs.set(j.id, j);
   }
   // The car's advisor on every line (6 November 2026, Peter) and the Advisor filter: All / Adarsh / … Internal only.
-  const advisorOf = await jobAdvisorsFor(Array.from(jobs.keys()));
+  const [advisorOf, techOfJobs] = await Promise.all([jobAdvisorsFor(Array.from(jobs.keys())), jobTechniciansFor(Array.from(jobs.keys()))]);
   const advisorFilter = String(rawAdvisor ?? "").trim();
   const advisorNames = new Map<string, string>();
   for (const a of advisorOf.values()) if (a.advisorId && a.advisorName) advisorNames.set(a.advisorId, a.advisorName);
   // The technician on every line and the Technician filter (8 November 2026, Peter). Internal only.
-  const techOf = await jobTechniciansFor(Array.from(jobs.keys()));
+  const techOf = techOfJobs;
   const techFilter = String(rawTech ?? "").trim();
   const techNames = new Map<string, string>();
   const onCar = (t: CarTechnicians | undefined, id: string) => !!t && [...t.mechanical, ...t.bodyshop].some((x) => x.id === id);
@@ -183,16 +191,16 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
       found = (data ?? []) as unknown as AllJob[];
     }
   }
-  const advisorOfCars = await jobAdvisorsFor([...allCars, ...found].map((j) => j.id));
+  const carIds = [...allCars, ...found].map((j) => j.id);
+  const [advisorOfCars, techOfCars, pics] = await Promise.all([jobAdvisorsFor(carIds), jobTechniciansFor(carIds), signCarPictures([...allCars, ...found].map((j) => j.vehicle?.photo_path))]);
   for (const [k, a] of advisorOfCars) {
     advisorOf.set(k, a);
     if (a.advisorId && a.advisorName) advisorNames.set(a.advisorId, a.advisorName);
   }
-  for (const [k, t] of await jobTechniciansFor([...allCars, ...found].map((j) => j.id))) techOf.set(k, t);
+  for (const [k, t] of techOfCars) techOf.set(k, t);
   for (const t of techOf.values()) for (const x of [...t.mechanical, ...t.bodyshop]) if (x.name) techNames.set(x.id, x.name);
   const allShown = allCars.filter((j) => (!advisorFilter || advisorOf.get(j.id)?.advisorId === advisorFilter) && (!techFilter || onCar(techOf.get(j.id), techFilter)));
   const foundShown = found.filter((j) => (!advisorFilter || advisorOf.get(j.id)?.advisorId === advisorFilter) && (!techFilter || onCar(techOf.get(j.id), techFilter)));
-  const pics = await signCarPictures([...allCars, ...found].map((j) => j.vehicle?.photo_path));
   const tagOf = (jobId: string) => {
     const a = advisorOf.get(jobId);
     const j = jobs.get(jobId) ?? allCars.find((x) => x.id === jobId) ?? found.find((x) => x.id === jobId);
@@ -244,7 +252,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
       <WaitingPanel staff={staff} />
-      <PricesToFix rows={await pricesToFix()} />
+      <PricesToFix rows={await pricesToFixP} />
 
       <form method="get" className="flex flex-wrap items-center gap-2" data-parts-search-form>
         <Input name="q" defaultValue={q} placeholder={seesCust ? "Find a car: plate, job number, VIN or customer (gone-out cars too)" : "Find a car: plate, job number or VIN (gone-out cars too)"} aria-label="Find a car" className="min-w-64 flex-1" data-parts-search />

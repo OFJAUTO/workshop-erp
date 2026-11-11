@@ -164,6 +164,25 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // A bodyshop quotation before the car arrives has no gate-in yet: its page is the bodyshop one.
   if (card.job.status === "booked") redirect(`/bodyshop/${id}`);
   const { job, vehicle, customer, customerPublic, vip, gateIn, requests, media, mediaUrls, events, approvals, gateOut } = card;
+  // 11 November 2026 (Section 16, speed): the reads further down that need only the job start now, together; each is
+  // still awaited where it was used (they ran one after another: about 45 round trips in a row on the job card).
+  const soon = <T,>(p: Promise<T>): Promise<T> => {
+    p.catch(() => undefined);
+    return p;
+  };
+  const early = {
+    aftercare: soon(aftercareOf(id)),
+    comebackExtra: soon(loadComebackExtra(id)),
+    warranty: soon(warrantyCardOf(id, settings)),
+    damageAfterOn: soon(damageAfterReady()),
+    teams: soon(workTeamsOf(id, job.department)),
+    linesReady: soon(teamsReady()),
+    reportsOn: soon(paymentReportsReady()),
+    dep: soon(depositState(id)),
+    scope: soon(loadScopeState(id)),
+    scopeInsp: soon(Promise.resolve(createAdminClient().from("inspections").select("status").eq("job_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle())),
+    removedEvents: soon(Promise.resolve(admin.from("job_events").select("created_by").eq("job_id", id).eq("event_type", "parts_removed_after_approval"))),
+  };
   const [inspection, { data: rt }, { data: moves }, { data: reportLinkRow }, { data: managers }, { data: noteBy }, quoteSummary, { data: partRows }, { data: scanRows }, quoteFamilies] = await Promise.all([
     job.department !== "bodyshop" ? loadInspection(id) : Promise.resolve(null),
     admin.from("road_tests").select(ROAD_TEST_SELECT).eq("job_id", id).maybeSingle(),
@@ -184,7 +203,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const moveRequests = (moves ?? []) as unknown as MoveRequestRow[];
   const reportLink = (reportLinkRow as ReportLinkRow | null) ?? null;
   const laterStage = ["approved", "waiting_parts", "in_work", "pending_qc", "pending_wash", "ready", "pending_payment", "in_delivery", "closed"].includes(job.status);
-  const aftercare = await aftercareOf(id);
+  const aftercare = await early.aftercare;
   // 9 November 2026: the optional promised time, once jobs.promised_time exists.
   const promisedTimeReady = await schemaReady("jobs", "promised_time");
   const promisedTime = promisedTimeReady ? (((await admin.from("jobs").select("promised_time").eq("id", id).maybeSingle()).data as { promised_time: string | null } | null)?.promised_time ?? null) : null;
@@ -192,7 +211,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const comebackOriginal = job.comeback_of ? ((comebackRows ?? []).find((r) => r.id === job.comeback_of) ?? null) : null;
   const comebacksOfThis = (comebackRows ?? []).filter((r) => r.id !== job.comeback_of);
   // Comeback at our cost (10 November 2026, Section 9).
-  const comebackExtra = await loadComebackExtra(id);
+  const comebackExtra = await early.comebackExtra;
   const comebackEarlier = comebackExtra && job.is_open && !job.comeback_of && !comebackExtra.originalRef ? await earlierJobsOfCar(id) : [];
 
   // Loose items: no inspection, no wash; the items card replaces the gate-in media.
@@ -238,7 +257,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const tintWords = tintSummary(await tintSpecForJob(id), tintLimitOf(settings));
   const viewerFollows = !!followRow?.is_active;
   // Section 12: the OFJ warranty card - status, the link, and after gate-out the short WhatsApp.
-  const wCard = await warrantyCardOf(id, settings);
+  const wCard = await early.warranty;
   const hasWarranty = !!wCard?.rows.length;
   const wToken = hasWarranty && job.gated_out_at ? await ensureWarrantyToken(id) : (wCard?.token ?? null);
   const wShort = wToken && job.gated_out_at ? await shortFor(`${PRODUCTION_SITE_URL}/warranty/${wToken}`) : null;
@@ -257,10 +276,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const seesCustomerDetails = can(role, "viewCustomers");
   // Section 4 (30 October 2026): the damage already on the car, and what was found after check-in.
   const damage = gateIn ? await loadCarDamage(id, { media, urls: mediaUrls }) : null;
-  const damageAfterOn = await damageAfterReady();
+  const damageAfterOn = await early.damageAfterOn;
 
   // The car's sides (job-sides.ts) and THE people source for every picker on this page.
-  const { sides: jobSides, teams: jobTeams } = await workTeamsOf(id, job.department);
+  const { sides: jobSides, teams: jobTeams } = await early.teams;
   const people = canAssign && !staff.viewingAs ? await pickablePeople(settings, jobSides, jobTeams) : [];
   const onCar = canAssign || job.assigned_to ? await loadJobTechnicians(id) : [];
   const bodyOnCar = canAssign && jobSides.includes("bodyshop") ? await bodyshopOnCar(id) : [];
@@ -268,7 +287,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // Department and teams (1 November 2026, J-00969): each line's team, and the people on the car who no longer fit.
   const mayChangeTeams = ["owner", "service_advisor", "workshop_manager"].includes(role) && !staff.viewingAs && job.is_open;
   const teamLines = job.is_open && ["owner", "service_advisor", "workshop_manager", "accounts"].includes(role) ? await lineTeamsOfJob(id, job.department) : [];
-  const linesReady = await teamsReady();
+  const linesReady = await early.linesReady;
   // Early charges (1 November 2026, B2): recovery, fuel and other costs/charges before or after the check-in approval.
   // 3 November 2026 (section 8, J-00969): the section lists the quotation's charges too, each once (charge-items.ts).
   const chargesOn = ["owner", "service_advisor", "accounts"].includes(role) && (await chargesReady());
@@ -353,7 +372,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const liveProforma = (moneyInvoices.find((i) => i.kind === "proforma" && !i.converted_to && !i.deposit_for_quotation_id) ?? null) as (MoneyInvoice & { id: string }) | null;
   const liveTax = (moneyInvoices.find((i) => i.kind === "tax_invoice") ?? null) as (MoneyInvoice & { id: string }) | null;
   // The payments advisors sent to accounts on this car (2 November 2026, section 3).
-  const reportsOn = await paymentReportsReady();
+  const reportsOn = await early.reportsOn;
   const jobReports = reportsOn && can(role, "viewInvoices") ? await loadReports({ jobId: id, settings }) : [];
   const waitingReport = jobReports.find((r) => r.status === "waiting") ?? null;
   // 1 November 2026: a payment can ALWAYS be recorded (owner and accounts, any stage, open or gone) and a payment link for
@@ -407,7 +426,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const stageIndex = ["gate_in", "inspection", "quote", "approval", "parts", "work", "qc", "wash", "ready"].indexOf(job.stage);
   const advisorName = inChargeName ?? card.gatedInBy ?? null;
   // The advance payment is a real step between Approval and Parts when the quotation asks a deposit.
-  const dep = await depositState(id);
+  const dep = await early.dep;
   const hasDeposit = dep.required > 0;
   const step = nextStepOf(id, {
     status: job.status,
@@ -462,7 +481,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const quoteApproved = quoteFamilies.length ? anyApproved(quoteFamilies) : latestQuote ? latestQuote.status === "approved" : null;
   // Fix 2.5 (4 November 2026): parts the desk removed AFTER the customer's approval - a quiet line, never a task.
   const removedAfterApproval = await (async () => {
-    const { data: ev } = await admin.from("job_events").select("created_by").eq("job_id", id).eq("event_type", "parts_removed_after_approval");
+    const { data: ev } = await early.removedEvents;
     if (!ev?.length) return null;
     const ids = Array.from(new Set(ev.map((e) => e.created_by as string | null).filter((x): x is string => !!x)));
     const { data: who } = ids.length ? await admin.from("staff").select("id, display_name").in("id", ids) : { data: [] };
@@ -507,8 +526,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const pendingMove = moveRequests.find((m) => m.status === "pending");
   const defaultRoadTest = roadTest?.decision ?? (gateIn?.condition === "does_not_run" ? "not_possible" : null);
 
-  const scopeState = await loadScopeState(id);
-  const { data: scopeInsp } = await createAdminClient().from("inspections").select("status").eq("job_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const scopeState = await early.scope;
+  const { data: scopeInsp } = await early.scopeInsp;
   const scopeStarted = !!scopeInsp && scopeInsp.status !== "not_started";
   return (
     <>

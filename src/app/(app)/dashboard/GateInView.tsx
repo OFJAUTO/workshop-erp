@@ -49,14 +49,21 @@ export async function GateInView({ staff, sp = {} }: { staff: CurrentStaff; sp?:
   const thumbs = await thumbsFor("vehicle-photos", [...rows.map((r) => r.vehicle.photo_path), ...expected.map((a) => a.vehicle?.photo_path ?? null)], 480);
   const readyRows = rows.filter((r) => ["ready", "pending_payment"].includes(r.status));
   // Cleared to leave: paid (or credit approved) - read per car only for the cars at the end.
+  // 11 November 2026 (Section 16): the customers' credit terms in one read and every balance at the same time
+  // (they were read one car after another).
+  const custIds = Array.from(new Set(readyRows.map((r) => r.customer_id).filter((x): x is string => !!x)));
+  const [{ data: custRows }, balances] = await Promise.all([
+    custIds.length ? admin.from("customers").select("id, credit_terms_days").in("id", custIds) : Promise.resolve({ data: [] }),
+    Promise.all(readyRows.map((r) => jobBalance(r.id).catch(() => null))),
+  ]);
+  const creditOf = new Map(((custRows ?? []) as { id: string; credit_terms_days: number | null }[]).map((c) => [c.id, (Number(c.credit_terms_days) || 0) > 0]));
   const cleared = new Map<string, string[]>();
-  for (const r of readyRows) {
-    const bal = await jobBalance(r.id).catch(() => null);
-    const { data: cust } = r.customer_id ? await admin.from("customers").select("credit_terms_days").eq("id", r.customer_id).maybeSingle() : { data: null };
-    const credit = (Number(cust?.credit_terms_days) || 0) > 0;
+  readyRows.forEach((r, i) => {
+    const bal = balances[i];
+    const credit = r.customer_id ? (creditOf.get(r.customer_id) ?? false) : false;
     const paid = !!bal && (bal.state === "nothing" || (bal.state !== "no_invoice" && (bal.balance <= 0 || credit)));
     cleared.set(r.id, gateOutBlocks({ status: r.status, paidOrCredit: paid, readySentAt: r.ready_sent_at, jobKind: r.job_kind }));
-  }
+  });
   const car = (v: Veh | null, jobNumber: string | null) => ({ plate: v ? formatPlate(v) : "", vin: v?.vin ?? null, make: v?.make?.name ?? null, model: v?.model?.name ?? null, jobNumber });
   const inList = tile === "ready" ? readyRows : tile === "out" ? rows.filter((r) => r.status === "in_delivery") : tile === "in" ? rows.filter((r) => r.status !== "in_delivery") : [];
   const counts = { ready: readyRows.length, expected: expected.length, in: rows.filter((r) => r.status !== "in_delivery").length, out: rows.filter((r) => r.status === "in_delivery").length };

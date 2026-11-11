@@ -495,10 +495,13 @@ export async function packageCostsForJobs(settings: Settings, jobIds: string[]):
     admin.from("ceramic_usage").select("job_id, cost_aed").in("job_id", withPkg).eq("is_active", true),
   ]);
   const { packageCostingForQuote } = await import("./quote-data");
+  // 11 November 2026 (Section 16, speed): every quotation's costing at the same time (each is three reads; they ran
+  // one quotation after another).
+  const costings = new Map(await Promise.all(quotes.filter((q) => lines.some((l) => l.quotation_id === q.id)).map(async (q) => [q.id, await packageCostingForQuote(settings, q, true)] as const)));
   for (const q of quotes) {
     const ls = lines.filter((l) => l.quotation_id === q.id);
     if (!ls.length) continue;
-    const costing = await packageCostingForQuote(settings, q, true);
+    const costing = costings.get(q.id) ?? null;
     const t = quoteTotals(ls, { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5 }, { packageCosting: costing });
     const cur = out.get(q.job_id) ?? { materials: 0, labour: 0, estimated: [] as string[], est: { film: 0, tint: 0, ceramic: 0, consumables: 0 } };
     const e = (cur as unknown as { est: { film: number; tint: number; ceramic: number; consumables: number } }).est;

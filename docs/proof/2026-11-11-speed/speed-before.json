@@ -1,0 +1,262 @@
+{
+  "at": "2026-11-11T17:29:48.786Z",
+  "base": "http://localhost:3102",
+  "runs": 3,
+  "dbRoundTripMs": 321,
+  "slowest10": [
+    {
+      "what": "accounts · /dashboard",
+      "kind": "page",
+      "ttfb": 11322,
+      "ready": 11508
+    },
+    {
+      "what": "owner · /dashboard",
+      "kind": "page",
+      "ttfb": 10340,
+      "ready": 10555
+    },
+    {
+      "what": "owner · /jobs/22222222-0000-4000-8000-00000000e303",
+      "kind": "page",
+      "ttfb": 10149,
+      "ready": 10202
+    },
+    {
+      "what": "service_advisor · /dashboard",
+      "kind": "page",
+      "ttfb": 9444,
+      "ready": 9677
+    },
+    {
+      "what": "parts · /parts",
+      "kind": "page",
+      "ttfb": 7691,
+      "ready": 7883
+    },
+    {
+      "what": "gate_in · tap In the workshop",
+      "kind": "button",
+      "ttfb": null,
+      "ready": 7762
+    },
+    {
+      "what": "gate_in · /dashboard",
+      "kind": "page",
+      "ttfb": 7437,
+      "ready": 7647
+    },
+    {
+      "what": "parts · /dashboard",
+      "kind": "page",
+      "ttfb": 6605,
+      "ready": 6811
+    },
+    {
+      "what": "owner · /jobs/22222222-0000-4000-8000-00000000e303/quote/22222222-0000-4000-8000-00000000e305",
+      "kind": "page",
+      "ttfb": 6372,
+      "ready": 6613
+    },
+    {
+      "what": "parts · tap a dashboard tile",
+      "kind": "button",
+      "ttfb": null,
+      "ready": 6562
+    }
+  ],
+  "all": [
+    {
+      "what": "owner · /dashboard",
+      "kind": "page",
+      "ttfb": 10340,
+      "ready": 10555
+    },
+    {
+      "what": "owner · /jobs",
+      "kind": "page",
+      "ttfb": 2491,
+      "ready": 2683
+    },
+    {
+      "what": "owner · /jobs/22222222-0000-4000-8000-00000000e303",
+      "kind": "page",
+      "ttfb": 10149,
+      "ready": 10202
+    },
+    {
+      "what": "owner · /jobs/22222222-0000-4000-8000-00000000e303/quote/22222222-0000-4000-8000-00000000e305",
+      "kind": "page",
+      "ttfb": 6372,
+      "ready": 6613
+    },
+    {
+      "what": "owner · /estimates/c61a1119-fd24-43af-b026-fabf4041c165",
+      "kind": "page",
+      "ttfb": 3544,
+      "ready": 4126
+    },
+    {
+      "what": "owner · /estimates",
+      "kind": "page",
+      "ttfb": 2445,
+      "ready": 2672
+    },
+    {
+      "what": "owner · /invoices",
+      "kind": "page",
+      "ttfb": 5112,
+      "ready": 5306
+    },
+    {
+      "what": "owner · /approvals",
+      "kind": "page",
+      "ttfb": 1593,
+      "ready": 1640
+    },
+    {
+      "what": "owner · /profit",
+      "kind": "page",
+      "ttfb": 4732,
+      "ready": 4929
+    },
+    {
+      "what": "owner · /reports/monthly",
+      "kind": "page",
+      "ttfb": 2523,
+      "ready": 2716
+    },
+    {
+      "what": "owner · /calendar",
+      "kind": "page",
+      "ttfb": 2471,
+      "ready": 2669
+    },
+    {
+      "what": "owner · /parts/orders/ad751d9e-8685-4d30-9a8c-fbae43fa453b",
+      "kind": "page",
+      "ttfb": 4728,
+      "ready": 4901
+    },
+    {
+      "what": "owner · jobs list: tap a sort",
+      "kind": "button",
+      "ttfb": null,
+      "ready": 1747
+    },
+    {
+      "what": "service_advisor · /dashboard",
+      "kind": "page",
+      "ttfb": 9444,
+      "ready": 9677
+    },
+    {
+      "what": "service_advisor · /quotes",
+      "kind": "page",
+      "ttfb": 1278,
+      "ready": 1458
+    },
+    {
+      "what": "service_advisor · /estimates",
+      "kind": "page",
+      "ttfb": 2213,
+      "ready": 2459
+    },
+    {
+      "what": "service_advisor · /jobs",
+      "kind": "page",
+      "ttfb": 1627,
+      "ready": 1876
+    },
+    {
+      "what": "parts · /dashboard",
+      "kind": "page",
+      "ttfb": 6605,
+      "ready": 6811
+    },
+    {
+      "what": "parts · /parts",
+      "kind": "page",
+      "ttfb": 7691,
+      "ready": 7883
+    },
+    {
+      "what": "parts · /parts/22222222-0000-4000-8000-00000000e303",
+      "kind": "page",
+      "ttfb": 4614,
+      "ready": 4680
+    },
+    {
+      "what": "parts · /stickers",
+      "kind": "page",
+      "ttfb": 1133,
+      "ready": 1357
+    },
+    {
+      "what": "parts · /parts/orders",
+      "kind": "page",
+      "ttfb": 2580,
+      "ready": 2785
+    },
+    {
+      "what": "parts · tap a dashboard tile",
+      "kind": "button",
+      "ttfb": null,
+      "ready": 6562
+    },
+    {
+      "what": "accounts · /dashboard",
+      "kind": "page",
+      "ttfb": 11322,
+      "ready": 11508
+    },
+    {
+      "what": "accounts · /supplier-invoices",
+      "kind": "page",
+      "ttfb": 1192,
+      "ready": 1427
+    },
+    {
+      "what": "accounts · /supplier-payments",
+      "kind": "page",
+      "ttfb": 2040,
+      "ready": 2212
+    },
+    {
+      "what": "accounts · /accounts-posting",
+      "kind": "page",
+      "ttfb": 1259,
+      "ready": 1380
+    },
+    {
+      "what": "technician · /my-jobs",
+      "kind": "page",
+      "ttfb": 4036,
+      "ready": 4177
+    },
+    {
+      "what": "gate_in · /dashboard",
+      "kind": "page",
+      "ttfb": 7437,
+      "ready": 7647
+    },
+    {
+      "what": "gate_in · tap In the workshop",
+      "kind": "button",
+      "ttfb": null,
+      "ready": 7762
+    },
+    {
+      "what": "workshop_manager · /dashboard",
+      "kind": "page",
+      "ttfb": 5777,
+      "ready": 5952
+    },
+    {
+      "what": "workshop_manager · /assign",
+      "kind": "page",
+      "ttfb": 1843,
+      "ready": 1887
+    }
+  ]
+}

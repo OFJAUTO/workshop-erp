@@ -94,44 +94,45 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const clockFor = (j: Row) => clockOf(j, settings);
 
   const customerIds = Array.from(new Set(all.map((j) => j.customer_id)));
-  const quoteSummaries = await loadQuoteSummaries(all.filter((j) => ["pending_quote", "pending_customer_approval"].includes(j.status)).map((j) => j.id));
   const planningJobs = all.filter((j) => ["approved", "waiting_parts"].includes(j.status) || (j.department === "both" && j.status === "in_work"));
-  const [partsLiveMap, sidesMap] = await Promise.all([loadPartsLiveMap(all.filter((j) => ["approved", "waiting_parts"].includes(j.status)).map((j) => j.id)), workSidesForJobs(planningJobs.map((j) => ({ id: j.id, department: (j.department as string | null) ?? null })))]);
-  const [{ data: names }, pictures] = await Promise.all([
+  const allIds = all.map((j) => j.id);
+  const inInsp = all.filter((j) => ["pending_inspection", "in_inspection", "pending_road_test"].includes(String((j as { status?: string }).status ?? "")));
+  // 11 November 2026 (Section 16, speed): every read below needs only the list of cars, so they all start at once
+  // (they ran one after another: about 30 database round trips in a row on the owner's dashboard).
+  // The order here matches the names on the left: the invoices, then the running clocks (a swap once put invoices
+  // under "On the clock" as NaN:NaN).
+  const [quoteSummaries, partsLiveMap, sidesMap, { data: names }, pictures, profit, { data: invoiced }, { data: clocked }, docAlerts, quoteHistory, jobCustomers, jobPeople, sides, scopeRows] = await Promise.all([
+    loadQuoteSummaries(all.filter((j) => ["pending_quote", "pending_customer_approval"].includes(j.status)).map((j) => j.id)),
+    loadPartsLiveMap(all.filter((j) => ["approved", "waiting_parts"].includes(j.status)).map((j) => j.id)),
+    workSidesForJobs(planningJobs.map((j) => ({ id: j.id, department: (j.department as string | null) ?? null }))),
     all.length ? createAdminClient().from("customers").select("id, full_name, company_name, is_vip").eq("is_active", true).in("id", customerIds) : Promise.resolve({ data: [] as { id: string; full_name: string; company_name: string | null; is_vip: boolean }[] }),
     signCarPictures(all.map((j) => j.vehicle?.photo_path)),
-  ]);
-  // The order here matches the queries below: the invoices, then the running clocks (a swap once put invoices under "On the clock" as NaN:NaN).
-  const [profit, { data: invoiced }, { data: clocked }] = await Promise.all([
     role === "owner" ? dailyProfit(settings) : Promise.resolve(null),
-
-    createAdminClient().from("invoices").select("job_id, number, total_aed, kind").in("kind", ["tax_invoice", "proforma"]).eq("status", "issued").eq("is_active", true).is("converted_to", null).in("job_id", all.map((j) => j.id)),
+    createAdminClient().from("invoices").select("job_id, number, total_aed, kind").in("kind", ["tax_invoice", "proforma"]).eq("status", "issued").eq("is_active", true).is("converted_to", null).in("job_id", allIds),
     createAdminClient().from("work_sessions").select("id, job_id, technician_id, started_at, technician:staff!work_sessions_technician_id_fkey(display_name), job:jobs(job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin))").is("ended_at", null).order("started_at"),
+    // Documents not sent (report, quotation, proforma, tax invoice, the customer's reply), one line per car.
+    loadDocAlerts(allIds, settings),
+    // Section 1 (29 October 2026): every quotation of each car (the picker) and the additional-quotation chip.
+    loadQuoteHistory(allIds),
+    // THE job's customer (owner, advisors, accounts only) and the people on each car (29 October 2026).
+    jobCustomersFor(role, allIds),
+    jobPeopleFor(allIds),
+    // 11 November 2026 (Section 9): the two departments' progress on cars with work on both sides.
+    loadSideProgress(allIds).catch(() => new Map<string, string>()),
+    // 11 November 2026 (Section 10): the inspection type on cars waiting for or in their inspection.
+    (async () => (inInsp.length && (await scopeReady()) ? ((await createAdminClient().from("jobs").select("id, inspection_scope").in("id", inInsp.map((j) => j.id))).data ?? []) : []) as { id: string; inspection_scope: string | null }[])(),
   ]);
-  // Documents not sent (report, quotation, proforma, tax invoice, the customer's reply), one line per car.
-  const docAlerts = await loadDocAlerts(all.map((j) => j.id), settings);
-  // Section 1 (29 October 2026): every quotation of each car (the picker) and the additional-quotation chip.
-  const quoteHistory = await loadQuoteHistory(all.map((j) => j.id));
   const seesQuotes = role === "owner" || role === "service_advisor";
   const invoicedJobs = new Map(((invoiced ?? []) as unknown as { job_id: string; number: string; total_aed: number | string; kind: "proforma" | "tax_invoice" }[]).map((i) => [i.job_id, i]));
   const toSend = all.filter((j) => invoicedJobs.has(j.id) && !(j as unknown as { ready_sent_at: string | null }).ready_sent_at);
   const awaitingPayment = all.filter((j) => j.status === "pending_payment");
   const onClock = (clocked ?? []) as unknown as { id: string; job_id: string; started_at: string; technician: { display_name: string } | null; job: { job_number: string; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null } | null } | null }[];
   const vipIds = new Set((names ?? []).filter((v) => v.is_vip).map((v) => v.id));
-  // THE job's customer (owner, advisors, accounts only) and the people on each car (29 October 2026).
-  const [jobCustomers, jobPeople] = await Promise.all([jobCustomersFor(role, all.map((j) => j.id)), jobPeopleFor(all.map((j) => j.id))]);
   const now = new Date();
 
   const showInspectionTime = role === "owner" || role === "workshop_manager" || role === "service_advisor";
-  // 11 November 2026 (Section 9): the two departments' progress on cars with work on both sides.
-  const sides = await loadSideProgress(all.map((j) => j.id)).catch(() => new Map<string, string>());
-  // 11 November 2026 (Section 10): the inspection type on cars waiting for or in their inspection.
   const scopes = new Map<string, string>();
-  if (await scopeReady()) {
-    const inInsp = all.filter((j) => ["pending_inspection", "in_inspection", "pending_road_test"].includes(String((j as { status?: string }).status ?? "")));
-    const { data: sc } = inInsp.length ? await createAdminClient().from("jobs").select("id, inspection_scope").in("id", inInsp.map((j) => j.id)) : { data: [] };
-    for (const r of (sc ?? []) as { id: string; inspection_scope: string | null }[]) scopes.set(r.id, scopeLabel(r.inspection_scope));
-  }
+  for (const r of scopeRows) scopes.set(r.id, scopeLabel(r.inspection_scope));
   const rows: DashRow[] = all.map((j) => {
     const clock = clockFor(j);
     const insp = j.inspection?.find((i) => i.status === "in_progress" || i.status === "submitted" || i.status === "approved") ?? null;
@@ -216,7 +217,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <LiveRefresh tables={["jobs", "gate_ins", "invoices", ...((await paymentReportsReady()) ? ["payment_reports"] : [])]} showUpdated />
       <HomeHeader staff={staff} gateIn={can(role, "gateIn")} />
 
-      <WaitingPanel staff={staff} extra={role === "service_advisor" || role === "owner" ? [...moneyWaiting, ...finalChecks, ...(role === "owner" ? [...(await lpoApprovalsWaiting("owner")), ...(await zohoWaitingExtra())] : [])] : []} />
+      <WaitingPanel staff={staff} extra={role === "service_advisor" || role === "owner" ? [...moneyWaiting, ...finalChecks, ...(role === "owner" ? (await Promise.all([lpoApprovalsWaiting("owner"), zohoWaitingExtra()])).flat() : [])] : []} />
 
       {role === "owner" ? <ApprovalsTile /> : null}
       {role === "owner" && !staff.viewingAs && (await hrReady()) ? <HrExpiringTile /> : null}

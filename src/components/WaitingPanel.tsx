@@ -104,20 +104,26 @@ function Row({ i, owner, charges, jobCard, readOnly, queryReasons }: { i: RowIte
  */
 export async function WaitingPanel({ staff, extra: given = [] }: { staff: CurrentStaff; extra?: ExtraWaiting[] }) {
   const settings = await getSettings();
-  // The advisor's calls about declined work, due after the set number of days (29 October 2026).
-  const followUps = (await declinedFollowUps(staff)).map((d): ExtraWaiting => ({ jobId: d.jobId, plate: d.plate, car: d.car, what: d.what, amount: null, actionLabel: "Called ✓", href: d.href, always: true, urgency: "amber", since: d.since, inline: { kind: "declined_called", ids: d.ids } }));
-  // 1 November 2026 (E-00055): estimates and quotations the owner approved or edited, back with their advisor.
-  const handbacks = (await handbacksFor(staff)).map((h): ExtraWaiting => ({ jobId: `quote:${h.id}`, plate: h.plate, car: h.car, what: `${h.kind === "estimate" ? "ESTIMATE" : "QUOTATION"} ${h.number} · ${h.words}${h.summary ? ` · ${h.summary}` : ""}`, amount: null, actionLabel: "Open", href: h.href, always: true, urgency: "amber", customerWaiting: true, since: h.since, hint: h.summary }));
-  // Pending charges (1 November 2026): unpaid after the set days, the advisor who added them (the owner sees all) is reminded.
   const remindDays = Number((settings as unknown as Record<string, unknown>).pending_charges_reminder_days) || 7;
+  // 11 November 2026 (Section 16, speed): the panel's five reads start at once (they ran one after another).
+  const [followRaw, handRaw, chargeRaw, reports, items] = await Promise.all([
+    declinedFollowUps(staff),
+    handbacksFor(staff),
+    ["owner", "service_advisor", "accounts"].includes(staff.role_id) ? loadChargeEntries({ status: "pending" }) : Promise.resolve([]),
+    reportWaitingItems(staff, settings),
+    loadWaitingOnYou(staff, settings),
+  ]);
+  // The advisor's calls about declined work, due after the set number of days (29 October 2026).
+  const followUps = followRaw.map((d): ExtraWaiting => ({ jobId: d.jobId, plate: d.plate, car: d.car, what: d.what, amount: null, actionLabel: "Called ✓", href: d.href, always: true, urgency: "amber", since: d.since, inline: { kind: "declined_called", ids: d.ids } }));
+  // 1 November 2026 (E-00055): estimates and quotations the owner approved or edited, back with their advisor.
+  const handbacks = handRaw.map((h): ExtraWaiting => ({ jobId: `quote:${h.id}`, plate: h.plate, car: h.car, what: `${h.kind === "estimate" ? "ESTIMATE" : "QUOTATION"} ${h.number} · ${h.words}${h.summary ? ` · ${h.summary}` : ""}`, amount: null, actionLabel: "Open", href: h.href, always: true, urgency: "amber", customerWaiting: true, since: h.since, hint: h.summary }));
+  // Pending charges (1 November 2026): unpaid after the set days, the advisor who added them (the owner sees all) is reminded.
   const pendingCharges = ["owner", "service_advisor", "accounts"].includes(staff.role_id)
-    ? (await loadChargeEntries({ status: "pending" })).filter((e) => pendingDays(e.created_at) >= remindDays && (staff.role_id !== "service_advisor" || e.created_by === staff.id)).map((e): ExtraWaiting => ({ jobId: `pc:${e.id}`, plate: e.plate ?? e.customer, car: e.car, what: `Pending charge ${pendingDays(e.created_at)} days · ${e.what}`, amount: `AED ${e.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`, actionLabel: "Open", href: `/pending-charges?open=${e.id}`, always: true, urgency: "amber", since: e.created_at, hint: "Not in the workshop: collect it (send the proforma again, or at the next visit)." }))
+    ? chargeRaw.filter((e) => pendingDays(e.created_at) >= remindDays && (staff.role_id !== "service_advisor" || e.created_by === staff.id)).map((e): ExtraWaiting => ({ jobId: `pc:${e.id}`, plate: e.plate ?? e.customer, car: e.car, what: `Pending charge ${pendingDays(e.created_at)} days · ${e.what}`, amount: `AED ${e.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`, actionLabel: "Open", href: `/pending-charges?open=${e.id}`, always: true, urgency: "amber", since: e.created_at, hint: "Not in the workshop: collect it (send the proforma again, or at the next visit)." }))
     : [];
   // 2 November 2026, section 3: payments advisors sent to accounts (accounts and the owner record or query them; an
   // advisor sees his own that came back with a query).
-  const reports = await reportWaitingItems(staff, settings);
   const extra = [...given, ...followUps, ...handbacks, ...pendingCharges, ...reports];
-  const items = await loadWaitingOnYou(staff, settings);
   const owner = staff.role_id === "owner";
   const charges = bankFeesOf(settings);
   const queryReasons = reasonsFor(settings, "payment_query");
