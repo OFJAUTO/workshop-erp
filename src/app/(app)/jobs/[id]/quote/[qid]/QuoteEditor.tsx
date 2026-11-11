@@ -351,7 +351,10 @@ export function QuoteEditor({
   lock = null,
   comp = null,
   damagePanels = [],
+  partsExtra = null,
 }: {
+  /** 11 November 2026 (Section 2): "Parts priced for this job on another quote – Add here", under the Parts heading. */
+  partsExtra?: React.ReactNode;
   quotation: QuoteRow;
   lines: QuoteLine[];
   parts: PartItem[];
@@ -1695,6 +1698,7 @@ export function QuoteEditor({
         {hasTint ? tintBox : null}
         <Card className="flex flex-col gap-3">
           <SectionLabel right={wait?.partsTotal ? `${partsPricedShown} of ${wait.partsTotal} priced` : !isQuotation && estParts.length ? `${estParts.filter((l) => l.unit_cost !== null && l.unit_cost !== undefined).length} of ${estParts.length} priced` : undefined}>Parts</SectionLabel>
+          {partsExtra}
           {!isQuotation && (estUnpriced.withDesk.length || estUnpriced.notSent.length) ? (
             <div className="flex flex-wrap items-center gap-2 rounded-control border border-amber-bar bg-amber-soft px-3 py-2 text-sm" data-est-parts-waiting>
               <span className="font-semibold">{[estUnpriced.withDesk.length ? waitingWords(estUnpriced.withDesk.length, true) : null, estUnpriced.notSent.length ? waitingWords(estUnpriced.notSent.length, false) : null].filter(Boolean).join(" · ")}</span>
@@ -1890,6 +1894,7 @@ export function QuoteEditor({
                           ) : null}
                           {/* A JOB's part (5 November 2026, once the columns exist): the advisor enters the price himself,
                               or hands his own price back to the parts desk. */}
+                          {!est && isQuotation && l.part_item_id && l.unit_cost !== null && l.unit_cost !== undefined && !settings.partPricedBy?.[l.part_item_id]?.advisor ? <span className="mb-1 block text-right text-xs font-semibold text-muted" data-priced-by-desk={l.id}>Priced by parts desk</span> : null}
                           {!est && isQuotation && l.part_item_id && !disabled && settings.advisorPriceParts ? (() => {
                             const pp = settings.partPricedBy?.[l.part_item_id] ?? null;
                             const unpriced = l.unit_cost === null || l.unit_cost === undefined;

@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -4009,6 +4009,60 @@ await section("e1", "stock LPO in supplier invoices and payments", async () => {
   const due = ap.locator('[data-sp-supplier="E2E STOCK SUP"]');
   check(`s4: once the invoice is entered the stock purchase is due (AED 94.50)`, (await due.count()) === 1 && (await due.locator("[data-sp-due-amount]").getAttribute("data-sp-due-amount")) === "94.50");
   await acc.browser.close();
+});
+
+/* ================================================================================================= */
+/* e2 (11 November 2026, Section 2, Q-00078): every part belongs to ONE quotation. A part priced while  */
+/* only the approved quotation existed is on no quotation; the additional quotation started later      */
+/* counts only its own parts, offers "Parts priced for this job on another quote – Add here", and one   */
+/* tap puts it on as a line "priced by parts desk". A request made while it is prepared belongs to it. */
+/* The desk shows "for <number> · additional"; a part on the approved quotation cannot move.           */
+/* ================================================================================================= */
+await section("e2", "parts belong to one quotation", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-parts-per-quote";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const orig = (await sql("select id, number from public.quotations where job_id = $1 and is_active and kind = 'quotation' order by created_at limit 1", [jobId]))[0];
+  // The Q-00078 case: a part priced while the only quotation was approved - it lands on no quotation.
+  const late = (await sql("insert into public.part_items (job_id, description, quantity, cost_aed, supplier, availability, priced_at, created_by, updated_by) values ($1, 'E2E FRONT BRAKE PAD', 1, 635, 'E2E SUPPLIER', 'in_stock', now(), $2, $2) returning id, for_quote", [jobId, ownerId]))[0];
+  check(`b1: a part priced while only the approved quotation exists is on no quotation (${late?.for_quote ?? "none"})`, !!late && late.for_quote === null);
+  // The additional quotation, being prepared.
+  const add = (await sql("insert into public.quotations (job_id, customer_id, vehicle_id, kind, number, version, status, created_by, updated_by) select $1, j.customer_id, j.vehicle_id, 'quotation', 'E2E-Q-ADD-1', 1, 'draft', $2, $2 from public.jobs j where j.id = $1 returning id, number", [jobId, ownerId]))[0];
+  if (!add) throw new Error("seed failed: the additional quotation");
+  // A request made now belongs to the quotation being prepared (the database fills it in).
+  const req = (await sql("insert into public.part_requests (job_id, source_type, source_key, label, quantity, created_by, updated_by) values ($1, 'manual', 'e2e-b2', 'E2E REAR WIPER', 1, $2, $2) returning id, for_quote", [jobId, ownerId]))[0];
+  check(`b2: a request made while ${add.number} is prepared belongs to it (${req?.for_quote})`, req?.for_quote === add.number);
+  const adv = await browserFor("service_advisor", { viewport: { width: 1440, height: 900 } });
+  const p = adv.page;
+  await go(p, `${base}/jobs/${jobId}/quote/${add.id}`);
+  const box = p.locator("[data-add-parts-here]");
+  check("b3: the additional quotation offers Parts priced for this job on another quote – Add here", (await box.count()) === 1 && /another quote \(1\)/.test((await box.textContent()) ?? ""));
+  const head = (((await p.locator("main").textContent()) ?? "").match(/\d+ of \d+ priced/) ?? [""])[0];
+  const ownTotal = (await sql("select count(*)::int as n from public.part_requests where job_id = $1 and is_active and status = 'open'", [jobId]))[0].n;
+  check(`b3: the counter counts only this quotation's parts, not the approved one's (${head}; open requests ${ownTotal})`, new RegExp(`0 of ${ownTotal} priced`).test(head));
+  await p.screenshot({ path: `${proof}/e2-add-here-1440.png` }).catch(() => null);
+  await box.locator("[data-add-parts-here-go]").click();
+  const line = await until(async () => (await sql("select id from public.quotation_lines where quotation_id = $1 and part_item_id = $2 and is_active", [add.id, late.id]))[0], 40, 500);
+  check("b4: one tap puts the part on the quotation as a line", !!line);
+  const tagged = (await sql("select for_quote from public.part_items where id = $1", [late.id]))[0]?.for_quote;
+  check(`b4: the part now belongs to ${add.number} (${tagged})`, tagged === add.number);
+  await go(p, `${base}/jobs/${jobId}/quote/${add.id}`);
+  check("b4: the line reads Priced by parts desk", (await p.locator("[data-priced-by-desk]").count()) >= 1);
+  check("b4: nothing left to add", (await p.locator("[data-add-parts-here]").count()) === 0);
+  await p.screenshot({ path: `${proof}/e2-added-priced-by-desk-1440.png` }).catch(() => null);
+  await adv.browser.close();
+  // The parts desk: the tag on each row; a part on the approved quotation offers no move.
+  const pt = await browserFor("parts", { viewport: { width: 1440, height: 900 } });
+  const pp = pt.page;
+  await go(pp, `${base}/parts/${jobId}`);
+  const tags = await pp.locator("[data-part-quote]").evaluateAll((els) => els.map((e) => `${e.getAttribute("data-part-quote")}|${e.textContent}`));
+  check(`b5: the desk shows which quotation each part is for (${tags.join(", ").slice(0, 160)})`, tags.some((t) => t.startsWith(`${add.number}|`) && /additional/.test(t)) && (!orig || tags.some((t) => t.startsWith(`${orig.number}|`))));
+  const onApproved = tags.filter((t) => orig && t.startsWith(`${orig.number}|`));
+  check("b5: a part on the approved quotation reads approved", !orig || onApproved.every((t) => /approved/.test(t)));
+  await pt.browser.close();
 });
 
 const failed = summary();

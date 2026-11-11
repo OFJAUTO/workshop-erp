@@ -1,3 +1,4 @@
+import { partQuoteMap } from "@/lib/part-quote-data";
 import "server-only";
 import { dubaiDate } from "@/lib/jobs";
 import { cleanPartNumber, daysFromDate, pricingSummary, rowState, type PricingSummary, type RowFlags, type RowState, type RowValues } from "@/lib/parts-rows";
@@ -168,7 +169,7 @@ export function pricingRowsOf(requests: PricingRequest[], parts: PricingPart[], 
   return rows;
 }
 
-export async function loadPricingRows(jobId: string, defaultType = ""): Promise<PricingRows> {
+export async function loadPricingRows(jobId: string, defaultType = "", opts: { /** 11 November 2026 (Section 2): only the parts of this quotation number. */ forQuote?: string } = {}): Promise<PricingRows> {
   const admin = createAdminClient();
   const select = await pricingPartSelect();
   const [{ data: reqRows }, { data: partRows }] = await Promise.all([
@@ -177,8 +178,15 @@ export async function loadPricingRows(jobId: string, defaultType = ""): Promise<
     admin.from("part_items").select(select).eq("job_id", jobId).or("is_active.eq.true,removed_at.not.is.null").order("created_at"),
   ]);
   const today = dubaiDate();
-  const requests = (reqRows ?? []) as PricingRequest[];
-  const parts = ((partRows ?? []) as unknown as PricingPart[]).map((p) => ({ ...p, job_id: jobId }));
+  let requests = (reqRows ?? []) as PricingRequest[];
+  let parts = ((partRows ?? []) as unknown as PricingPart[]).map((p) => ({ ...p, job_id: jobId }));
+  // One quotation's own parts (Section 2): the counter and the list it sits on read the same rule.
+  if (opts.forQuote) {
+    const map = await partQuoteMap(jobId);
+    parts = parts.filter((p) => map.partOf.get(p.id) === opts.forQuote);
+    const keptReq = new Set(parts.map((p) => p.part_request_id).filter(Boolean));
+    requests = requests.filter((r) => keptReq.has(r.id) || (!parts.some((p) => p.part_request_id === r.id) && map.requestOf.get(r.id) === opts.forQuote));
+  }
   // The cost check of every part (2 November 2026): the same one the table, Pricing done and the quotation read.
   const checks = await costChecksFor(parts.filter((p) => p.is_active !== false), parts.filter((p) => p.is_active !== false));
   const rows = pricingRowsOf(requests, parts, today, defaultType, checks);

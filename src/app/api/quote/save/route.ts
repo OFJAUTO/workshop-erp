@@ -25,6 +25,7 @@ import { syncLineForPart } from "@/app/(app)/parts/actions";
 import { checkQuantity, cleanUnit, defaultUnitFor, qtyWithUnit, quantityChangeWords, whoOfRole, type PartUnit, type QtyWho } from "@/lib/part-units";
 import { setJobPartQuantity } from "@/lib/part-quantity";
 import { reopenPricingFor } from "@/lib/parts-pricing";
+import { partQuoteReady } from "@/lib/part-quote-data";
 
 type LinePatch = {
   package_key?: string | null;
@@ -653,7 +654,7 @@ export async function POST(request: NextRequest) {
       const { data: same } = await admin.from("part_requests").select("id").eq("client_key", opKey).maybeSingle();
       if (same) return NextResponse.json({ ok: true });
     }
-    const { error } = await admin.from("part_requests").insert({ job_id: q.job_id, source_type: srcType, source_key: srcKey, label: description, positions: reqPositions, catalogue_id: reqCatalogue, requested_text: `Quantity ${qty} · asked by ${staff.display_name} on ${q.number}`, quantity: qty, client_key: opKey, created_by: staff.id, ...stamp });
+    const { error } = await admin.from("part_requests").insert({ job_id: q.job_id, source_type: srcType, source_key: srcKey, label: description, positions: reqPositions, catalogue_id: reqCatalogue, requested_text: `Quantity ${qty} · asked by ${staff.display_name} on ${q.number}`, quantity: qty, client_key: opKey, created_by: staff.id, ...stamp, ...((await partQuoteReady()) ? { for_quote: q.number } : {}) });
     if (error) return NextResponse.json({ ok: !!/client_key/.test(error.message), error: /client_key/.test(error.message) ? undefined : dbWords(error, "api/quote/save") }, { status: /client_key/.test(error.message) ? 200 : 500 });
     if (reqCatalogue) {
       const { data: row } = await admin.from("part_catalogue").select("usage_count").eq("id", reqCatalogue).maybeSingle();
@@ -749,7 +750,9 @@ export async function POST(request: NextRequest) {
     if (error || !created) return NextResponse.json({ error: (error ? dbWords(error, "api/quote/save") : "Could not add the line.") }, { status: 500 });
     if (addGate && "stamps" in addGate) await stampAll(addGate.stamps, a.below_cost_reason, (l) => (l.id === NEW_ID ? created.id : l.id));
     if (linked) {
-      await admin.from("part_requests").insert(linked.rows);
+      // 11 November 2026 (Section 2): parts asked from this quotation belong to it.
+      const forQuote = (await partQuoteReady()) ? { for_quote: q.number } : {};
+      await admin.from("part_requests").insert((linked.rows as Record<string, unknown>[]).map((r) => ({ ...r, ...forQuote })));
       await reopenPricingFor(q.job_id as string, staff.id);
       await notifyRoles(["parts"], { type: "parts_request", title: `Parts to price · ${job?.job_number ?? ""}`, body: `${linked.rows.map((r) => r.label).join(", ")} for ${linked.name}.`, jobId: q.job_id, href: `/parts/${q.job_id}` });
     }

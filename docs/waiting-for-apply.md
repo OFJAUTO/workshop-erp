@@ -11,7 +11,11 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Nothing.
+Backup taken before building: `backups/2026-11-11T13-52-56` (124 tables, 274,663 rows).
+
+| # | What | What it does on live | Size |
+|---|---|---|---|
+| 1 | `supabase/migrations/20261213090000_part_quote_link.sql` (11 Nov, Section 2) | Adds `for_quote` (the quotation number a request or part is for) to `part_requests` and `part_items`, a rule that fills it in when one is made (the quotation it was asked from, or the one being prepared; a part takes its request's), and fills it for existing parts from the quotation whose line carries them (nothing else guessed; Q-00078 itself is not touched). Until then the counter counts the whole job, as before, and there is no tag, move or Add here. | 2 columns + 1 rule |
 
 ## Applied on 11 November 2026, morning
 

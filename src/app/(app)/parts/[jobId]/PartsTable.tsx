@@ -1,5 +1,6 @@
 "use client";
 
+import { movePartToQuote } from "@/app/(app)/quotes/part-quote-actions";
 import { SupplierAmount } from "@/components/SupplierAmount";
 import { addSupplierMoney, supplierMoney } from "@/lib/supplier-money";
 import { useEffect, useRef, useState, useTransition } from "react";
@@ -42,6 +43,8 @@ import type { RowSave } from "../actions";
 
 export type TableRow = {
   key: string;
+  /** 11 November 2026 (Section 2): which quotation this part is for, and where it can move ("for Q-00078 · additional"). */
+  quoteTag?: { number: string | null; words: string; targets: { number: string; words: string }[] } | null;
   requestId: string | null;
   partId: string | null;
   /** The part's name: the technician's, or corrected by Parts. */
@@ -891,6 +894,7 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
                   {partId && !row.locked ? <MenuItem label="Split into separate parts" onClick={() => { setMenu(null); setSplit(true); }} /> : null}
                   {partId && complete && !row.locked ? <MenuItem label="Add an option for this part" onClick={() => { setMenu(null); onAddOption(); }} /> : null}
                   {partId && (row.locked || row.approvedNotOrdered) && !row.removed && !row.ended ? <MenuItem label="Change the quantity…" onClick={() => { setMenu(null); setQtyChanging(true); }} /> : null}
+                  {row.quoteTag && !row.removed && !estimate ? row.quoteTag.targets.map((q) => <MenuItem key={q.number} label={`Move to ${q.words}`} onClick={() => { setMenu(null); run(async () => { const r = await movePartToQuote(jobId, { partId, requestId: partId ? null : row.requestId }, q.number); if (r?.error) window.alert(r.error); }); }} />) : null}
                   {row.labelHref ? <MenuItem label="Print the QR label" onClick={() => { setMenu(null); window.open(row.labelHref!, "_blank", "noopener"); }} /> : null}
                   {partId ? <MenuItem label="Attach diagram" onClick={() => { setMenu(null); fileRef.current?.click(); }} /> : null}
                   {partId && (!row.question || row.answer) ? <MenuItem label="Ask the workshop manager" onClick={() => { setMenu(null); const q = window.prompt("Your question for the workshop manager", "Is this the right part?"); if (q !== null) { const fd = new FormData(); fd.set("question", q); run(() => askManager(partId, fd)); } }} /> : null}
@@ -928,6 +932,7 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
         {row.optionGroup ? <Chip tone="outline">Option</Chip> : null}
         {row.unavailable && !row.removed ? <Chip tone="amber">Not available</Chip> : null}
         {row.orderLabel ? <Chip tone="ink">{row.orderLabel}</Chip> : null}
+        {row.quoteTag && !row.removed ? <span className={`inline-flex min-h-5 shrink-0 items-center rounded-full border px-2 text-xs font-bold ${row.quoteTag.number ? "border-ink" : "border-amber-bar bg-amber-soft text-amber-text"}`} data-part-quote={row.quoteTag.number ?? "none"}>{row.quoteTag.words}</span> : null}
         {row.repeatedNumber && state !== "removed" ? <span className="inline-flex min-h-5 max-w-full flex-wrap items-center rounded-control border border-red-bar bg-red-soft px-2 py-0.5 text-xs font-bold text-red" data-repeated-pn>{row.repeatedNumber}</span> : null}
         {unitsReady && unitOf(v.unit) !== "pc" && num(v.cost_aed) > 0 && state !== "removed" ? <span className="shrink-0 text-xs font-semibold" data-per-unit={unitOf(v.unit)}>AED {aed(num(v.cost_aed))} {perUnitWords(unitOf(v.unit))} × {qtyWithUnit(qty, unitOf(v.unit))}</span> : null}
         {row.qtyMemory && !readOnly && (Math.abs(row.qtyMemory.qty - qty) > 0.005 || (unitsReady && row.qtyMemory.unit !== unitOf(v.unit))) ? <button type="button" onClick={() => change({ qty: String(row.qtyMemory!.qty), ...(unitsReady ? { unit: row.qtyMemory!.unit } : {}) })} className="shrink-0 h-5 max-w-[60%] truncate rounded-control border border-ink bg-white px-2 text-xs font-bold" title="The quantity used last time on the same model (or make). Nothing changes until you tap it." data-qty-memory={`${row.qtyMemory.qty}${row.qtyMemory.unit}`}>{row.qtyMemory.words} · Use</button> : null}

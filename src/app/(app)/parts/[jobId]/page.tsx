@@ -1,3 +1,5 @@
+import { moveTargets, PREPARING_STATUSES, quoteTagWords } from "@/lib/part-quote";
+import { partQuoteMap } from "@/lib/part-quote-data";
 import { addSupplierMoney, supplierMoney, supplierMoneyText } from "@/lib/supplier-money";
 import { LatheTicketForm } from "@/components/Lathe";
 import { latheReady, latheSettingsOf, loadLatheTickets } from "@/lib/lathe";
@@ -97,6 +99,14 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const v = job.vehicle as unknown as V;
   const requests = (reqRows ?? []) as unknown as PartRequest[];
   const parts = ((partRows ?? []) as unknown as Record<string, unknown>[]).map(toPart);
+  // 11 November 2026 (Section 2): which quotation each part and request is for, and where it may move.
+  const pq = await partQuoteMap(jobId);
+  const tagOf = (num: string | null, opts: { partId?: string }): TableRow["quoteTag"] => {
+    if (!pq.ready || !pq.quotes.length) return null;
+    const facts = opts.partId ? pq.partFacts.get(opts.partId) : null;
+    const onLocked = !!facts?.lineNumbers.some((n) => !PREPARING_STATUSES.includes(pq.quotes.find((q) => q.number === n)?.status ?? "draft"));
+    return { number: num, words: quoteTagWords(num, pq.quotes), targets: moveTargets(num, pq.quotes, { onLockedLine: onLocked }).map((q) => ({ number: q.number, words: quoteTagWords(q.number, pq.quotes).replace(/^for /, "") })) };
+  };
   const rawById = new Map(((partRows ?? []) as unknown as Record<string, unknown>[]).map((r) => [String(r.id), r]));
   // Parts changed after the customer's approval (5 November 2026, J-00985): what was added, removed or changed, and
   // which parts wait for an approval (they hold the step bar open and go out with "Resend for approval").
@@ -170,6 +180,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   };
   const rowOfPart = (p: PartItem, r: PartRequest | null, key: string): TableRow => ({
     key,
+    quoteTag: tagOf(pq.partOf.get(p.id) ?? null, { partId: p.id }),
     requestId: p.part_request_id,
     partId: p.id,
     name: p.description,
@@ -226,7 +237,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     const items = parts.filter((p) => p.part_request_id === r.id);
     // The row keeps the request's key once its part exists, so the screen never redraws under someone's fingers.
     if (items.length) items.forEach((p, i) => rows.push(rowOfPart(p, r, i === 0 ? `req:${r.id}` : p.id)));
-    else if (r.status !== "rejected" || r.removed_at) rows.push({ key: `req:${r.id}`, requestId: r.id, partId: null, name: r.label, original: null, techQty: Number(r.quantity) || 1, askedBy: askerOf(r), askedUnit: unitsReady ? requestUnitOf(r.label, r.unit) : null, qtyMemory: memory[`req:${r.id}`] ?? null, info: infoOf(r), shownPositions: r.positions ?? null, values: valuesOfRequest(r, types[0] ?? ""), optionGroup: null, unavailable: r.status === "unavailable", closedReason: r.closed_reason, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: r.unit === "set", removed: r.removed_at ? { by: nameOf.get(r.removed_by ?? "") ?? "Parts", reason: r.removed_reason ?? "" } : null, waitingApproval: false });
+    else if (r.status !== "rejected" || r.removed_at) rows.push({ key: `req:${r.id}`, quoteTag: tagOf(pq.requestOf.get(r.id) ?? null, {}), requestId: r.id, partId: null, name: r.label, original: null, techQty: Number(r.quantity) || 1, askedBy: askerOf(r), askedUnit: unitsReady ? requestUnitOf(r.label, r.unit) : null, qtyMemory: memory[`req:${r.id}`] ?? null, info: infoOf(r), shownPositions: r.positions ?? null, values: valuesOfRequest(r, types[0] ?? ""), optionGroup: null, unavailable: r.status === "unavailable", closedReason: r.closed_reason, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: r.unit === "set", removed: r.removed_at ? { by: nameOf.get(r.removed_by ?? "") ?? "Parts", reason: r.removed_reason ?? "" } : null, waitingApproval: false });
   }
   for (const p of parts.filter((p) => !p.part_request_id)) rows.push(rowOfPart(p, null, p.id));
 

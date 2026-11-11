@@ -1,3 +1,4 @@
+import { partQuoteReady } from "@/lib/part-quote-data";
 import { dbWords } from "@/lib/app-errors";
 import { invoicesForLock, refuseIfLocked } from "./quote-lock-server";
 import { liveInvoicesOf } from "./quote-lock";
@@ -514,6 +515,15 @@ export async function syncPartLine(jobId: string, partId: string, by: string | n
       ]);
       await admin.from("job_events").insert({ job_id: jobId, event_type: "parts_removed_after_approval", note: `${String(p1?.description ?? "A part").toUpperCase()} removed by ${who1?.display_name ?? "Parts"} after approval · still charged on ${q.number} until the advisor revises it`, created_by: by });
       return { quotationId: null, created: false, change: null, keptApproved: true };
+    }
+  }
+  // 11 November 2026 (Section 2): a part that belongs to a quotation still being prepared lands on THAT one.
+  if (!quotationId && !home && (await partQuoteReady())) {
+    const { data: tagged } = await admin.from("part_items").select("for_quote").eq("id", partId).maybeSingle();
+    const tag = (tagged as { for_quote?: string | null } | null)?.for_quote ?? null;
+    if (tag) {
+      const { data: newest } = await admin.from("quotations").select("id, status").eq("job_id", jobId).eq("number", tag).eq("is_active", true).order("version", { ascending: false }).limit(1).maybeSingle();
+      if (newest && ["draft", "pending_owner"].includes(newest.status as string)) home = newest.id as string;
     }
   }
   const target = quotationId ? { id: quotationId, created: false } : home ? { id: home, created: false } : await quoteTargetFor(jobId, by, changeWords, { partIds: [partId], redOf, quiet: opts.quietRevision });

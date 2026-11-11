@@ -1,3 +1,16 @@
+# Handover – 11 November 2026, evening (11 Nov list of 16 sections: IN PROGRESS)
+
+**Done so far:** S1 stock LPOs in Supplier invoices and payments (41df358) · S2 parts belong to one quotation (dormant until apply).
+
+**NEEDS OMAR (11 Nov list):**
+- Reply "apply" for the waiting list (docs/waiting-for-apply.md).
+- Q-00078 (J-00317): Peter re-links the parts on Q-00078. On live: 13 of the job's priced parts are on the approved Q-00020 and stay there; three (FRONT BRAKE PAD, MAIN BATTERY, TRANSMISSION MOUNT) were priced before Q-00078 existed and are on no quotation: after the apply they show on Q-00078 under "Parts priced for this job on another quote (3) – Add here".
+- Zoho mapping: pick the stock account for "Stock purchases (inventory)" on Settings > Zoho Books > Mapping (OFJ TEST makes "Inventory Asset" by itself).
+
+**WAITING FOR APPLY:** 1. part_quote_link (S2). Backup backups/2026-11-11T13-52-56.
+
+---
+
 # Handover – 11 November 2026, 11:30 Dubai (10 Nov list: ALL DONE)
 
 **NEEDS OMAR:**

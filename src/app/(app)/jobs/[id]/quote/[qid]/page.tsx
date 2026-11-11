@@ -1,3 +1,6 @@
+import { AddPartsHere, type OtherPart } from "@/components/AddPartsHere";
+import { partsToAddHere } from "@/lib/part-quote";
+import { partQuoteMap, partQuoteReady } from "@/lib/part-quote-data";
 import { compJobChoices } from "@/lib/quote-data";
 import { ViewAsCustomer } from "@/components/ViewAsCustomer";
 import { withAddressAs } from "@/lib/customer-address";
@@ -108,13 +111,24 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const candidates = Object.entries(candidateMap).filter(([, n]) => Number(n) >= 2).map(([t]) => t);
   const estimatedDays = estimatedDaysAfterApproval(bundle.lines, bundle.parts, dubaiDate(), workingTimeOf(settings));
   // The same rows and state as the Parts table: "4 of 5 parts priced" means the same thing on both screens.
-  const pricing = await loadPricingRows(id);
+  // 11 November 2026 (Section 2): a quotation counts only ITS parts (the list on it and the counter never disagree).
+  const pqReady = await partQuoteReady();
+  const pricing = await loadPricingRows(id, "", pqReady && q.kind === "quotation" ? { forQuote: q.number } : {});
+  const pqMap = pqReady && q.kind === "quotation" ? await partQuoteMap(id) : null;
+  const otherParts: OtherPart[] = pqMap
+    ? partsToAddHere(
+        ((await createAdminClient().from("part_items").select("id, description, cost_aed, is_active").eq("job_id", id)).data ?? []).map((p) => ({ id: p.id as string, name: p.description as string, cost: Number(p.cost_aed) || 0, priced: Number(p.cost_aed) > 0, live: p.is_active !== false, ...(pqMap.partFacts.get(p.id as string) ?? { tag: null, lineNumbers: [] }) })),
+        q.number,
+        pqMap.quotes,
+      ).map((p) => ({ id: p.id, name: p.name, cost: p.cost, belongs: pqMap.partOf.get(p.id) ?? null }))
+    : [];
+  const ownOpenRequests = pricing.requests.filter((r) => r.status === "open" && !pricing.parts.some((p) => p.part_request_id === r.id)).length;
   // The estimate this quotation came from (30 October 2026: several can be carried over at gate-in, accepted or not).
   const { data: fromEst } = q.estimate_id ? await createAdminClient().from("quotations").select("number, status").eq("id", q.estimate_id).maybeSingle() : { data: null };
   const { data: unavailableRows } = await createAdminClient().from("part_requests").select("label, closed_reason").eq("job_id", id).eq("status", "unavailable").eq("is_active", true);
   const wait: PartsWait = {
     unavailable: (unavailableRows ?? []).map((u) => ({ label: u.label as string, note: (u.closed_reason as string | null) ?? null })),
-    openRequests: checks.openRequests,
+    openRequests: pqReady && q.kind === "quotation" ? ownOpenRequests : checks.openRequests,
     partsTotal: pricing.summary.total,
     partsPriced: pricing.summary.counts.priced,
     waitingMinutes: partsWait.minutes,
@@ -344,6 +358,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       ) : null}
 
       <QuoteEditor
+        partsExtra={canEdit && !lock.locked && ["draft", "pending_owner"].includes(q.status) && otherParts.length ? <AddPartsHere jobId={id} quotationId={q.id} number={q.number} parts={otherParts} /> : null}
         comp={await compJobChoices(q, bundle.job as { comeback_free?: boolean } | null)}
         damagePanels={await damagedPanelsOf(q.job_id)}
         quotation={q}
