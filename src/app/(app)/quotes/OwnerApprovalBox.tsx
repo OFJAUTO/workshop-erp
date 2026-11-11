@@ -62,7 +62,7 @@ export function OwnerApprovalBox({ q, mayApprove, discountBy, approveFocus = fal
 }
 
 /** The parts behind a revision request, with every figure labelled: list, discount, cost, and the selling price each would get. */
-function RevisionPreview({ rows }: { rows: RevisionPreviewRow[] }) {
+export function RevisionPreview({ rows }: { rows: RevisionPreviewRow[] }) {
   const money = (n: number | null) => (n === null ? "—" : aed(n));
   // One block per part, the four figures labelled in two columns: the owner's box is narrow (a side column on a
   // computer, the whole width on a phone), and a five-column table hid the selling price off to the side.

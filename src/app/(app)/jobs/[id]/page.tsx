@@ -1,3 +1,4 @@
+import { ApprovalsHere } from "@/components/ApprovalsHere";
 import { loadBankWaiting } from "@/lib/bank-posting";
 import { ViewAsCustomer } from "@/components/ViewAsCustomer";
 import { earlierJobsOfCar, loadComebackExtra } from "@/lib/comeback-cost";
@@ -147,10 +148,10 @@ const MONEY_EVENTS = new Set(["payment", "invoice_issued", "proforma_issued", "r
 
 type MoveRequestRow = { id: string; reason: string; status: "pending" | "approved" | "refused"; to_status: string | null; decision_reason: string | null; decided_at: string | null; created_at: string; requester: { display_name: string } | null; decider: { display_name: string } | null };
 
-export default async function JobPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string; link?: string; req?: string; charge_message?: string; charge_error?: string }> }) {
+export default async function JobPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string; link?: string; req?: string; charge_message?: string; charge_error?: string; approval?: string }> }) {
   const staff = await requirePermission("viewJobs");
   const { id } = await params;
-  const { message, error, link, req, charge_message: chargeMessage, charge_error: chargeError } = await searchParams;
+  const { message, error, link, req, charge_message: chargeMessage, charge_error: chargeError, approval } = await searchParams;
   const role = staff.role_id as RoleId;
 
   const supabase = await createClient();
@@ -509,6 +510,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       {/* Section 10: inbound_scans is live and the net is 20 s, so a scan report appears on the job card by itself. */}
       <RecentJobMark staffId={staff.id} job={{ id, n: job.job_number, p: formatPlate(vehicle), t: vehicleTitle(vehicle) }} />
       <LiveRefresh tables={["jobs", "gate_in_media", "gate_ins", "approval_requests", "inspections", "road_tests", "move_requests", "inbound_scans", "payments", "invoices", ...(reportsOn ? ["payment_reports"] : [])]} jobId={id} />
+      {/* 11 November 2026 (Section 4): what waits for the owner on this car, at the top (quotations show theirs on their own page). */}
+      <ApprovalsHere staff={staff} jobId={id} highlight={approval ?? null} kinds={["fee", "free_charge", "comeback", "overpayment", "discount", "inspection_change", "stock_reversal", "void", "inspection_type"]} />
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={formatPlate(vehicle)}

@@ -1,3 +1,4 @@
+import { ApprovalsHere } from "@/components/ApprovalsHere";
 import { compJobChoices } from "@/lib/quote-data";
 import { ViewAsCustomer } from "@/components/ViewAsCustomer";
 import { withAddressAs } from "@/lib/customer-address";
@@ -32,7 +33,7 @@ import { VersionLinks } from "@/components/VersionLinks";
 import { TintSpecPanel } from "@/components/TintSpecPanel";
 import { EstimateMenu } from "../EstimateMenu";
 import { loadCatalogue } from "@/lib/parts-catalogue";
-import { OwnerApprovalBox, discountByOf } from "@/app/(app)/quotes/OwnerApprovalBox";
+import { discountByOf } from "@/app/(app)/quotes/OwnerApprovalBox";
 import { refuseRecord } from "@/lib/refusal";
 import { handbackOf, startersOf, staffNamesOf } from "@/lib/quote-lead";
 import { HandbackBanner } from "@/components/HandbackBanner";
@@ -48,11 +49,11 @@ import { OrderPartsNow } from "./OrderPartsNow";
 export const dynamic = "force-dynamic";
 
 /** The estimate builder: the same lines and prices as a quotation, no promised date, sent to a page headed "Estimate". Owner and the advisor who made it only. */
-export default async function EstimatePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string; packages?: string; send?: string }> }) {
+export default async function EstimatePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string; packages?: string; send?: string; approval?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
   const { id } = await params;
-  const { message, error, packages: openPackages, send } = await searchParams;
+  const { message, error, packages: openPackages, send, approval } = await searchParams;
   const [bundle, settings, site] = await Promise.all([loadQuotation(id), getSettings(), getSiteUrl()]);
   if (!bundle || bundle.quotation.kind !== "estimate") return refuseRecord("estimate", id);
   const { quotation: q, vehicle, customer } = bundle;
@@ -130,6 +131,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
 
   return (
     <>
+      <ApprovalsHere staff={staff} quotationId={q.id} highlight={approval ?? null} />
       <PageHeader
         title={`${q.number} · Estimate`}
         titleAfter={<VersionLinks versions={bundle.versions} currentId={q.id} hrefOf={(vid) => `/estimates/${vid}`} />}
@@ -207,7 +209,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         autoSend={send === "1"}
         comp={await compJobChoices(q, null)}
         damagePanels={await damagedPanelsOf(q.job_id)}
-        ownerBox={<OwnerApprovalBox q={q} mayApprove={can(role, "approveQuotes") && !staff.viewingAs} discountBy={discountBy} />}
+        ownerBox={null}
         discountBy={discountBy}
         viewerName={staff.display_name}
         autoOpenPackages={openPackages === "1"}

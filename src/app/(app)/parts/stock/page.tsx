@@ -1,3 +1,4 @@
+import { ApprovalsHere } from "@/components/ApprovalsHere";
 import Link from "next/link";
 import { loadReversals, reversalsReady, reversible } from "@/lib/stock-reversals";
 import { archiveStockItemAction, askReversalAction, decideReversalAction } from "./reversal-actions";
@@ -26,9 +27,9 @@ const KIND_LABEL: Record<string, string> = { in: "In", out: "Issued", count: "Co
  * turns red with Reorder; a stock order is an LPO with no job; the monthly count replaces the figures; every
  * movement is listed. Issuing to a job stays as it was (by quantity, the technician's PIN above the limit).
  */
-export default async function StockPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; count?: string; order?: string; reorder?: string }> }) {
+export default async function StockPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; count?: string; order?: string; reorder?: string; approval?: string }> }) {
   const staff = await requirePermission("manageStock");
-  const { message, error, count, order, reorder } = await searchParams;
+  const { message, error, count, order, reorder, approval } = await searchParams;
   const admin = createAdminClient();
   const settings = await getSettings();
   const [{ data: itemsRaw }, { data: jobs }, { data: techs }, { data: suppliers }, { data: moves }, { data: openOrders }] = await Promise.all([
@@ -59,6 +60,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
 
   return (
     <>
+      <ApprovalsHere staff={staff} highlight={approval ?? null} kinds={["stock_reversal"]} />
       <PageHeader
         title="Stock"
         subtitle={`${items.length} item${items.length === 1 ? "" : "s"}${low.length ? ` · ${low.length} below minimum` : ""}${lastCount ? ` · last count ${formatDate(lastCount)}` : " · never counted"}`}

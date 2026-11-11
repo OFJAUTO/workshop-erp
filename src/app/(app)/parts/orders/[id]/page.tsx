@@ -1,3 +1,4 @@
+import { ApprovalsHere } from "@/components/ApprovalsHere";
 import { countsAsPaid } from "@/lib/bank-status";
 import { OwnerReviewCard, SendForOwner } from "./OwnerReviewCard";
 import { accountsLimitOf, loadReviews, lpoReviewReady, reviewLog } from "@/lib/lpo-review";
@@ -66,11 +67,11 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
  * One LPO. The main LPO (every supplier, grouped with a subtotal each and a grand total) is approved here with
  * one tap; its supplier LPOs (LPO-00012-1, -2, -3) are sent, marked ordered, received and invoiced here.
  */
-export default async function PurchaseOrderPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
+export default async function PurchaseOrderPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string; approval?: string }> }) {
   const staff = await requirePermission("viewPurchaseOrders");
   const role = staff.role_id as RoleId;
   const { id } = await params;
-  const { message, error } = await searchParams;
+  const { message, error, approval } = await searchParams;
   const bundle = await loadPurchaseOrder(id);
   if (!bundle) notFound();
   const { po, lines, job, names, parts } = bundle;
@@ -235,6 +236,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
 
   return (
     <>
+      <ApprovalsHere staff={staff} poId={po.id} highlight={approval ?? null} />
       <PageHeader
         title={isMain ? `${po.number} · all suppliers` : `${po.number} · ${po.supplier_name}`}
         subtitle={

@@ -1,3 +1,4 @@
+import { approvalsCount } from "@/lib/approvals";
 import { Suspense } from "react";
 import { chargesReady } from "@/lib/charges";
 import type { Metadata } from "next";
@@ -96,9 +97,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const partsManagement = { group: "parts-management", label: "Parts management", items: partsManagementItems.filter((i) => i.show).map(({ href, label, badge }) => ({ href, label, badge })) };
 
   const pkReady = await passkeysReady();
+  // 11 November 2026 (Section 4): the owner's Approvals with its count.
+  const approvalsWaiting = role === "owner" ? await approvalsCount().catch(() => 0) : 0;
   const entries: ((NavItem | typeof partsManagement) & { show: boolean })[] = [
     { href: "/home", label: "Home", show: role !== "gate_in" && role !== "technician" && role !== "qc_inspector" && role !== "team_leader" },
     { href: "/dashboard", label: "Dashboard", show: can(role, "viewDashboard") },
+    { href: "/approvals", label: "Approvals", show: role === "owner", badge: approvalsWaiting || undefined },
     { href: "/calendar", label: "Calendar", show: can(role, "viewCalendar") && role !== "accounts" && role !== "parts" },
     { href: "/parts/arrivals", label: "Parts arrivals", show: role === "parts" || role === "owner" },
     { href: "/assign", label: "To assign", show: can(role, "assignJobs") },

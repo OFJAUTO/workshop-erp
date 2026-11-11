@@ -704,7 +704,7 @@ export async function sendQuotation(quotationId: string, _prev: SendQuoteState, 
       await logQuoteEvent(q.id, q.job_id, staff.id, "quote_owner_approval", `${q.number} sent to the owner for approval: ${reasons.join("; ")}`);
       const comp = await compCostForBundle(bundle, settings);
       const car = [bundle.vehicle?.make?.name, bundle.vehicle?.model?.name].filter(Boolean).join(" ");
-      await notifyRoles(["owner"], { type: "quote_owner_approval", title: comp ? `Complimentary needs your approval · ${car} · ${q.number}` : `Quotation needs your approval · ${q.number}`, body: [reasons.join("; "), comp ? compCostWords(comp.cost) : null].filter(Boolean).join(" · "), jobId: q.job_id, href: q.job_id ? `/jobs/${q.job_id}/quote/${q.id}` : `/estimates/${q.id}` });
+      await notifyRoles(["owner"], { type: "quote_owner_approval", title: comp ? `Complimentary needs your approval · ${car} · ${q.number}` : `Quotation needs your approval · ${q.number}`, body: [reasons.join("; "), comp ? compCostWords(comp.cost) : null].filter(Boolean).join(" · "), jobId: q.job_id, href: `${q.job_id ? `/jobs/${q.job_id}/quote/${q.id}` : `/estimates/${q.id}`}?approval=quote:${q.id}` });
       refresh(q.job_id, q.id);
     } else if ((q.owner_approval_reason ?? "") !== reasons.join("; ")) {
       // Still waiting, but the figures moved: the owner's box shows what would go out now.

@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -4121,6 +4121,65 @@ await section("e3", "apply supplier advance without a new payment", async () => 
   const row = ap.locator("[data-si-row]").filter({ hasText: "E2E-25630196" }).first();
   check("a5: an invoice dated 11 May on a November LPO is flagged Check the date", !!po2 && (await row.locator("[data-si-date-warning]").count()) === 1);
   await acc.browser.close();
+});
+
+/* ================================================================================================= */
+/* e4 (11 November 2026, Section 4, Q-00077): the yellow NEEDS YOUR APPROVAL box at the top of the     */
+/* page; the bell's ?approval= highlights it; the advisor sees "Waiting for owner approval"; the one   */
+/* Approvals page lists everything (menu count, dashboard tile); approve from the list; refuse needs a */
+/* reason (on the job card's box); nobody but the owner opens the page.                               */
+/* ================================================================================================= */
+await section("e4", "approval box and approvals page", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-approvals";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "quote" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const q = (await sql("select id, number from public.quotations where job_id = $1 and is_active order by created_at desc limit 1", [jobId]))[0];
+  const reason = "Complimentary: goodwill gesture (normal price AED 450.00)";
+  await sql("update public.quotations set status = 'pending_owner', owner_approval_reason = $2, owner_approved_at = null, owner_approved_by = null, completed_at = now() where id = $1", [q.id, reason]);
+  await sql("update public.jobs set inspection_fee_request_aed = 300, inspection_fee_request_by = (select id from public.staff where role_id = 'service_advisor' and is_active order by created_at limit 1) where id = $1", [jobId]);
+  const own = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  const op = own.page;
+  // p1. The bell's address opens the quotation with the box at the top, highlighted.
+  await go(op, `${base}/jobs/${jobId}/quote/${q.id}?approval=quote:${q.id}`);
+  const box = op.locator(`[data-approval-box="quote:${q.id}"]`);
+  const top = await box.evaluate((el) => el.getBoundingClientRect().top + window.scrollY).catch(() => 99999);
+  check(`p1: the yellow box is at the top of the quotation page (y ${Math.round(top)})`, (await box.count()) === 1 && top < 500);
+  check("p1: it says what, the money, and has Approve and Refuse", /Needs your approval/i.test((await box.textContent()) ?? "") && (await box.locator("[data-approval-money]").count()) === 1 && (await box.locator("[data-approval-approve]").count()) === 1 && (await box.locator("[data-approval-refuse]").count()) === 1);
+  await op.screenshot({ path: `${proof}/e4-box-on-quotation-1440.png` }).catch(() => null);
+  // p2. The menu count and the dashboard tile.
+  const badge = ((await op.locator('a[href="/approvals"]').first().textContent()) ?? "").replace(/\D/g, "");
+  check(`p2: Approvals in the menu with a count (${badge})`, Number(badge) >= 2);
+  await go(op, `${base}/dashboard`);
+  check("p2: the dashboard tile", Number(await op.locator('[data-tile="approvals"]').getAttribute("data-tile-count")) >= 2);
+  // p3. The advisor sees the waiting line and no buttons.
+  const adv = await browserFor("service_advisor", { viewport: { width: 1440, height: 900 } });
+  await go(adv.page, `${base}/jobs/${jobId}/quote/${q.id}`);
+  check("p3: the advisor sees Waiting for owner approval, no Approve", (await adv.page.locator(`[data-approval-waiting="quote:${q.id}"]`).count()) === 1 && (await adv.page.locator("[data-approval-approve]").count()) === 0);
+  const res = await adv.page.goto(`${base}/approvals`);
+  check(`p3: the Approvals page is the owner's only (${res?.status()})`, res?.status() === 404);
+  await adv.browser.close();
+  // p4. The Approvals page: approve the quotation from the list.
+  await go(op, `${base}/approvals`);
+  const listed = op.locator(`[data-approvals-page] [data-approval-box="quote:${q.id}"]`);
+  check("p4: the quotation is on the Approvals list", (await listed.count()) === 1);
+  await op.screenshot({ path: `${proof}/e4-approvals-page-1440.png` }).catch(() => null);
+  await listed.locator("[data-approval-approve]").click();
+  await listed.locator("[data-approval-done], [data-approval-error]").first().waitFor({ timeout: 30000 }).catch(() => {});
+  const after = (await sql("select status, owner_approved_at from public.quotations where id = $1", [q.id]))[0];
+  check(`p4: approved from the list (${after?.status}, ${after?.owner_approved_at ? "stamped" : "no stamp"})`, after?.status !== "pending_owner" && !!after?.owner_approved_at);
+  // p5. Refuse needs a reason: the fee request on the job card.
+  await go(op, `${base}/jobs/${jobId}`);
+  const fee = op.locator(`[data-approval-box="fee:${jobId}"]`);
+  check("p5: the fee request's box is at the top of the job card", (await fee.count()) === 1);
+  await fee.locator("[data-approval-refuse]").click();
+  check("p5: Refuse waits for a reason", await fee.locator("[data-approval-refuse-send]").isDisabled());
+  await fee.locator("[data-approval-reason]").fill("Not below the minimum this time");
+  await fee.locator("[data-approval-refuse-send]").click();
+  const cleared = await until(async () => (await sql("select inspection_fee_request_aed from public.jobs where id = $1", [jobId]))[0]?.inspection_fee_request_aed === null, 40, 500);
+  check("p5: refused with the reason, the request is gone", !!cleared);
+  await own.browser.close();
 });
 
 const failed = summary();

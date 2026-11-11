@@ -43,7 +43,8 @@ import { TintSpecPanel } from "@/components/TintSpecPanel";
 import { jobCharges } from "@/lib/supplier-charges";
 import { bodyFindingWords, bodyLineTitle, loadBodyState } from "@/lib/bodyshop-findings";
 import { severityLabel } from "@/lib/car-outline";
-import { OwnerApprovalBox, discountByOf } from "@/app/(app)/quotes/OwnerApprovalBox";
+import { RevisionPreview, discountByOf } from "@/app/(app)/quotes/OwnerApprovalBox";
+import { ApprovalsHere } from "@/components/ApprovalsHere";
 import { DocReviseButton } from "@/components/DocReviseButton";
 import { VersionLinks } from "@/components/VersionLinks";
 import { oldVersionBanner } from "@/lib/quote-history";
@@ -55,7 +56,7 @@ import { handbackOf, startersOf, staffNamesOf } from "@/lib/quote-lead";
 import { carryWarning } from "@/lib/carry-check";
 import { HandbackBanner } from "@/components/HandbackBanner";
 import { recoveryProviderList } from "@/lib/recovery-providers";
-import { requestPartsGone, revisionPreview } from "@/lib/quote-versions";
+import { revisionPreview } from "@/lib/quote-versions";
 import { advisorPricePartsReady, belowCostReady, partUnitsReady } from "@/lib/schema-ready";
 import { loadPartsChanges } from "@/lib/parts-changes-data";
 import { recoveryElsewhere } from "@/lib/charges";
@@ -66,11 +67,11 @@ import { QtyReduceCard } from "@/components/QtyReduceCard";
 export const dynamic = "force-dynamic";
 
 /** The quotation builder for a job. Only the owner and the job's advisor can open it; everyone else goes back to the job card. */
-export default async function QuotePage({ params, searchParams }: { params: Promise<{ id: string; qid: string }>; searchParams: Promise<{ message?: string; error?: string; send?: string; approve?: string; revise?: string }> }) {
+export default async function QuotePage({ params, searchParams }: { params: Promise<{ id: string; qid: string }>; searchParams: Promise<{ message?: string; error?: string; send?: string; approve?: string; revise?: string; approval?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
   const { id, qid } = await params;
-  const { message, error, send, approve, revise } = await searchParams;
+  const { message, error, send, approve, revise, approval } = await searchParams;
   const { data: declinedRow } = await createAdminClient().from("jobs").select("declined_out_at, is_open, inspection_fee_aed, inspection_fee_choice").eq("id", id).maybeSingle();
   const declinedOut = !!declinedRow?.declined_out_at;
   const jobOpen = declinedRow?.is_open !== false;
@@ -171,16 +172,21 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const { data: nameRows } = nameIds.length ? await createAdminClient().from("staff").select("id, display_name").in("id", nameIds) : { data: [] as { id: string; display_name: string }[] };
   const nameOf = (id: string | null | undefined) => (nameRows ?? []).find((r) => r.id === id)?.display_name ?? null;
   const approverName = nameOf(q.owner_approved_by);
-  const requesterName = nameOf(q.revision_requested_by);
   const revisionPending = !!q.revision_requested_at && !q.revision_allowed_at && !q.revision_declined_at;
-  const ownerSees = revisionPending && can(role, "approveQuotes") && !staff.viewingAs;
   // The owner's box sits in the right column under "Before sending": the approval above the limit, or a revision request.
   const discountBy = await discountByOf(q);
   // The owner's approval still covers what the quotation would ask now (the send's own rule).
   const roundingByOwner = await roundingByOwnerOf(q.id, q.rounded_total_aed !== null && q.rounded_total_aed !== undefined);
   const approvalNow = approvalReasonsNow(bundle, settings, { discount: discountBy?.owner === true, rounding: roundingByOwner });
   const approvalStands = !!q.owner_approved_at && approvalCovers(q.owner_approval_reason ?? null, approvalNow);
-  const ownerBox = <OwnerApprovalBox q={q} mayApprove={can(role, "approveQuotes") && !staff.viewingAs} discountBy={discountBy} approveFocus={approve === "1"} revision={{ pending: revisionPending, requesterName, kind: q.revision_request_kind ?? null, reason: q.revision_request_reason ?? null, preview: ownerSees ? await revisionPreview(q.id) : [], allGone: ownerSees ? !!(await requestPartsGone(q.id))?.allGone : false }} />;
+  // The details inside the box: who gave the discount, and what a revision would change part by part.
+  const revPreview = revisionPending && can(role, "approveQuotes") && !staff.viewingAs ? await revisionPreview(q.id) : [];
+  const approvalExtras: Record<string, React.ReactNode> = {
+    ...(discountBy && !discountBy.owner && (q.owner_approval_reason ?? "").includes("discount") ? { [`quote:${q.id}`]: <p className="text-xs text-muted" data-owner-box-reason>Discount given by {discountBy.name}</p> } : {}),
+    ...(revPreview.length ? { [`revision:${q.id}`]: <RevisionPreview rows={revPreview} /> } : {}),
+  };
+  // The owner's decisions moved to the ONE yellow box at the top of the page (11 November 2026, Section 4).
+  const ownerBox = null;
   const customerName = customer?.company_name ?? customer?.full_name ?? "Customer";
   // A revised quotation goes out with its own message ("has been updated").
   const template = (q.version > 1 ? settings.whatsapp_quote_revised_template : settings.whatsapp_quote_template)
@@ -274,6 +280,8 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   return (
     <>
       <PendingChargeNote customerId={q.customer_id} />
+      {/* 11 November 2026 (Section 4): what waits for the owner, at the TOP - the one yellow box. */}
+      <ApprovalsHere staff={staff} quotationId={q.id} highlight={approval ?? (approve === "1" ? "1" : null)} extras={approvalExtras} />
       <PageHeader
         picture={<CarHeaderThumb vehicleId={q.vehicle_id} />}
         title={`${q.number} · Quotation`}
