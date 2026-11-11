@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6,e7,e8,e9").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6,e7,e8,e9,e10").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -296,6 +296,8 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
     const save = (body) => api("/api/inspection/save", { inspectionId: insp.id, ...body }, cookie);
     await save({ inspection: { scan_read: true } });
     const { browser, page } = await browserForId(techId, { viewport: { width: 800, height: 1280 }, touch: true });
+    // 11 November 2026 (Section 10): the advisor picked the type on the job card (path e10 proves the picker).
+    await sql("update public.jobs set inspection_scope = 'full' where id = $1 and inspection_scope is null", [jobId]).catch(() => null);
     await go(page, `${base}/my-jobs/${jobId}`);
     const start = page.getByRole("button", { name: "Start inspection" });
     if (await start.count()) { await start.click(); await submitted(page); }
@@ -4485,6 +4487,87 @@ await section("e9", "jobs to do", async () => {
   await go(op, `${base}/dashboard`);
   const chip = await op.locator(`[data-flash-id="${jobId}"] [data-car-sides]`).getAttribute("data-car-sides").catch(() => null);
   check(`j3: the car card says both sides (${chip})`, !!chip && /Bodyshop 1\/1 done/.test(chip));
+  await own.browser.close();
+});
+
+/* ================================================================================================= */
+/* e10 (11 November 2026, Section 10): the inspection type and "Could not check". The inspection waits */
+/* for the advisor's pick (no default); Customer complaints only shows CHECK ONLY; the car's condition */
+/* marks impossible items by itself and "Car now runs" brings them back; any item can be Could not     */
+/* check with a one-tap reason; the advisor settles it; a smaller type after the start needs the owner.*/
+/* ================================================================================================= */
+await section("e10", "inspection type and could not check", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-inspection-type";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "inspection" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  await sql("update public.jobs set inspection_scope = null where id = $1", [jobId]);
+  const insp = (await sql("select id, technician_id, status from public.inspections where job_id = $1 order by created_at desc limit 1", [jobId]))[0];
+  const techId = insp?.technician_id ?? (await sql("select assigned_to from public.jobs where id = $1", [jobId]))[0]?.assigned_to;
+  await sql("update public.inspections set status = 'not_started', started_at = null, car_condition = null where id = $1", [insp.id]);
+  await sql("update public.inspection_items set status = null, not_checked_reason = null, not_checked_auto = false, not_checked_resolution = null where inspection_id = $1", [insp.id]);
+  const cookie = await cookieHeader(techId);
+  await api("/api/inspection/save", { inspectionId: insp.id, inspection: { scan_read: true } }, cookie);
+  // i1. The technician cannot start: the type is not picked.
+  const tech = await browserForId(techId, { viewport: { width: 800, height: 1280 }, touch: true });
+  await go(tech.page, `${base}/my-jobs/${jobId}`);
+  const start = tech.page.getByRole("button", { name: "Start inspection" });
+  if (await start.count()) { await start.click(); await tech.page.waitForURL(/error=/, { timeout: 20000 }).catch(() => null); }
+  check("i1: the inspection waits for the advisor's type", /inspection type/.test(decodeURIComponent(tech.page.url())) && (await sql("select status from public.inspections where id = $1", [insp.id]))[0]?.status === "not_started");
+  // i2. The advisor picks Customer complaints only on the job card (no default).
+  const adv = await browserFor("service_advisor", { viewport: { width: 1440, height: 900 } });
+  await go(adv.page, `${base}/jobs/${jobId}`);
+  check("i2: the job card reads Type: not set, nothing picked", (await adv.page.locator('[data-scope-box="none"]').count()) === 1 && (await adv.page.locator('[data-scope-pick][aria-pressed="true"]').count()) === 0);
+  await adv.page.locator('[data-scope-pick="complaints"]').click();
+  const picked = await until(async () => (await sql("select inspection_scope from public.jobs where id = $1", [jobId]))[0]?.inspection_scope === "complaints", 40, 500);
+  check("i2: Customer complaints only saved", !!picked);
+  // i3. The technician starts; the type large, CHECK ONLY with the customer's requests.
+  await go(tech.page, `${base}/my-jobs/${jobId}`);
+  if (await start.count()) { await start.click(); await submitted(tech.page); }
+  await go(tech.page, `${base}/my-jobs/${jobId}`);
+  check("i3: the type shows large at the top", (await tech.page.locator('[data-inspection-type="complaints"]').count()) === 1);
+  check("i3: CHECK ONLY lists the complaints", (await tech.page.locator("[data-check-only] li").count()) >= 1);
+  // i4. Doesn't start: items needing the engine or driving are marked by themselves.
+  await tech.page.locator('[data-condition="no_start"]').click();
+  const auto = await until(async () => Number((await sql("select count(*)::int as n from public.inspection_items where inspection_id = $1 and not_checked_auto", [insp.id]))[0].n), 40, 500);
+  check(`i4: Doesn't start marks the impossible items by itself (${auto})`, auto > 0);
+  // i5. Any item, one tap: Could not check – Access blocked.
+  const anyItem = (await sql("select item_key, item_label from public.inspection_items where inspection_id = $1 and not_checked_reason is null and status is null order by item_key limit 1", [insp.id]))[0];
+  await go(tech.page, `${base}/my-jobs/${jobId}`);
+  await tech.page.locator("[data-not-checked-pick]").selectOption(anyItem.item_key);
+  await tech.page.locator('[data-not-checked-reason="Access blocked"]').click();
+  const manual = await until(async () => (await sql("select not_checked_reason from public.inspection_items where inspection_id = $1 and item_key = $2", [insp.id, anyItem.item_key]))[0]?.not_checked_reason === "Access blocked", 40, 500);
+  check("i5: one item marked Could not check – Access blocked", !!manual);
+  await tech.page.screenshot({ path: `${proof}/e10-tech-top-800.png` }).catch(() => null);
+  // i6. The car runs now: the automatic ones come back; technician and advisor told.
+  const m0 = await mark();
+  await go(tech.page, `${base}/my-jobs/${jobId}`);
+  await tech.page.locator('[data-condition="drives"]').click();
+  const back = await until(async () => Number((await sql("select count(*)::int as n from public.inspection_items where inspection_id = $1 and not_checked_auto", [insp.id]))[0].n) === 0, 40, 500);
+  const told2 = await until(async () => Number((await sql("select count(*)::int as n from public.notifications where id > $1 and title like 'Car now runs:%'", [m0]))[0].n) >= 1, 40, 500);
+  check("i6: Car now runs - the automatic items wait to be checked, people told", !!back && !!told2);
+  await tech.browser.close();
+  // i7. The advisor settles the manual one: Not applicable; the job card says checked / pending.
+  await go(adv.page, `${base}/jobs/${jobId}`);
+  await adv.page.locator(`[data-not-checked-na="${anyItem.item_key}"]`).click();
+  const settled = await until(async () => (await sql("select not_checked_resolution from public.inspection_items where inspection_id = $1 and item_key = $2", [insp.id, anyItem.item_key]))[0]?.not_checked_resolution === "not_applicable", 40, 500);
+  check("i7: the advisor marks it Not applicable", !!settled);
+  // i8. A smaller type after the start asks the owner.
+  await sql("update public.jobs set inspection_scope = 'full' where id = $1", [jobId]);
+  await go(adv.page, `${base}/jobs/${jobId}`);
+  await adv.page.locator('[data-scope-pick="complaints"]').click();
+  await adv.page.locator("[data-scope-why]").fill("Customer only wants the noise checked");
+  await adv.page.locator("[data-scope-ask]").click();
+  const asked = await until(async () => (await sql("select inspection_scope_request from public.jobs where id = $1", [jobId]))[0]?.inspection_scope_request === "complaints", 40, 500);
+  check("i8: the downgrade waits for the owner", !!asked && (await sql("select inspection_scope from public.jobs where id = $1", [jobId]))[0]?.inspection_scope === "full");
+  await adv.page.screenshot({ path: `${proof}/e10-job-card-type-1440.png` }).catch(() => null);
+  await adv.browser.close();
+  const own = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  await go(own.page, `${base}/approvals`);
+  await own.page.locator(`[data-approval-box="inspection_type:${jobId}"] [data-approval-approve]`).click();
+  const changed = await until(async () => (await sql("select inspection_scope from public.jobs where id = $1", [jobId]))[0]?.inspection_scope === "complaints", 40, 500);
+  check("i8: the owner allows it on Approvals", !!changed);
   await own.browser.close();
 });
 

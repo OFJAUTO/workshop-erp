@@ -1,3 +1,4 @@
+import { schemaReady } from "@/lib/schema-ready";
 import { e2eRefused } from "@/lib/e2e-guard";
 import { NextResponse, type NextRequest } from "next/server";
 import { ensureInspection } from "@/lib/inspection-data";
@@ -33,6 +34,15 @@ const LVEH = ID("20"), LJOB = ID("21"), LIT1 = ID("22"), LIT2 = ID("23"), LREQ =
 const BVEH = ID("30"), BJOB = ID("31"), BQ = ID("32"), BGI = ID("33"), BAPPT = ID("34");
 
 export async function POST(request: NextRequest) {
+  const res = await seedStage(request);
+  // 11 November 2026 (Section 10): a seeded car has its inspection type picked (Full), so its inspection can start.
+  if (res.status === 200 && (await schemaReady("jobs", "inspection_scope"))) {
+    await createAdminClient().from("jobs").update({ inspection_scope: "full" }).in("id", [JOB, LJOB, BJOB, ID("51")]).is("inspection_scope", null).then(() => null, () => null);
+  }
+  return res;
+}
+
+async function seedStage(request: NextRequest) {
   if (e2eRefused(request)) {
     return NextResponse.json({ error: "Not available." }, { status: 404 });
   }

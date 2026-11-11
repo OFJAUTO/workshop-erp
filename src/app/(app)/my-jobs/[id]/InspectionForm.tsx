@@ -265,7 +265,12 @@ export function InspectionForm({
   scan = null,
   thisYear = new Date().getFullYear(),
   body = null,
+  notChecked = [],
+  scope = null,
 }: {
+  /** 11 November 2026 (Section 10): items marked Could not check, and the inspection type. */
+  notChecked?: string[];
+  scope?: string | null;
   /** The bodyshop findings at the bottom (section 7, 23 October 2026): their state and who may change or check them. */
   body?: { initial: BodyStateProps; canEdit: boolean; canCheck: boolean } | null;
   inspectionId: string;
@@ -546,7 +551,7 @@ export function InspectionForm({
   };
 
   const reportState = { items, measurements, estimatedHours: submitAction ? estimate : null, scan: scanState?.gate ? { required: true, read: !!scanState.readAt, approved: !!scanState.approvedAt } : undefined };
-  const problems = reportProblemsOf(reportState, { limits });
+  const problems = reportProblemsOf({ ...reportState, notChecked, scope }, { limits });
   const progress = reportProgressOf(reportState, { limits });
   const problemKeys = new Set(problems.map((p) => p.key));
   const sectionOk = (sectionKey: string) => !items.some((i) => i.sectionKey === sectionKey && problemKeys.has(i.key));

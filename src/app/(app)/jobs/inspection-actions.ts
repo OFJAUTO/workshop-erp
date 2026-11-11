@@ -1,4 +1,5 @@
 "use server";
+import { loadScopeState, scopeReady } from "@/lib/inspection-scope-data";
 import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
@@ -42,6 +43,11 @@ async function jobOf(jobId: string) {
 export async function startInspection(jobId: string) {
   const staff = await requireStaff();
   const gate = await jobOf(jobId);
+  // 11 November 2026 (Section 10): the advisor picks the inspection type first (no default).
+  if (gate && (await scopeReady())) {
+    const { data: sc } = await createAdminClient().from("jobs").select("inspection_scope").eq("id", jobId).maybeSingle();
+    if (!sc?.inspection_scope) redirect(`/my-jobs/${jobId}?error=${encodeURIComponent("The advisor has not picked the inspection type yet (Full, Customer complaints only or Pre-purchase). Ask them: it is on the job card.")}`);
+  }
   if (gate && !gate.first_approval_at && staff.role_id !== "owner") redirect(`/my-jobs/${jobId}?error=${encodeURIComponent("The customer has not approved the job card yet. The inspection starts after that.")}`);
   let bundle = await loadInspection(jobId);
   if (!bundle) {
@@ -65,7 +71,7 @@ export async function startInspection(jobId: string) {
   const settings = await getSettings();
   await admin
     .from("inspections")
-    .update({ status: "in_progress", started_at: insp.started_at ?? new Date().toISOString(), target_minutes: insp.target_minutes ?? (Number(settings.inspection_target_minutes) || 90), updated_by: staff.id })
+    .update({ status: "in_progress", started_at: insp.started_at ?? new Date().toISOString(), target_minutes: insp.target_minutes ?? (await scopeMinutes(jobId, settings)) ?? (Number(settings.inspection_target_minutes) || 90), updated_by: staff.id })
     .eq("id", insp.id);
   await admin.from("jobs").update({ status: "in_inspection", stage: "inspection" }).eq("id", jobId).eq("status", "pending_inspection");
   await logEvent(jobId, staff.id, "inspection_started", `Inspection started by ${staff.display_name}`);
@@ -85,7 +91,9 @@ export async function submitInspection(jobId: string, _state: FormState, formDat
   const admin = createAdminClient();
   const { data: requests } = await admin.from("job_requests").select("id, text").eq("job_id", jobId).eq("is_active", true);
   const settings = await getSettings();
-  const problems = [...reportProblems(bundle, (requests ?? []) as { id: string; text: string }[], { limits: inspectionLimitsOf(settings), prescanGate: !!settings.prescan_gate_enabled }), ...(await bodyProblems(insp.id))];
+  // 11 November 2026 (Section 10): items that could not be checked wait (never "not marked"); complaints only asks only what was answered.
+  const scopeState = await loadScopeState(jobId);
+  const problems = [...reportProblems(bundle, (requests ?? []) as { id: string; text: string }[], { limits: inspectionLimitsOf(settings), prescanGate: !!settings.prescan_gate_enabled, notChecked: scopeState.notChecked.map((x) => x.key), scope: scopeState.scope }), ...(await bodyProblems(insp.id))];
   if (problems.length) return { error: problems.slice(0, 4).join(" "), values };
 
   const wt = workingTimeOf(settings);
@@ -344,4 +352,12 @@ export async function approveScanNotPossible(jobId: string) {
   if (bundle.inspection.technician_id) await notifyStaff([bundle.inspection.technician_id], { type: "scan_approval", title: `Scan not possible approved · ${job?.job_number ?? ""}`, body: "The checklist is open.", jobId, href: `/my-jobs/${jobId}` });
   refresh(jobId);
   redirect(`/jobs/${jobId}/inspection`);
+}
+
+/** The time allowed for this car's inspection type (Settings), or null for the usual time. */
+async function scopeMinutes(jobId: string, settings: Awaited<ReturnType<typeof getSettings>>): Promise<number | null> {
+  if (!(await scopeReady())) return null;
+  const { data } = await createAdminClient().from("jobs").select("inspection_scope").eq("id", jobId).maybeSingle();
+  const rule = ((settings.inspection_scope_rules ?? {}) as Record<string, { minutes?: number | null }>)[String(data?.inspection_scope ?? "")];
+  return rule?.minutes && rule.minutes > 0 ? rule.minutes : null;
 }

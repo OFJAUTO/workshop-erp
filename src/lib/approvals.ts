@@ -172,6 +172,15 @@ export async function loadApprovals(scope: Scope = {}): Promise<ApprovalItem[]> 
       push({ kind: "lathe_void", id: String(r.id), title: `Void lathe bill ${r.bill_number} · ${r.supplier_name}`, what: String(r.void_request_reason ?? ""), askedBy: nm(r.void_requested_by), askedAt: (r.void_requested_at as string) ?? null, money: aed(r.total_aed), href: "/parts/lathe", jobId: null, quotationId: null, poId: null, approveLabel: "Void it", refuseLabel: "Keep the bill" });
     }
   }
+  // An inspection type made smaller after the start (11 November 2026, Section 10).
+  if (await schemaReady("jobs", "inspection_scope_request")) {
+    const { data: ir } = await admin.from("jobs").select("id, job_number, inspection_scope, inspection_scope_request, inspection_scope_request_reason, inspection_scope_request_by, inspection_scope_request_at").not("inspection_scope_request", "is", null);
+    const { scopeLabel } = await import("@/lib/inspection-scope");
+    for (const r of (ir ?? []) as R[]) {
+      if (r.inspection_scope_request_by && !who.has(String(r.inspection_scope_request_by))) for (const st of ((await admin.from("staff").select("id, display_name").eq("id", String(r.inspection_scope_request_by))).data ?? []) as R[]) who.set(String(st.id), String(st.display_name));
+      push({ kind: "inspection_type", id: String(r.id), title: `Inspection type: ${scopeLabel(r.inspection_scope as string)} → ${scopeLabel(r.inspection_scope_request as string)} · ${r.job_number}`, what: String(r.inspection_scope_request_reason ?? ""), askedBy: nm(r.inspection_scope_request_by), askedAt: (r.inspection_scope_request_at as string) ?? null, money: null, href: `/jobs/${r.id}`, jobId: String(r.id), quotationId: null, poId: null, approveLabel: "Allow the change", refuseLabel: "Keep it" });
+    }
+  }
   for (const extra of await moreApprovals(scope)) out.push(extra);
   const kept = out.filter((i) => (!scope.jobId || i.jobId === scope.jobId) && (!scope.quotationId || i.quotationId === scope.quotationId) && (!scope.poId || i.poId === scope.poId));
   return kept.sort((a, b) => String(a.askedAt ?? "").localeCompare(String(b.askedAt ?? "")));

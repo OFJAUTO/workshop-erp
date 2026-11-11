@@ -1,4 +1,6 @@
-import { Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { SCOPES } from "@/lib/inspection-scope";
+import { saveScopeRules } from "./scope-rules-actions";
+import { Button, Card, LinkButton, Notice, PageHeader, SectionLabel , Input } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { ROAD_TEST_ITEMS } from "@/lib/road-test";
 import { chipRowsFor } from "@/lib/road-test-chips";
@@ -26,6 +28,24 @@ export default async function InspectionChecklistPage({ searchParams }: { search
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {/* 11 November 2026 (Section 10): fee and time allowed per inspection type (empty = today's behaviour). */}
+      <Card className="flex flex-col gap-3" id="scope-rules" data-scope-rules>
+        <SectionLabel>Inspection types – fee and time allowed</SectionLabel>
+        <p className="text-xs text-muted">Empty keeps today&apos;s rule (the fee chosen at gate-in, the usual time). The time sets the technician&apos;s allowance when the inspection starts.</p>
+        <form action={saveScopeRules} className="flex flex-col gap-2">
+          {SCOPES.map((sc) => {
+            const rule = ((settings.inspection_scope_rules ?? {}) as Record<string, { fee: number | null; minutes: number | null }>)[sc.key] ?? { fee: null, minutes: null };
+            return (
+              <div key={sc.key} className="flex flex-wrap items-end gap-2">
+                <span className="min-w-56 text-sm font-bold">{sc.label}</span>
+                <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Fee (AED)<Input name={`fee_${sc.key}`} inputMode="decimal" defaultValue={rule.fee === null ? "" : String(rule.fee)} className="w-32" /></label>
+                <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Time (minutes)<Input name={`minutes_${sc.key}`} inputMode="numeric" defaultValue={rule.minutes === null ? "" : String(rule.minutes)} className="w-32" /></label>
+              </div>
+            );
+          })}
+          <div><Button type="submit" size="md" data-scope-rules-save>Save</Button></div>
+        </form>
+      </Card>
       {brandSuggestions.length ? (
         <Card className="flex flex-col gap-3 border-ink">
           <SectionLabel right={`${brandSuggestions.length}`}>Suggestions: tyre brands typed on reports</SectionLabel>

@@ -228,6 +228,8 @@ const DEFAULTS = {
   lathe_price_list: [] as unknown[],
   lathe_lpo_threshold_aed: 200,
   lpo_accounts_limit_aed: 0,
+  // 11 November 2026 (Section 10): fee (AED) and time (minutes) per inspection type; null = today's rule.
+  inspection_scope_rules: { full: { fee: null, minutes: null }, complaints: { fee: null, minutes: null }, pre_purchase: { fee: null, minutes: null } } as Record<string, { fee: number | null; minutes: number | null }>,
   lathe_min_markup_percent: 200,
   /** "Urgent" must mean urgent (9 November 2026): a customer waiting on us longer than these WORKING hours makes the
    *  task urgent on Waiting on you (Settings > Money). */

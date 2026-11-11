@@ -15,6 +15,8 @@ export type DashRow = {
   id: string;
   /** 11 November 2026 (Section 9): "Bodyshop 3/3 done · Workshop 0/4" on a car with both sides. */
   sidesWords?: string | null;
+  /** 11 November 2026 (Section 10): the inspection type while the car waits for or is in its inspection. */
+  scopeWords?: string | null;
   /** Items without a car: no inspection, no wash. */
   loose: boolean;
   jobNumber: string;
@@ -260,6 +262,7 @@ export function DashboardCars({ rows, initialPending, advisorView = false }: { r
                   <TimingBadge timing={j.timing} />
                   {j.inspectionLabel && j.timing.tone !== "red" ? <Badge tone="neutral">{j.inspectionLabel}</Badge> : null}
                   <AdvisorBadge name={j.advisorName} />
+                  {j.scopeWords ? <span className={`rounded-full border px-2 py-0.5 text-xs font-bold ${j.scopeWords === "Type: not set" ? "border-amber-bar bg-amber-soft text-amber-text" : "border-line-strong"}`} data-car-scope={j.scopeWords}>{j.scopeWords}</span> : null}
                   {j.sidesWords ? <span className="rounded-full border border-line-strong px-2 py-0.5 text-xs font-bold" data-car-sides={j.sidesWords}>{j.sidesWords}</span> : null}
                 </>
               }

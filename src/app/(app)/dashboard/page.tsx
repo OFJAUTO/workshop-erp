@@ -1,3 +1,5 @@
+import { scopeReady } from "@/lib/inspection-scope-data";
+import { scopeLabel } from "@/lib/inspection-scope";
 import { loadSideProgress } from "@/lib/jobs-to-do-data";
 import { ApprovalsTile } from "@/components/ApprovalsTile";
 import { LiveRefresh } from "@/components/LiveRefresh";
@@ -121,6 +123,13 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const showInspectionTime = role === "owner" || role === "workshop_manager" || role === "service_advisor";
   // 11 November 2026 (Section 9): the two departments' progress on cars with work on both sides.
   const sides = await loadSideProgress(all.map((j) => j.id)).catch(() => new Map<string, string>());
+  // 11 November 2026 (Section 10): the inspection type on cars waiting for or in their inspection.
+  const scopes = new Map<string, string>();
+  if (await scopeReady()) {
+    const inInsp = all.filter((j) => ["pending_inspection", "in_inspection", "pending_road_test"].includes(String((j as { status?: string }).status ?? "")));
+    const { data: sc } = inInsp.length ? await createAdminClient().from("jobs").select("id, inspection_scope").in("id", inInsp.map((j) => j.id)) : { data: [] };
+    for (const r of (sc ?? []) as { id: string; inspection_scope: string | null }[]) scopes.set(r.id, scopeLabel(r.inspection_scope));
+  }
   const rows: DashRow[] = all.map((j) => {
     const clock = clockFor(j);
     const insp = j.inspection?.find((i) => i.status === "in_progress" || i.status === "submitted" || i.status === "approved") ?? null;
@@ -215,7 +224,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
       {role === "owner" ? <DepositsWaiting /> : null}
 
-      <DashboardCars rows={rows.map((r) => ({ ...r, sidesWords: sides.get(r.id) ?? null }))} initialPending={pending} advisorView={role === "service_advisor"} />
+      <DashboardCars rows={rows.map((r) => ({ ...r, sidesWords: sides.get(r.id) ?? null, scopeWords: scopes.get(r.id) ?? null }))} initialPending={pending} advisorView={role === "service_advisor"} />
 
       {/* Nothing on screen when nothing runs: empty boxes are clutter. */}
       {onClock.length ? (

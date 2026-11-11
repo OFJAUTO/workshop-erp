@@ -143,6 +143,11 @@ export async function decideApprovalAction(kind: ApprovalKind, id: string, decis
       }
       break;
     }
+    case "inspection_type": {
+      const { decideScopeRequest } = await import("@/lib/inspection-scope-decide");
+      answer = await decideScopeRequest(id, yes, note, staff);
+      break;
+    }
     default:
       answer = await runMoreDecision(kind, id, yes, note, staff);
   }

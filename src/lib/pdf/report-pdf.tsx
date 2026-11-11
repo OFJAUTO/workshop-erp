@@ -289,6 +289,22 @@ function ReportDoc({ data, pics, look, token, company, logo, qr }: { data: Repor
       </View>
     </View>
   );
+  const scopeBlock = (
+    <>
+      {data.scopeTitle && data.scopeTitle.title !== "INSPECTION REPORT" ? (
+        <View style={{ borderWidth: 1.5, borderColor: "#111113", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 5, marginBottom: 5 }}>
+          <Text style={{ fontWeight: 800 }}>{data.scopeTitle.title}</Text>
+          {data.scopeTitle.note ? <Text style={{ fontWeight: 700 }}>{data.scopeTitle.note}</Text> : null}
+        </View>
+      ) : null}
+      {data.notChecked?.length ? (
+        <View style={{ borderWidth: 1.5, borderColor: "#B45309", backgroundColor: "#FEF3C7", borderRadius: 4, paddingHorizontal: 8, paddingVertical: 5, marginBottom: 5 }} wrap={false}>
+          <Text style={{ fontWeight: 800, letterSpacing: 0.5 }}>NOT CHECKED YET</Text>
+          {data.notChecked.map((x) => <Text key={x.label}>{x.label} – {x.reason}</Text>)}
+        </View>
+      ) : null}
+    </>
+  );
   const danger = layout.dangers.length ? (
     <View style={{ backgroundColor: TONE_COLOURS.red.bg, borderRadius: 4, paddingHorizontal: 8, paddingVertical: 5, marginBottom: 5 }}>
       <Text style={{ color: "#FFFFFF", fontWeight: 800, letterSpacing: 0.5 }}>DANGEROUS TO DRIVE</Text>
@@ -334,6 +350,7 @@ function ReportDoc({ data, pics, look, token, company, logo, qr }: { data: Repor
       <View style={{ borderWidth: layout.noIssues ? 0 : px(2), borderColor: INK, backgroundColor: layout.noIssues ? TONE_COLOURS.green.bg : "#FFFFFF", borderRadius: px(8), paddingHorizontal: 9, paddingVertical: 7 }}>
         <View wrap={false}>
           {attentionHead}
+          {scopeBlock}
           {danger}
           {layout.attention.slice(0, 3).map(attentionLine)}
         </View>

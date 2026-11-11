@@ -186,6 +186,18 @@ export function InspectionReport({ data, refreshUrl, signedAt, withHead = false 
         </div>
       ) : null}
 
+      {data.scopeTitle && data.scopeTitle.title !== "INSPECTION REPORT" ? (
+        <div className="rounded-lg border-2 border-[#111113] px-3.5 py-2" data-report-scope-title>
+          <p className="text-[15px] font-extrabold">{data.scopeTitle.title}</p>
+          {data.scopeTitle.note ? <p className="text-[13px] font-bold">{data.scopeTitle.note}</p> : null}
+        </div>
+      ) : null}
+      {data.notChecked?.length ? (
+        <section className="flex flex-col gap-1.5 rounded-lg border-2 border-[#B45309] bg-[#FEF3C7] px-3.5 py-3" data-report-not-checked={data.notChecked.length}>
+          <p className="text-[13px] font-extrabold tracking-[0.06em]">NOT CHECKED YET</p>
+          <ul className="flex flex-col gap-1 text-[13px]">{data.notChecked.map((x) => <li key={x.label}><span className="font-bold">{x.label}</span> – {x.reason}</li>)}</ul>
+        </section>
+      ) : null}
       <section className={`flex flex-col gap-3 rounded-lg px-3.5 py-3 sm:px-4 ${layout.noIssues ? "bg-[#E3F2E7]" : "border-2 border-[#111113]"}`} data-report-attention={n}>
         <header className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
           {layout.noIssues ? <h2 className="text-[15px] font-extrabold tracking-[0.06em] text-[#1B6B2F]">✓ NO ISSUES FOUND</h2> : <h2 className="text-[15px] font-extrabold tracking-[0.06em]">NEEDS ATTENTION · {n}</h2>}

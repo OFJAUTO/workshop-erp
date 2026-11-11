@@ -237,7 +237,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
 
   return (
     <>
-      <ApprovalsHere staff={staff} poId={po.id} highlight={approval ?? null} />
+      {/* The LPO page decides LPOs and price rises on its own card (with its checks); other kinds show here. */}
+      <ApprovalsHere staff={staff} poId={po.id} highlight={approval ?? null} kinds={["void", "lathe_void"]} />
       <PageHeader
         title={isMain ? `${po.number} · all suppliers` : `${po.number} · ${po.supplier_name}`}
         subtitle={

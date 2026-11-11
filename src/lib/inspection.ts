@@ -434,20 +434,26 @@ export type ReportState = {
   estimatedHours?: string | null;
   /** The scan step when the gate is on. */
   scan?: { required: boolean; read: boolean; approved: boolean };
+  /** 11 November 2026 (Section 10): items marked Could not check (they wait, they are not "not marked"). */
+  notChecked?: string[];
+  /** The inspection type: complaints only asks only what is answered, tyres and measurements included. */
+  scope?: string | null;
 };
 
 export function reportProblemsOf(s: ReportState, opts: { limits?: InspectionLimits } = {}): ReportProblem[] {
   const out: ReportProblem[] = [];
   if (s.scan?.required && !s.scan.read && !s.scan.approved) out.push({ key: "prescan", label: "Scan report: read it, or get Scan not possible approved" });
+  const skipped = new Set(s.notChecked ?? []);
+  const complaintsOnly = s.scope === "complaints";
   for (const i of s.items) {
     if (i.sectionKey === ROAD_TEST_SECTION_KEY) continue;
     const short = i.label.length > 28 ? i.label.slice(0, 26) + "…" : i.label;
     if (!i.status) {
-      if (i.sectionKey !== OPTIONAL_SECTION_KEY) out.push({ key: i.key, label: `${short}: not marked` });
+      if (i.sectionKey !== OPTIONAL_SECTION_KEY && !skipped.has(i.key) && !complaintsOnly) out.push({ key: i.key, label: `${short}: not marked` });
     } else if (i.style !== "job" && (i.status === "average" || i.status === "bad") && !i.remarks.trim() && !hasStructuredDetail(i, s.measurements)) out.push({ key: i.key, label: `${short}: remark needed` });
     if (i.dangerous && !(i.dangerous_reason ?? "").trim()) out.push({ key: i.key, label: `${short}: why is it dangerous?` });
   }
-  for (const p of TYRE_POSITIONS) {
+  for (const p of complaintsOnly ? [] : TYRE_POSITIONS) {
     const tread = s.measurements[`tyre_${p.key}_tread`];
     const year = s.measurements[`tyre_${p.key}_year`];
     const cond = s.measurements[`tyre_${p.key}_cond`];
@@ -459,7 +465,7 @@ export function reportProblemsOf(s: ReportState, opts: { limits?: InspectionLimi
     if (s.measurements[`tyre_${p.key}_danger`] === "1" && !(s.measurements[`tyre_${p.key}_danger_reason`] ?? "").trim()) out.push({ key: `m-tyre_${p.key}_action`, label: `${p.label} tyre: why is it dangerous?` });
     if (tyreReasonNeeded(s.measurements, p.key) && !(s.measurements[`tyre_${p.key}_reason`] ?? "").trim()) out.push({ key: `m-tyre_${p.key}_action`, label: `${p.label} tyre: why replace now?` });
   }
-  for (const m of MEASUREMENTS) {
+  for (const m of complaintsOnly ? [] : MEASUREMENTS) {
     if (m.optional || (m.key.startsWith("tyre_") && m.kind !== "text")) continue;
     const v = s.measurements[m.key];
     if (!v?.trim()) out.push({ key: `m-${m.key}`, label: `${m.label}: missing` });

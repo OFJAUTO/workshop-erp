@@ -1,3 +1,5 @@
+import { InspectionTop, NotCheckedList } from "@/components/InspectionScope";
+import { loadScopeState } from "@/lib/inspection-scope-data";
 import { JobsToDo } from "@/components/JobsToDo";
 import { loadJobsToDo, viewerSideOf } from "@/lib/jobs-to-do-data";
 import { DamageSection } from "@/components/DamageSection";
@@ -85,6 +87,10 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
   const isVip = customer?.is_vip ?? vip?.is_vip ?? false;
   const vipNote = customer?.vip_note ?? vip?.vip_note ?? null;
   const insp = bundle?.inspection ?? null;
+  // 11 November 2026 (Section 10): the inspection type and what could not be checked.
+  const scopeTech = await loadScopeState(id);
+  const { data: scopeReqRows } = await createAdminClient().from("job_requests").select("text").eq("job_id", id).eq("is_active", true).order("position");
+  const scopeRequests = ((scopeReqRows ?? []) as { text: string }[]).map((r) => r.text);
   const wt = workingTimeOf(settings);
   const workingMin = insp ? inspectionWorkingMinutes(insp, wt) : 0;
   const target = insp?.target_minutes ?? (Number(settings.inspection_target_minutes) || 90);
@@ -400,7 +406,9 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
 
       {(!inWork || ownerDirect) && insp && formProps && (insp.status === "in_progress" || insp.status === "submitted" || insp.status === "approved" || ownerDirect) ? (
         <>
-          <InspectionForm inspectionId={insp.id} jobId={id} {...formProps} body={body} readOnly={!canFill} quickRemarks={(settings.quick_remarks ?? []) as string[]} tyreBrands={(settings.tyre_brands ?? []) as string[]} canAddPrescan={canAddPrescan} submitAction={insp.status === "in_progress" ? submitInspection.bind(null, id) : null} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={settings.prescan_gate_enabled ? { gate: insp.status !== "approved" && !ownerDirect, readAt: insp.scan_read_at, notPossibleReason: insp.scan_not_possible_reason, approvedAt: insp.scan_approved_at } : null} />
+          {scopeTech.ready && canFill ? <InspectionTop jobId={id} scope={scopeTech.scope} requests={scopeRequests} condition={scopeTech.condition} items={(bundle?.items ?? []).filter((it) => !it.status).map((it) => ({ key: it.item_key, label: it.item_label }))} /> : null}
+          {scopeTech.ready ? <NotCheckedList jobId={id} items={scopeTech.notChecked} canResolve={false} canReopen={!!canFill} /> : null}
+          <InspectionForm notChecked={scopeTech.notChecked.map((x) => x.key)} scope={scopeTech.scope} inspectionId={insp.id} jobId={id} {...formProps} body={body} readOnly={!canFill} quickRemarks={(settings.quick_remarks ?? []) as string[]} tyreBrands={(settings.tyre_brands ?? []) as string[]} canAddPrescan={canAddPrescan} submitAction={insp.status === "in_progress" ? submitInspection.bind(null, id) : null} limits={inspectionLimitsOf(settings)} suggestions={(settings.item_suggestions ?? {}) as Suggestions} fluidGrades={(settings.fluid_grades ?? []) as string[]} bigJobTags={(settings.big_job_tags ?? []) as string[]} initialTags={insp.big_job_tags ?? []} estimatedHours={insp.estimated_hours === null ? "" : String(insp.estimated_hours)} estimateReason={insp.estimate_reason ?? ""} scan={settings.prescan_gate_enabled ? { gate: insp.status !== "approved" && !ownerDirect, readAt: insp.scan_read_at, notPossibleReason: insp.scan_not_possible_reason, approvedAt: insp.scan_approved_at } : null} />
           {insp.status === "approved" && !locked && canFill ? (
             <Card className="flex flex-col gap-3 border-ink">
               <SectionLabel>What did you change?</SectionLabel>

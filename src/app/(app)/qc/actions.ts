@@ -1,5 +1,6 @@
 "use server";
 
+import { pendingChecksWords } from "@/lib/inspection-scope-data";
 import { redirect } from "next/navigation";
 import { jobAdvisorIds as advisorsInCharge } from "@/lib/notifications";
 import { isBatteryPart, jobHasOilChange } from "@/lib/stickers";
@@ -88,6 +89,11 @@ export async function saveQc(jobId: string, formData: FormData) {
   const noRemark = items.filter((i) => i.result === "fail" && !(i.remark ?? "").trim());
   if (noRemark.length) redirect(`${back}?error=${encodeURIComponent(`Write a remark on every Fail: ${noRemark.map((i) => i.label).join("; ")}`)}`);
   const loose = job.job_kind === "loose";
+  // 11 November 2026 (Section 10): items that could not be checked must be checked, or settled by the advisor.
+  if (!failedNow(formData)) {
+    const pending = await pendingChecksWords(jobId);
+    if (pending) redirect(`${back}?error=${encodeURIComponent(`QC cannot pass: ${pending}`)}`);
+  }
   if (mileage === null && !loose) redirect(`${back}?error=${encodeURIComponent("Record the mileage at QC.")}`);
   if (!postscan && !waived && !loose) redirect(`${back}?error=${encodeURIComponent("Attach the post-scan PDF from the Autel, or write the reason it is missing.")}`);
   const failed = items.filter((i) => i.result === "fail");
@@ -144,4 +150,10 @@ async function stickerPrompts(jobId: string, jobNumber: string, gatedInBy: strin
   const { data: parts } = await admin.from("part_items").select("id, description, part_type, sticker_kind, stickers_printed, issue_status").eq("job_id", jobId).eq("is_active", true).eq("issue_status", "confirmed");
   const batteries = (parts ?? []).filter((p) => isBatteryPart(p) && !p.stickers_printed);
   if (batteries.length) await notifyRoles(["parts"], { type: "sticker_prompt", title: `Print the battery warranty sticker · ${jobNumber}`, body: `${batteries.map((b) => b.description).join(", ")} fitted: print the warranty sticker from the handover page.`, jobId, href: `/parts/handover/${jobId}` });
+}
+
+/** A QC round with a Fail never passes, so the pending checks only stop a pass. */
+function failedNow(formData: FormData): boolean {
+  for (const [k, v] of formData.entries()) if (k.startsWith("result__") && String(v) === "fail") return true;
+  return false;
 }

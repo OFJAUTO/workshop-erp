@@ -1,3 +1,5 @@
+import { NotCheckedList, ScopeChoice } from "@/components/InspectionScope";
+import { loadScopeState } from "@/lib/inspection-scope-data";
 import { ApprovalsHere } from "@/components/ApprovalsHere";
 import { loadBankWaiting } from "@/lib/bank-posting";
 import { ViewAsCustomer } from "@/components/ViewAsCustomer";
@@ -505,6 +507,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const pendingMove = moveRequests.find((m) => m.status === "pending");
   const defaultRoadTest = roadTest?.decision ?? (gateIn?.condition === "does_not_run" ? "not_possible" : null);
 
+  const scopeState = await loadScopeState(id);
+  const { data: scopeInsp } = await createAdminClient().from("inspections").select("status").eq("job_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  const scopeStarted = !!scopeInsp && scopeInsp.status !== "not_started";
   return (
     <>
       {/* Section 10: inbound_scans is live and the net is 20 s, so a scan report appears on the job card by itself. */}
@@ -512,6 +517,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       <LiveRefresh tables={["jobs", "gate_in_media", "gate_ins", "approval_requests", "inspections", "road_tests", "move_requests", "inbound_scans", "payments", "invoices", ...(reportsOn ? ["payment_reports"] : [])]} jobId={id} />
       {/* 11 November 2026 (Section 4): what waits for the owner on this car, at the top (quotations show theirs on their own page). */}
       <ApprovalsHere staff={staff} jobId={id} highlight={approval ?? null} kinds={["fee", "free_charge", "comeback", "overpayment", "discount", "inspection_change", "stock_reversal", "void", "inspection_type"]} />
+      {/* 11 November 2026 (Section 10): the inspection type (picked before it can start) and the items not checked. */}
+      {scopeState.ready && job.is_open && !loose ? <ScopeChoice jobId={id} scope={scopeState.scope} request={scopeState.request} started={scopeStarted} canChoose={!staff.viewingAs && (role === "owner" || can(role, "editQuotes"))} checked={scopeState.checked} pending={scopeState.pending} /> : null}
+      {scopeState.ready ? <NotCheckedList jobId={id} items={scopeState.notChecked} canResolve={!staff.viewingAs && (role === "owner" || can(role, "editQuotes"))} canReopen={false} /> : null}
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
         title={formatPlate(vehicle)}

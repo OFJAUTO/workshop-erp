@@ -240,8 +240,10 @@ export function inspectionLocked(insp: Pick<InspectionRow, "status" | "unlocked_
 }
 
 /** What still has to be done before the report can go to the manager (same rules as the technician's screen). */
-export function reportProblems(b: InspectionBundle, _requests: { id: string; text: string }[], opts: { limits?: InspectionLimits; prescanGate?: boolean } = {}): string[] {
+export function reportProblems(b: InspectionBundle, _requests: { id: string; text: string }[], opts: { limits?: InspectionLimits; prescanGate?: boolean; notChecked?: string[]; scope?: string | null } = {}): string[] {
   return reportProblemsOf({
+    notChecked: opts.notChecked,
+    scope: opts.scope,
     estimatedHours: String(b.inspection.estimated_hours ?? ""),
     scan: opts.prescanGate ? { required: true, read: !!b.inspection.scan_read_at, approved: !!b.inspection.scan_approved_at } : undefined,
     items: b.items.map((i) => ({ key: i.item_key, label: i.item_label, sectionKey: i.section_key, style: i.style, status: i.status, remarks: i.remarks ?? "", dangerous: !!i.dangerous, dangerous_reason: i.dangerous_reason ?? "" })),

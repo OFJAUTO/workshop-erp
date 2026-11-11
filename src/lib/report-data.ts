@@ -1,3 +1,5 @@
+import { loadScopeState } from "@/lib/inspection-scope-data";
+import { reportTitleOf } from "@/lib/inspection-scope";
 import "server-only";
 import { actionLabel, damageWords, panelLabel, severityLabel, toneOf } from "./car-outline";
 import { loadBodyState } from "./bodyshop-findings";
@@ -42,6 +44,10 @@ export type ReportData = {
   /** Videos whose place is not on the report (an item marked N/A, a request): their own block at the end. */
   extraVideos: ReportVideoItem[];
   dangerText: string;
+  /** 11 November 2026 (Section 10): the type's title ("… – CUSTOMER REQUESTS ONLY") and its note. */
+  scopeTitle?: { title: string; note: string | null } | null;
+  /** NOT CHECKED YET: the items still waiting, in plain words with the reason. */
+  notChecked?: { label: string; reason: string }[];
 };
 
 const mileageWords = (g: JobCard["gateIn"]) => {
@@ -53,6 +59,7 @@ const mileageWords = (g: JobCard["gateIn"]) => {
 export async function loadReportData(card: JobCard, bundle: InspectionBundle, roadTest: RoadTestRow | null, settings: Settings, opts: { thumbs?: boolean } = {}): Promise<ReportData> {
   const insp = bundle.inspection;
   const limits = inspectionLimitsOf(settings);
+  const scopeState = await loadScopeState(card.job.id);
   const body = await loadBodyState(insp.id);
   const road = roadTestSummary(roadTest);
   // The report's own media: photos and videos of the checklist, the measurements, the tyres and the body (never the
@@ -118,5 +125,7 @@ export async function loadReportData(card: JobCard, bundle: InspectionBundle, ro
     media,
     extraVideos,
     dangerText: String(settings.dangerous_customer_text ?? ""),
+    scopeTitle: scopeState.ready && scopeState.scope ? reportTitleOf(scopeState.scope) : null,
+    notChecked: scopeState.notChecked.filter((x) => !x.resolution || x.resolution === "declined").map((x) => ({ label: x.label, reason: x.resolution === "declined" ? "you chose not to have it checked" : x.reason })),
   };
 }
