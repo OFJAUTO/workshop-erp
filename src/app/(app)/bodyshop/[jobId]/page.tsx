@@ -1,3 +1,5 @@
+import { JobsToDo } from "@/components/JobsToDo";
+import { loadJobsToDo, viewerSideOf } from "@/lib/jobs-to-do-data";
 import { VinCopy } from "@/components/VinCopy";
 import { advanceSplit } from "@/lib/estimate-money-rules";
 import { cutMethodsForJobs } from "@/lib/ppf-cut-data";
@@ -73,6 +75,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
   const { message, error } = await searchParams;
   const [data, settings, site] = await Promise.all([loadBodyshopJob(jobId), getSettings(), getSiteUrl()]);
   if (!data) return refuseRecord("job", jobId);
+  const todo = await loadJobsToDo(jobId, role === "owner" || role === "service_advisor" ? "bodyshop" : viewerSideOf(staff.department_id ?? null, staff.role_id));
   const { job, stages, assignments, clockings, signoffs, removedItems, updates, kinds, film, tintPercent } = data;
   const v = job.vehicle;
   const admin = createAdminClient();
@@ -190,6 +193,8 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
           </>
         }
       />
+      {/* 11 November 2026 (Section 9): THE jobs list (the bodyshop's jobs first, the workshop's folded). */}
+      {todo ? <JobsToDo jobId={jobId} data={todo} canTick={["owner", "team_leader", "workshop_manager", "technician"].includes(role)} showCheck={["owner", "service_advisor", "workshop_manager"].includes(role)} /> : null}
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
 

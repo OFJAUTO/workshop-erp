@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6,e7,e8").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6,e7,e8,e9").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -4434,6 +4434,57 @@ await section("e8", "department tablets", async () => {
   check("t2: the owner sets it to Workshop", !!set);
   await go(own.page, `${base}/tablet/register`);
   check("t3: registering a shared tablet asks for its department", (await own.page.locator("[data-register-department]").count()) === 1);
+  await own.browser.close();
+});
+
+/* ================================================================================================= */
+/* e9 (11 November 2026, Section 9): JOBS TO DO - the approved jobs numbered in capitals, each job's    */
+/* parts under it, the viewer's department first and the other folded, "Customer said no" folded; the */
+/* bodyshop ticks its job; the car card says "Bodyshop 1/1 done · Workshop 0/n"; the printed job card  */
+/* is the same list. No prices anywhere on it.                                                         */
+/* ================================================================================================= */
+await section("e9", "jobs to do", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-jobs-to-do";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const q = (await sql("select id from public.quotations where job_id = $1 and status = 'approved' and is_active order by created_at desc limit 1", [jobId]))[0];
+  // A bodyshop job on the same approved quotation (put on while a draft, then approved again).
+  await sql("update public.quotations set status = 'draft' where id = $1", [q.id]);
+  const paint = (await sql("insert into public.quotation_lines (quotation_id, line_type, title, quantity, unit_price, line_total, position, is_active, created_by, updated_by) values ($1, 'labour', 'E2E Paint front bumper', 1, 500, 500, 90, true, $2, $2) returning id", [q.id, ownerId]))[0];
+  await sql("update public.quotations set status = 'approved' where id = $1", [q.id]);
+  await sql("update public.quotation_lines set team = 'paint' where id = $1", [paint.id]);
+  await sql("insert into public.part_items (job_id, description, quantity, cost_aed, supplier, availability, created_by, updated_by) values ($1, 'E2E Front bumper clip', 2, 5, 'E2E SUPPLIER', 'in_stock', $2, $2)", [jobId, ownerId]);
+  await sql("insert into public.declined_work (job_id, customer_id, vehicle_id, title, is_active, created_by, updated_by) select $1, j.customer_id, j.vehicle_id, 'E2E Rear wiper blade', true, $2, $2 from public.jobs j where j.id = $1", [jobId, ownerId]);
+  const own = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  const op = own.page;
+  // j1. The printed job card: the same list, no prices.
+  await go(op, `${base}/print/job-card/${jobId}`);
+  const card = op.locator("[data-jobs-to-do]");
+  check("j1: the printed job card shows JOBS TO DO", (await card.count()) === 1);
+  const paintRow = op.locator(`[data-todo-job="${paint.id}"]`);
+  check("j1: the paint job sits with the Bodyshop, in capitals", (await paintRow.getAttribute("data-todo-side")) === "bodyshop" && /E2E PAINT FRONT BUMPER/.test((await paintRow.textContent()) ?? ""));
+  check("j1: its part under it, Not ordered", /E2E FRONT BUMPER CLIP/.test((await paintRow.textContent()) ?? "") && (await paintRow.locator('[data-todo-part="not_ordered"]').count()) === 1);
+  check("j1: Customer said no – don't do, with the declined line", /E2E REAR WIPER BLADE/.test((await op.locator("[data-todo-declined]").textContent()) ?? ""));
+  check("j1: no prices on it", !/AED/.test((await card.textContent()) ?? ""));
+  await op.screenshot({ path: `${proof}/e9-printed-job-card-1440.png`, fullPage: true }).catch(() => null);
+  // j2. The bodyshop page: the bodyshop's jobs first, the workshop's folded; tick the paint job.
+  await go(op, `${base}/bodyshop/${jobId}`);
+  const head = ((await op.locator("[data-todo-mine-head]").textContent()) ?? "").trim();
+  check(`j2: "Your jobs – Bodyshop" first, the workshop's folded (${head})`, /Your jobs – Bodyshop \(1\)/.test(head) && (await op.locator("[data-todo-others]").count()) === 1);
+  await op.locator(`[data-todo-tick="${paint.id}"]`).click();
+  const ticked = await until(async () => !!(await sql("select done_at from public.job_line_ticks where job_id = $1 and quotation_line_id = $2", [jobId, paint.id]))[0]?.done_at, 40, 500);
+  check("j2: the tick is saved", ticked);
+  await go(op, `${base}/bodyshop/${jobId}`);
+  const words = (await op.locator("[data-jobs-to-do]").getAttribute("data-todo-words")) ?? "";
+  check(`j2: the progress reads Bodyshop 1/1 done (${words})`, /Bodyshop 1\/1 done/.test(words) && /Workshop 0\//.test(words));
+  await op.locator("[data-jobs-to-do]").screenshot({ path: `${proof}/e9-bodyshop-jobs-1440.png` }).catch(() => null);
+  // j3. The car card on the dashboard.
+  await go(op, `${base}/dashboard`);
+  const chip = await op.locator(`[data-flash-id="${jobId}"] [data-car-sides]`).getAttribute("data-car-sides").catch(() => null);
+  check(`j3: the car card says both sides (${chip})`, !!chip && /Bodyshop 1\/1 done/.test(chip));
   await own.browser.close();
 });
 

@@ -1,3 +1,4 @@
+import { loadSideProgress } from "@/lib/jobs-to-do-data";
 import { ApprovalsTile } from "@/components/ApprovalsTile";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { lpoApprovalsWaiting } from "@/lib/accounts-waiting";
@@ -118,6 +119,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const now = new Date();
 
   const showInspectionTime = role === "owner" || role === "workshop_manager" || role === "service_advisor";
+  // 11 November 2026 (Section 9): the two departments' progress on cars with work on both sides.
+  const sides = await loadSideProgress(all.map((j) => j.id)).catch(() => new Map<string, string>());
   const rows: DashRow[] = all.map((j) => {
     const clock = clockFor(j);
     const insp = j.inspection?.find((i) => i.status === "in_progress" || i.status === "submitted" || i.status === "approved") ?? null;
@@ -212,7 +215,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
       {role === "owner" ? <DepositsWaiting /> : null}
 
-      <DashboardCars rows={rows} initialPending={pending} advisorView={role === "service_advisor"} />
+      <DashboardCars rows={rows.map((r) => ({ ...r, sidesWords: sides.get(r.id) ?? null }))} initialPending={pending} advisorView={role === "service_advisor"} />
 
       {/* Nothing on screen when nothing runs: empty boxes are clutter. */}
       {onClock.length ? (

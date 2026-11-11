@@ -13,6 +13,8 @@ import type { QuotePickItem } from "@/lib/quote-history";
 /** One car on the dashboard, already shaped on the server so the list can be filtered and sorted here. */
 export type DashRow = {
   id: string;
+  /** 11 November 2026 (Section 9): "Bodyshop 3/3 done · Workshop 0/4" on a car with both sides. */
+  sidesWords?: string | null;
   /** Items without a car: no inspection, no wash. */
   loose: boolean;
   jobNumber: string;
@@ -258,6 +260,7 @@ export function DashboardCars({ rows, initialPending, advisorView = false }: { r
                   <TimingBadge timing={j.timing} />
                   {j.inspectionLabel && j.timing.tone !== "red" ? <Badge tone="neutral">{j.inspectionLabel}</Badge> : null}
                   <AdvisorBadge name={j.advisorName} />
+                  {j.sidesWords ? <span className="rounded-full border border-line-strong px-2 py-0.5 text-xs font-bold" data-car-sides={j.sidesWords}>{j.sidesWords}</span> : null}
                 </>
               }
               status={{ line: j.statusLine || STATUS_LABELS[j.status] }}

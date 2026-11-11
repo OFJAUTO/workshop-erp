@@ -45,6 +45,9 @@ begin
   delete from public.bodyshop_updates where job_id = any(job_ids);
   delete from public.bodyshop_stages where job_id = any(job_ids);
   update public.jobs set final_check_appointment_id = null, bodyshop_after_photo_id = null where id = any(job_ids);
+  if to_regclass('public.job_line_ticks') is not null then
+    delete from public.job_line_ticks where job_id = any(job_ids) or quotation_line_id in (select l.id from public.quotation_lines l join public.quotations q on q.id = l.quotation_id where q.job_id = any(job_ids) or q.customer_id = any(cust_ids) or q.vehicle_id = any(veh_ids));
+  end if;
   delete from public.quotation_lines where quotation_id in (select id from public.quotations where job_id = any(job_ids) or customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
   delete from public.quotation_events where quotation_id in (select id from public.quotations where job_id = any(job_ids) or customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
   delete from public.quotations where job_id is null and (customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
@@ -126,6 +129,9 @@ begin
   delete from public.bodyshop_updates where job_id = any(job_ids);
   delete from public.bodyshop_stages where job_id = any(job_ids);
   update public.jobs set final_check_appointment_id = null, bodyshop_after_photo_id = null where id = any(job_ids);
+  if to_regclass('public.job_line_ticks') is not null then
+    delete from public.job_line_ticks where job_id = any(job_ids) or quotation_line_id in (select l.id from public.quotation_lines l join public.quotations q on q.id = l.quotation_id where q.job_id = any(job_ids) or q.customer_id = any(cust_ids) or q.vehicle_id = any(veh_ids));
+  end if;
   delete from public.quotation_lines where quotation_id in (select id from public.quotations where job_id = any(job_ids) or customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
   delete from public.quotation_events where quotation_id in (select id from public.quotations where job_id = any(job_ids) or customer_id = any(cust_ids) or vehicle_id = any(veh_ids));
   delete from public.quotations where job_id is null and (customer_id = any(cust_ids) or vehicle_id = any(veh_ids));

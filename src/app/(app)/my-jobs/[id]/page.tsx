@@ -1,3 +1,5 @@
+import { JobsToDo } from "@/components/JobsToDo";
+import { loadJobsToDo, viewerSideOf } from "@/lib/jobs-to-do-data";
 import { DamageSection } from "@/components/DamageSection";
 import { DamageFoundAfter } from "@/components/DamageFoundAfter";
 import { damageAfterReady, loadCarDamage } from "@/lib/damage-data";
@@ -106,6 +108,8 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
 
   // The work order, once the car is in Work (or back from a failed QC).
   const work = inWork || job.status === "pending_qc" ? await loadWork(id) : null;
+  // 11 November 2026 (Section 9): THE jobs list, this person's department first.
+  const todo = work ? await loadJobsToDo(id, viewerSideOf(staff.department_id ?? null, staff.role_id)) : null;
   // The parts list loads whatever the stage: receiving on the tablet starts before the car is released to Work.
   const parts = await jobPartsState(id);
   const [qc, { data: sendBackEvent }, { data: managers }] = work
@@ -288,7 +292,9 @@ export default async function TechnicianJobPage({ params, searchParams }: { para
               <ul className="divide-y divide-line">{looseItems.map((it) => <li key={it.id} className="py-2 font-semibold">{it.quantity > 1 ? `${it.quantity} × ` : ""}{it.item_type}{it.description ? ` · ${it.description}` : ""}</li>)}</ul>
             </Card>
           ) : null}
+          {todo ? <JobsToDo jobId={id} data={todo} canTick={!!canWork} /> : null}
           <WorkJobs
+            hideList={!!todo && todo.mine.length + todo.others.length > 0}
             jobId={id}
             lines={panelLines}
             parts={[]}

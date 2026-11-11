@@ -1,6 +1,7 @@
 "use client";
 
 import type { QuoteLock } from "@/lib/quote-lock";
+import { guessJobForPart } from "@/lib/jobs-to-do";
 import { TextCounter } from "@/components/TextCounter";
 import { LINE_TEXT_MAX } from "@/lib/text-limits";
 import { flushTimers, onPageLeave } from "@/lib/app-version";
@@ -1038,6 +1039,7 @@ export function QuoteEditor({
     window.addEventListener("pointercancel", up);
   };
   const namedLabour = labourLines.filter((l) => l.title.trim());
+  const jobChoices = namedLabour.map((j) => ({ id: j.id, title: j.title }));
   const labourDone = namedLabour.filter(finishedLine).length;
   const compBlock = compFree.length ? compProblem(q) : null;
   const blockers = [...sendBlockers(q, lines, parts, { minMarkup: settings.minMarkup, openRequests: wait?.openRequests ?? 0, workshopEstimate, packageCosting: liveCosting, bodyshopRate: settings.bodyshopRate ?? 0, costAsks: settings.costAsks }), ...(compBlock ? [{ key: "comp", label: compBlock }] : [])];
@@ -1894,6 +1896,10 @@ export function QuoteEditor({
                           ) : null}
                           {/* A JOB's part (5 November 2026, once the columns exist): the advisor enters the price himself,
                               or hands his own price back to the parts desk. */}
+                          {/* 11 November 2026 (Section 9): which job this part is for (guessed by its name; the technician sees it under that job). */}
+                          {namedLabour.length ? (
+                            <label className="mb-1 flex items-center justify-end gap-1 text-xs font-semibold text-muted">For job:<select value={l.parent_line_id ?? guessJobForPart(l.title, jobChoices) ?? ""} disabled={!!disabled} onChange={(e) => patch(l.id, { parent_line_id: e.target.value || null }, true)} className="min-h-9 max-w-48 rounded-control border border-line bg-white px-1 text-xs font-semibold uppercase" data-part-for-job={l.id} data-part-for-job-guessed={l.parent_line_id ? "0" : "1"}><option value="">No job</option>{jobChoices.map((j) => <option key={j.id} value={j.id}>{j.title.slice(0, 40)}</option>)}</select></label>
+                          ) : null}
                           {!est && isQuotation && l.part_item_id && l.unit_cost !== null && l.unit_cost !== undefined && !settings.partPricedBy?.[l.part_item_id]?.advisor ? <span className="mb-1 block text-right text-xs font-semibold text-muted" data-priced-by-desk={l.id}>Priced by parts desk</span> : null}
                           {!est && isQuotation && l.part_item_id && !disabled && settings.advisorPriceParts ? (() => {
                             const pp = settings.partPricedBy?.[l.part_item_id] ?? null;

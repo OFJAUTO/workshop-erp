@@ -157,7 +157,7 @@ export function WorkClock({ hoursCharged, minutesUsed, running, mineRunning, min
 }
 
 /** The read-only job list with the parts, "Additional work found", and "Job finished". */
-export function WorkJobs({ jobId, lines, parts, findings, canWork, workDone, severalTechnicians, myPartDone, finishNeedsPin = false, finishAction, reportAction }: { finishNeedsPin?: boolean; jobId: string; lines: PanelLine[]; parts: PanelPart[]; findings: PanelFinding[]; canWork: boolean; workDone: boolean; severalTechnicians: boolean; myPartDone: boolean; finishAction: () => void; reportAction: (formData: FormData) => void }) {
+export function WorkJobs({ jobId, lines, parts, findings, canWork, workDone, severalTechnicians, myPartDone, finishNeedsPin = false, finishAction, reportAction, hideList = false }: { /** 11 November 2026 (Section 9): the jobs are shown by JOBS TO DO above. */ hideList?: boolean; finishNeedsPin?: boolean; jobId: string; lines: PanelLine[]; parts: PanelPart[]; findings: PanelFinding[]; canWork: boolean; workDone: boolean; severalTechnicians: boolean; myPartDone: boolean; finishAction: () => void; reportAction: (formData: FormData) => void }) {
   const [reportOpen, setReportOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [findingFiles, setFindingFiles] = useState<JobFile[]>([]);
@@ -165,7 +165,7 @@ export function WorkJobs({ jobId, lines, parts, findings, canWork, workDone, sev
   const [findingWaiting, setFindingWaiting] = useState(0);
   return (
     <div className="flex flex-col gap-4">
-      <Card className="flex flex-col gap-2">
+      {hideList ? null : <Card className="flex flex-col gap-2">
         <SectionLabel right={`${lines.length} job${lines.length === 1 ? "" : "s"}`}>Jobs on this car</SectionLabel>
         {lines.length === 0 ? <p className="text-sm text-muted">No work lines yet.</p> : null}
         <ol className="divide-y divide-line">
@@ -184,7 +184,7 @@ export function WorkJobs({ jobId, lines, parts, findings, canWork, workDone, sev
         {parts.some((p) => p.state !== "handed") ? (
           <p className="border-t border-line pt-2 text-xs font-bold text-amber-text">{parts.filter((p) => p.state !== "handed").length} part{parts.filter((p) => p.state !== "handed").length === 1 ? "" : "s"} not received yet · see &quot;Parts for this car&quot;</p>
         ) : null}
-      </Card>
+      </Card>}
 
       <Card className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-2">

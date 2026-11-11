@@ -542,6 +542,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         }
         actions={
           <>
+            {/* 11 November 2026 (Section 9): THE jobs list on paper. */}
+            {job.first_approval_at ? <a href={`/print/job-card/${id}`} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center justify-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-print-job-card-link>Print job card</a> : null}
             {latestApproval?.token && seesCustomerDetails ? <ViewAsCustomer href={`/approve/${latestApproval.token}`} notSent={!latestApproval.sent_at} /> : null}
             {loose ? (
               <LinkButton href={`/jobs/${id}/gate-in`} tone="secondary" data-gate-in-details>
