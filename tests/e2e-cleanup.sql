@@ -237,6 +237,10 @@ set session_replication_role = default;
 
 -- Stock orders, stock items and the notifications the Part C tests make.
 set session_replication_role = replica;
+do $$ begin if to_regclass('public.stock_reversals') is not null then
+  delete from public.stock_reversals where stock_item_id in (select id from public.stock_items where name ilike 'e2e %');
+end if; end $$;
+delete from public.stock_issues where stock_item_id in (select id from public.stock_items where name ilike 'e2e %');
 delete from public.stock_movements where stock_item_id in (select id from public.stock_items where name ilike 'e2e %') or po_id in (select id from public.purchase_orders where supplier_name ilike 'e2e %');
 delete from public.supplier_invoice_edits where po_id in (select id from public.purchase_orders where supplier_name ilike 'e2e %');
 -- Further supplier invoices on an LPO (10 November 2026, Section 3) and their Zoho rows.

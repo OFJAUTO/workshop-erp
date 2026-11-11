@@ -91,6 +91,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "advisor_question", label: "Parts (or a colleague) asks you about one of your cars", locked: true },
   { type: "advisor_answer", label: "The advisor answered your question about a car", locked: true },
   { type: "po_decided", label: "Your LPO was approved or refused", locked: true },
+  { type: "stock_reversal", label: "A stock entry to reverse (owner) or its decision", locked: true },
   { type: "po_owner_review", label: "An LPO sent for owner approval, the owner's reply or decision", locked: true },
   { type: "parts_arrived", label: "Parts arrived for your car", locked: true },
   { type: "parts_late", label: "A part is past its expected date", locked: true },

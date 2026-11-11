@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -3752,6 +3752,87 @@ await section("d7", "clocking start pause stop", async () => {
   check(`k5: Stop = my part is done ("${n4}")`, /my part is done/i.test(n4 ?? "") && last?.closed_reason === "done" && last?.ended_at !== null);
   check("k5: nothing is left running", (await sql("select count(*)::int as n from public.bodyshop_clockings where staff_id = $1 and ended_at is null and is_active", [installer]))[0].n === 0);
   await tb.close();
+});
+
+/* ================================================================================================= */
+/* d8 (10 November 2026, Section 8): reverse a mistaken stock entry. "BLUE - COOLANT +5 → 5 at       */
+/* AED 49.00 · Opening stock" reversed with a reason, the owner approves, "−5 → 0 · reversed …       */
+/* approved by …"; blocked when some was issued (the job named); moved to a job instead; an empty    */
+/* item archived.                                                                                    */
+/* ================================================================================================= */
+await section("d8", "stock reverse a mistaken entry", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-10-stock-reverse";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const jobNumber = (await sql("select job_number from public.jobs where id = $1", [jobId]))[0]?.job_number;
+  const parts = (await sql("select id from public.staff where role_id = 'parts' and is_active order by created_at limit 1"))[0]?.id;
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const mkItem = async (name, qty) => {
+    const id = (await sql("insert into public.stock_items (name, unit, quantity, unit_cost, item_type, created_by, updated_by) values ($1, 'L', $2, 49, 'consumable', $3, $3) returning id", [name, qty, parts]))[0]?.id;
+    const mv = (await sql("insert into public.stock_movements (stock_item_id, kind, quantity, unit_cost, quantity_after, note, created_by, updated_by) values ($1, 'in', $2, 49, $2, 'Opening stock', $3, $3) returning id", [id, qty, parts]))[0]?.id;
+    return { id, mv };
+  };
+  const A = await mkItem("E2E BLUE - COOLANT", 5);
+  const B = await mkItem("E2E BRAKE CLEANER", 5);
+  const C = await mkItem("E2E WIPER FLUID", 4);
+  // B: 3 already issued to the job, 2 left on the shelf.
+  await sql("insert into public.stock_movements (stock_item_id, kind, quantity, unit_cost, quantity_after, job_id, note, created_by, updated_by) values ($1, 'out', -3, 49, 2, $2, 'Issued', $3, $3)", [B.id, jobId, parts]);
+  await sql("update public.stock_items set quantity = 2 where id = $1", [B.id]);
+  const since = Number((await sql("select coalesce(max(id), 0) as m from public.notifications"))[0].m);
+
+  const pb = await browserForId(parts, { viewport: { width: 1440, height: 900 } });
+  const pp = pb.page;
+  const ask = async (mv, reason, jobPick) => {
+    await go(pp, `${base}/parts/stock?v=${Date.now()}`);
+    const box = pp.locator(`[data-reverse-entry="${mv}"]`);
+    await box.locator("summary").click();
+    if (jobPick) {
+      await box.locator('input[value="move_to_job"]').check();
+      await box.locator("[data-reverse-job]").selectOption(jobPick);
+    }
+    await box.locator("[data-reverse-reason]").fill(reason);
+    await box.locator("[data-reverse-send]").click();
+    await pp.waitForURL(/message=|error=/, { timeout: 30000 }).catch(() => null);
+    return decodeURIComponent((pp.url().split(/[?&](?:message|error)=/)[1] ?? "").split("#")[0].replace(/\+/g, " "));
+  };
+  // r1. Parts ask to reverse it with the reason; the owner gets a bell.
+  const w1 = await ask(A.mv, "Entered by mistake");
+  check(`r1: sent to the owner (${w1.slice(0, 80)})`, /Sent to the owner/.test(w1) && (await sql("select status from public.stock_reversals where movement_id = $1", [A.mv]))[0]?.status === "pending");
+  check("r1: the owner's bell", (await sql("select count(*)::int as n from public.notifications where id > $1 and staff_id = $2 and type = 'stock_reversal'", [since, ownerId]))[0].n >= 1);
+  await pp.locator("[data-stock-reversals]").screenshot({ path: `${proof}/d8-reverse-request-1440.png` }).catch(() => null);
+  // r2. Blocked when some was issued: the job is named.
+  const w2 = await ask(B.mv, "Entered by mistake");
+  check(`r2: blocked, names the job (${w2.slice(0, 120)})`, /already issued/.test(w2) && w2.includes(jobNumber));
+  // r3. Move to a job instead.
+  const w3 = await ask(C.mv, "Bought for this car", jobId);
+  check(`r3: move to the job sent to the owner (${w3.slice(0, 60)})`, /Sent to the owner/.test(w3));
+  await pb.browser.close();
+
+  // r4. The owner approves both: the opposite movement, and the issue to the job.
+  const ob = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+  const op = ob.page;
+  for (const item of [A, C]) {
+    await go(op, `${base}/parts/stock?v=${Date.now()}`);
+    const row = op.locator("[data-reversal='pending']").filter({ hasText: item === A ? "BLUE" : "WIPER" });
+    await row.locator("[data-reversal-approve]").click();
+    await op.waitForURL(/message=|error=/, { timeout: 30000 }).catch(() => null);
+  }
+  const last = (await sql("select kind, quantity::float as q, quantity_after::float as a, note from public.stock_movements where stock_item_id = $1 order by created_at desc limit 1", [A.id]))[0];
+  check(`r4: "−5 → 0 · reversed: … approved by" (${JSON.stringify(last)})`, last?.q === -5 && last?.a === 0 && /reversed: Entered by mistake · approved by /.test(last?.note ?? ""));
+  const itemA = (await sql("select quantity::float as q from public.stock_items where id = $1", [A.id]))[0];
+  check("r4: quantity corrected, history kept (both movements)", itemA?.q === 0 && (await sql("select count(*)::int as n from public.stock_movements where stock_item_id = $1", [A.id]))[0].n === 2);
+  const issue = (await sql("select quantity::float as q from public.stock_issues where stock_item_id = $1 and job_id = $2", [C.id, jobId]))[0];
+  check(`r4: moved to the job, its cost on the car (${JSON.stringify(issue)})`, issue?.q === 4);
+  await go(op, `${base}/parts/stock#reversals`);
+  await op.locator("[data-stock-reversals]").screenshot({ path: `${proof}/d8-owner-approved-1440.png` }).catch(() => null);
+  // r5. The empty item is archived (hidden, not deleted).
+  await op.locator(`[data-archive-item="${A.id}"]`).click();
+  await op.waitForURL(/message=|error=/, { timeout: 30000 }).catch(() => null);
+  const arch = (await sql("select is_active from public.stock_items where id = $1", [A.id]))[0];
+  check("r5: an empty item archived, not deleted", arch?.is_active === false);
+  await ob.browser.close();
 });
 
 const failed = summary();

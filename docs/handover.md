@@ -1,14 +1,14 @@
-# Handover – 11 November 2026, 11:15 Dubai (10 Nov list, in progress)
+# Handover – 11 November 2026, 09:15 Dubai (10 Nov list, in progress)
 
 **NEEDS OMAR (now):**
 1. Reply **"apply"** when convenient for the one waiting database change (several invoices per LPO); see WAITING FOR APPLY below.
 2. **J-00490 (comeback):** the car has no earlier job in the ERP (its record was made on 26 Oct). The original work was before the ERP, so the comeback screen (Section 9) will offer "original job not in the ERP" with the old invoice number.
 
-**Live (10 Nov list):** S1 paid means paid (deafd90) · S2 Autel post-scan (c6b74c2) · S3 several invoices per LPO (6ebd1f0, switched on after apply) · S4 send LPO for owner approval (switched on after apply) · S5 supplier payments tab · S6 proof on every payment method · S7 clocking Start / Pause / Stop. Last push 11 Nov 11:15 Dubai.
+**Live (10 Nov list):** S1 paid means paid (deafd90) · S2 Autel post-scan (c6b74c2) · S3 several invoices per LPO (6ebd1f0, after apply) · S4 send LPO for owner approval (103e877, after apply) · S5 supplier payments tab (c5ae8b3) · S6 proof on every payment method (15b8557) · S7 clocking Start / Pause / Stop (0088d3f) · S8 stock reverse (after apply). Pushed 07:55 to 09:15 Dubai.
 
-**WAITING FOR APPLY:** 1 `20261212090000_lpo_invoices.sql` · 2 `20261212100000_lpo_owner_review.sql` (backup `backups/2026-11-11T03-53-15`).
+**WAITING FOR APPLY:** 1 `20261212090000_lpo_invoices.sql` · 2 `20261212100000_lpo_owner_review.sql` · 3 `20261212110000_stock_reversals.sql` (backup `backups/2026-11-11T03-53-15`; a fresh one is taken at apply).
 
-**Working on:** Section 8 (stock: reverse a mistaken entry). Then 9 and 10.
+**Working on:** Section 9 (comeback at our cost). Then 10.
 
 **Known stale test:** test-i check 4 (the team leader's one-tap pick on My team) fails on the TEST copy; not caused by this batch, to look at with the end-of-batch run.
 

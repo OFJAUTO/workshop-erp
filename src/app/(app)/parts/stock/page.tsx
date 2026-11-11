@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { loadReversals, reversalsReady, reversible } from "@/lib/stock-reversals";
+import { archiveStockItemAction, askReversalAction, decideReversalAction } from "./reversal-actions";
 import { Badge, Button, Card, ChoiceButtons, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDayTime } from "@/lib/format";
@@ -25,7 +27,7 @@ const KIND_LABEL: Record<string, string> = { in: "In", out: "Issued", count: "Co
  * movement is listed. Issuing to a job stays as it was (by quantity, the technician's PIN above the limit).
  */
 export default async function StockPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; count?: string; order?: string; reorder?: string }> }) {
-  await requirePermission("manageStock");
+  const staff = await requirePermission("manageStock");
   const { message, error, count, order, reorder } = await searchParams;
   const admin = createAdminClient();
   const settings = await getSettings();
@@ -38,6 +40,14 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
     admin.from("purchase_orders").select("id, number, supplier_name, status, total_cost_aed").eq("kind", "stock").eq("is_active", true).in("status", ["pending_approval", "approved", "ordered", "partly_received"]).order("created_at", { ascending: false }),
   ]);
   const items = ((itemsRaw ?? []) as Record<string, unknown>[]).map(toStockItem);
+  // Reverse a mistaken entry (10 November 2026, Section 8): the requests, the owner's decisions and every open job to move stock to.
+  const reversalsOn = await reversalsReady();
+  const reversals = await loadReversals();
+  const reversalOf = (movementId: string) => reversals.find((r) => r.movement_id === movementId && r.status !== "refused") ?? null;
+  const isOwner = staff.role_id === "owner" && !staff.viewingAs;
+  const { data: allOpen } = reversalsOn ? await admin.from("jobs").select("id, job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("is_open", true).order("job_number", { ascending: false }).limit(300) : { data: [] };
+  const moveJobs = (allOpen ?? []) as unknown as OpenJob[];
+  const pendingReversals = reversals.filter((r) => r.status === "pending");
   const openJobs = (jobs ?? []) as unknown as OpenJob[];
   const supplierName = new Map((suppliers ?? []).map((s) => [s.id, s.name]));
   const itemName = new Map(items.map((i) => [i.id, i.name]));
@@ -133,6 +143,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
                     {i.supplier_id ? <span className="text-xs text-muted">{supplierName.get(i.supplier_id)}</span> : null}
                     {isLow(i) ? <Badge tone="red">Below minimum</Badge> : null}
                     {isLow(i) ? <LinkButton href={`/parts/stock?reorder=${i.id}`} size="md" data-reorder={i.id}>Reorder</LinkButton> : null}
+                    {Math.abs(i.quantity) < 0.0005 && !staff.viewingAs ? <form action={archiveStockItemAction.bind(null, i.id)}><Button type="submit" tone="ghost" size="md" data-archive-item={i.id}>Archive</Button></form> : null}
                   </div>
                   <details className="text-xs">
                     <summary className="cursor-pointer min-h-9 flex items-center font-semibold text-muted">Edit the item or adjust the figure</summary>
@@ -175,6 +186,28 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
               <Button type="submit" size="md" data-add-stock-item>Add item</Button>
             </form>
           </Card>
+          {reversalsOn ? (
+            <Card className={`flex flex-col gap-2 scroll-mt-4 ${pendingReversals.length ? "border-2 border-amber-bar" : ""}`} id="reversals" data-stock-reversals>
+              <SectionLabel right={pendingReversals.length ? `${pendingReversals.length} waiting` : undefined}>Reversed entries</SectionLabel>
+              {message || error ? <p className={`text-sm font-semibold ${error ? "text-red" : "text-green-text"}`} data-reversal-answer>{error ?? message}</p> : null}
+              {reversals.length === 0 ? <p className="text-sm text-muted">No entry reversed. On a wrong entry below: &quot;Reverse this entry&quot;.</p> : null}
+              <ul className="divide-y divide-line text-sm">
+                {reversals.slice(0, 20).map((r) => (
+                  <li key={r.id} className="flex flex-col gap-1 py-2" data-reversal={r.status}>
+                    <span><span className="font-semibold">{itemName.get(r.stock_item_id) ?? "Item"} +{r.quantity}</span> · {r.kind === "move_to_job" ? `move to ${moveJobs.find((j) => j.id === r.job_id)?.job_number ?? "a job"}` : "reverse"} · {r.reason}</span>
+                    <span className="text-xs text-muted">{r.status === "pending" ? "Waiting for the owner" : r.status === "approved" ? `Approved${r.decided_at ? ` ${formatDayTime(r.decided_at)}` : ""}` : "Refused"}{r.decision_note ? ` · ${r.decision_note}` : ""}</span>
+                    {r.status === "pending" && isOwner ? (
+                      <form action={decideReversalAction.bind(null, r.id)} className="flex flex-wrap items-center gap-2" data-reversal-decide>
+                        <Input name="note" placeholder="Note (optional)" className="min-w-[12rem] flex-1" textCase="sentence" />
+                        <Button type="submit" name="decision" value="approve" size="md" data-reversal-approve>Approve</Button>
+                        <Button type="submit" name="decision" value="refuse" tone="secondary" size="md" data-reversal-refuse>Refuse</Button>
+                      </form>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
           <Card className="flex flex-col gap-2">
             <SectionLabel right={`${(moves ?? []).length}`}>Movements</SectionLabel>
             {(moves ?? []).length === 0 ? <p className="text-sm text-muted">Nothing moved yet.</p> : null}
@@ -187,6 +220,20 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
                   <span>{Number(m.quantity) > 0 ? "+" : ""}{Number(m.quantity)} → {Number(m.quantity_after)}</span>
                   {m.unit_cost !== null && (m.kind === "in" || m.kind === "return") ? <span className="text-xs text-muted">at {money(Number(m.unit_cost))}</span> : null}
                   <span className="text-xs text-muted">{m.job?.job_number ?? m.po?.number ?? ""}{m.note ? ` · ${m.note}` : ""}{m.by ? ` · ${m.by.display_name}` : ""}</span>
+                  {reversalsOn && reversalOf(m.id) ? <Badge tone={reversalOf(m.id)!.status === "approved" ? "neutral" : "amber"}>{reversalOf(m.id)!.status === "approved" ? "Reversed" : "Waiting for owner"}</Badge> : null}
+                  {reversalsOn && !reversalOf(m.id) && reversible(m) && !staff.viewingAs ? (
+                    <details className="basis-full" data-reverse-entry={m.id}>
+                      <summary className="inline-flex min-h-9 cursor-pointer list-none items-center text-xs font-bold underline underline-offset-4 [&::-webkit-details-marker]:hidden">Reverse this entry</summary>
+                      <form action={askReversalAction.bind(null, m.id)} className="mt-1 flex flex-col gap-2 rounded-control border border-line bg-white p-2">
+                        <label className="flex items-center gap-2 text-sm"><input type="radio" name="kind" value="reverse" defaultChecked className="h-5 w-5 accent-ink" />Reverse it (entered by mistake)</label>
+                        <label className="flex flex-wrap items-center gap-2 text-sm"><input type="radio" name="kind" value="move_to_job" className="h-5 w-5 accent-ink" />Move to a job instead (it was bought for a car)
+                          <Select name="job_id" className="w-56" data-reverse-job><option value="">Pick the job…</option>{moveJobs.map((j) => <option key={j.id} value={j.id}>{j.job_number} · {j.vehicle ? formatPlate(j.vehicle) : ""}</option>)}</Select>
+                        </label>
+                        <Input name="reason" required minLength={5} placeholder="Why? e.g. entered by mistake" textCase="sentence" data-reverse-reason />
+                        <Button type="submit" size="md" className="self-start" data-reverse-send>Send to the owner</Button>
+                      </form>
+                    </details>
+                  ) : null}
                 </li>
               ))}
             </ul>
