@@ -1,4 +1,6 @@
 import { countsAsPaid } from "@/lib/bank-status";
+import { OwnerReviewCard, SendForOwner } from "./OwnerReviewCard";
+import { accountsLimitOf, loadReviews, lpoReviewReady, reviewLog } from "@/lib/lpo-review";
 import { LpoInvoicesCard } from "./LpoInvoicesCard";
 import { lpoInvoiceGross, lpoInvoiceState, lpoInvoicesReady } from "@/lib/lpo-invoices";
 import Link from "next/link";
@@ -135,6 +137,13 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   // Approve each supplier separately (8 November 2026): while the request waits, only the suppliers still waiting are
   // listed under "Parts by supplier"; the approved ones are their own LPO cards above.
   const pendingMain = isMain && po.status === "pending_approval";
+  // Send for owner approval (10 November 2026, Section 4).
+  const reviews = await loadReviews([po.id]);
+  const reviewEntries = (await reviewLog(reviews)).map((e) => { const r = reviews.find((x) => x.id === e.id)!; return { ...e, status: r.status, auto: r.auto }; });
+  const waitingOwnerAll = reviews.some((r) => r.status === "waiting" && !r.supplier);
+  const waitingOwnerOf = (sup: string) => reviews.some((r) => r.status === "waiting" && (!r.supplier || r.supplier.trim().toLowerCase() === sup.trim().toLowerCase()));
+  const reviewOn = await lpoReviewReady();
+  const accountsLimit = accountsLimitOf(settings as unknown as Record<string, unknown>);
   const onMainIds = new Set(parts.map((p) => p.id));
   const groupLines = pendingMain ? lines.filter((l) => onMainIds.has(l.part_item_id)) : lines;
   const supplierStates = pendingMain ? await mainSupplierStates(po.id) : [];
@@ -264,6 +273,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           <Notice tone="info">{returnsHere.map((r) => `${r.number}: ${r.description.toUpperCase()} × ${r.quantity} ${r.status === "credited" || r.status === "refunded" ? `went back (${r.status === "credited" ? `credit note ${r.creditNumber ?? ""}` : "refunded"})` : "is going back"}`).join(" · ")}. {po.supplier_invoice_status === "received" ? "Check the supplier's invoice: a returned part must be credited, never paid twice." : "When the supplier's invoice arrives, check it does not still charge the returned part (or that the credit note covers it)."} <Link href="/parts/returns" className="font-bold underline">Purchase returns</Link></Notice>
         </div>
       ) : null}
+      {canApprove || role === "owner" ? <OwnerReviewCard action={decidePurchaseOrder.bind(null, po.id)} entries={reviewEntries} isOwner={role === "owner" && !staff.viewingAs} pending={po.status === "pending_approval"} /> : null}
       {po.status === "pending_approval" ? <Notice tone="info">{isMain ? "Waiting for the owner or the head accountant. Approve each supplier on its own (its LPO is made at once), or Approve all." : "Waiting for the owner or the head accountant. The PDF cannot be downloaded or sent before approval."}</Notice> : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -318,7 +328,13 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                   {pendingMain && canApprove && (groups.length > 1 || supplierStates.length > 1) ? (() => {
                     const blockedLine = g.lines.find((l) => lineProblems.get(l.part_item_id) || repeatedPn.get(l.part_item_id));
                     const blocked = blockedLine ? (repeatedPn.get(blockedLine.part_item_id) ?? `${blockedLine.description.toUpperCase()}: not a real price yet`) : null;
-                    return <SupplierDecide action={decidePurchaseOrder.bind(null, po.id)} supplier={g.supplier} amount={supplierMoneyText(groupMoney(g))} blocked={blocked} depositShort={depositShort} isOwner={role === "owner"} reasons={reasonsFor(settings, "deposit_override")} />;
+                    if (role !== "owner" && waitingOwnerOf(g.supplier)) return <p className="text-sm font-semibold text-amber-bar" data-supplier-waiting-owner={g.supplier}>{g.supplier}: waiting for the owner.</p>;
+                    return (
+                      <div className="flex flex-col gap-2">
+                        <SupplierDecide action={decidePurchaseOrder.bind(null, po.id)} supplier={g.supplier} amount={supplierMoneyText(groupMoney(g))} blocked={blocked} depositShort={depositShort} isOwner={role === "owner"} reasons={reasonsFor(settings, "deposit_override")} />
+                        {role !== "owner" && reviewOn ? <SendForOwner action={decidePurchaseOrder.bind(null, po.id)} supplier={g.supplier} /> : null}
+                      </div>
+                    );
                   })() : null}
                 </div>
               ))}
@@ -443,7 +459,15 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {po.status === "pending_approval" && canApprove ? (
             <Card className="flex flex-col gap-2 border-ink">
               <SectionLabel>Approve this LPO</SectionLabel>
-              <DecideForm action={decidePurchaseOrder.bind(null, po.id)} problems={problemList.map((p) => p.words)} problemAdvice={problemAdvice} depositShort={depositShort} isOwner={role === "owner"} reasons={reasonsFor(settings, "deposit_override")} summary={[po.number, po.supplier_name, supplierMoneyText(isMain ? grandMoney : ownMoney), `${lines.length} line${lines.length === 1 ? "" : "s"}`]} />
+              {role !== "owner" && waitingOwnerAll ? (
+                <p className="text-sm font-semibold text-amber-bar" data-lpo-waiting-owner>Waiting for the owner: his decision or answer comes as a bell.</p>
+              ) : (
+                <>
+                  {role !== "owner" && accountsLimit > 0 && (isMain ? grandMoney : ownMoney).gross > accountsLimit ? <p className="text-sm font-semibold text-amber-bar" data-above-limit>Above your approval limit (AED {accountsLimit.toLocaleString("en-GB", { minimumFractionDigits: 2 })} incl. VAT): Approve sends it to the owner.</p> : null}
+                  <DecideForm action={decidePurchaseOrder.bind(null, po.id)} problems={problemList.map((p) => p.words)} problemAdvice={problemAdvice} depositShort={depositShort} isOwner={role === "owner"} reasons={reasonsFor(settings, "deposit_override")} summary={[po.number, po.supplier_name, supplierMoneyText(isMain ? grandMoney : ownMoney), `${lines.length} line${lines.length === 1 ? "" : "s"}`]} />
+                  {role !== "owner" && reviewOn ? <SendForOwner action={decidePurchaseOrder.bind(null, po.id)} /> : null}
+                </>
+              )}
             </Card>
           ) : null}
           {!isMain && po.status === "approved" ? (

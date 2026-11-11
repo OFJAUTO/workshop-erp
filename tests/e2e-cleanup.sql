@@ -240,6 +240,9 @@ set session_replication_role = replica;
 delete from public.stock_movements where stock_item_id in (select id from public.stock_items where name ilike 'e2e %') or po_id in (select id from public.purchase_orders where supplier_name ilike 'e2e %');
 delete from public.supplier_invoice_edits where po_id in (select id from public.purchase_orders where supplier_name ilike 'e2e %');
 -- Further supplier invoices on an LPO (10 November 2026, Section 3) and their Zoho rows.
+do $$ begin if to_regclass('public.lpo_owner_reviews') is not null then
+  delete from public.lpo_owner_reviews where po_id in (select id from public.purchase_orders where supplier_name ilike 'e2e %');
+end if; end $$;
 do $$ begin if to_regclass('public.lpo_invoices') is not null then
   delete from public.zoho_outbox where kind = 'lpoinvoice' and record_id in (select id from public.lpo_invoices where supplier_name ilike 'e2e %');
   delete from public.lpo_invoices where supplier_name ilike 'e2e %';

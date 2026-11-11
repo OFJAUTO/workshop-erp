@@ -16,6 +16,7 @@ Live backup before these: `backups/2026-11-11T03-53-15` (121 tables, 268,409 row
 | # | What | What it does on live | Size |
 |---|---|---|---|
 | 1 | `supabase/migrations/20261212090000_lpo_invoices.sql` (10 Nov, Section 3) | Adds the server-only `lpo_invoices` table (further supplier invoices on one LPO: number, date, amounts and VAT as printed, which lines and how many, checked/paid/queried, its own Zoho bill), `purchase_orders.supplier_invoice_lines` (what the first invoice covers), `lpo_invoice_id` on supplier payment lines and invoice edits, and Zoho kind `lpoinvoice`. Until then the LPO page says several invoices per LPO switch on with the apply; one invoice per LPO works as before. | 1 table + 3 columns + 1 rule |
+| 2 | `supabase/migrations/20261212100000_lpo_owner_review.sql` (10 Nov, Section 4) | Adds the server-only `lpo_owner_reviews` table (accounts send an LPO or one supplier block to the owner with a note; the owner's reply or decision; the reminder stamp) and the setting `lpo_accounts_limit_aed` (0 = off). Until then the LPO page shows Approve and Refuse only, as before. | 1 table + 1 settings row |
 
 ## Applied on 9 November 2026, night
 

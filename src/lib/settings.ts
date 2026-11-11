@@ -227,6 +227,7 @@ const DEFAULTS = {
    *  under which a ticket skips LPO approval, and the minimum markup on the cost (200% = 3 × the cost). */
   lathe_price_list: [] as unknown[],
   lathe_lpo_threshold_aed: 200,
+  lpo_accounts_limit_aed: 0,
   lathe_min_markup_percent: 200,
   /** "Urgent" must mean urgent (9 November 2026): a customer waiting on us longer than these WORKING hours makes the
    *  task urgent on Waiting on you (Settings > Money). */

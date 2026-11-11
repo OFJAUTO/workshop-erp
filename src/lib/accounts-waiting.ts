@@ -1,4 +1,5 @@
 import { lpoAmounts } from "./supplier-vat";
+import { loadReviews, openReviewOf, reviewWords } from "@/lib/lpo-review";
 import { supplierMoneyText } from "./supplier-money";
 import "server-only";
 import { loadSupplierInvoices } from "./supplier-invoices";
@@ -214,7 +215,7 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
  * Every LPO waiting for approval, one line each, for the owner and accounts (1 November 2026: additions to an LPO that
  * waits, and the new approval request for parts added after an approval, included). A job LPO names the job.
  */
-export async function lpoApprovalsWaiting(): Promise<ExtraWaiting[]> {
+export async function lpoApprovalsWaiting(viewer: "owner" | "accounts" = "accounts"): Promise<ExtraWaiting[]> {
   const admin = createAdminClient();
   // The job number is read on its own: an unhinted purchase_orders → jobs embed is ambiguous and fails silently.
   const { data: lpos } = await admin.from("purchase_orders").select("id, number, supplier_id, supplier_name, total_cost_aed, kind, created_at, job_id").eq("status", "pending_approval").eq("is_active", true).order("created_at");
@@ -224,7 +225,24 @@ export async function lpoApprovalsWaiting(): Promise<ExtraWaiting[]> {
   // Supplier amounts with VAT (5 November 2026): the amount being approved, exactly as the approval screen shows it.
   const rows = (lpos ?? []) as { id: string; number: string; supplier_id?: string | null; supplier_name: string; total_cost_aed: number | string; kind: string; created_at: string; job_id: string | null }[];
   const amounts = await lpoAmounts(rows.map((p) => ({ id: p.id, kind: p.kind, status: "pending_approval", supplier_id: p.supplier_id ?? null, supplier_name: p.supplier_name, total_cost_aed: Number(p.total_cost_aed) || 0 })));
-  return rows.map((po) => ({
+  // Send for owner approval (10 November 2026, Section 4): the owner's line carries the accounts note.
+  const reviews = await loadReviews(rows.map((p) => p.id));
+  return rows.map((po) => {
+    const r = openReviewOf(reviews, po.id);
+    if (r) return {
+      jobId: `lpo:${po.id}`,
+      plate: po.number,
+      car: [po.job_id ? numberOf.get(po.job_id) : null, r.supplier ?? po.supplier_name].filter(Boolean).join(" · "),
+      what: reviewWords(r),
+      amount: amounts.get(po.id) ? supplierMoneyText(amounts.get(po.id)!) : aed(Number(po.total_cost_aed) || 0),
+      actionLabel: r.status === "waiting" ? (viewer === "owner" ? "Decide" : "Open") : (viewer === "owner" ? "Open" : "Decide"),
+      href: `/parts/orders/${po.id}#owner-review`,
+      always: true,
+      urgency: (r.reminded_at ? "red" : "amber") as "red" | "amber",
+      since: r.created_at,
+      hint: r.status === "waiting" ? `Accounts: ${r.note}` : `The owner replied: ${r.reply ?? ""}`,
+    };
+    return {
     jobId: `lpo:${po.id}`,
     plate: po.number,
     car: [po.job_id ? numberOf.get(po.job_id) : null, po.supplier_name].filter(Boolean).join(" · "),
@@ -236,5 +254,6 @@ export async function lpoApprovalsWaiting(): Promise<ExtraWaiting[]> {
     urgency: "amber" as const,
     since: po.created_at,
     hint: "One tap approves it on the LPO page (or refuse one line with its reason); Parts then order from each supplier.",
-  }));
+  };
+  });
 }

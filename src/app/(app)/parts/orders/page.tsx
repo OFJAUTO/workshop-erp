@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { loadReviews, openReviewOf, reviewWords } from "@/lib/lpo-review";
 import { seesCustomers } from "@/lib/customer-data";
 import { Words } from "@/components/Words";
 import { LiveRefresh } from "@/components/LiveRefresh";
@@ -119,6 +120,9 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
   } else {
     groups.push({ key: "all", title: TABS.find((t) => t.key === tab)?.label ?? "All", items: shown });
   }
+  // Send for owner approval (10 November 2026, Section 4): "Waiting for owner" on the row.
+  const reviews = await loadReviews(visible.filter((p) => p.status === "pending_approval").map((p) => p.id));
+  const reviewOfRow = (id: string) => openReviewOf(reviews, id);
   const tone = (p: PurchaseOrderRow): "neutral" | "amber" | "green" | "red" | "ink" => (p.status === "pending_approval" ? "amber" : p.status === "received" ? "green" : p.status === "cancelled" ? "neutral" : "ink");
 
   return (
@@ -171,6 +175,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
                     <span className="font-semibold">{p.supplier_name}</span>
                     {c ? <Words className="text-sm text-muted" text={`${c.plate} · ${c.car} · ${c.job}`} /> : p.kind === "stock" ? <span className="text-sm text-muted">for the shelf</span> : null}
                     <Badge tone={tone(p)}>{PO_STATUS_LABELS[p.status]}</Badge>
+                    {reviewOfRow(p.id) ? <span data-lpo-row-owner={reviewOfRow(p.id)!.status}><Badge tone={reviewOfRow(p.id)!.status === "waiting" ? "red" : "ink"}>{reviewWords(reviewOfRow(p.id)!)}</Badge></span> : null}
                     {supplierStatesOf.get(p.id)?.length ? <span className="text-xs font-semibold" data-lpo-row-suppliers>{supplierStatesOf.get(p.id)!.map((x) => `${x.supplier} ${x.state === "approved" ? "✓" : x.state === "refused" ? "refused" : "waiting"}`).join(" · ")}</span> : null}
                     {late && p.status !== "cancelled" ? <Badge tone="red">{late} line{late === 1 ? "" : "s"} late</Badge> : null}
                     {p.supplier_invoice_status === "to_follow" ? <Badge tone={invoiceAge >= redDays ? "red" : "amber"}>Invoice missing · {invoiceAge} day{invoiceAge === 1 ? "" : "s"}</Badge> : null}

@@ -201,7 +201,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       <LiveRefresh tables={["jobs", "gate_ins", "invoices", ...((await paymentReportsReady()) ? ["payment_reports"] : [])]} showUpdated />
       <HomeHeader staff={staff} gateIn={can(role, "gateIn")} />
 
-      <WaitingPanel staff={staff} extra={role === "service_advisor" || role === "owner" ? [...moneyWaiting, ...finalChecks, ...(role === "owner" ? [...(await lpoApprovalsWaiting()), ...(await zohoWaitingExtra())] : [])] : []} />
+      <WaitingPanel staff={staff} extra={role === "service_advisor" || role === "owner" ? [...moneyWaiting, ...finalChecks, ...(role === "owner" ? [...(await lpoApprovalsWaiting("owner")), ...(await zohoWaitingExtra())] : [])] : []} />
 
       {role === "owner" && profit ? (
         <ProfitPanel live target={Number(settings.daily_profit_target_aed) || 0} data={profit} />

@@ -596,6 +596,9 @@ export async function saveMoneyLimits(formData: FormData) {
   const waitHours = formData.has("urgent_customer_wait_hours") ? num("urgent_customer_wait_hours", 0.5, 48) : undefined;
   if (waitHours === null) redirect(`/settings?error=${encodeURIComponent("Urgent: a customer waiting 0.5 to 48 working hours.")}#money-limits`);
   // Parts accounts (3 November 2026, section 12): a returned part waiting for the supplier's credit note turns red after these days.
+  // Send for owner approval (10 November 2026, Section 4): accounts approve LPOs up to this amount incl. VAT (0 = no limit).
+  const lpoLimit = formData.has("lpo_accounts_limit_aed") ? num("lpo_accounts_limit_aed", 0, 10000000) : undefined;
+  if (lpoLimit === null) redirect(`/settings?error=${encodeURIComponent("Accounts LPO limit: 0 (no limit) to 10,000,000 AED.")}#money-limits`);
   const creditDays = formData.has("supplier_credit_wait_days") ? num("supplier_credit_wait_days", 1, 365) : undefined;
   if (creditDays === null) redirect(`/settings?error=${encodeURIComponent("Supplier credit notes: red after 1 to 365 days.")}#money-limits`);
   // Round-off (3 November 2026): advisors may round a document DOWN up to this (more needs the owner); UP capped for everyone.
@@ -614,6 +617,7 @@ export async function saveMoneyLimits(formData: FormData) {
     ...(markupWarn !== undefined ? [{ key: "part_markup_warn_percent", label: "Quotations: warn on a part markup over (%)", value: markupWarn }] : []),
     ...(reportHours !== undefined && reportHours !== null ? [{ key: "payment_report_reminder_hours", label: "Payment reported by an advisor and not recorded: remind accounts and the owner after (working hours)", value: Math.round(reportHours) }] : []),
     ...(waitHours !== undefined && waitHours !== null ? [{ key: "urgent_customer_wait_hours", label: "Waiting on you: a customer waiting longer than this is urgent (working hours)", value: waitHours }] : []),
+    ...(lpoLimit !== undefined && lpoLimit !== null ? [{ key: "lpo_accounts_limit_aed", label: "Accounts approve LPOs up to this amount incl. VAT (0 = no limit)", value: lpoLimit }] : []),
     ...(creditDays !== undefined && creditDays !== null ? [{ key: "supplier_credit_wait_days", label: "Supplier credit note: days to wait", value: Math.round(creditDays) }] : []),
     ...(roundDown !== undefined && roundDown !== null ? [{ key: "roundoff_down_limit_aed", label: "Round-off: advisors may round DOWN up to (AED per document)", value: roundDown }] : []),
     ...(roundUp !== undefined && roundUp !== null ? [{ key: "roundoff_up_limit_aed", label: "Round-off: rounding UP capped at (AED per document)", value: roundUp }] : []),

@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { lpoReviewHourly } from "@/lib/lpo-review";
 import { archiveOldNotices, clearDoneNotices } from "@/lib/bell-clear";
 import { checkLateJobs, recordJobRun } from "@/lib/background-jobs";
 import { quoteLeadIds } from "@/lib/quote-lead";
@@ -623,6 +624,16 @@ async function runHousekeeping(): Promise<Record<string, number>> {
     report.passkeyChallengesRemoved = data?.length ?? 0;
   } catch {
     report.passkeyChallengesRemoved = -1;
+  }
+
+  // 32. LPOs sent for owner approval (10 November 2026, Section 4): above the accounts limit go to the owner by
+  //     themselves; a question waiting 4 working hours gets one reminder.
+  try {
+    const r = await lpoReviewHourly(settings as unknown as Record<string, unknown>);
+    report.lpoReviewAuto = r.autoSent;
+    report.lpoReviewReminded = r.reminded;
+  } catch {
+    report.lpoReviewReminded = -1;
   }
 
   // 31. The bell only counts what is still open (9 November 2026): notices whose task is done clear for everyone;

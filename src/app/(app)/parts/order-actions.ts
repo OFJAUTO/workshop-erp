@@ -29,6 +29,8 @@ import { logAppError, dbWords } from "@/lib/app-errors";
 import { applyInvoicePrices } from "@/lib/price-change-server";
 import { DEFAULT_UNDO_MINUTES, mayUndo } from "@/lib/money-undo";
 import { objectExists } from "@/lib/upload-targets/common";
+import { accountsLimitOf, closeReviews, lpoReviewReady, replyToAccounts, sendForOwner } from "@/lib/lpo-review";
+import { lpoAmounts } from "@/lib/supplier-vat";
 
 function refresh(jobId: string | null, poId?: string) {
   revalidatePath("/parts");
@@ -98,6 +100,36 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
   const job = await jobBrief(po.job_id);
   // APPROVE EACH SUPPLIER SEPARATELY (8 November 2026, LPO-00059): one supplier of a main LPO request at a time.
   const supplierPick = po.kind === "main" ? blankToNull(formData.get("supplier")) : null;
+  // SEND FOR OWNER APPROVAL (10 November 2026, Section 4): accounts ask the owner; the owner replies to accounts.
+  const brief = { id: po.id, number: po.number, job_id: po.job_id, supplier_name: po.supplier_name };
+  if (decision === "owner") {
+    if (role === "owner") redirect(`${back}?error=${encodeURIComponent("You are the owner: approve or refuse it.")}`);
+    const r = await sendForOwner(brief, supplierPick, String(formData.get("owner_note") ?? ""), staff);
+    if (r.error) redirect(`${back}?error=${encodeURIComponent(r.error)}#owner-review`);
+    refresh(po.job_id, poId);
+    redirect(`${back}?message=${encodeURIComponent(r.words ?? "Sent to the owner ✓")}#owner-review`);
+  }
+  if (decision === "reply") {
+    if (role !== "owner" || staff.viewingAs) redirect(`${back}?error=${encodeURIComponent("Only the owner replies to accounts.")}`);
+    const r = await replyToAccounts(brief, String(formData.get("review_id") ?? ""), String(formData.get("reply") ?? ""), staff);
+    if (r.error) redirect(`${back}?error=${encodeURIComponent(r.error)}#owner-review`);
+    refresh(po.job_id, poId);
+    redirect(`${back}?message=${encodeURIComponent(r.words ?? "Answer sent ✓")}#owner-review`);
+  }
+  // While it waits for the owner, or above the accounts limit, accounts do not decide it.
+  if (role !== "owner" && (await lpoReviewReady())) {
+    const { data: waitingRows } = await admin.from("lpo_owner_reviews").select("id, supplier").eq("po_id", poId).eq("is_active", true).eq("status", "waiting");
+    if ((waitingRows ?? []).some((r) => !r.supplier || !supplierPick || String(r.supplier).trim().toLowerCase() === supplierPick.trim().toLowerCase())) redirect(`${back}?error=${encodeURIComponent("It is waiting for the owner: his answer comes as a bell.")}`);
+    const limit = accountsLimitOf((await getSettings()) as unknown as Record<string, unknown>);
+    if (limit > 0 && decision === "approve") {
+      const gross = (await lpoAmounts([{ id: po.id, kind: po.kind, status: po.status, supplier_id: po.supplier_id ?? null, supplier_name: po.supplier_name, total_cost_aed: po.total_cost_aed }])).get(po.id)?.gross ?? 0;
+      if (gross > limit) {
+        await sendForOwner(brief, null, `Above accounts limit: AED ${gross.toFixed(2)} incl. VAT (limit AED ${limit.toFixed(2)}).`, staff, { auto: true });
+        refresh(po.job_id, poId);
+        redirect(`${back}?error=${encodeURIComponent(`Above your approval limit (AED ${limit.toFixed(2)} incl. VAT): it now waits for the owner.`)}#owner-review`);
+      }
+    }
+  }
   const waitingOfSupplier = async () => {
     const { data: ls } = await admin.from("purchase_order_lines").select("id, part_item_id").eq("po_id", poId).eq("is_active", true);
     const ids = (ls ?? []).map((l) => l.part_item_id as string | null).filter((x): x is string => !!x);
@@ -115,6 +147,7 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
       if (r.error) redirect(`${back}?error=${encodeURIComponent(r.error)}`);
     }
     await finishMainIfDone(poId, staff);
+    await closeReviews(brief, supplierPick, "refused", reason, staff);
     refresh(po.job_id, poId);
     redirect(`${back}?message=${encodeURIComponent(`${supplierPick} refused ✓ — its ${mine.length} part${mine.length === 1 ? " is" : "s are"} back with Parts with your reason; a replacement joins this request.`)}#lpo-group-done`);
   }
@@ -122,6 +155,7 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
     await admin.from("purchase_orders").update({ status: "cancelled", notes: [po.notes, note ? `Refused: ${note}` : "Refused"].filter(Boolean).join("\n"), updated_by: staff.id }).eq("id", poId);
     await admin.from("part_items").update({ po_id: null, po_line_id: null, updated_by: staff.id }).eq("po_id", poId);
     await releaseCharges(poId, staff.id);
+    await closeReviews(brief, null, "refused", note, staff);
     if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_refused", note: `${po.number} refused by ${staff.display_name}${note ? `: ${note}` : ""}`, created_by: staff.id });
     await notifyRoles(["parts"], { type: "po_decided", title: `${po.number} refused by ${staff.display_name}`, body: `${note ? `Reason: ${note}. ` : ""}The parts are back under To order: fix the list and send a new LPO for approval.`, jobId: po.job_id, href: po.job_id ? `/parts/${po.job_id}#lpo` : "/parts" });
     refresh(po.job_id, poId);
@@ -171,6 +205,7 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
     for (const c of created) revalidatePath(`/parts/orders/${c.id}`);
     if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_approved", note: `${po.number}: ${supplierPick} approved by ${staff.display_name}${override ? ` (override: ${override.reason})` : ""} → ${created.map((c) => c.number).join(", ")}`, created_by: staff.id });
     await notifyRoles(["parts"], { type: "po_decided", title: `ORDER NOW · ${job?.job_number ?? po.number} · ${supplierPick}`, body: `${supplierPick} approved by ${staff.display_name} on ${po.number}: ${created.map((c) => c.number).join(", ")}. Send it (Copy, PDF or Email) and press Ordered.`, jobId: po.job_id, href: `/parts/${po.job_id}#lpos` });
+    await closeReviews(brief, supplierPick, "approved", note, staff);
     const done = await finishMainIfDone(poId, staff);
     if (!done) {
       const states = await mainSupplierStates(poId);
@@ -180,6 +215,7 @@ export async function decidePurchaseOrder(poId: string, formData: FormData) {
     refresh(po.job_id, poId);
     redirect(`${back}?message=${encodeURIComponent(`${supplierPick} approved ✓ — ${created.map((c) => c.number).join(", ")} is ready to send.${done ? " Every supplier of the request is decided." : " The other suppliers still wait."}`)}`);
   }
+  await closeReviews(brief, null, "approved", note, staff);
   await admin.from("purchase_orders").update({ status: "approved", approved_by: staff.id, approved_at: new Date().toISOString(), deposit_override_by: override?.by ?? null, deposit_override_reason: override?.reason ?? null, updated_by: staff.id }).eq("id", poId);
   if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "po_approved", note: `${po.number} approved by ${staff.display_name}${override ? ` (deposit override: ${override.reason})` : ""}`, created_by: staff.id });
   if (po.kind === "main") {

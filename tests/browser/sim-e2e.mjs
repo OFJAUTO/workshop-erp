@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -3438,6 +3438,118 @@ await section("d3", "one LPO, several supplier invoices", async () => {
   await page.locator("[data-lpo-invoices]").scrollIntoViewIfNeeded().catch(() => null);
   await page.locator("[data-lpo-invoices]").screenshot({ path: `${proof}/d3-lpo-00043-3-split-1440.png` }).catch(() => null);
   await acc.browser.close();
+});
+
+/* ================================================================================================= */
+/* d4 (10 November 2026, Section 4): an LPO "Send for owner approval". Accounts see three choices,   */
+/* send with the compulsory note; "Waiting for owner" on the list, the owner's bell and Waiting on   */
+/* you; the owner replies, then approves with an answer; another is refused with a reason; one above  */
+/* the accounts limit goes to the owner by itself. Accounts get a bell with each answer.             */
+/* ================================================================================================= */
+await section("d4", "LPO send for owner approval", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-10-owner-review";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const head = (await sql("select id, display_name from public.staff where role_id = 'accounts' and is_active and is_head_accountant order by created_at limit 1"))[0]
+    ?? (await sql("select id, display_name from public.staff where role_id = 'accounts' and is_active order by created_at limit 1"))[0];
+  if (!head?.id) throw new Error("no accounts login");
+  const wasHead = (await sql("select is_head_accountant from public.staff where id = $1", [head.id]))[0]?.is_head_accountant;
+  if (!wasHead) await sql("update public.staff set is_head_accountant = true where id = $1", [head.id]);
+  const sup = (await sql("insert into public.suppliers (name, trn, vat_registered, created_by, updated_by) values ('E2E OWNER REVIEW', '100200300400888', true, $1, $1) returning id", [ownerId]))[0];
+  const mkPo = async (number, net) => {
+    const id = (await sql("insert into public.purchase_orders (number, job_id, supplier_id, supplier_name, kind, status, total_cost_aed, created_by, updated_by) values ($1, $2, $3, 'E2E OWNER REVIEW', 'supplier', 'pending_approval', $4, $5, $5) returning id", [number, jobId, sup.id, net, ownerId]))[0]?.id;
+    await sql("insert into public.purchase_order_lines (po_id, position, description, quantity, unit_cost, created_by, updated_by) values ($1, 1, 'E2E REVIEW PART', 1, $2, $3, $3)", [id, net, ownerId]);
+    return id;
+  };
+  const A = await mkPo("E2E-LPO-OR-1", 1200);
+  const B = await mkPo("E2E-LPO-OR-2", 300);
+  if (!sup?.id || !A || !B) throw new Error("seed failed: the LPOs");
+  const limitBefore = (await sql("select value::text as v from public.settings where key = 'lpo_accounts_limit_aed'"))[0]?.v ?? null;
+  const since = Number((await sql("select coalesce(max(id), 0) as m from public.notifications"))[0].m);
+  const bells = async (staffId) => (await sql("select title from public.notifications where id > $1 and staff_id = $2 and type = 'po_owner_review' order by id", [since, staffId])).map((r) => r.title);
+  const status = async (po) => (await sql("select status, reply, decision from public.lpo_owner_reviews where po_id = $1 order by created_at desc limit 1", [po]))[0];
+  const poStatus = async (po) => (await sql("select status from public.purchase_orders where id = $1", [po]))[0]?.status;
+  try {
+    const acc = await browserForId(head.id, { viewport: { width: 1440, height: 900 } });
+    const ap = acc.page;
+    // o1. Accounts: Approve, Refuse and Send for owner approval; the note is compulsory.
+    await go(ap, `${base}/parts/orders/${A}`);
+    const three = (await ap.locator('[data-confirm-open="lpo-approve"]').count()) > 0 && (await ap.locator("button[name=decision][value=refuse]").count()) > 0 && (await ap.locator("[data-send-owner] summary").count()) > 0;
+    check("o1: accounts see Approve, Refuse and Send for owner approval", three);
+    await ap.locator("[data-send-owner] summary").first().click();
+    await ap.locator("[data-send-owner]").first().screenshot({ path: `${proof}/d4-three-buttons-1440.png` }).catch(() => null);
+    await ap.locator("[data-send-owner] form").first().screenshot({ path: `${proof}/d4-send-owner-note-1440.png` }).catch(() => null);
+    const required = await ap.locator("[data-owner-note]").first().evaluate((el) => el.required);
+    check("o1: the note is compulsory", required === true);
+    await ap.locator("[data-owner-note]").first().fill("Supplier price looks high compared to last month, please confirm");
+    await ap.locator("[data-send-owner-save]").first().click();
+    const r1 = await until(async () => (await status(A))?.status === "waiting" ? await status(A) : null, 30, 500);
+    check("o2: sent, waiting for the owner", r1?.status === "waiting");
+    check(`o2: the owner gets a bell (${(await bells(ownerId)).join(" | ")})`, (await bells(ownerId)).some((t) => t.includes("E2E-LPO-OR-1")));
+    await go(ap, `${base}/parts/orders/${A}`);
+    check("o2: accounts no longer decide it (Waiting for the owner)", (await ap.locator("[data-lpo-waiting-owner]").count()) === 1);
+    const log = ((await ap.locator("[data-owner-review-line]").first().textContent()) ?? "");
+    check(`o2: the log line (${log.slice(0, 90)})`, /^Sent for owner approval by .+: Supplier price looks high/.test(log.trim()));
+    await go(ap, `${base}/parts/orders?tab=pending`);
+    check("o2: \"Waiting for owner\" on the LPO list", ((await ap.locator(`[data-lpo-row="E2E-LPO-OR-1"] [data-lpo-row-owner]`).textContent().catch(() => "")) ?? "").includes("Waiting for owner"));
+    // o3. The owner: the note at the top and three answers; Reply to accounts.
+    const own = await browserFor("owner", { viewport: { width: 1440, height: 900 } });
+    const op = own.page;
+    await go(op, `${base}/dashboard`);
+    check("o3: Waiting on you shows it for the owner", ((await op.locator("[data-waiting-panel]").textContent().catch(() => "")) ?? "").includes("E2E-LPO-OR-1"));
+    await go(op, `${base}/parts/orders/${A}`);
+    check("o3: the owner sees Approve, Refuse and Reply to accounts", (await op.locator("[data-owner-options] [data-owner-approve]").count()) === 1 && (await op.locator("[data-owner-options] [data-owner-refuse]").count()) === 1 && (await op.locator("[data-owner-options] [data-owner-reply]").count()) === 1);
+    await op.locator("[data-owner-review]").screenshot({ path: `${proof}/d4-owner-options-1440.png` }).catch(() => null);
+    await op.locator("[data-owner-reply-text]").fill("It is the new list price, fine to approve");
+    await op.locator("[data-owner-reply]").click();
+    const r2 = await until(async () => (await status(A))?.status === "replied" ? await status(A) : null, 30, 500);
+    check("o3: replied, back with accounts", r2?.status === "replied" && /new list price/.test(r2?.reply ?? ""));
+    check(`o3: accounts get a bell with the answer (${(await bells(head.id)).join(" | ")})`, (await bells(head.id)).some((t) => t.startsWith("Owner replied")));
+    // o4. Accounts send it again; the owner approves with an answer.
+    await go(ap, `${base}/parts/orders/${A}`);
+    await ap.locator("[data-send-owner] summary").first().click();
+    await ap.locator("[data-owner-note]").first().fill("Still unsure: please approve yourself");
+    await ap.locator("[data-send-owner-save]").first().click();
+    await until(async () => (await status(A))?.status === "waiting", 30, 500);
+    await go(op, `${base}/parts/orders/${A}`);
+    await op.locator("[data-owner-options] input[name=note]").first().fill("Approved, go ahead");
+    await op.locator("[data-owner-approve]").click();
+    await until(async () => (await poStatus(A)) === "approved", 30, 500);
+    const r3 = await until(async () => (await status(A))?.decision === "approved" ? await status(A) : null, 30, 500);
+    check("o4: approved by the owner, the question closed", (await poStatus(A)) === "approved" && r3?.status === "decided");
+    check("o4: accounts get a bell with the decision", (await bells(head.id)).some((t) => t.startsWith("Approved by")));
+    const ev = (await sql("select note from public.job_events where job_id = $1 and event_type = 'po_owner_review' order by created_at", [jobId])).map((r) => r.note);
+    check(`o4: the log on the job (${ev.length} lines)`, ev.some((n) => /sent for owner approval by/.test(n)) && ev.some((n) => /Approved by .+: Approved, go ahead/.test(n)));
+    // o5. Another one refused by the owner with a reason.
+    await go(ap, `${base}/parts/orders/${B}`);
+    await ap.locator("[data-send-owner] summary").first().click();
+    await ap.locator("[data-owner-note]").first().fill("Is this supplier still approved?");
+    await ap.locator("[data-send-owner-save]").first().click();
+    await until(async () => (await status(B))?.status === "waiting", 30, 500);
+    await go(op, `${base}/parts/orders/${B}`);
+    await op.locator("[data-owner-refuse-reason]").fill("Use the other supplier");
+    await op.locator("[data-owner-refuse]").click();
+    await until(async () => (await poStatus(B)) === "cancelled", 30, 500);
+    check("o5: refused with the reason", (await poStatus(B)) === "cancelled" && (await status(B))?.decision === "refused");
+    // o6. The accounts limit (off by default): above it, Approve sends it to the owner by itself.
+    await sql("insert into public.settings (key, label, value) values ('lpo_accounts_limit_aed', 'Accounts approve LPOs up to this amount incl. VAT (0 = no limit)', to_jsonb(500)) on conflict (key) do update set value = to_jsonb(500)");
+    const C = await mkPo("E2E-LPO-OR-3", 800);
+    await go(ap, `${base}/parts/orders/${C}`);
+    check("o6: accounts see \"Above your approval limit\"", (await ap.locator("[data-above-limit]").count()) === 1);
+    await ap.locator('[data-confirm-open="lpo-approve"]').first().click();
+    await ap.locator("[data-confirm-yes-money=\"lpo-approve\"]").click();
+    const r6 = await until(async () => (await sql("select status, auto, note from public.lpo_owner_reviews where po_id = $1", [C]))[0], 30, 500);
+    check(`o6: above the limit it waits for the owner (${r6?.note ?? ""})`, r6?.status === "waiting" && r6?.auto === true && (await poStatus(C)) === "pending_approval" && /Above accounts limit/.test(r6?.note ?? ""));
+    await own.browser.close();
+    await acc.browser.close();
+  } finally {
+    if (limitBefore === null) await sql("update public.settings set value = to_jsonb(0) where key = 'lpo_accounts_limit_aed'");
+    else await sql("update public.settings set value = $1::jsonb where key = 'lpo_accounts_limit_aed'", [limitBefore]);
+    if (!wasHead) await sql("update public.staff set is_head_accountant = false where id = $1", [head.id]);
+  }
 });
 
 const failed = summary();
