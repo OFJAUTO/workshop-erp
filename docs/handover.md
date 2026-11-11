@@ -1,6 +1,6 @@
 # Handover – 11 November 2026, evening (11 Nov list of 16 sections: IN PROGRESS)
 
-**Done so far:** S1 stock LPOs in Supplier invoices and payments (41df358) · S2 parts belong to one quotation (dormant until apply) · S3 apply supplier advances without a new payment + invoice date check · S4 approvals box + Approvals page · S5 void a duplicate receipt + one cheque never more than its amount · S6 lathe bills.
+**Done so far:** S1 stock LPOs in Supplier invoices and payments (41df358) · S2 parts belong to one quotation (dormant until apply) · S3 apply supplier advances without a new payment + invoice date check · S4 approvals box + Approvals page · S5 void a duplicate receipt + one cheque never more than its amount · S6 lathe bills · S7 complimentary in one tap.
 
 **NEEDS OMAR (11 Nov list):**
 - Supplier invoice dates to correct (Edit invoice on the LPO page, Mathew): LPO-00043-1 and LPO-00044-1 (GARGASH, dated 11 May 2026: likely 5 November, day and month swapped), LPO-00035-2 (SPARE HUB, dated 29 Oct 2016: likely 2026).

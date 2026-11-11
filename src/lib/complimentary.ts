@@ -61,14 +61,14 @@ export function normalPriceOf(l: Line): number {
   return Math.round(linePrice({ ...l, price_display: "normal", visible_to_customer: true }) * 100) / 100;
 }
 
-export type CompCost = { normal: number; cost: number; labour: number; parts: number; materials: number; film: number; recovery: number; other: number; detail: string };
+export type CompCost = { normal: number; /** 11 November 2026: where the normal price came from (a line typed at 0 takes the price list, else at least our cost). */ valueFrom?: "price" | "list" | "cost"; cost: number; labour: number; parts: number; materials: number; film: number; recovery: number; other: number; detail: string };
 
 /**
  * The cost to us of the free lines, from THE calculation (quoteTotals with the same costing as the profit): labour hours
  * at the cost rate, parts at cost, materials worked out (film, tint, ceramic, consumables - never 0 for film work),
  * recovery. "labour 50 · film 29 · recovery 150".
  */
-export function compCost(free: Line[], q: Q, opts: Parameters<typeof quoteTotals>[2] = {}, rates: { technician: number; bodyshop: number } = { technician: 0, bodyshop: 0 }): CompCost {
+export function compCost(free: Line[], q: Q, opts: Parameters<typeof quoteTotals>[2] = {}, rates: { technician: number; bodyshop: number } = { technician: 0, bodyshop: 0 }, listPriceOf: ((l: Line) => number | null) | null = null): CompCost {
   const bare = { ...(q as QuoteRow), discount_percent: 0, discount_kind: null, discount_value: null, commission_kind: null, commission_value: null, materials_cost_aed: 0, deposit_mode: null, deposit_value: null, rounded_total_aed: null } as QuoteRow;
   const t: QuoteTotals = quoteTotals(free, bare, { ...opts, bankChargePercent: 0, bankChargeFixed: 0, supplierCharges: 0, clockedHours: opts.clockedHours ?? null });
   const lines = profitLines(t, rates);
@@ -83,18 +83,22 @@ export function compCost(free: Line[], q: Q, opts: Parameters<typeof quoteTotals
   const cost = r2(parts + labour + materials + recovery + other);
   const n = (x: number) => Math.round(x).toLocaleString("en-GB");
   const detail = [labour ? `labour ${n(labour)}` : null, parts ? `parts ${n(parts)}` : null, film ? `film ${n(film)}` : null, materials - film > 0.5 ? `materials ${n(materials - film)}` : null, recovery ? `recovery ${n(recovery)}` : null, other ? `other ${n(other)}` : null].filter(Boolean).join(" · ");
-  return { normal: r2(free.reduce((a, l) => a + normalPriceOf(l), 0)), cost, labour, parts, materials, film, recovery, other, detail };
+  // The true value given away (11 November 2026, Section 7): the line's own price; a line typed at 0 takes its price-list
+  // price; never less than what it costs us - never "Normal price AED 0.00".
+  let fromList = false;
+  const priced = r2(free.reduce((a, l) => { const p = normalPriceOf(l); if (p > 0.004) return a + p; const lp = listPriceOf ? listPriceOf(l) : null; if (lp && lp > 0) { fromList = true; return a + lp * (Number(l.quantity) || 1); } return a; }, 0));
+  const normal = priced > cost ? priced : cost;
+  return { normal: r2(normal), valueFrom: priced > cost ? (fromList ? "list" : "price") : "cost", cost, labour, parts, materials, film, recovery, other, detail };
 }
 
 const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 /** "Normal price AED 350.00 · Cost to us AED 229.00 (labour 50 · film 29 · recovery 150)". */
-export const compCostWords = (c: CompCost) => `Normal price ${aed(c.normal)} · Cost to us ${aed(c.cost)}${c.detail ? ` (${c.detail})` : ""}`;
+export const compCostWords = (c: CompCost) => `Value given away ${aed(c.normal)}${c.valueFrom === "list" ? " (price list)" : c.valueFrom === "cost" ? " (at our cost)" : " (normal price)"} · Cost to us ${aed(c.cost)}${c.detail ? ` (${c.detail})` : ""}`;
 
 /** What is missing before the free part can go to the owner: the reason, and the original job or the note it needs. */
 export function compProblem(q: Q): string | null {
   if (!isCompReason(q.comp_reason)) return "Complimentary needs a reason: our mistake, goodwill or warranty";
-  if (needsOriginalJob(q.comp_reason) && !q.comp_original_job_id) return "Complimentary (our mistake or warranty): pick the original job";
-  if (q.comp_reason === "goodwill" && !(q.comp_note ?? "").trim()) return "Complimentary (goodwill): write why";
+  // 11 November 2026 (Section 7): one tap is enough. The earlier job is found by itself; a note is optional.
   return null;
 }
 

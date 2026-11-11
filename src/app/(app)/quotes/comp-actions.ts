@@ -31,7 +31,9 @@ export async function saveCompReason(quotationId: string, input: { reason: strin
   if (q.status !== "draft" && q.status !== "pending_owner") return { error: (await refuseIfLocked(q.id, staff.id, "change the complimentary reason", "quotation page")) ?? "This version has been sent: revise it to change it." };
   let original: string | null = null;
   if (needsOriginalJob(input.reason)) {
-    original = input.originalJobId || null;
+    // Nobody types a job number (11 November 2026, Section 7): our mistake = the comeback's original job; warranty = this
+    // car's earlier job of the last 6 months (else the customer's). The box shows it; another of the earlier jobs can be picked.
+    original = input.originalJobId || (await earlierJobFor(q.job_id as string | null, q.vehicle_id as string | null, q.customer_id as string | null, input.reason as "our_mistake" | "warranty"));
     if (original) {
       const { data: j } = await admin.from("jobs").select("id, customer_id, vehicle_id").eq("id", original).maybeSingle();
       if (!j || j.id === q.job_id || (j.customer_id !== q.customer_id && j.vehicle_id !== q.vehicle_id)) return { error: "Pick one of this customer's or this car's earlier jobs." };
@@ -48,4 +50,23 @@ export async function saveCompReason(quotationId: string, input: { reason: strin
   }
   revalidatePath(`/estimates/${q.id}`);
   return {};
+}
+
+/** The job this free work goes back to: a comeback's original job, else the car's latest earlier job (warranty: last 6 months). */
+async function earlierJobFor(jobId: string | null, vehicleId: string | null, customerId: string | null, reason: "our_mistake" | "warranty"): Promise<string | null> {
+  const admin = createAdminClient();
+  if (jobId) {
+    const { data: j } = await admin.from("jobs").select("comeback_of").eq("id", jobId).maybeSingle();
+    if (j?.comeback_of) return j.comeback_of as string;
+  }
+  const since = reason === "warranty" ? new Date(Date.now() - 183 * 86400000).toISOString() : null;
+  for (const [col, val] of [["vehicle_id", vehicleId], ["customer_id", customerId]] as const) {
+    if (!val) continue;
+    let q = admin.from("jobs").select("id").eq(col, val).not("gated_in_at", "is", null).order("gated_in_at", { ascending: false }).limit(5);
+    if (since) q = q.gte("gated_in_at", since);
+    const { data } = await q;
+    const hit = ((data ?? []) as { id: string }[]).find((x) => x.id !== jobId);
+    if (hit) return hit.id;
+  }
+  return null;
 }

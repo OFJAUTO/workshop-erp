@@ -18,7 +18,7 @@ check("a bill shared by estimate adds up exactly", Math.abs((split.get("a") ?? 0
 const typed = splitBill(350, 30, [{ partId: "a", estimate: 160, typed: 140 }, { partId: "b", estimate: 250, typed: 180 }]);
 check("itemised amounts are kept", typed.get("a") === 140 && typed.get("b") === 180);
 check("typed amounts must add up to the bill less the extra lines", (billProblem(350, 30, [{ partId: "a", estimate: 1, typed: 100 }, { partId: "b", estimate: 1, typed: 100 }]) ?? "").includes("AED 320.00"));
-check("no tickets ticked is refused", (billProblem(100, 0, []) ?? "").includes("Tick the tickets"));
+check("no tickets ticked is allowed, warned in the confirm (11 Nov)", billProblem(100, 0, []) === null);
 check("status Sent → Back → Billed", ticketStatus({ lathe_sent_at: "x", lathe_back_at: null, lathe_bill_id: null }) === "Sent" && ticketStatus({ lathe_sent_at: "x", lathe_back_at: "y", lathe_bill_id: null }) === "Back" && ticketStatus({ lathe_sent_at: "x", lathe_back_at: "y", lathe_bill_id: "z" }) === "Billed");
 check("not billed after a month is flagged", unbilledTooLong("2026-10-01T08:00:00Z", false, Date.parse("2026-11-09T08:00:00Z")) && !unbilledTooLong("2026-11-01T08:00:00Z", false, Date.parse("2026-11-09T08:00:00Z")));
 

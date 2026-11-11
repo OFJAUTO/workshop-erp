@@ -27,12 +27,12 @@ const c = compCost(free, q, { technicianCostRate: 50, bodyshopRate: 50, packageC
 check("materials are never 0 on PPF work: the film's share of a car (1 h of 80 h × AED 1,429)", near(c.film, 17.86) && c.materials > 0, JSON.stringify(c));
 check("cost to us = labour 50 + film 17.86 + recovery 150", near(c.cost, 217.86) && near(c.labour, 50) && near(c.recovery, 150), `${c.cost}`);
 check("the normal price is what the customer would have paid (1 h × AED 350)", near(c.normal, 350) && normalPriceOf(mirror) === 350);
-check("the words read like the owner's example", compCostWords(c) === "Normal price AED 350.00 · Cost to us AED 217.86 (labour 50 · film 18 · recovery 150)", compCostWords(c));
+check("the words: the value given away (11 Nov: never Normal price AED 0.00)", compCostWords(c) === "Value given away AED 350.00 (normal price) · Cost to us AED 217.86 (labour 50 · film 18 · recovery 150)", compCostWords(c));
 check("the same film now shows in THE profit calculation", near(quoteTotals([mirror], q, { technicianCostRate: 50, packageCosting: costing }).packageMaterials.film, 17.86));
 
 check("no reason: blocked", compProblem(q) === "Complimentary needs a reason: our mistake, goodwill or warranty");
-check("goodwill without a note: blocked", /write why/.test(compProblem({ ...q, comp_reason: "goodwill" }) ?? ""));
-check("our mistake without the original job: blocked", /original job/.test(compProblem({ ...q, comp_reason: "our_mistake" }) ?? ""));
+check("goodwill without a note: allowed (11 Nov: one tap)", compProblem({ ...q, comp_reason: "goodwill" }) === null);
+check("our mistake without the original job: allowed (found by itself)", compProblem({ ...q, comp_reason: "our_mistake" }) === null);
 check("our mistake with the original job: fine", compProblem({ ...q, comp_reason: "our_mistake", comp_original_job_id: "x" }) === null);
 const reason = compApprovalReason([mirror, recovery], { ...q, comp_reason: "goodwill", comp_note: "Loyal customer" });
 check("the owner's approval reason names the reason, the note, the lines and the normal price", reason === "complimentary (Goodwill gesture: Loyal customer): PPF front right mirror housing, Recovery · normal price AED 350.00", reason);

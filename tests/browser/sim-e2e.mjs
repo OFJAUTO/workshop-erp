@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1,e2,e3,e4,e5,e6,e7").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -4351,6 +4351,46 @@ await section("e6", "lathe bills: shop box, confirm, correct, void, attach", asy
   await go(own.page, `${base}/parts/lathe`);
   check("k7: the list shows it VOID", (await own.page.locator('[data-lathe-bill="E2E-KA-1B"][data-lathe-bill-voided="1"]').count()) === 1);
   await own.browser.close();
+});
+
+/* ================================================================================================= */
+/* e7 (11 November 2026, Section 7): a free item in one tap. Tapping the reason saves it (no Save      */
+/* button, no text required); Warranty claim finds the car's earlier job of the last 6 months by itself;*/
+/* the value given away is shown, never "Normal price AED 0.00".                                       */
+/* ================================================================================================= */
+await section("e7", "complimentary in one tap", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-comp-one-tap";
+  mkdirSync(proof, { recursive: true });
+  const seed = (await api("/api/e2e/stage", { stage: "quote" })).json;
+  const jobId = seed?.jobId;
+  if (!jobId) throw new Error("seed failed");
+  const q = (await sql("select id from public.quotations where job_id = $1 and is_active order by created_at desc limit 1", [jobId]))[0];
+  const line = (await sql("select id from public.quotation_lines where quotation_id = $1 and is_active and line_type in ('labour', 'service') order by position limit 1", [q.id]))[0];
+  // The line given free and typed at 0.
+  await sql("update public.quotation_lines set price_display = 'complimentary', unit_price = 0, line_total = 0 where id = $1", [line.id]);
+  await sql("update public.quotations set comp_reason = null, comp_original_job_id = null, comp_note = null, comp_status = null where id = $1", [q.id]);
+  // An earlier job of this car, 40 days ago.
+  const j = (await sql("select vehicle_id, customer_id, gated_in_by from public.jobs where id = $1", [jobId]))[0];
+  const old = (await sql("insert into public.jobs (job_number, vehicle_id, customer_id, gated_in_by, gated_in_at, status, is_open, department) values ($1, $2, $3, $4, now() - interval '40 days', 'closed', false, 'mechanical') returning id", [`E2E-OLD-${Date.now() % 100000}`, j.vehicle_id, j.customer_id, j.gated_in_by]))[0]?.id;
+  const adv = await browserFor("service_advisor", { viewport: { width: 1440, height: 900 } });
+  const p = adv.page;
+  await go(p, `${base}/jobs/${jobId}/quote/${q.id}`);
+  const box = p.locator("[data-comp-box]");
+  await box.waitFor({ timeout: 20000 });
+  check("f1: no Save button, no required text", (await box.locator("[data-comp-save]").count()) === 0 && !/required/i.test((await box.textContent()) ?? ""));
+  const cost = ((await box.locator("[data-comp-cost]").textContent()) ?? "").trim();
+  check(`f1: the value given away, never AED 0.00 (${cost.slice(0, 90)})`, /Value given away AED/.test(cost) && !/Value given away AED 0\.00/.test(cost));
+  await box.locator('[data-comp-reason="goodwill"]').click();
+  const saved = await until(async () => (await sql("select comp_reason from public.quotations where id = $1", [q.id]))[0]?.comp_reason === "goodwill", 40, 500);
+  check("f2: tapping Goodwill gesture saves it", !!saved);
+  await go(p, `${base}/jobs/${jobId}/quote/${q.id}`);
+  await p.locator('[data-comp-box] [data-comp-reason="warranty"]').click();
+  const linked = await until(async () => { const r = (await sql("select comp_reason, comp_original_job_id from public.quotations where id = $1", [q.id]))[0]; return r?.comp_reason === "warranty" && r?.comp_original_job_id ? r : null; }, 40, 500);
+  check(`f3: Warranty claim finds the car's earlier job by itself (${linked?.comp_original_job_id === old ? "the 40-day-old job" : linked?.comp_original_job_id ?? "none"})`, linked?.comp_original_job_id === old);
+  await go(p, `${base}/jobs/${jobId}/quote/${q.id}`);
+  await p.locator("[data-comp-box]").screenshot({ path: `${proof}/e7-comp-box-1440.png` }).catch(() => null);
+  check("f3: the box shows Saved ✓ and the earlier job", (await p.locator("[data-comp-box] [data-comp-saved]").count()) === 1 && (await p.locator("[data-comp-box] [data-comp-original]").inputValue()) === old);
+  await adv.browser.close();
 });
 
 const failed = summary();

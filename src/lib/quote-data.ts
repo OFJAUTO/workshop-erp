@@ -697,7 +697,11 @@ export async function compCostForBundle(bundle: Pick<QuoteBundle, "quotation" | 
   const costing = await packageCostingForQuote(settings, q as { vehicle_id?: string | null; film_rolls_est?: number | null; tint_spec?: unknown }, true);
   const technician = Number(settings.technician_cost_rate_aed) || 0;
   const bodyshop = Number(settings.bodyshop_cost_rate_aed) || costing?.ratePerHour || 50;
-  return { cost: compCost(free, q, { technicianCostRate: technician, bodyshopRate: bodyshop, packageCosting: costing }, { technician, bodyshop }), what: free.map((l) => l.title || "line") };
+  // The price list (11 November 2026, Section 7): a free line typed at 0 is valued at its service's price.
+  const ids = Array.from(new Set(free.map((l) => l.service_id).filter((x): x is string => !!x)));
+  const { data: svc } = ids.length ? await createAdminClient().from("services").select("id, price_aed").in("id", ids) : { data: [] };
+  const priceOf = new Map(((svc ?? []) as { id: string; price_aed: number | null }[]).map((x) => [x.id, Number(x.price_aed) || 0]));
+  return { cost: compCost(free, q, { technicianCostRate: technician, bodyshopRate: bodyshop, packageCosting: costing }, { technician, bodyshop }, (l) => (l.service_id ? priceOf.get(l.service_id) ?? null : null)), what: free.map((l) => l.title || "line") };
 }
 
 /** The complimentary box's choices (section 5): this customer's and this car's earlier jobs, newest first. Null until the database has it. */
