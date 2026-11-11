@@ -23,14 +23,14 @@ const keys = (raw: string | null) => (raw ?? "").split(",").map((x) => x.trim())
 export async function GET(request: NextRequest) {
   const staff = await getCurrentStaff();
   if (!staff) return new NextResponse("Please sign in.", { status: 401 });
-  if (!can(staff.role_id as RoleId, "viewPurchaseOrders")) return new NextResponse("Not allowed.", { status: 403 });
+  if (!can(staff.role_id as RoleId, "viewPurchaseOrders") && !can(staff.role_id as RoleId, "printStickers")) return new NextResponse("Not allowed.", { status: 403 });
   const sp = request.nextUrl.searchParams;
   const ss = stickerSettings(await getSettings());
   const size = { w: ss.partW || 50, h: ss.partH || 25 };
   if (sp.get("test") === "1") return pdfResponse(await renderPartLabelsPdf([sampleLabel()], size, { border: true }), `OFJ test label ${size.w}x${size.h}.pdf`);
   const job = UUID.test(sp.get("job") ?? "") ? sp.get("job") : null;
   const po = UUID.test(sp.get("po") ?? "") ? sp.get("po") : null;
-  const labels = await partLabelsFor({ jobId: job, poId: po, partIds: ids(sp.get("parts")), keys: keys(sp.get("keys")), today: sp.get("today") === "1" }, staff.id);
+  const labels = await partLabelsFor({ jobId: job, poId: po, partIds: ids(sp.getAll("parts").join(",")), keys: keys(sp.get("keys")), today: sp.get("today") === "1" }, staff.id);
   if (!labels.length) return new NextResponse("No received parts to label yet: labels appear once a delivery is recorded.", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
   return pdfResponse(await renderPartLabelsPdf(labels, size, { border: sp.get("border") === "1" }), `OFJ part labels ${labels[0].jobNumber}.pdf`);
 }

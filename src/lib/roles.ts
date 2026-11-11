@@ -54,6 +54,8 @@ export const PERMISSIONS = {
   viewTablets: ["owner", "workshop_manager"],
   manageTablets: ["owner"],
   manageSettings: ["owner"],
+  // 11 November 2026 (Section 12): the Stickers tab - part stickers, warranty stickers, history, printer setup.
+  printStickers: ["owner", "parts", "service_advisor", "workshop_manager"],
   viewAudit: ["owner"],
   viewCustomers: ["owner", "service_advisor", "accounts"],
   editCustomers: ["owner", "service_advisor"],

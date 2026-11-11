@@ -103,7 +103,7 @@ export default async function SettingsPage() {
             <LinkButton href="/settings/warranty" tone="secondary">
               Warranty terms
             </LinkButton>
-            <LinkButton href="/settings/stickers" tone="secondary">
+            <LinkButton href="/stickers?tab=printer" tone="secondary">
               Stickers
             </LinkButton>
             <LinkButton href="/settings/inspection" tone="secondary">

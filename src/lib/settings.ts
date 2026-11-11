@@ -135,6 +135,8 @@ const DEFAULTS = {
   /** Tools and equipment orders at or above this are flagged for accounts as a fixed asset. */
   fixed_asset_threshold_aed: 2000,
   sticker_part_types: [] as string[],
+  // 11 November 2026 (Section 12): the owner's warranty sticker types, "Name = months[ = batch]" per line (Stickers tab).
+  sticker_warranty_types: "PPF film = 120 = batch\nWindow tint = 60 = batch",
   sticker_battery_required: true,
   sticker_service_required: true,
   battery_warranty_months: 12,

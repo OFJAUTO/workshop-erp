@@ -6,7 +6,8 @@ import { formatDate } from "@/lib/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { title: "OFJ Automotive", robots: { index: false, follow: false } };
+// No details in a link preview (11 November 2026, Section 12): the name only, the same for every label.
+export const metadata: Metadata = { title: "OFJ Automotive", description: "OFJ Automotive", openGraph: { title: "OFJ Automotive", description: "OFJ Automotive" }, robots: { index: false, follow: false } };
 
 function Plain({ title, lines }: { title: string; lines: string[] }) {
   return (
@@ -14,6 +15,16 @@ function Plain({ title, lines }: { title: string; lines: string[] }) {
       <Logo className="h-16 w-auto" alt="OFJ Automotive" />
       <h1 className="text-2xl font-extrabold">{title}</h1>
       {lines.map((l) => <p key={l} className="text-base font-medium text-muted">{l}</p>)}
+    </main>
+  );
+}
+
+/** THE signed-out label page (11 November 2026, Section 12): the logo and one sentence, nothing to tap. */
+function SignedOut() {
+  return (
+    <main className="min-h-screen bg-white text-ink flex flex-col items-center justify-center gap-5 px-6 text-center" data-qr-signed-out>
+      <Logo className="h-16 w-auto" alt="OFJ Automotive" />
+      <p className="max-w-md text-xl font-extrabold uppercase leading-snug">OFJ AUTOMOTIVE - TO VIEW THIS LABEL YOU MUST BE SIGNED IN TO THE ERP.</p>
     </main>
   );
 }
@@ -27,12 +38,13 @@ export default async function QrPage({ params }: { params: Promise<{ code: strin
   const { code } = await params;
   const admin = createAdminClient();
   const { data: link } = await admin.from("qr_links").select("code, kind, job_id, vehicle_id, ref_id").eq("code", code.toUpperCase()).maybeSingle();
-  if (!link) return <Plain title="OFJ Automotive" lines={["This code is not known."]} />;
   const staff = await getCurrentStaff();
+  // 11 November 2026, Section 12: a part or item label (or an unknown code) shows nothing at all without a sign-in,
+  // and never sends anyone to the sign-in page: the one sentence, no button, no link.
+  if (!link || (!staff && (link.kind === "part" || link.kind === "item"))) return <SignedOut />;
   // 9 November 2026, Section 5: a PART sticker's QR is for staff only. Signed in: the part's own page with everything
   // the sticker no longer carries. Not signed in: the sign-in page, nothing else.
   if (link.kind === "part") {
-    if (!staff) redirect(`/login?next=${encodeURIComponent(`/s/${link.code}`)}`);
     if (link.ref_id) redirect(`/parts/label/${link.ref_id}`);
   }
   if (staff) {

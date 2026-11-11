@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import { readExtraTypes, warrantyTypesOf, warrantyUntil, cleanBatch, writeExtraTypes } from "../../src/lib/sticker-types.ts";
+const t = warrantyTypesOf(undefined);
+assert.equal(t[0].key, "battery");
+assert.ok(t.some((x) => x.key === "ppf-film" && x.batch && x.months === 120));
+assert.ok(t.filter((x) => x.batch).every((x) => /ppf|tint/.test(x.key)));
+const r = readExtraTypes("Next service = 6\nbad line\nBattery = 12\nCeramic = 0\nTint = 36 = batch");
+assert.deepEqual(r.map((x) => x.key), ["next-service", "tint"]);
+assert.equal(r[0].batch, false);
+assert.equal(writeExtraTypes(r), "Next service = 6\nTint = 36 = batch");
+assert.equal(warrantyUntil("2026-11-11", 12), "2027-11-11");
+assert.equal(cleanBatch(" ab-12/x <b> "), "AB-12/X B");
+console.log("sticker-types: ok");
