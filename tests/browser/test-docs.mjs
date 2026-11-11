@@ -8,7 +8,7 @@
 //   node --env-file=.env.test.local tests/browser/test-docs.mjs        (npm run test:docs)
 import fs from "node:fs";
 import path from "node:path";
-import { base, browserFor, here, makeChecks, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, here, makeChecks, sql } from "./pw-lib.mjs";
 
 const { checkPdf, moneyProblems, labelledAmounts, pagePng } = await import("../unit/pdf-check-lib.mjs");
 const mupdf = await import("mupdf");
@@ -47,9 +47,19 @@ try {
   const one = async (q, params = []) => (await sql(q, params))[0] ?? null;
 
   /* Q-00039: the package alone -> one page, 20,000 once, 21,000 once, the bank details on it */
-  // Q-00039 is a draft (never sent, so no link yet): on the TEST database it gets a link token for this check.
-  await sql("update public.quotations set token = $1 where number = 'Q-00039' and token is null and is_active and status = 'draft'", [`e2e-q39-${Date.now()}`]);
-  const q39 = await one("select token from public.quotations where number = 'Q-00039' and token is not null and is_active order by version desc limit 1");
+  // 12 November 2026: the package-only quotation is built on the fixed test car each run (it used to be TEST's copy of
+  // Q-00039, which the copy of the live records turned into an approved quotation with many lines - the checks failed
+  // for data, not for the layout). One package line at AED 20,000, VAT 1,000, total 21,000, a link token.
+  const seeded = (await api("/api/e2e/stage", { stage: "quote" })).json;
+  const qid = seeded?.quotationId;
+  const tok = `e2e-q39-${Date.now()}`;
+  if (qid) {
+    await sql("update public.quotation_lines set is_active = false where quotation_id = $1", [qid]);
+    await sql("insert into public.quotation_lines (quotation_id, line_type, title, quantity, unit_price, line_total, position, urgency, visible_to_customer) values ($1, 'package', 'OFJ PLATINUM PPF PACKAGE', 1, 20000, 20000, 1, 'recommended', true)", [qid]);
+    await sql("update public.quotations set token = $2, status = 'draft', subtotal_aed = 20000, discount_aed = 0, vat_aed = 1000, total_aed = 21000, rounded_total_aed = null, valid_until = (now() + interval '7 days')::date where id = $1", [qid, tok]);
+  }
+  const q39 = qid ? await one("select token from public.quotations where id = $1 and token = $2", [qid, tok]) : null;
+  check("Q-00039: the package-only test quotation is ready", !!q39 && Number((await one("select count(*)::int n from public.quotation_lines where quotation_id = $1 and is_active", [qid]))?.n) === 1);
   const a = await document("Q-00039", q39 ? `/api/pdf/quote/${q39.token}` : null, { expectPages: 1 });
   if (a) {
     check("Q-00039: the package price is printed once", count(a.text, "20,000.00") === 1, `${count(a.text, "20,000.00")} times`);
@@ -71,7 +81,9 @@ try {
     // What the customer SEES (innerText): the approve window, not open, is not counted.
     const body = ((await page.locator("body").innerText()) ?? "").replace(/\s+/g, " ");
     await page.screenshot({ path: path.join(SHOTS, "Q-00039-customer-page-390.png"), fullPage: true });
-    check("customer page (phone): no package subtotal, the package price once", !/Package subtotal/i.test(body) && count(body, "20,000.00") === 1, `${count(body, "20,000.00")} times`);
+    // The phone page is the short front page (total, View PDF, call): line prices live in the PDF, so the package price is
+    // never printed twice here and there is no package subtotal (12 November 2026).
+    check("customer page (phone): no package subtotal, the package price never twice", !/Package subtotal/i.test(body) && count(body, "20,000.00") <= 1, `${count(body, "20,000.00")} times`);
     check("customer page (phone): the total once, in AED", count(body, "21,000.00") === 1 && /AED 21,000\.00/.test(body), `${count(body, "21,000.00")} times`);
     const valid = body.match(/VALID UNTIL.{0,60}/i)?.[0] ?? "";
     check("customer page (phone): Valid until is a date", /\d{1,2} [A-Z][a-z]{2} \d{4}/.test(valid) && !/\d+ days/.test(valid), valid);
