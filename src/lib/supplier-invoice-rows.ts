@@ -71,6 +71,10 @@ export const MATCH_WORDS: Record<InvoiceMatch, string> = {
 export type InvoiceShare = { /** The further invoice this share is (null = the LPO's first invoice). */ invoiceId: string | null; poId: string; poNumber: string; jobId: string | null; jobNumber: string | null; plate: string; car: string; amount: number; /** This share's VAT (the LPO's typed VAT when one was entered, else 5% of the amount) and the share with it. */ vat: number; withVat: number; lpoTotal: number; parts: number; paidAt: string | null; /** Fix 4 (4 November 2026): the payment's own facts, so the proof box reads per LPO. */ paidMethod: string | null; paidReference: string | null; proofPath: string | null; paidBy: string | null };
 export type InvoiceRow = {
   key: string;
+  /** 11 November 2026: ordered from the supplier, nothing delivered yet ("Not received yet"). */
+  notReceived: boolean;
+  /** Every LPO of the row is a stock purchase with no car. */
+  stock: boolean;
   supplier: string;
   supplierId: string | null;
   trn: string | null;
@@ -122,6 +126,10 @@ export function approvedVsInvoiced(lpoTotal: number, invoiced: number | null | u
   return `Approved ${fmt(lpoTotal)} → Invoiced ${fmt(invoiced)} (${diff < 0 ? "−" : "+"}${fmt(Math.abs(diff))})`;
 }
 
+/** THE "ordered, not delivered yet" rule of the invoice list: sent to the supplier, no invoice, nothing received. */
+export const isOrderedNotReceived = (po: { status: string; supplier_invoice_status: string | null; received_at?: string | null }) =>
+  po.status === "ordered" && (po.supplier_invoice_status ?? "none") === "none" && !po.received_at;
+
 /** The rows, newest first. */
 export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppliers: SiSupplier[], vatPercent = 5): InvoiceRow[] {
   const jobOf = new Map(jobs.map((j) => [j.id, j]));
@@ -131,9 +139,12 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
   for (const po of pos) {
     if (po.status === "cancelled" || po.status === "pending_approval") continue;
     const inv = po.supplier_invoice_status;
-    if (inv !== "received" && inv !== "to_follow") continue;
+    // 11 November 2026 (Section 1): an LPO ordered from the supplier but not delivered yet is listed too ("Not received
+    // yet"), car or stock alike, so accounts can enter the invoice that arrives with the delivery.
+    const ordered = isOrderedNotReceived(po);
+    if (inv !== "received" && inv !== "to_follow" && !ordered) continue;
     const supKey = po.supplier_id ?? po.supplier_name.trim().toLowerCase();
-    const key = inv === "to_follow" || !invoiceKeyNumber(po.supplier_invoice_number) ? `follow:${po.id}${po.invoice_id ? `:${po.invoice_id}` : ""}` : `${supKey}|${invoiceKeyNumber(po.supplier_invoice_number)}`;
+    const key = inv !== "received" || !invoiceKeyNumber(po.supplier_invoice_number) ? `follow:${po.id}${po.invoice_id ? `:${po.invoice_id}` : ""}` : `${supKey}|${invoiceKeyNumber(po.supplier_invoice_number)}`;
     groups.set(key, [...(groups.get(key) ?? []), po]);
   }
   const rows: InvoiceRow[] = [];
@@ -144,7 +155,8 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
     // THE supplier VAT rule (5 November 2026, Mathew): VAT only from a supplier registered with a TRN (never Our stock),
     // 5% of the amount rounded half up; the entered invoice's own typed VAT always wins.
     const chargesVat = supplierChargesVat(sup ? { ...sup, name: first.supplier_name || sup.name } : { name: first.supplier_name, trn: null, vat_registered: null });
-    const waiting = items.every((p) => p.supplier_invoice_status === "to_follow");
+    const waiting = items.every((p) => p.supplier_invoice_status !== "received");
+    const notReceived = waiting && items.every((p) => isOrderedNotReceived(p));
     const shares: InvoiceShare[] = items.map((p) => {
       const j = p.job_id ? jobOf.get(p.job_id) : null;
       const mine = lines.filter((l) => l.po_id === p.id && (!p.line_ids || (l.id !== undefined && p.line_ids.includes(l.id))));
@@ -167,7 +179,7 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
     if (!mine.length) match.push("not_linked");
     else {
       if (mine.some((l) => ["mismatch", "accepted", "disputed"].includes(l.invoice_check ?? "") || (l.invoice_unit_cost !== null && Math.abs(l.invoice_unit_cost - l.unit_cost) > 0.005))) match.push("price_changed");
-      if (mine.some((l) => l.received_qty + 0.001 < l.quantity)) match.push("quantity_different");
+      if (!notReceived && mine.some((l) => l.received_qty + 0.001 < l.quantity)) match.push("quantity_different");
       if (!match.length) match.push("matches");
     }
     const query = items.find((p) => p.query)?.query ?? null;
@@ -195,6 +207,8 @@ export function groupInvoices(pos: SiPo[], lines: SiLine[], jobs: SiJob[], suppl
     const paidPo = items.filter((p) => p.paid_at).sort((a, b) => String(a.paid_at).localeCompare(String(b.paid_at)))[0] ?? null;
     rows.push({
       key,
+      notReceived,
+      stock: items.every((p) => !p.job_id),
       supplier: sup?.name ?? first.supplier_name,
       supplierId: first.supplier_id,
       trn: sup?.trn ?? null,

@@ -458,7 +458,7 @@ export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise
       <InfoBoxes
         boxes={[
           { title: "Supplier", strong: po.supplier_name, lines: [supplier?.trn ? `TRN ${supplier.trn}` : null, supplier?.address ?? null, [supplier?.phone, supplier?.email].filter(Boolean).join(" · ") || null, supplier?.payment_terms ? `Terms: ${supplier.payment_terms}` : null] },
-          { title: "Vehicle", strong: vin ? `VIN ${vin}` : "VIN to follow" },
+          po.job_id ? { title: "Vehicle", strong: vin ? `VIN ${vin}` : "VIN to follow" } : { title: "Order", strong: "STOCK PURCHASE – NO CAR" },
         ]}
       />
       <PoLinesTable rows={rows} />

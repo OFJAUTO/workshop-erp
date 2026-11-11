@@ -45,7 +45,7 @@ async function readSupplierInvoices(opts: { jobId?: string; poIds?: string[] }):
   const queryCols = ((await siQueryReady()) ? ", supplier_invoice_query, supplier_invoice_query_at" : "") + ((await invoiceVatReady()) ? ", supplier_invoice_vat_aed" : "") + ((await schemaReady("purchase_orders", "supplier_invoice_lines")) ? ", supplier_invoice_lines" : "");
   // Every row, page by page (PostgREST answers 1,000 rows at most; the old .limit(1500) stopped silently at 1,000).
   const page = (from: number, to: number) => {
-    let q = admin.from("purchase_orders").select(PO_COLS + queryCols).eq("is_active", true).neq("kind", "main").in("supplier_invoice_status", ["received", "to_follow"]).order("created_at", { ascending: false }).order("id").range(from, to);
+    let q = admin.from("purchase_orders").select(PO_COLS + queryCols).eq("is_active", true).neq("kind", "main").or("supplier_invoice_status.in.(received,to_follow),and(status.eq.ordered,supplier_invoice_status.eq.none)").order("created_at", { ascending: false }).order("id").range(from, to);
     if (opts.jobId) q = q.eq("job_id", opts.jobId);
     if (opts.poIds?.length) q = q.in("id", opts.poIds);
     return q as unknown as PromiseLike<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>;

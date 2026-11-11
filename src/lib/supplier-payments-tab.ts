@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadSupplierInvoices } from "@/lib/supplier-invoices";
-import { unpaidBySupplier, type UnpaidSupplier } from "@/lib/supplier-invoice-rows";
+import { unpaidBySupplier, type InvoiceRow, type UnpaidSupplier } from "@/lib/supplier-invoice-rows";
 import { advancesBySupplier, supplierPaymentsReadyNow } from "@/lib/supplier-payments";
 
 /**
@@ -25,13 +25,35 @@ export type PaymentHistoryRow = {
   hasProof: boolean;
 };
 
+/** A supplier's LPOs still waiting for their invoice (ordered, or delivered with the invoice to follow), car or stock. */
+export type AwaitingSupplier = { supplier: string; supplierId: string | null; count: number; notReceived: number; total: number; lpos: string[] };
+
+/** THE "waiting for the invoice" list per supplier (11 November 2026, Section 1): nothing to pay yet, but on the tab. */
+export function awaitingBySupplier(rows: InvoiceRow[]): AwaitingSupplier[] {
+  const m = new Map<string, AwaitingSupplier>();
+  for (const r of rows) {
+    if (r.status !== "waiting") continue;
+    const k = r.supplierId ?? `name:${r.supplier.trim().toLowerCase()}`;
+    const cur = m.get(k) ?? { supplier: r.supplier, supplierId: r.supplierId, count: 0, notReceived: 0, total: 0, lpos: [] };
+    cur.count++;
+    if (r.notReceived) cur.notReceived++;
+    cur.total = Math.round((cur.total + r.total) * 100) / 100;
+    cur.lpos.push(...r.shares.map((x) => x.poNumber));
+    m.set(k, cur);
+  }
+  return Array.from(m.values()).sort((a, b) => a.supplier.localeCompare(b.supplier));
+}
+
 export const METHOD_WORDS: Record<string, string> = { transfer: "Bank transfer", card: "Card", cash: "Cash", cheque: "Cheque", link: "Payment link" };
 
-export async function loadPaymentsTab(opts: { from?: string | null; to?: string | null; supplier?: string | null } = {}): Promise<{ ready: boolean; due: UnpaidSupplier[]; advances: Map<string, number>; history: PaymentHistoryRow[]; read: boolean }> {
+export async function loadPaymentsTab(opts: { from?: string | null; to?: string | null; supplier?: string | null } = {}): Promise<{ ready: boolean; due: UnpaidSupplier[]; advances: Map<string, number>; history: PaymentHistoryRow[]; read: boolean; awaiting: AwaitingSupplier[]; suppliers: { id: string; name: string }[] }> {
   const ready = await supplierPaymentsReadyNow();
   const inv = await loadSupplierInvoices({ strict: true }).catch(() => null);
+  const awaiting = awaitingBySupplier(inv?.rows ?? []);
+  const { data: supList } = await createAdminClient().from("suppliers").select("id, name").eq("is_active", true).order("name").limit(1000);
+  const suppliers = ((supList ?? []) as { id: string; name: string }[]).filter((x) => !/^our stock$/i.test(x.name.trim()));
   const due = unpaidBySupplier(inv?.rows ?? []).sort((a, b) => (a.oldest ?? "9999").localeCompare(b.oldest ?? "9999") || b.total - a.total);
-  if (!ready) return { ready, due, advances: new Map(), history: [], read: !!inv };
+  if (!ready) return { ready, due, advances: new Map(), history: [], read: !!inv, awaiting, suppliers };
   const admin = createAdminClient();
   const advances = await advancesBySupplier();
   let q = admin.from("supplier_payments").select("id, number, supplier_id, supplier_name, paid_on, method, reference, amount_aed, excess_kind, fee_aed, status, void_reason, created_by, proof_path").eq("is_active", true).order("paid_on", { ascending: false }).order("created_at", { ascending: false }).limit(500);
@@ -65,5 +87,5 @@ export async function loadPaymentsTab(opts: { from?: string | null; to?: string 
     by: p.created_by ? who.get(p.created_by) ?? null : null,
     hasProof: !!p.proof_path,
   }));
-  return { ready, due, advances, history, read: !!inv };
+  return { ready, due, advances, history, read: !!inv, awaiting, suppliers };
 }

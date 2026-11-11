@@ -59,6 +59,8 @@ export type MethodKey = (typeof DEPOSIT_METHODS)[number]["key"];
 export const PURCHASE_TYPES = [
   { key: "parts", label: "Parts purchases" },
   { key: "courier", label: "Courier & freight" },
+  // 11 November 2026 (Section 1): a stock purchase (no car) is bought for the shelf: its bill goes to the stock account.
+  { key: "stock", label: "Stock purchases (inventory)" },
 ] as const;
 export type PurchaseKey = (typeof PURCHASE_TYPES)[number]["key"];
 
@@ -119,6 +121,7 @@ export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Reco
   purchases: {
     parts: "Parts purchases",
     courier: "Courier and freight",
+    stock: "Inventory Asset",
   },
   expense: {
     commission: "Sales commissions",
@@ -235,6 +238,8 @@ type Resolved = {
   /** Phase 2 groups resolve softly: a missing bills/expenses mapping fails ONLY the rows that need it, never the phase 1 money. */
   purchases?: Record<PurchaseKey, string>;
   purchasesError?: string;
+  /** The stock account's own soft failure (11 November 2026). */
+  purchasesStockError?: string;
   expense?: Record<ExpenseKey, string>;
   expenseError?: string;
   paidFrom?: string;
@@ -296,7 +301,7 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
   if (!tax) throw new ZohoError("No 5% tax exists in this Zoho organization. Run the mirror on Settings > Zoho Books.");
   const byName = new Map(chart.filter((a) => a.is_active !== false).map((a) => [a.account_name.trim().toLowerCase(), a]));
   const mayCreate = create && org !== ZOHO_REAL_ORG_ID;
-  const resolve = async (name: string | undefined, label: string, kind: "income" | "cash" | "bank" | "expense"): Promise<string> => {
+  const resolve = async (name: string | undefined, label: string, kind: "income" | "cash" | "bank" | "expense" | "stock"): Promise<string> => {
     const clean = (name ?? "").trim();
     if (!clean) throw new ZohoError(`Mapping missing: ${label}. Pick the account on Settings > Zoho Books > Mapping.`);
     const found = byName.get(clean.toLowerCase());
@@ -319,7 +324,13 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
   // The phase 2 groups fail softly: only the rows needing them carry the reason.
   try {
     const purchases = {} as Record<PurchaseKey, string>;
-    for (const p of PURCHASE_TYPES) purchases[p.key] = await resolve(map.purchases[p.key], p.label, "expense");
+    for (const p of PURCHASE_TYPES) if (p.key !== "stock") purchases[p.key] = await resolve(map.purchases[p.key], p.label, "expense");
+    // The stock account resolves on its own: a missing one fails only the stock purchases' bills.
+    try {
+      purchases.stock = await resolve(map.purchases.stock, "Stock purchases (inventory)", "stock");
+    } catch (e) {
+      out.purchasesStockError = e instanceof Error ? e.message : String(e);
+    }
     out.purchases = purchases;
   } catch (e) {
     out.purchasesError = e instanceof Error ? e.message : String(e);
@@ -1036,7 +1047,7 @@ async function syncLpoInvoiceRow(org: string, accounts: Resolved, invoiceId: str
   const vat = taxed ? (inv.vat_aed === null ? roundHalfUp(net * 0.05) : roundHalfUp(Number(inv.vat_aed) || 0)) : 0;
   const gross = roundHalfUp(net + vat);
   const count = (inv.lines ?? []).length;
-  const line_items = [{ name: cut(`Parts per ${po.number} (invoice ${inv.number}) – ${count} item${count === 1 ? "" : "s"}`, 100), rate: net, quantity: 1, account_id: purchases.parts, ...(taxed ? { tax_id: accounts.taxId } : {}) }];
+  const line_items = [{ name: cut(`Parts per ${po.number} (invoice ${inv.number}) – ${count} item${count === 1 ? "" : "s"}`, 100), rate: net, quantity: 1, account_id: billPartsAccount(po, accounts, purchases), ...(taxed ? { tax_id: accounts.taxId } : {}) }];
   const zohoVat = taxed ? roundHalfUp(net * 0.05) : 0;
   const vatAdjust = roundHalfUp(vat - zohoVat);
   if (Math.abs(vatAdjust) > 1) throw new ZohoError(`${po.number}: the VAT typed for invoice ${inv.number} (${vat.toFixed(2)}) is more than AED 1 away from 5% of ${net.toFixed(2)} (${zohoVat.toFixed(2)}): check it on the LPO page.`);
@@ -1402,6 +1413,7 @@ export type PoRow = {
   id: string;
   number: string;
   kind: string;
+  order_type?: string | null;
   job_id: string | null;
   supplier_id: string | null;
   supplier_name: string;
@@ -1421,7 +1433,7 @@ export type PoRow = {
   zoho_bill_taxed: boolean | null;
 };
 
-const PO_ZOHO_SELECT = "id, number, kind, job_id, supplier_id, supplier_name, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_path, supplier_paid_at, supplier_paid_reference, supplier_paid_method, supplier_paid_proof_path, zoho_bill_id, zoho_billpayment_id, zoho_bill_taxed";
+const PO_ZOHO_SELECT = "id, number, kind, order_type, job_id, supplier_id, supplier_name, total_cost_aed, supplier_invoice_status, supplier_invoice_number, supplier_invoice_date, supplier_invoice_amount, supplier_invoice_path, supplier_paid_at, supplier_paid_reference, supplier_paid_method, supplier_paid_proof_path, zoho_bill_id, zoho_billpayment_id, zoho_bill_taxed";
 
 export async function poForZoho(poId: string): Promise<PoRow> {
   const { data } = await createAdminClient().from("purchase_orders").select(PO_ZOHO_SELECT).eq("id", poId).maybeSingle();
@@ -1534,6 +1546,15 @@ function billDiffWords(z: ZohoBill, net: number, vat: number, total: number): st
   return figuresDiffWords({ net: z.sub_total, vat: round2(z.total - z.sub_total), total: z.total }, { net, vat, total }) ?? "the figures differ";
 }
 
+/** THE account a supplier bill's parts post to: the stock account for a stock purchase (tools stay a purchase), else parts purchases. */
+function billPartsAccount(po: PoRow, accounts: Resolved, purchases: Record<PurchaseKey, string>): string {
+  if (po.kind === "stock" && po.order_type !== "tools") {
+    if (!purchases.stock) throw new ZohoError(accounts.purchasesStockError ?? "Mapping missing: Stock purchases (inventory). Pick the account on Settings > Zoho Books > Mapping.");
+    return purchases.stock;
+  }
+  return purchases.parts;
+}
+
 async function syncBillRow(org: string, accounts: Resolved, poId: string): Promise<HandlerOut> {
   const admin = createAdminClient();
   const po = await poForZoho(poId);
@@ -1561,7 +1582,7 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   );
   const line_items: Record<string, unknown>[] = [];
   if (partsRate > 0.005 || lines.length) {
-    line_items.push({ name: cut(`Parts per ${po.number} – ${lines.length} item${lines.length === 1 ? "" : "s"}`, 100), rate: partsRate, quantity: 1, account_id: purchases.parts, ...(taxed ? { tax_id: accounts.taxId } : {}) });
+    line_items.push({ name: cut(`${po.kind === "stock" ? "Stock purchase" : "Parts"} per ${po.number} – ${lines.length} item${lines.length === 1 ? "" : "s"}`, 100), rate: partsRate, quantity: 1, account_id: billPartsAccount(po, accounts, purchases), ...(taxed ? { tax_id: accounts.taxId } : {}) });
   }
   for (const c of charges) line_items.push({ name: cut(c.description, 100), rate: c.amount, quantity: 1, account_id: purchases.courier, ...(taxed ? { tax_id: accounts.taxId } : {}) });
   if (!line_items.length) throw new ZohoError(`${po.number} has nothing to bill (no lines and no charges).`);

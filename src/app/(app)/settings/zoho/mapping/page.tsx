@@ -71,6 +71,7 @@ export default async function ZohoMappingPage({ searchParams }: { searchParams: 
   const income = chart.filter((a) => a.account_type === "income").map((a) => a.account_name);
   const depositable = chart.filter((a) => ["bank", "cash", "other_current_asset"].includes(a.account_type)).map((a) => a.account_name);
   const expense = chart.filter((a) => a.account_type === "expense").map((a) => a.account_name);
+  const stockAccounts = chart.filter((a) => ["stock", "other_current_asset"].includes(a.account_type)).map((a) => a.account_name);
   const liability = chart.filter((a) => a.account_type.includes("liability")).map((a) => a.account_name);
 
   /** The select shows the live chart, with the picked or suggested name added when the chart does not hold it yet. */
@@ -128,8 +129,8 @@ export default async function ZohoMappingPage({ searchParams }: { searchParams: 
           <SectionLabel>Purchases and expenses — bills, commissions and recovery</SectionLabel>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {PURCHASE_TYPES.map((p) => (
-              <Field key={p.key} label={p.label} hint={p.key === "parts" ? "Where supplier bills put the parts (at net cost)." : "Courier/freight charged on a supplier's invoice — its own line on that bill, never doubled as an expense."}>
-                {box(`map__purchase__${p.key}`, bestMatch(map.purchases[p.key], SUGGESTED_MAP.purchases[p.key], expense, MATCH_WORDS[`purchase_${p.key}`] ?? []), expense)}
+              <Field key={p.key} label={p.label} hint={p.key === "parts" ? "Where supplier bills put the parts (at net cost)." : p.key === "stock" ? "Stock purchases with no car (shelf parts, oils, consumables): the inventory account." : "Courier/freight charged on a supplier's invoice — its own line on that bill, never doubled as an expense."}>
+                {p.key === "stock" ? box(`map__purchase__${p.key}`, bestMatch(map.purchases[p.key], SUGGESTED_MAP.purchases[p.key], stockAccounts, MATCH_WORDS[`purchase_${p.key}`] ?? []), stockAccounts) : box(`map__purchase__${p.key}`, bestMatch(map.purchases[p.key], SUGGESTED_MAP.purchases[p.key], expense, MATCH_WORDS[`purchase_${p.key}`] ?? []), expense)}
               </Field>
             ))}
             {EXPENSE_TYPES.map((e) => (

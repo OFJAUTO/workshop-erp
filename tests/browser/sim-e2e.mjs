@@ -15,7 +15,7 @@ import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHea
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
 mkdirSync(shots, { recursive: true });
-const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10").split(",").map((s) => s.trim());
+const PATHS = (process.env.PATHS ?? "a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,q,r,s,t,u,v,w,x,y,z,sec2,sec3,sec4,sec5,sec6,sec7,sec8,d1,d2,d3,d4,d5,d6,d7,d8,d9,d10,e1").split(",").map((s) => s.trim());
 const want = (k) => PATHS.includes(k);
 const until = async (fn, tries = 40, ms = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(ms); } return null; };
 /** A 1×1 PNG for the gate-out's instrument-cluster photo (30 October 2026 rule). */
@@ -3965,6 +3965,50 @@ await section("d10", "view as customer", async () => {
   const after = (await sql("select status, opened_at from public.quotations where id = $1", [q.id]))[0];
   check(`v2: never counted as opened (${after?.status})`, after?.status === "sent" && after?.opened_at === null);
   await own.browser.close();
+});
+
+/* ================================================================================================= */
+/* e1 (11 November 2026, Section 1): a stock LPO (no car) flows like a car LPO. Ordered and not        */
+/* received: on Supplier invoices tagged "Not received yet"; the supplier on Supplier payments as      */
+/* "waiting for the invoice" with Pay an advance; any supplier payable as an advance; the LPO header   */
+/* reads STOCK PURCHASE – NO CAR (no VIN); accounts enter the invoice and the supplier is then due.    */
+/* ================================================================================================= */
+await section("e1", "stock LPO in supplier invoices and payments", async () => {
+  const proof = "C:/Users/user/Desktop/workshop ERP/docs/proof/2026-11-11-stock-lpo";
+  mkdirSync(proof, { recursive: true });
+  const ownerId = (await sql("select id from public.staff where role_id = 'owner' and is_active order by created_at limit 1"))[0].id;
+  const sup = (await sql("insert into public.suppliers (name, trn, vat_registered, created_by, updated_by) values ('E2E STOCK SUP', '100200300400777', true, $1, $1) returning id", [ownerId]))[0];
+  const po = (await sql("insert into public.purchase_orders (number, job_id, supplier_id, supplier_name, kind, order_type, status, total_cost_aed, supplier_invoice_status, ordered_at, created_by, updated_by) values ('LPO-E2E-STK-1', null, $1, 'E2E STOCK SUP', 'stock', 'stock_parts', 'ordered', 90, 'none', now(), $2, $2) returning id", [sup.id, ownerId]))[0]?.id;
+  if (!po) throw new Error("seed failed: the stock LPO");
+  await sql("insert into public.purchase_order_lines (po_id, position, description, quantity, unit_cost, created_by, updated_by) values ($1, 1, 'E2E POWER STEERING OIL', 2, 45, $2, $2)", [po, ownerId]);
+  const acc = await browserFor("accounts", { viewport: { width: 1440, height: 900 } });
+  const ap = acc.page;
+  // s1. Supplier invoices: the stock LPO is listed, tagged Not received yet.
+  await go(ap, `${base}/supplier-invoices?q=LPO-E2E-STK-1`);
+  const row = ap.locator(`[data-si-row="follow:${po}"]`);
+  check("s1: the ordered stock LPO is on Supplier invoices", (await row.count()) === 1);
+  check("s1: tagged Not received yet and Stock purchase", (await row.locator("[data-si-not-received]").count()) === 1 && /Stock purchase/.test((await row.textContent()) ?? ""));
+  await ap.screenshot({ path: `${proof}/e1-supplier-invoices-not-received-1440.png` }).catch(() => null);
+  // s2. Supplier payments: waiting for the invoice, with Pay an advance; the any-supplier picker.
+  await go(ap, `${base}/supplier-payments`);
+  const w = ap.locator('[data-sp-awaiting-supplier="E2E STOCK SUP"]');
+  check(`s2: the supplier is listed as waiting for the invoice (${((await w.textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").slice(0, 90)})`, (await w.count()) === 1 && /not received yet/.test((await w.textContent()) ?? ""));
+  check("s2: Pay any supplier (advance) is offered", (await ap.locator("[data-sp-any-select] option").count()) > 1);
+  await w.locator("[data-sp-pay]").click();
+  await ap.waitForURL(/supplier=/, { timeout: 20000 });
+  check("s2: the payment box opens for an advance with no invoice due", (await ap.locator("[data-sp-pay-card] [data-supplier-pay-none]").count()) === 1 && (await ap.locator("[data-sp-pay-card] [data-supplier-pay-amount]").count()) === 1);
+  // s3. The LPO header: STOCK PURCHASE – NO CAR, no VIN, no stray dot.
+  await go(ap, `${base}/parts/orders/${po}`);
+  const head = ((await ap.locator("main header, main").first().textContent()) ?? "").replace(/\s+/g, " ");
+  check("s3: the LPO header reads Stock purchase – no car, with no VIN", (await ap.locator("[data-lpo-stock-header]").count()) === 1 && !/No VIN/.test(head));
+  await ap.screenshot({ path: `${proof}/e1-lpo-header-1440.png` }).catch(() => null);
+  // s4. The invoice entered (the delivery came with it): the supplier is now due on Supplier payments.
+  const today = (await sql("select (now() at time zone 'Asia/Dubai')::date::text as d"))[0].d;
+  await sql("update public.purchase_orders set supplier_invoice_status = 'received', supplier_invoice_number = 'E2E-STK-INV-1', supplier_invoice_date = $2, supplier_invoice_amount = 90, supplier_invoice_at = now(), supplier_invoice_checked_at = now() where id = $1", [po, today]);
+  await go(ap, `${base}/supplier-payments`);
+  const due = ap.locator('[data-sp-supplier="E2E STOCK SUP"]');
+  check(`s4: once the invoice is entered the stock purchase is due (AED 94.50)`, (await due.count()) === 1 && (await due.locator("[data-sp-due-amount]").getAttribute("data-sp-due-amount")) === "94.50");
+  await acc.browser.close();
 });
 
 const failed = summary();

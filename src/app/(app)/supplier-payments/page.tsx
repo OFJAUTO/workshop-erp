@@ -18,6 +18,8 @@ import { SUPPLIER_PAY_METHODS, readZohoMap } from "@/lib/zoho-sync";
  * supplier (oldest first), record a payment with the existing box (method, amount, date, proof, one payment across
  * several invoices, advance or fee), the payment history, advances per supplier and the Excel export.
  */
+const awaitingWords = (a: { count: number; notReceived: number; total: number }) =>
+  `${a.count} LPO${a.count === 1 ? "" : "s"} waiting for the invoice${a.notReceived ? ` (${a.notReceived} not received yet)` : ""} · AED ${money(a.total)}`;
 const money = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default async function SupplierPaymentsPage({ searchParams }: { searchParams: Promise<{ supplier?: string; from?: string; to?: string }> }) {
@@ -27,7 +29,14 @@ export default async function SupplierPaymentsPage({ searchParams }: { searchPar
   const settings = await getSettings();
   const tab = await loadPaymentsTab({ from: sp.from ?? null, to: sp.to ?? null });
   const advanceOf = (id: string | null, name: string) => tab.advances.get(id ?? "") ?? tab.advances.get(name.toUpperCase()) ?? 0;
-  const pick = sp.supplier ? tab.due.find((d) => (d.supplierId ?? `name:${d.supplier}`) === sp.supplier) ?? null : null;
+  // A supplier with an invoice due, one whose LPOs wait for their invoice, or any supplier on the list (an advance).
+  const pick: { supplierId: string | null; supplier: string } | null = sp.supplier
+    ? (tab.due.find((d) => (d.supplierId ?? `name:${d.supplier}`) === sp.supplier) ??
+      tab.awaiting.find((d) => (d.supplierId ?? `name:${d.supplier}`) === sp.supplier) ??
+      tab.suppliers.map((x) => ({ supplierId: x.id, supplier: x.name })).find((x) => x.supplierId === sp.supplier) ??
+      null)
+    : null;
+  const awaitingOf = (id: string | null, name: string) => tab.awaiting.find((a) => (a.supplierId && a.supplierId === id) || a.supplier.toUpperCase() === name.toUpperCase()) ?? null;
   const canPay = !staff.viewingAs;
   const zmap = readZohoMap(settings);
   const paidFromWords = SUPPLIER_PAY_METHODS.map((m) => `${m.label}: ${zmap.paidFromBy?.[m.key] || zmap.paidFrom || "not mapped yet"}`).join(" · ");
@@ -55,6 +64,7 @@ export default async function SupplierPaymentsPage({ searchParams }: { searchPar
                 <span className="font-extrabold uppercase">{d.supplier}</span>
                 <span className="text-sm text-muted">{d.count} invoice{d.count === 1 ? "" : "s"}{d.oldest ? ` · oldest ${formatDate(d.oldest)}` : ""}</span>
                 {adv > 0.005 ? <Badge tone="green">Advance AED {money(adv)}</Badge> : null}
+                {awaitingOf(d.supplierId, d.supplier) ? <span className="text-xs font-semibold text-amber-text" data-sp-awaiting-words>{awaitingWords(awaitingOf(d.supplierId, d.supplier)!)}</span> : null}
                 <span className="ml-auto" data-sp-due-amount={d.total.toFixed(2)}><SupplierAmount money={moneyFrom(d.net, d.vat, d.vatCharged)} size="sm" /></span>
                 {canPay && tab.ready ? <LinkButton href={`/supplier-payments?supplier=${encodeURIComponent(key)}#pay`} size="md" data-sp-pay={d.supplier}>Record payment</LinkButton> : null}
               </li>
@@ -62,6 +72,42 @@ export default async function SupplierPaymentsPage({ searchParams }: { searchPar
           })}
         </ul>
       </Card>
+
+      {tab.awaiting.some((a) => !tab.due.some((d) => (d.supplierId ?? d.supplier.toUpperCase()) === (a.supplierId ?? a.supplier.toUpperCase()))) ? (
+        <Card className="flex flex-col gap-2" data-sp-awaiting>
+          <SectionLabel>Waiting for the supplier&apos;s invoice</SectionLabel>
+          <p className="text-xs text-muted">Ordered or delivered, the invoice not entered yet. Nothing is due until accounts enter it; an advance can be paid now.</p>
+          <ul className="divide-y divide-line">
+            {tab.awaiting.filter((a) => !tab.due.some((d) => (d.supplierId ?? d.supplier.toUpperCase()) === (a.supplierId ?? a.supplier.toUpperCase()))).map((a) => {
+              const key = a.supplierId ?? `name:${a.supplier}`;
+              return (
+                <li key={key} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2" data-sp-awaiting-supplier={a.supplier}>
+                  <span className="font-extrabold uppercase">{a.supplier}</span>
+                  <span className="text-sm text-amber-text font-semibold">{awaitingWords(a)}</span>
+                  <span className="text-sm text-muted">{a.lpos.join(", ")}</span>
+                  {canPay && tab.ready ? <LinkButton href={`/supplier-payments?supplier=${encodeURIComponent(key)}#pay`} size="md" tone="secondary" className="ml-auto" data-sp-pay={a.supplier}>Pay an advance</LinkButton> : null}
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      ) : null}
+
+      {canPay && tab.ready ? (
+        <Card className="flex flex-col gap-2" data-sp-any>
+          <SectionLabel>Pay any supplier (advance)</SectionLabel>
+          <form method="get" action="/supplier-payments" className="flex flex-wrap items-end gap-2">
+            <label className="flex min-w-60 flex-1 flex-col gap-1 text-xs font-semibold text-muted">
+              Supplier
+              <select name="supplier" defaultValue="" required className="h-11 rounded-control border border-line-strong bg-white px-3 text-sm text-ink" data-sp-any-select>
+                <option value="" disabled>Choose a supplier</option>
+                {tab.suppliers.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </label>
+            <Button type="submit" size="md" tone="secondary" data-sp-any-open>Open</Button>
+          </form>
+        </Card>
+      ) : null}
 
       {pick && box ? (
         <Card className="flex flex-col gap-3 scroll-mt-4" id="pay" data-sp-pay-card={pick.supplier}>

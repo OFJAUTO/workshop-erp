@@ -46,12 +46,12 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
   const put = r2(invoices.filter((i) => ticked.has(i.poId)).reduce((a, i) => a + allocOf(i.poId), 0));
   const excess = r2(amount - put);
   const short = r2(dueTicked - put - advTotal);
-  if (!invoices.length && !advances.length) return <p className="text-sm text-muted" data-supplier-pay-none>Nothing owed to {supplierName}.</p>;
   return (
     <form action={action} className="flex flex-col gap-3" data-supplier-pay-box>
       <input type="hidden" name="supplier_id" value={supplierId ?? ""} />
       <input type="hidden" name="supplier_name" value={supplierName} />
-      <ul className="flex flex-col divide-y divide-line rounded-control border border-line">
+      {!invoices.length ? <p className="text-sm text-muted" data-supplier-pay-none>No invoice due to {supplierName} yet. What you record here is kept as an advance with them.</p> : null}
+      {invoices.length ? <ul className="flex flex-col divide-y divide-line rounded-control border border-line">
         {invoices.map((i) => (
           <li key={i.poId} className="flex flex-wrap items-center gap-2 px-3 py-2" data-supplier-pay-invoice={i.poId}>
             <label className="flex min-h-11 flex-1 items-center gap-2 text-sm">
@@ -64,7 +64,7 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
             ) : null}
           </li>
         ))}
-      </ul>
+      </ul> : null}
       {advances.length ? (
         <div className="flex flex-col gap-1 rounded-control border border-green bg-green-soft px-3 py-2" data-supplier-advances>
           {advances.map((a) => (

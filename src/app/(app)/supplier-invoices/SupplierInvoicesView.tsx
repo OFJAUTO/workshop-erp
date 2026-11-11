@@ -130,6 +130,8 @@ function InvoiceCard({ r, href, open }: { r: InvoiceRow; href: string; open: boo
         <span className="font-semibold">{invWords(r.number)}</span>
         {r.date ? <span className="text-sm text-muted">{formatDate(r.date)}</span> : null}
         <Badge tone={STATUS_TONE[r.status]}>{STATUS_WORDS[r.status]}</Badge>
+        {r.notReceived ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text" data-si-not-received>Not received yet</span> : null}
+        {r.stock ? <Badge tone="ink">Stock purchase</Badge> : null}
         {r.partlyPaid ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text" data-si-partly-paid>Partly paid · AED {money(r.unpaidAmount)} to pay</span> : null}
         {r.proofMissing ? <span className="rounded-full border border-red-bar bg-white px-2 py-0.5 text-xs font-bold text-red" data-si-proof-missing-tag>Proof missing – upload</span> : null}
         <MatchChips r={r} />

@@ -239,8 +239,9 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
         title={isMain ? `${po.number} · all suppliers` : `${po.number} · ${po.supplier_name}`}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
-            <span>{v ? `${formatPlate(v)} · ${[v.make?.name, v.model?.name].filter(Boolean).join(" ")}` : ""}</span>
-            <span>· {job?.job_number}</span>
+            {/* 11 November 2026 (Section 1): a stock purchase says so, never an empty car line, a stray dot or "No VIN". */}
+            {po.job_id ? <span>{v ? `${formatPlate(v)} · ${[v.make?.name, v.model?.name].filter(Boolean).join(" ")}` : ""}</span> : <span className="font-extrabold uppercase" data-lpo-stock-header>Stock purchase – no car</span>}
+            {job?.job_number ? <span>· {job.job_number}</span> : null}
             {po.job_id && advisor ? <JobAdvisorTag jobId={po.job_id} jobWords={`${job?.job_number ?? ""}${v ? ` · ${formatPlate(v)}` : ""}`} advisor={advisor} canAsk={!staff.viewingAs} /> : null}
             {po.job_id ? <JobTechnicianTag jobId={po.job_id} technicians={technicians} /> : null}
             <Badge tone={po.status === "pending_approval" ? "amber" : po.status === "received" ? "green" : po.status === "cancelled" ? "neutral" : "ink"}>{isMain && po.status === "approved" ? "Approved" : PO_STATUS_LABELS[po.status]}</Badge>
@@ -251,7 +252,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
         }
         actions={
           <>
-            <CopyVin vin={v?.vin} />
+            {po.job_id ? <CopyVin vin={v?.vin} /> : null}
             <LinkButton href="/parts/orders" tone="secondary" size="lg">All LPOs</LinkButton>
             {job ? <LinkButton href={`/parts/${job.id}#lpo`} tone="secondary" size="lg">Parts page</LinkButton> : null}
             {job ? <LinkButton href={`/jobs/${job.id}`} tone="secondary" size="lg">Job card</LinkButton> : null}
