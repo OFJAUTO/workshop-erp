@@ -12,11 +12,10 @@
 - After the apply: set each shared tablet's department (Team > Tablets and phones: Workshop / Bodyshop / Both). Today: Test tablet, Mechanic Tablet 1, Mechanic Tablet 2, Mechanic 1, Mechanical 2, Mech 3 and Bodyshop shared read "Department: not set".
 - After the apply: set the fee per inspection type if wanted (Settings > Inspection checklist > Inspection types – fee and time allowed); empty keeps today's fee. From the apply an inspection waits until the advisor picks its type on the job card; cars already in inspection show "Type: not set".
 - VIN from a photo (Section 11): not built - the barcode scan and typing stay, with the checks (17 characters, no I/O/Q, make from the VIN). Reading a VIN from a photo needs a paid service to be reliable, e.g. Google Cloud Vision text reading: USD 1.50 per 1,000 photos after the first 1,000 free each month; at 30 cars a day about USD 0-2 a month, worst case under USD 5. Say yes if you want it.
-- Reply "apply" for the waiting list (docs/waiting-for-apply.md).
 - Q-00078 (J-00317): Peter re-links the parts on Q-00078. On live: 13 of the job's priced parts are on the approved Q-00020 and stay there; three (FRONT BRAKE PAD, MAIN BATTERY, TRANSMISSION MOUNT) were priced before Q-00078 existed and are on no quotation: after the apply they show on Q-00078 under "Parts priced for this job on another quote (3) – Add here".
 - Zoho mapping: pick the stock account for "Stock purchases (inventory)" on Settings > Zoho Books > Mapping (OFJ TEST makes "Inventory Asset" by itself).
 
-**WAITING FOR APPLY:** 1. part_quote_link (S2) · 2. receipt_void_request_cheque_total (S5) · 3. lathe_bills_v2 (S6) · 4. device_department (S8) · 5. job_line_ticks (S9) · 6. inspection_scope (S10) · 7. data fix supabase/data-fixes/2026-11-11-password-alert-pile.sql (S14: marks the 17 unread old password bells read) · 8. hr (S15). Backup backups/2026-11-11T13-52-56.
+**WAITING FOR APPLY:** nothing. All 8 applied 11 Nov night (backup `backups/2026-11-11T19-35-14`), live check 33/33.
 
 ---
 

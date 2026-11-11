@@ -11,7 +11,11 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Backup taken before building: `backups/2026-11-11T13-52-56` (124 tables, 274,663 rows).
+Nothing.
+
+## Applied on 11 November 2026, night
+
+The owner replied "apply". A fresh backup was taken first: `backups/2026-11-11T19-35-14` (124 tables, 274,739 rows). The seven migrations were run with `scripts/db-sql.mjs` in order without an error and recorded with `scripts/db-record-migration.mjs`; the data fix marked 17 old password bells read. Checked on live: 0 unread old password bells, the HR tables and the hr-files bucket exist, 417 parts tagged to their quotation. `npm run check:live`: 33 passed, 0 failed.
 
 | # | What | What it does on live | Size |
 |---|---|---|---|
@@ -23,6 +27,7 @@ Backup taken before building: `backups/2026-11-11T13-52-56` (124 tables, 274,663
 | 6 | `supabase/migrations/20261213140000_inspection_scope.sql` (11 Nov, Section 10) | Adds `jobs.inspection_scope` (full / complaints / pre_purchase; empty = "Type: not set") with who set it and a downgrade request waiting for the owner (granted column by column), `inspections.car_condition`, `inspection_items.not_checked_reason/auto/resolution/resolved_by/at`, and the setting `inspection_scope_rules` (fee and time per type, empty = today's rule). From the apply, an inspection cannot START until the advisor picks the type on the job card. | 9 + 1 + 5 columns, 1 settings row |
 | 7 | `supabase/data-fixes/2026-11-11-password-alert-pile.sql` (11 Nov, Section 14, data only) | Marks read the 17 unread old "signed in with the password instead of a phone" bells (161 in all, read on live 11 Nov). From the deploy these sign-ins come as one evening summary; nothing is deleted. | 17 rows |
 | 8 | `supabase/migrations/20261213150000_hr.sql` (11 Nov, Section 15) | Adds the three server-only HR tables `hr_people` (the person: passport name, role, department, joining date, phone, emergency contact, contract and probation end, Left with reason), `hr_documents` (photo, Emirates ID, passport, visa, labour card, health insurance, driving licence: number, expiry, file, the reminder stage; replaced and archived kept) and `hr_access_log` (every open, view, download, number shown, upload, edit, Left), with audit, stamp and no-delete triggers, and the private bucket `hr-files` (25 MB a file). No policies and no grants to the login role: only the server reads them. Until then the HR menu item says it switches on with the apply. | 3 tables + 1 bucket |
+
 
 ## Applied on 11 November 2026, morning
 
