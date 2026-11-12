@@ -10,7 +10,7 @@ import { schemaReady } from "@/lib/schema-ready";
  * Approve and Refuse go through ONE dispatcher (src/app/(app)/approvals/actions.ts) to each kind's own decision, so
  * the rules of each decision stay where they are.
  */
-export const APPROVAL_KINDS = ["quote", "revision", "commission", "lpo", "discount", "fee", "price", "free_charge", "inspection_change", "stock_reversal", "comeback", "overpayment", "void", "lathe_void", "inspection_type"] as const;
+export const APPROVAL_KINDS = ["quote", "revision", "commission", "lpo", "discount", "fee", "price", "free_charge", "inspection_change", "stock_reversal", "comeback", "overpayment", "void", "lathe_void", "inspection_type", "part_change"] as const;
 export type ApprovalKind = (typeof APPROVAL_KINDS)[number];
 
 export const KIND_WORDS: Record<ApprovalKind, string> = {
@@ -29,6 +29,7 @@ export const KIND_WORDS: Record<ApprovalKind, string> = {
   void: "Void a receipt",
   lathe_void: "Void a lathe bill",
   inspection_type: "Inspection type downgrade",
+  part_change: "Part supplier or price change",
 };
 
 export type ApprovalItem = {
@@ -179,6 +180,16 @@ export async function loadApprovals(scope: Scope = {}): Promise<ApprovalItem[]> 
     for (const r of (ir ?? []) as R[]) {
       if (r.inspection_scope_request_by && !who.has(String(r.inspection_scope_request_by))) for (const st of ((await admin.from("staff").select("id, display_name").eq("id", String(r.inspection_scope_request_by))).data ?? []) as R[]) who.set(String(st.id), String(st.display_name));
       push({ kind: "inspection_type", id: String(r.id), title: `Inspection type: ${scopeLabel(r.inspection_scope as string)} → ${scopeLabel(r.inspection_scope_request as string)} · ${r.job_number}`, what: String(r.inspection_scope_request_reason ?? ""), askedBy: nm(r.inspection_scope_request_by), askedAt: (r.inspection_scope_request_at as string) ?? null, money: null, href: `/jobs/${r.id}`, jobId: String(r.id), quotationId: null, poId: null, approveLabel: "Allow the change", refuseLabel: "Keep it" });
+    }
+  }
+  // A part's supplier or price changed in place, cost up or another type (13 November 2026, Section 3).
+  if (await schemaReady("part_changes", "status, words")) {
+    const { data: pc } = await admin.from("part_changes").select("id, job_id, words, price_choice, absorb_aed, created_by, created_at").eq("status", "pending").eq("is_active", true);
+    for (const r of (pc ?? []) as R[]) {
+      if (r.created_by && !who.has(String(r.created_by))) for (const st of ((await admin.from("staff").select("id, display_name").eq("id", String(r.created_by))).data ?? []) as R[]) who.set(String(st.id), String(st.display_name));
+      if (r.job_id && !jobWords.has(String(r.job_id))) for (const j of ((await admin.from("jobs").select("id, job_number").eq("id", String(r.job_id))).data ?? []) as R[]) jobWords.set(String(j.id), String(j.job_number));
+      const keep = r.price_choice === "keep";
+      push({ kind: "part_change", id: String(r.id), title: `Part change · ${jw(r.job_id)}`, what: `${String(r.words)}${keep ? " · keep the customer's price" : r.price_choice === "revise" ? " · then revise the quotation" : ""}`, askedBy: nm(r.created_by), askedAt: (r.created_at as string) ?? null, money: keep && Number(r.absorb_aed) > 0 ? `we absorb ${aed(r.absorb_aed)}` : null, href: `/parts/${r.job_id}`, jobId: String(r.job_id), quotationId: null, poId: null });
     }
   }
   for (const extra of await moreApprovals(scope)) out.push(extra);

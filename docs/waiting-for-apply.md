@@ -17,6 +17,7 @@ These come from the overnight list of 13 November 2026. A live backup was taken 
 |---|---|---|---|
 | 1 | `supabase/migrations/20261215090000_stock_value_zoho.sql` (Section 2) | Lets a stock item used on a job post its value to Zoho. It adds the outbox kind `stockuse` and the column `stock_movements.zoho_journal_id`. Until it is applied, the stock count and bills work as now, and nothing is queued for stock used on a job. | 1 rule + 1 column |
 | 2 | `supabase/data-fixes/2026-11-13-stock-value-mapping.sql` (Section 2, data fix) | Points "Stock value" on the Zoho mapping at "Parts stock (ERP count)" instead of Zoho's own "Inventory Asset". It also puts bill 9275779 (LPO-00070, MODEL AUTOMOTIVE PARTS EST) back in the queue. At the next **Sync to Zoho** the bill posts, and SPAY-00018 follows it. | 2 updates, nothing deleted |
+| 3 | `supabase/migrations/20261215100000_part_changes.sql` (Section 3) | Adds the server-only table `part_changes` (RLS on, no policies, no grants to the login role, audit and no-delete triggers): every change of a part made in place (old → new, reason, who) and the changes waiting for the owner (cost up or another type). Until then "Change supplier / price…" and "This replaces…" do not show. | 1 table |
 
 ## Applied on 12 November 2026, afternoon
 

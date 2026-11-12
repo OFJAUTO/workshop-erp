@@ -240,6 +240,30 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
     else if (r.status !== "rejected" || r.removed_at) rows.push({ key: `req:${r.id}`, quoteTag: tagOf(pq.requestOf.get(r.id) ?? null, {}), requestId: r.id, partId: null, name: r.label, original: null, techQty: Number(r.quantity) || 1, askedBy: askerOf(r), askedUnit: unitsReady ? requestUnitOf(r.label, r.unit) : null, qtyMemory: memory[`req:${r.id}`] ?? null, info: infoOf(r), shownPositions: r.positions ?? null, values: valuesOfRequest(r, types[0] ?? ""), optionGroup: null, unavailable: r.status === "unavailable", closedReason: r.closed_reason, locked: false, orderLabel: null, diagramUrl: null, question: null, answer: null, perSet: r.unit === "set", removed: r.removed_at ? { by: nameOf.get(r.removed_by ?? "") ?? "Parts", reason: r.removed_reason ?? "" } : null, waitingApproval: false });
   }
   for (const p of parts.filter((p) => !p.part_request_id)) rows.push(rowOfPart(p, null, p.id));
+  // 13 November 2026 (Section 3): change supplier / price in place, its history, the "This replaces…" repair and the
+  // part numbers that are not real yet.
+  {
+    const { partChangesReady, partChangeHistory, replaceTargets } = await import("@/lib/part-change");
+    const { partNumberLooksLikeName } = await import("@/lib/part-change-rules");
+    const ready = await partChangesReady();
+    const history = ready ? await partChangeHistory(jobId) : new Map<string, { words: string; status: string; at: string }[]>();
+    const { approvedPartIds } = await import("@/lib/parts-changes-data");
+    const approvedSet = (await approvedPartIds([jobId])).get(jobId) ?? new Set<string>();
+    const pastApproval = approvedSet.size > 0;
+    const targets = pastApproval && canPrice ? await replaceTargets(jobId, "") : [];
+    for (const row of rows) {
+      const p = row.partId ? parts.find((x) => x.id === row.partId) : null;
+      if (!p) continue;
+      const raw = rawById.get(p.id);
+      const received = Number(raw?.received_qty ?? 0) > 0 || ["received", "partly_received"].includes(String(p.order_status)) || String(raw?.issue_status ?? "") === "confirmed";
+      row.changeable = ready && live(p) && !p.removed_at && !received && (row.locked || !!row.approvedNotOrdered) && p.cost_aed !== null;
+      row.changeHistory = history.get(p.id) ?? [];
+      // Added after the approval, on no approved quotation, not linked yet: offer the removed approved parts.
+      row.relinkTargets = pastApproval && live(p) && !p.removed_at && !raw?.replaced_part_id && !approvedSet.has(p.id) && targets.length ? targets.filter((t) => t.id !== p.id) : null;
+      const pn = String(p.part_number ?? "").trim();
+      row.pnFlag = live(p) && !p.removed_at ? (pn.toUpperCase() === "NO NUMBER" ? "No part number yet: flagged until the real number is entered." : partNumberLooksLikeName(pn, p.description)) : null;
+    }
+  }
 
   // After the customer's approval: the approved parts, the one main LPO and its supplier LPOs.
   // A part given its ending (cancelled, returned, kept in stock) has left the job: it is in none of these lists.

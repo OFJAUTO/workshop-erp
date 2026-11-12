@@ -148,6 +148,13 @@ export async function decideApprovalAction(kind: ApprovalKind, id: string, decis
       answer = await decideScopeRequest(id, yes, note, staff);
       break;
     }
+    case "part_change": {
+      // 13 November 2026 (Section 3): a part's supplier or price changed in place, cost up or another type.
+      const { decidePartChange } = await import("@/lib/part-change");
+      const r = await decidePartChange(id, yes, note, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+      answer = r.error ? { error: r.error } : { ok: true, message: r.words ?? "Done." };
+      break;
+    }
     default:
       answer = await runMoreDecision(kind, id, yes, note, staff);
   }

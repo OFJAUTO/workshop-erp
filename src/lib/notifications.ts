@@ -79,6 +79,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "lathe_unmatched", label: "A lathe bill has lines with no ticket: find the car each was for (Parts)", locked: true },
   { type: "batch_missing", label: "A PPF or tint batch number is missing, so the warranty certificate waits (bodyshop manager, advisor)", locked: true },
   { type: "qty_reduced", label: "Fewer parts used than the customer approved: reduce the price (or an advance/refund is due)", locked: true },
+  { type: "part_change", label: "A part's supplier or price changed in place (waiting for the owner, approved, refused, cancel with the old supplier)", locked: true },
   { type: "qty_keep_price", label: "Keeping the approved price although fewer parts were used (owner's decision)", locked: true },
   { type: "qty_after_invoice", label: "A part's quantity changed after its supplier invoice was entered (accounts)", locked: true },
   { type: "hours_missing", label: "Your estimates or quotations count work with no hours (the profit is not reliable until the hours are typed)" },
