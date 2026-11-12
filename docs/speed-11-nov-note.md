@@ -91,3 +91,25 @@ So the job card and, on a busy day, the accounts dashboard can still pass 1 seco
 
 - `npm run test:speed` (`tests/browser/speed-check.mjs`): the tablet timing against the test server. It writes JSON to `docs/proof/2026-11-11-speed/`.
 - `tests/browser/speed-trace.mjs` with a test server started with `SPEED_TRACE=<file>` (`src/instrumentation.ts`, off everywhere else): one page's database calls and waves, in order.
+
+## MEASURED ON LIVE (12 November 2026 morning, Vercel Observability, production, last 12 hours)
+
+Read from Vercel in the owner's own Chrome (read-only). Screenshots: `docs/proof/2026-11-11-speed/live-vercel-functions-p75-12h.jpg` and `live-vercel-dashboard-12h.jpg`.
+
+| Page | P75 duration on live | Calls |
+|---|---|---|
+| Job card `/jobs/[id]` | **111 ms** | 137 |
+| Home `/home` | **90 ms** | 59 |
+| Notifications `/api/notifications` | 362 ms | 69 |
+| LPO page `/parts/orders/[id]` | 635 ms | 13 |
+| Parts desk `/parts` | 761 ms | 22 |
+| Sign-in `/login` | 1.05 s | 45 |
+| Dashboards `/dashboard` (all roles) | **1.85 s** (route detail: average 0.997 s, P75 1.39 s) | 46 |
+
+So the job card, home, the Parts desk and the LPO page are under 1 second on live. The dashboards are not yet: on average 1.0 s.
+
+The real cost of one database call from the live server is **97 ms** on average (Vercel's External APIs for `/dashboard`: 2.8K calls to Supabase from 46 page views, about 60 calls each). That is higher than my estimate of 20–35 ms, which came from the sign-in page and a public page. This is why the dashboards stay near 1 s even after their waves were halved.
+
+The next free step for the dashboards: fewer calls per view (about 60 now). One read for the jobs-to-do and planning facts of all cars instead of one per helper, and the Waiting on you items from the same job list the dashboard already holds.
+
+A bigger Supabase plan still would not help: the 97 ms is the trip and the query handling per call, not the database's CPU (CPU throttle P75 21%, memory 303 MB of 2 GB).
