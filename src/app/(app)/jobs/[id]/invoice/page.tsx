@@ -300,12 +300,12 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
 
           <Card className="flex flex-col gap-2" data-money-summary>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" data-money-figures>
-              <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Total incl. VAT</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(totalDue)}</span></div>
+              <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Total incl. VAT</span><span className="text-xl sm:text-2xl font-extrabold whitespace-nowrap">AED {m(totalDue)}</span></div>
               {depRequested ? (
-                <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Deposit</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(dep.received)}<span className="text-sm font-semibold text-muted"> of {m(dep.required)}</span></span></div>
+                <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Deposit</span><span className="text-xl sm:text-2xl font-extrabold whitespace-nowrap">AED {m(dep.received)}<span className="text-sm font-semibold text-muted"> of {m(dep.required)}</span></span></div>
               ) : null}
-              <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Paid so far</span><span className="text-xl sm:text-2xl font-extrabold">AED {m(paidSoFar)}</span></div>
-              <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Balance due</span><span className={`text-xl sm:text-2xl font-extrabold ${balTone}`} data-balance>{live && !unpaid ? "Paid in full" : `AED ${m(balanceDue)}`}</span></div>
+              <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Paid so far</span><span className="text-xl sm:text-2xl font-extrabold whitespace-nowrap">AED {m(paidSoFar)}</span></div>
+              <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Balance due</span><span className={`text-xl sm:text-2xl font-extrabold whitespace-nowrap ${balTone}`} data-balance>{live && !unpaid ? "Paid in full" : `AED ${m(balanceDue)}`}</span></div>
             </div>
             {bankLine ? <p className="text-sm font-semibold text-amber-text" data-bank-pending-line>{bankLine}</p> : chequeClearing ? <p className="text-sm font-semibold text-amber-text">Cheque of AED {m(chequeClearing)} pending clearance.</p> : null}
             {bal?.credited ? <p className="text-sm font-semibold text-muted" data-credit-note-off>Credit notes AED {m(bal.credited)} taken off the balance.</p> : null}

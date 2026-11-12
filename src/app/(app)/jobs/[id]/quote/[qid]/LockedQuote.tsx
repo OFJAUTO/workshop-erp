@@ -42,8 +42,8 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
   return (
     <div className="flex flex-col gap-4 pb-20" data-quote-locked data-lock-reason={lock.reason ?? ""}>
       <div className="rounded-control border border-ink bg-chip px-4 py-3 text-sm font-bold" role="status" data-lock-banner>{lock.banner}</div>
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="xl:col-span-2 flex flex-col gap-4">
+      <div className="grid grid-cols-1 2xl:grid-cols-3 gap-6">
+        <div className="2xl:col-span-2 flex min-w-0 flex-col gap-4">
           <Card className="flex flex-col gap-2">
             <SectionLabel right={`${labour.length}`}>Labour and services</SectionLabel>
             {labour.length === 0 ? <p className="text-sm text-muted">None.</p> : (
@@ -82,9 +82,9 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
                         <td className="py-2 pr-2 align-top text-xs font-bold text-muted">{i + 1}</td>
                         <td className="py-2 pr-2 align-top"><Words text={l.title} className="font-semibold uppercase" /><PositionsLine positions={l.positions} />{l.left_off ? <Badge tone="neutral">Left off</Badge> : null}{isHidden(l) ? <Badge tone="neutral">Internal cost only</Badge> : null}{l.option_group && l.chosen === false ? <Badge tone="neutral">Not chosen</Badge> : null}</td>
                         <td className="py-2 pr-2 align-top text-right whitespace-nowrap">{qtyWithUnit(Number(l.quantity) || 1, unitOf(l.unit))}</td>
-                        {showProfit ? <><td className="py-2 pr-2 align-top text-right text-muted">{aed(l.unit_cost)}</td><td className="py-2 pr-2 align-top text-right text-muted">{markupBoth(l).percent === null ? "—" : `${markupBoth(l).percent!.toFixed(2)}%`}</td><td className="py-2 pr-2 align-top text-right text-muted">{aed(markupBoth(l).aed)}</td></> : null}
-                        <td className="py-2 pr-2 align-top text-right">{off ? "" : aed(lineUnitPrice(l))}</td>
-                        <td className="py-2 align-top text-right font-bold">{off ? aed(0) : aed(lineTotal(l))}</td>
+                        {showProfit ? <><td className="py-2 pr-2 align-top text-right whitespace-nowrap text-muted">{aed(l.unit_cost)}</td><td className="py-2 pr-2 align-top text-right whitespace-nowrap text-muted">{markupBoth(l).percent === null ? "—" : `${markupBoth(l).percent!.toFixed(2)}%`}</td><td className="py-2 pr-2 align-top text-right whitespace-nowrap text-muted">{aed(markupBoth(l).aed)}</td></> : null}
+                        <td className="py-2 pr-2 align-top text-right whitespace-nowrap">{off ? "" : aed(lineUnitPrice(l))}</td>
+                        <td className="py-2 align-top text-right whitespace-nowrap font-bold">{off ? aed(0) : aed(lineTotal(l))}</td>
                       </tr>
                     );
                   })}

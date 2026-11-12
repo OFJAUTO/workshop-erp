@@ -146,16 +146,27 @@ async function WarrantyStickers({ q, isOwner, stored }: { q: string; isOwner: bo
             {cars.map((c) => (
               <li key={c.id} className="flex flex-col gap-2 py-3" data-warranty-car={c.id}>
                 <span className="text-sm"><b>{c.jobNumber}</b> · {[c.plate, c.car].filter(Boolean).join(" · ")}</span>
-                <div className="flex flex-wrap gap-2">
-                  <LinkButton href={`/print/service-sticker/${c.id}?back=${encodeURIComponent("/stickers?tab=warranty")}`} tone="secondary" target="_blank" data-service-print={c.id}>Oil service sticker</LinkButton>
+                {/* 13 November 2026 (Section 1d): each label is its own box - its name, its batch box (PPF and tint only)
+                    and its own Print - so a batch box can never be read as belonging to the label next to it. */}
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(17rem,1fr))] gap-2" data-label-groups>
+                  <div className="flex min-h-12 items-center gap-2 rounded-control border border-line px-3 py-1.5" data-label-group="service">
+                    <span className="min-w-0 flex-1 text-sm font-bold">Oil service</span>
+                    <LinkButton href={`/print/service-sticker/${c.id}?back=${encodeURIComponent("/stickers?tab=warranty")}`} tone="secondary" target="_blank" data-service-print={c.id}>Print</LinkButton>
+                  </div>
                   {extra.map((t) => t.batch ? (
-                    <form key={t.key} method="get" action={`/print/warranty-sticker/${c.id}`} target="_blank" className="flex flex-wrap items-center gap-1.5">
+                    <form key={t.key} method="get" action={`/print/warranty-sticker/${c.id}`} target="_blank" className="flex min-h-12 flex-wrap items-center gap-2 rounded-control border border-line px-3 py-1.5" data-label-group={t.key}>
                       <input type="hidden" name="type" value={t.key} />
-                      <input name="batch" required placeholder="Batch" className="min-h-11 w-28 rounded-control border border-line-strong bg-white px-2 text-sm uppercase" data-warranty-batch={t.key} autoComplete="off" />
-                      <Button type="submit" tone="secondary" data-warranty-print={t.key}>{t.label}</Button>
+                      <span className="min-w-0 flex-1 text-sm font-bold">{t.label}</span>
+                      <label className="flex items-center gap-1.5 text-xs font-semibold text-muted">batch
+                        <input name="batch" required placeholder="___" className="min-h-11 w-24 rounded-control border border-line-strong bg-white px-2 text-sm uppercase text-ink" data-warranty-batch={t.key} autoComplete="off" />
+                      </label>
+                      <Button type="submit" tone="secondary" data-warranty-print={t.key}>Print</Button>
                     </form>
                   ) : (
-                    <LinkButton key={t.key} href={`/print/warranty-sticker/${c.id}?type=${t.key}`} tone="secondary" target="_blank" data-warranty-print={t.key}>{t.label}</LinkButton>
+                    <div key={t.key} className="flex min-h-12 items-center gap-2 rounded-control border border-line px-3 py-1.5" data-label-group={t.key}>
+                      <span className="min-w-0 flex-1 text-sm font-bold">{t.label}</span>
+                      <LinkButton href={`/print/warranty-sticker/${c.id}?type=${t.key}`} tone="secondary" target="_blank" data-warranty-print={t.key}>Print</LinkButton>
+                    </div>
                   ))}
                 </div>
               </li>

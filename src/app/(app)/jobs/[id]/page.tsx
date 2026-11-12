@@ -1,3 +1,4 @@
+import { FlashNotice } from "@/components/FlashNotice";
 import { NotCheckedList, ScopeChoice } from "@/components/InspectionScope";
 import { loadScopeState } from "@/lib/inspection-scope-data";
 import { ApprovalsHere } from "@/components/ApprovalsHere";
@@ -632,7 +633,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </div>
       ) : null}
 
-      {message ? <Notice tone="success">{message}</Notice> : null}
+      {message ? <FlashNotice key={message}>{message}</FlashNotice> : null}
       {aftercare ? (
         <Card className={`flex flex-col gap-2 ${aftercare.overdue ? "border-red-bar border-2" : aftercare.done_at ? "!border-green !bg-green-soft" : ""}`} data-aftercare-card>
           <div className="flex flex-wrap items-center gap-2">

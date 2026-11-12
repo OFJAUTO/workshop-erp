@@ -137,12 +137,16 @@ type EstimateDesk = { id: string; number: string; preparing: boolean; /** Sent b
 // minimum on two lines went from 10rem to 9rem, the two-line Availability from 9.5rem to 9rem, Disc % from 3.25rem
 // to 3rem and the gaps from 6 to 4 px to pay for it (at 1366 the table had scrolled 29 px sideways, at 1920 7 px), so a
 // name like "AIR SUSPENSION STRUT" still wraps on two lines within the row.
-const GRID = "grid grid-cols-2 md:grid-cols-[minmax(9rem,14rem)_8.25rem_4.25rem_3rem_5.25rem_14rem_9rem_5rem_2.5rem] min-[110rem]:grid-cols-[minmax(10.5rem,14.5rem)_8.25rem_19rem_11.5rem_4.25rem_3.25rem_5.25rem_14rem_11rem_5rem_2.5rem] gap-x-1 gap-y-1 items-center";
-const SECOND_LINE = "col-span-2 md:col-span-4 md:order-2 min-[110rem]:col-span-1 min-[110rem]:order-none";
-const STATUS_LINE = "col-span-2 md:col-span-9 min-[110rem]:col-span-11 md:order-3";
+// 13 November 2026 (Section 1): the layout follows the WIDTH OF THE TABLE'S OWN BOX (container queries), never the
+// window: a 1280 tablet's card is 934 px, so the window-based two-line grid (1005 px) spilled out of it.
+// Below 57.5rem: two columns stacked; 57.5rem up: two lines (the supplier 11rem until 60.5rem, then 14rem);
+// 98.25rem up: one line. Every column keeps the width its contents need; only the part name gives way.
+const GRID = "grid grid-cols-2 @min-[57.5rem]:grid-cols-[minmax(6rem,14rem)_8.25rem_4.25rem_3rem_5.25rem_11rem_9rem_5rem_2.5rem] @min-[60.5rem]:grid-cols-[minmax(6rem,14rem)_8.25rem_4.25rem_3rem_5.25rem_14rem_9rem_5rem_2.5rem] @min-[98.25rem]:grid-cols-[minmax(10.5rem,14.5rem)_8.25rem_19rem_11.5rem_4.25rem_3.25rem_5.25rem_14rem_11rem_5rem_2.5rem] gap-x-1 gap-y-1 items-center";
+const SECOND_LINE = "col-span-2 @min-[57.5rem]:col-span-4 @min-[57.5rem]:order-2 @min-[98.25rem]:col-span-1 @min-[98.25rem]:order-none";
+const STATUS_LINE = "col-span-2 @min-[57.5rem]:col-span-9 @min-[98.25rem]:col-span-11 @min-[57.5rem]:order-3";
 /** Money for the cost bar and the line totals. */
 const aed = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const ONE_LINE_ONLY = "hidden min-[110rem]:block";
+const ONE_LINE_ONLY = "hidden @min-[98.25rem]:block";
 const EMPTY: RowValues = { part_number: "", part_type: "", brand: "", list_price: "", discount: "", cost_aed: "", supplier: "", availability: "", days: "", qty: "1" };
 const num = (s: string) => Number(String(s).replace(",", ".")) || 0;
 const stateOf = (r: TableRow, values = r.values): RowState => rowState(values, { unavailable: r.unavailable, removed: !!r.removed, waitingApproval: r.waitingApproval });
@@ -429,8 +433,8 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
           </button>
         ) : null}
       </div>
-      <div className="overflow-x-auto">
-        <div className={`${GRID} hidden md:grid border-b border-line pb-1 text-xs font-bold uppercase tracking-[0.06em] text-muted`}>
+      <div className="@container overflow-x-auto">
+        <div className={`${GRID} hidden @min-[57.5rem]:grid border-b border-line pb-1 text-xs font-bold uppercase tracking-[0.06em] text-muted`}>
           <span className="flex items-center gap-1.5">
             {isJob && canPrice && !pricingLocked ? <input type="checkbox" aria-label="Select all parts" checked={allTicked} onChange={toggleAll} disabled={deletable.length === 0} className="h-4 w-4 accent-ink" data-select-all /> : null}
             Part
@@ -776,7 +780,7 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
   return (
     <div data-row-key={row.key} data-row-state={state} className={`${GRID} rounded-control border px-2 py-1 ${tone}`} onFocusCapture={() => setFocused(true)} onBlurCapture={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) { setFocused(false); flushNow(); } }}>
       {/* Part: the name (tap to correct it through the picker); a long name wraps onto two or three lines and the row grows with it */}
-      <div className="col-span-2 md:col-span-1 min-h-9 flex items-center gap-1 min-w-0">
+      <div className="col-span-2 @min-[57.5rem]:col-span-1 min-h-9 flex items-center gap-1 min-w-0">
         {canPrice && !estimate && !row.removed ? <input type="checkbox" aria-label={`Select ${name}`} checked={selected} onChange={(e) => onSelect(e.target.checked)} className="h-4 w-4 shrink-0 accent-ink" data-row-select /> : null}
         <span className={`w-4 shrink-0 text-center text-green-text font-extrabold ${complete ? "" : "invisible"}`} aria-label={complete ? "priced" : undefined}>✓</span>
         <button type="button" disabled={readOnly} onClick={() => setEditingName(true)} className={`min-h-9 min-w-0 flex-1 py-0.5 text-left font-bold disabled:cursor-default overflow-hidden ${row.removed || row.refused ? "line-through text-muted" : ""}`} title={readOnly ? name : `${name} · tap to correct the name`} data-part-name>
@@ -879,7 +883,7 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
         </span>
       )}
       {/* Line total: qty × net each. A removed or not-available line shows a dash and counts nowhere. */}
-      <span className="hidden md:flex h-9 items-center justify-end text-sm font-semibold tabular-nums" data-line-total>
+      <span className="hidden @min-[57.5rem]:flex h-9 items-center justify-end text-sm font-semibold tabular-nums" data-line-total>
         {state === "removed" || state === "not_available" ? "—" : aed(num(v.qty || "1") * num(v.cost_aed))}
       </span>
       {/* The three-dot menu: narrow, always visible, opens upwards near the bottom */}

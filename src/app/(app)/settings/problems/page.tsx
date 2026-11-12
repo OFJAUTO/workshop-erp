@@ -49,11 +49,11 @@ export default async function ProblemsPage() {
                     {r.place}
                     {r.job_id && jobOf.get(r.job_id) ? <a href={`/jobs/${r.job_id}`} className="ml-2 text-xs font-bold underline underline-offset-4">{jobOf.get(r.job_id)}</a> : null}
                   </span>
-                  {/* Raw text keeps its paths and ids whole: one line each, the strip scrolls sideways when one is long. */}
-                  <div className="overflow-x-auto">
-                    <span className="block whitespace-nowrap text-red font-semibold font-mono text-xs" data-problem-message>{r.message}</span>
+                  {/* Raw text wraps anywhere (13 November 2026): the whole path and id stay visible, nothing is cut off. */}
+                  <div className="min-w-0 [overflow-wrap:anywhere]" data-layout-skip>
+                    <span className="block text-red font-semibold font-mono text-xs" data-problem-message>{r.message}</span>
                     {detailLines(r.detail).map((line) => (
-                      <span key={line} className="block whitespace-nowrap text-xs text-muted">{line}</span>
+                      <span key={line} className="block text-xs text-muted">{line}</span>
                     ))}
                   </div>
                 </div>

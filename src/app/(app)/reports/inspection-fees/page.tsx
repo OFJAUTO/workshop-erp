@@ -1,3 +1,4 @@
+import { Words } from "@/components/Words";
 import { redirect } from "next/navigation";
 import { Card, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -46,7 +47,7 @@ export default async function InspectionFeesPage({ searchParams }: { searchParam
         ].map(([label, value]) => (
           <Card key={label} className="flex flex-col gap-1">
             <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{label}</span>
-            <span className="text-lg font-extrabold">{value}</span>
+            <Words className="text-lg font-extrabold" text={value} />
           </Card>
         ))}
       </div>
@@ -55,7 +56,7 @@ export default async function InspectionFeesPage({ searchParams }: { searchParam
         {rows.length === 0 ? (
           <p className="text-sm text-muted">No car was gated in this month.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" data-scroll-ok>
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-[0.08em] text-muted">

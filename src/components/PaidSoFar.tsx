@@ -1,3 +1,4 @@
+import { Words } from "./Words";
 import { paidSoFarParts } from "@/lib/money-list";
 
 /**
@@ -9,18 +10,18 @@ export function PaidSoFar({ m, showTotal = true, className = "text-xs text-muted
   const p = paidSoFarParts(m);
   return (
     <span className={className} data-paid-so-far>
-      {showTotal && p.total ? `${p.total} · ` : ""}
-      <span data-paid-amount>{p.paid}</span>
+      {showTotal && p.total ? <><Words text={p.total} />{" · "}</> : ""}
+      <Words text={p.paid} data-paid-amount />
       {p.credit ? <span data-credit-note-off>{` · ${p.credit}`}</span> : null}
       {p.balance ? (
         <>
           {" · "}
           <span className={p.balanceTone === "due" ? "font-bold text-ink" : p.balanceTone === "paid" ? "font-bold text-green-text" : ""} data-balance-left>
-            {p.balance}
+            <Words text={p.balance} />
           </span>
         </>
       ) : null}
-      {p.cheque ? ` · ${p.cheque}` : ""}
+      {p.cheque ? <>{" · "}<Words text={p.cheque} /></> : ""}
     </span>
   );
 }

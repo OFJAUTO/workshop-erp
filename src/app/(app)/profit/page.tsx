@@ -168,7 +168,7 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
         <Card className="flex flex-col gap-0.5"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Revenue (before VAT)</span><span className="text-2xl font-extrabold">{aed0(revenue)}</span><span className="text-xs text-muted">{rows.length} invoice{rows.length === 1 ? "" : "s"} · {range.label}</span></Card>
         <Card className="flex flex-col gap-0.5"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Job costs</span><span className="text-2xl font-extrabold">{aed0(jobCosts)}</span><span className="text-xs text-muted">parts, labour, bank, commission…</span></Card>
         <Card className="flex flex-col gap-0.5"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Profit</span><span className="text-2xl font-extrabold text-green-text" data-profit-total>{aed0(costs.profit)}</span><span className="text-xs text-muted">{margin.toFixed(1)}% margin</span></Card>
-        <Card className="flex flex-col gap-0.5"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Daily target</span><span className="text-2xl font-extrabold">{aed0(today.invoicedProfit)} <span className="text-sm font-semibold text-muted">/ {n0(today.target)} today</span></span><span className="text-xs text-muted">Month: {monthBehind >= 0 ? "ahead" : "behind"} by {aed0(Math.abs(monthBehind))}</span></Card>
+        <Card className="flex flex-col gap-0.5"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Daily target</span><span className="text-2xl font-extrabold">{aed0(today.invoicedProfit)} <span className="text-sm font-semibold text-muted">/ {n0(today.target)} today</span></span><span className="text-xs text-muted">Month: {monthBehind >= 0 ? "ahead" : "behind"} by <span className="whitespace-nowrap">{aed0(Math.abs(monthBehind))}</span></span></Card>
       </div>
 
       <Card className="flex flex-col gap-2" data-money-went>
@@ -187,7 +187,7 @@ export default async function ProfitPage({ searchParams }: { searchParams: Promi
         </div>
       </Card>
 
-      <Card className="p-0 overflow-x-auto" data-profit-table>
+      <Card className="p-0 overflow-x-auto" data-profit-table data-scroll-ok>
         <div className="flex flex-wrap items-center gap-2 px-5 pt-4">
           <span className="text-sm font-extrabold uppercase tracking-[0.08em]">Invoices</span>
           <span className="ml-auto flex gap-1.5 text-xs">

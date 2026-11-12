@@ -326,28 +326,28 @@ export function SettingsForm({
               </Field>
             </div>
             <Field label="Breaks (per day, per department)" hint="Written as 12:30-13:30; empty = no break that day. Every clock pauses in that break, and labour cost, times shown, planning and due dates leave it out.">
-              <div className="overflow-x-auto">
-                <table className="text-sm" data-break-grid>
-                  <thead>
-                    <tr className="text-left text-xs font-bold uppercase tracking-[0.06em] text-muted">
-                      <th className="py-1 pr-3" />
-                      {["sat", "sun", "mon", "tue", "wed", "thu", "fri"].map((d) => <th key={d} className="py-1 pr-2 font-bold">{d.charAt(0).toUpperCase() + d.slice(1)}</th>)}
+              {/* 13 November 2026 (Section 1): days down, the two departments across - it fits on every screen. */}
+              <table className="text-sm" data-break-grid>
+                <thead>
+                  <tr className="text-left text-xs font-bold uppercase text-muted">
+                    <th className="py-1 pr-3" />
+                    <th className="py-1 pr-2 font-bold">Mechanical</th>
+                    <th className="py-1 pr-2 font-bold">Bodyshop</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {["sat", "sun", "mon", "tue", "wed", "thu", "fri"].map((d) => (
+                    <tr key={d}>
+                      <td className="py-1 pr-3 text-sm font-semibold">{d.charAt(0).toUpperCase() + d.slice(1)}</td>
+                      {([["mechanical", "Mechanical"], ["bodyshop", "Bodyshop"]] as const).map(([side, label]) => (
+                        <td key={side} className="py-1 pr-2">
+                          <Input name={`break__${side}__${d}`} defaultValue={breakTimes[side]?.[d] ?? ""} placeholder={d === "fri" ? "12:30-14:00" : side === "bodyshop" ? "13:30-14:30" : "12:30-13:30"} className="min-h-10 px-2 text-sm" style={{ width: "8rem" }} aria-label={`${label} break on ${d}`} />
+                        </td>
+                      ))}
                     </tr>
-                  </thead>
-                  <tbody>
-                    {([["mechanical", "Mechanical"], ["bodyshop", "Bodyshop"]] as const).map(([side, label]) => (
-                      <tr key={side}>
-                        <td className="py-1 pr-3 text-sm font-semibold">{label}</td>
-                        {["sat", "sun", "mon", "tue", "wed", "thu", "fri"].map((d) => (
-                          <td key={d} className="py-1 pr-2">
-                            <Input name={`break__${side}__${d}`} defaultValue={breakTimes[side]?.[d] ?? ""} placeholder={d === "fri" ? "12:30-14:00" : side === "bodyshop" ? "13:30-14:30" : "12:30-13:30"} className="min-h-10 px-2 text-xs" style={{ width: "6.5rem" }} aria-label={`${label} break on ${d}`} />
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                  ))}
+                </tbody>
+              </table>
             </Field>
             <Field label="Working days" hint="Days that count towards the daily target and the stage timers.">
               <div className="flex flex-wrap gap-2">

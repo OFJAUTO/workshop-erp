@@ -4,7 +4,8 @@
  * still wraps at the spaces.
  */
 export function Words({ text, className, ...rest }: { text: string; className?: string } & Record<`data-${string}`, string | number | boolean | undefined>) {
-  const parts = text.split(/(\s+)/);
+  // An amount ("AED 945.00") is one piece too (13 November 2026): it never splits across two lines.
+  const parts = text.split(/(AED\s+[−+-]?[\d,.]+|\s+)/);
   return (
     <span className={className} {...rest}>
       {parts.map((p, i) => (/^\s+$/.test(p) ? " " : p ? <span key={i} className="whitespace-nowrap">{p}</span> : null))}

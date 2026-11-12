@@ -52,7 +52,7 @@ export default async function MonthlyReportPage({ searchParams }: { searchParams
         {s.bodyshop.byCut?.length ? (
           <div className="flex flex-col gap-1" data-ppf-by-cut>
             <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">PPF by cutting method</span>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto" data-scroll-ok>
               <table className="w-full text-sm">
                 <thead><tr className="text-left text-xs uppercase tracking-[0.08em] text-muted"><th className="py-1 pr-3">Method</th><th className="py-1 pr-3 text-right">Jobs</th><th className="py-1 pr-3 text-right">PPF hours</th><th className="py-1 pr-3 text-right">Film (m)</th><th className="py-1 pr-3 text-right">Hours per job</th><th className="py-1 text-right">Film per job (m)</th></tr></thead>
                 <tbody>
@@ -65,7 +65,7 @@ export default async function MonthlyReportPage({ searchParams }: { searchParams
           </div>
         ) : null}
         {s.bodyshop.cars.length ? (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" data-scroll-ok>
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs uppercase tracking-[0.08em] text-muted"><th className="py-1 pr-3">Job</th><th className="py-1 pr-3">Car</th><th className="py-1 pr-3 text-right">Price</th><th className="py-1 pr-3 text-right">Materials</th><th className="py-1 pr-3 text-right">Labour</th><th className="py-1 pr-3 text-right">Commission</th><th className="py-1 text-right">Profit</th></tr></thead>
               <tbody>
@@ -95,7 +95,7 @@ export default async function MonthlyReportPage({ searchParams }: { searchParams
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
               {[...totals.entries()].sort((a, b) => b[1] - a[1]).map(([sec, h]) => <span key={sec} className="font-semibold">{(SECTION_LABELS as Record<string, string>)[sec] ?? sec}: {Math.round(h * 10) / 10} h</span>)}
             </div>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto" data-scroll-ok>
               <table className="w-full text-sm">
                 <thead><tr className="text-left text-xs uppercase tracking-[0.08em] text-muted"><th className="py-1 pr-3">Car</th><th className="py-1 pr-3 text-right">Film (m)</th><th className="py-1 pr-3 text-right">Film + tint</th><th className="py-1">Hours per section</th></tr></thead>
                 <tbody>
@@ -134,7 +134,7 @@ export default async function MonthlyReportPage({ searchParams }: { searchParams
       <Card className="flex flex-col gap-2">
         <SectionLabel right={`${s.jobs.length}`}>Jobs gated out in {s.label}</SectionLabel>
         {s.jobs.length === 0 ? <p className="text-sm text-muted">Nothing gated out in this month.</p> : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" data-scroll-ok>
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs uppercase tracking-[0.08em] text-muted"><th className="py-1 pr-3">Gated out</th><th className="py-1 pr-3">Job</th><th className="py-1 pr-3">Car</th><th className="py-1 pr-3">Customer</th><th className="py-1 pr-3">Verdict</th><th className="py-1 pr-3 text-right">Invoiced</th><th className="py-1 pr-3 text-right">Profit</th><th className="py-1 pr-3 text-right">Days</th><th className="py-1 text-right">Flags</th></tr></thead>
               <tbody>
@@ -159,7 +159,7 @@ export default async function MonthlyReportPage({ searchParams }: { searchParams
       <Card id="commissions" className="flex flex-col gap-2" data-commissions>
         <SectionLabel right={s.commissionsUnpaid ? `${aedText(s.commissionsUnpaid)} not paid` : `${s.commissions.length}`}>Commissions</SectionLabel>
         {s.commissions.length === 0 ? <p className="text-sm text-muted">No commissions on the jobs of this month.</p> : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto" data-scroll-ok>
             <table className="w-full text-sm">
               <thead><tr className="text-left text-xs uppercase tracking-[0.08em] text-muted"><th className="py-1 pr-3">Job</th><th className="py-1 pr-3">Car</th><th className="py-1 pr-3">To</th><th className="py-1 pr-3 text-right">Amount</th><th className="py-1 pr-3">Status</th><th className="py-1" /></tr></thead>
               <tbody>

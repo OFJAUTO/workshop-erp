@@ -1,3 +1,4 @@
+import { Words } from "./Words";
 import Link from "next/link";
 import type { ReactNode } from "react";
 import { Badge, Card, SectionLabel } from "@/components/ui";
@@ -116,7 +117,7 @@ export function QuoteListSections({ rows, me, ownerName, noun, acceptedWords }: 
                   {r.sentAt ? `sent ${formatDateTime(r.sentAt)}` : `started ${formatDateTime(r.createdAt)}`}
                   {r.validUntil ? ` · valid until ${formatDate(r.validUntil)}` : ""}
                   {r.leadName ? <span data-started-by> · started by {r.leadName}</span> : null}
-                  {r.money?.words ? <span data-em-list-paid> · {r.money.words}</span> : null}
+                  {r.money?.words ? <span data-em-list-paid> · <Words text={r.money.words} /></span> : null}
                 </span>
                 {r.handback && s.key === "ready" && r.handback.summary ? <span className="basis-full text-sm font-semibold" data-handback-summary>{r.handback.summary}</span> : null}
               </div>

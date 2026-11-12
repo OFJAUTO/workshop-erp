@@ -1338,9 +1338,9 @@ export function QuoteEditor({
               ) : null}
             </>
           )}
-          {internal ? <span className="w-24 text-right text-xs font-extrabold uppercase tracking-wide text-muted" data-internal-line={l.id}>Internal</span> : isComplimentary(l) ? <span className="w-24 text-right text-xs font-extrabold uppercase tracking-wide text-green-text" data-complimentary={l.price_display}>{complimentaryWord(l)}</span> : <span className="w-24 text-right font-bold">{aed(total)}</span>}
+          {internal ? <span className="w-24 text-right text-xs font-extrabold uppercase tracking-wide text-muted" data-internal-line={l.id}>Internal</span> : isComplimentary(l) ? <span className="w-24 text-right text-xs font-extrabold uppercase tracking-wide text-green-text" data-complimentary={l.price_display}>{complimentaryWord(l)}</span> : <span className="min-w-24 text-right whitespace-nowrap font-bold">{aed(total)}</span>}
           {!disabled && labourLines.length > 1 ? (
-            <span className="inline-flex flex-col" aria-label="Move this line">
+            <span className="inline-flex flex-col pointer-coarse:hidden" aria-label="Move this line">
               <button type="button" disabled={index === 0} onClick={() => moveLine(l, "up")} aria-label="Move up" data-move-up={l.id} className="h-5 w-7 rounded-t-control border border-line text-xs font-bold leading-none text-muted disabled:opacity-30">▲</button>
               <button type="button" disabled={index === labourLines.length - 1} onClick={() => moveLine(l, "down")} aria-label="Move down" data-move-down={l.id} className="h-5 w-7 rounded-b-control border border-t-0 border-line text-xs font-bold leading-none text-muted disabled:opacity-30">▼</button>
             </span>
@@ -1557,8 +1557,8 @@ export function QuoteEditor({
   };
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 pb-28">
-      <div className="xl:col-span-2 flex flex-col gap-4">
+    <div className="grid grid-cols-1 2xl:grid-cols-3 gap-6 pb-28">
+      <div className="2xl:col-span-2 flex min-w-0 flex-col gap-4">
         {lockedName ? <Notice tone="info">{lockedName} is editing this quotation. You can read it; changes open once they leave.</Notice> : null}
         {error ? <Notice tone="error">{error}</Notice> : null}
         {actionError ? <Notice tone="error">{actionError}</Notice> : null}
@@ -1733,23 +1733,10 @@ export function QuoteEditor({
             </div>
           ) : null}
           {partLines.length === 0 ? <p className="text-sm text-muted">{wait?.openRequests ? `${wait.openRequests} request${wait.openRequests === 1 ? "" : "s"} with Parts. The parts appear here on their own once priced.` : "No parts on this quotation."}</p> : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs font-bold uppercase tracking-[0.06em] text-muted">
-                    <th className="py-1 pr-2">#</th>
-                    {/* The name keeps a real width (it wraps by words, never a letter per line). */}
-                    <th className="py-1 pr-2" style={{ minWidth: "9rem" }}>Part</th>
-                    <th className="py-1 pr-2">Availability</th>
-                    <th className="py-1 pr-2 text-right">Qty</th>
-                    <th className="py-1 pr-2 text-right">Cost</th>
-                    <th className="py-1 pr-2 text-right">Markup (% or AED)</th>
-                    <th className="py-1 pr-2 text-right">Selling</th>
-                    <th className="py-1 pr-2 text-right">Total</th>
-                    <th className="py-1" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-line">
+            <div className="flex flex-col divide-y divide-line text-sm" data-parts-lines>
+
+                {/* 13 November 2026 (Section 1a): no table: each part is two lines that always fit their box (part, availability, qty and cost; then markup, selling, total and its buttons), every figure with its own small label. */}
+                
                   {partLines.map((l, idx) => {
                     const part = partOf(l);
                     // An estimate's own part line (30 October 2026): named here, priced by the parts desk or by the advisor.
@@ -1778,9 +1765,10 @@ export function QuoteEditor({
                     };
                     return (
                       <Fragment key={l.id}>
-                      <tr id={`item-line-${l.id}`} className={unchosen ? "opacity-50" : ""} data-part-line data-est-part={est ? l.id : undefined}>
-                        <td className="py-2 pr-2 align-top text-xs font-bold text-muted">{idx + 1}</td>
-                        <td className="py-2 pr-2 align-top min-w-0">
+                      <div id={`item-line-${l.id}`} className={`flex flex-col gap-2 py-3 ${unchosen ? "opacity-50" : ""}`} data-part-line data-est-part={est ? l.id : undefined}>
+                        <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+                        <span className="w-5 shrink-0 pt-0.5 text-xs font-bold text-muted">{idx + 1}</span>
+                        <div className="min-w-[12rem] flex-1">
                           {/* Two fixed lines: the part, then its tags, so a row never changes height while the markup is typed */}
                           {failChip(l.id)}
                           {belowCostNote(l)}
@@ -1801,11 +1789,23 @@ export function QuoteEditor({
                                 </span>
                               ) : <>
                                 <span className="min-w-0 break-words font-semibold uppercase">{l.title}</span>
-                                {!disabled && l.part_item_id ? <button type="button" onClick={() => { setRenameError(null); setRenamePart({ lineId: l.id, partId: l.part_item_id!, value: l.title }); }} aria-label="Rename for the customer" title="Rename for the customer (the supplier name and part number never change)" className="min-h-7 min-w-7 shrink-0 rounded-control border border-line text-xs font-bold text-muted hover:border-ink" data-rename-part={l.id}>✎</button> : null}
+                                {!disabled && l.part_item_id ? <button type="button" onClick={() => { setRenameError(null); setRenamePart({ lineId: l.id, partId: l.part_item_id!, value: l.title }); }} aria-label="Rename for the customer" title="Rename for the customer (the supplier name and part number never change)" className="min-h-7 min-w-7 pointer-coarse:min-h-11 pointer-coarse:min-w-11 shrink-0 rounded-control border border-line text-xs font-bold text-muted hover:border-ink" data-rename-part={l.id}>✎</button> : null}
                               </>
                             )}
                           </div>
                           <PositionsLine positions={l.positions} />
+                          {/* 13 November 2026 (Section 1a): "For job" and "Priced by parts desk" sit under the part name on their own
+                              lines (in the last column they were cut off at the right edge and made every row tall). */}
+                          {namedLabour.length ? (
+                            <label className="mt-1 flex min-w-0 flex-wrap items-center gap-1 text-xs font-semibold text-muted" data-part-for-job-line>
+                              <span className="shrink-0">For job:</span>
+                              <select value={l.parent_line_id ?? guessJobForPart(l.title, jobChoices) ?? ""} disabled={!!disabled} onChange={(e) => patch(l.id, { parent_line_id: e.target.value || null }, true)} className="min-h-9 min-w-0 max-w-full flex-1 rounded-control border border-line bg-white px-1 text-xs font-semibold uppercase" data-part-for-job={l.id} data-part-for-job-guessed={l.parent_line_id ? "0" : "1"}>
+                                <option value="">Not linked to a job yet</option>
+                                {jobChoices.map((j, n) => <option key={j.id} value={j.id}>{n + 1}. {j.title.slice(0, 48)}</option>)}
+                              </select>
+                            </label>
+                          ) : null}
+                          {!est && isQuotation && l.part_item_id && l.unit_cost !== null && l.unit_cost !== undefined && !settings.partPricedBy?.[l.part_item_id]?.advisor ? <div className="mt-0.5 text-xs font-semibold text-muted" data-priced-by-desk={l.id}>Priced by parts desk</div> : null}
                           {partTypeText(l) ? <div><Badge tone="outline">{partTypeText(l)}</Badge></div> : null}
                           {positionsWarningOf(l) ? <div className="text-xs font-bold text-red" data-positions-mismatch>{positionsWarningOf(l)}</div> : null}
                           {est ? (
@@ -1815,7 +1815,7 @@ export function QuoteEditor({
                               {disabled && l.parts_note ? <span>Note: {l.parts_note}</span> : null}
                             </div>
                           ) : null}
-                          <div className="h-6 flex items-center gap-1.5 whitespace-nowrap overflow-hidden text-xs text-muted">
+                          <div className="h-6 empty:hidden flex items-center gap-1.5 whitespace-nowrap overflow-hidden text-xs text-muted">
                             {leftOff ? <Badge tone="neutral">Left off</Badge> : null}
                             {l.visible_to_customer === false ? <span data-internal-badge><Badge tone="neutral">Internal cost only</Badge></span> : null}
                             {part?.cost_aed === null && !leftOff ? <Badge tone="amber">Waiting for the price</Badge> : null}
@@ -1834,18 +1834,20 @@ export function QuoteEditor({
                               </span>
                             ) : null}
                           </div>
-                        </td>
-                        <td className="py-2 pr-2 align-top text-xs text-muted whitespace-nowrap">{est ? (customerAvailabilityWords(l.availability, l.delivery_days) ?? "") : (customerAvailabilityWords(part?.availability, daysFromDate(part?.delivery_date, settings.today ?? "")) ?? "")}</td>
-                        <td className="py-2 pr-2 align-top text-right" data-part-qty-cell={l.id}>
+                        </div>
+                        <PartCell label="Availability" className="w-28 text-xs text-muted">{est ? (customerAvailabilityWords(l.availability, l.delivery_days) ?? "") : (customerAvailabilityWords(part?.availability, daysFromDate(part?.delivery_date, settings.today ?? "")) ?? "")}</PartCell>
+                        <PartCell label="Qty" className="text-right" right data-part-qty-cell={l.id}>
                           {(est || (!!l.part_item_id && part?.order_status === "none" && !unchosen)) && !disabled ? (
                             // 3 November 2026: the advisor's quantity on a job's part is saved (THE quantity rule, logged, Parts told).
                             <QtyUnitBox qty={num(l.quantity)} unit={unitOf(l.unit)} onQty={(t) => { const v = Number(String(t).replace(",", ".")); if (t !== "" && Number.isFinite(v) && v > 0) patch(l.id, { quantity: v }); }} onUnit={(u) => patch(l.id, { unit: u }, true)} showUnit={!!settings.unitsReady} hook={est ? "data-est-part-qty" : "data-job-part-qty"} />
                           ) : (
                             <span className="whitespace-nowrap" data-part-qty-text>{qtyWithUnit(Number(l.quantity) || 1, unitOf(l.unit))}</span>
                           )}
-                        </td>
-                        <td className="py-2 pr-2 align-top text-right">{l.unit_cost === null ? "" : aed(l.unit_cost)}</td>
-                        <td className="py-2 pr-2 align-top" data-markup-cell>
+                        </PartCell>
+                        <PartCell label="Cost" className="w-24 text-right" right>{l.unit_cost === null ? "" : aed(l.unit_cost)}</PartCell>
+                      </div>
+                      <div className="flex flex-wrap items-start justify-end gap-x-3 gap-y-2" data-part-line-money>
+                        <PartCell label="Markup (% or AED)" right data-markup-cell>
                           <div className="flex items-center justify-end gap-1.5">
                             {/* % or AED: switching keeps the selling price, only the way the markup is kept changes */}
                             <span className="inline-flex shrink-0 overflow-hidden rounded-control border border-line-strong" data-markup-mode={mode}>
@@ -1869,12 +1871,12 @@ export function QuoteEditor({
                             const high = !unchosen ? markupTooHigh(l, settings.partMarkupWarn ?? DEFAULT_COST_LIMITS.markupWarnPercent) : null;
                             return high !== null ? <span className="mt-0.5 block max-w-[14rem] text-right text-xs font-bold text-amber-text" data-markup-high>{markupTooHighWords(high, l.unit_cost, part?.supplier ?? null)}</span> : null;
                           })()}
-                        </td>
-                        <td className="py-2 pr-2 align-top text-right" data-selling-cell>
+                        </PartCell>
+                        <PartCell label="Selling" className="text-right" right data-selling-cell>
                           {/* Type the selling price: the markup (% and AED) is worked out from it */}
                           <Input value={num(lineUnitPrice(l))} onChange={(e) => { if (e.target.value === "") return; const v = Number(e.target.value); if (Number.isFinite(v)) setMarkup({ markup_mode: mode, ...markupFromSell(l, v) }); }} inputMode="decimal" disabled={disabled || unchosen || l.unit_cost === null} className="text-right min-h-9" style={{ width: "6.5rem" }} aria-label="Selling price per unit" data-selling-input />
-                        </td>
-                        <td className="py-2 pr-2 align-top text-right font-bold">
+                        </PartCell>
+                        <PartCell label="Total" className="w-28 text-right font-bold" right>
                           {aed(total)}
                           {isOwner && !disabled && !unchosen ? (
                             <details className="text-xs font-normal text-left">
@@ -1882,9 +1884,9 @@ export function QuoteEditor({
                               <OwnerPartDiscount percent={l.discount_percent ?? 0} reason={l.discount_reason ?? ""} options={settings.reasons?.part_discount ?? []} onChange={(pct, reason) => patch(l.id, { discount_percent: pct, discount_reason: reason })} />
                             </details>
                           ) : (l.discount_percent ?? 0) > 0 ? <span className="block text-xs font-normal text-muted">Discount {l.discount_percent}%</span> : null}
-                          <span className={`block text-xs font-bold text-red ${belowFloor ? "" : "invisible"}`}>Below the minimum</span>
-                        </td>
-                        <td className="py-2 align-top text-right">
+                          {belowFloor ? <span className="block text-xs font-bold text-red">Below the minimum</span> : null}
+                        </PartCell>
+                        <div className="flex min-w-[7rem] flex-col items-end text-right">
                           {est && !disabled ? (
                             <div className="mb-1 flex flex-col items-end gap-1" data-est-part-actions>
                               {estState === "draft" ? <button type="button" disabled={!l.title.trim()} onClick={() => sendToDesk([l.id])} title={l.title.trim() ? undefined : "Type the name first"} className="min-h-9 rounded-control bg-ink px-2.5 text-xs font-bold text-on-dark whitespace-nowrap disabled:opacity-40" data-est-send={l.id}>Send to parts desk</button> : null}
@@ -1896,11 +1898,6 @@ export function QuoteEditor({
                           ) : null}
                           {/* A JOB's part (5 November 2026, once the columns exist): the advisor enters the price himself,
                               or hands his own price back to the parts desk. */}
-                          {/* 11 November 2026 (Section 9): which job this part is for (guessed by its name; the technician sees it under that job). */}
-                          {namedLabour.length ? (
-                            <label className="mb-1 flex items-center justify-end gap-1 text-xs font-semibold text-muted">For job:<select value={l.parent_line_id ?? guessJobForPart(l.title, jobChoices) ?? ""} disabled={!!disabled} onChange={(e) => patch(l.id, { parent_line_id: e.target.value || null }, true)} className="min-h-9 max-w-48 rounded-control border border-line bg-white px-1 text-xs font-semibold uppercase" data-part-for-job={l.id} data-part-for-job-guessed={l.parent_line_id ? "0" : "1"}><option value="">No job</option>{jobChoices.map((j) => <option key={j.id} value={j.id}>{j.title.slice(0, 40)}</option>)}</select></label>
-                          ) : null}
-                          {!est && isQuotation && l.part_item_id && l.unit_cost !== null && l.unit_cost !== undefined && !settings.partPricedBy?.[l.part_item_id]?.advisor ? <span className="mb-1 block text-right text-xs font-semibold text-muted" data-priced-by-desk={l.id}>Priced by parts desk</span> : null}
                           {!est && isQuotation && l.part_item_id && !disabled && settings.advisorPriceParts ? (() => {
                             const pp = settings.partPricedBy?.[l.part_item_id] ?? null;
                             const unpriced = l.unit_cost === null || l.unit_cost === undefined;
@@ -1921,13 +1918,14 @@ export function QuoteEditor({
                             )
                           ) : null}
                           {!disabled && !leftOff ? <button type="button" onClick={() => patch(l.id, { visible_to_customer: l.visible_to_customer === false }, true)} title={INTERNAL_ONLY_LABEL} className="mt-1 block min-h-9 w-full text-right text-xs font-semibold text-muted underline underline-offset-4 whitespace-nowrap" data-internal-toggle={l.id}>{l.visible_to_customer === false ? "Show to customer" : "Internal only"}</button> : null}
-                        </td>
-                      </tr>
+                        </div>
+                        </div>
+                      </div>
                       </Fragment>
                     );
                   })}
-                </tbody>
-              </table>
+                
+              
             </div>
           )}
           {/* A JOB's parts still with the desk (no price, so no line yet): the advisor can price one himself (5 November 2026). */}
@@ -2175,20 +2173,20 @@ export function QuoteEditor({
             <ul className="flex flex-col gap-1">
               {blockers.map((b, i) => (
                 <li key={b.key + i}>
-                  <button type="button" onClick={() => { setAttempted(true); document.getElementById(`item-${b.key}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); }} className={`text-left text-xs font-semibold underline underline-offset-4 ${attempted ? "text-red" : "text-muted"}`}>{b.label}</button>
+                  <button type="button" onClick={() => { setAttempted(true); document.getElementById(`item-${b.key}`)?.scrollIntoView({ behavior: "smooth", block: "center" }); }} className={`min-h-9 text-left text-xs font-semibold underline underline-offset-4 ${attempted ? "text-red" : "text-muted"}`}>{b.label}</button>
                 </li>
               ))}
             </ul>
           ) : null}
           {!sent && !completed && !blockers.length ? <p className="text-xs text-green-text font-semibold">✓ Nothing blocks it. Finish it in the bar below.</p> : null}
           {canKeepUrgent ? (
-            <button type="button" disabled={pending} onClick={() => { if (window.confirm("Keep only the lines marked Urgent, and their parts? The rest is removed from this version.")) run(() => keepUrgentOnly(quotation.id)); }} className="self-start text-xs font-semibold underline underline-offset-4">Keep urgent lines only</button>
+            <button type="button" disabled={pending} onClick={() => { if (window.confirm("Keep only the lines marked Urgent, and their parts? The rest is removed from this version.")) run(() => keepUrgentOnly(quotation.id)); }} className="min-h-9 self-start text-xs font-semibold underline underline-offset-4">Keep urgent lines only</button>
           ) : null}
           {!sent && completed ? (
             <>
               <p className="text-xs text-muted">Complete {formatDayTime(completedAt)}. Any change reopens it.</p>
               {!blockers.length && reasons.length && !isOwner && !approvalStands ? <p className="text-xs font-semibold text-amber-text">Needs the owner&apos;s approval: {reasons.join("; ")}</p> : null}
-              {!disabled ? <button type="button" className="self-start text-xs font-semibold underline underline-offset-4" onClick={() => run(() => reopenQuotation(quotation.id))}>Reopen to change</button> : null}
+              {!disabled ? <button type="button" className="min-h-9 self-start text-xs font-semibold underline underline-offset-4" onClick={() => run(() => reopenQuotation(quotation.id))}>Reopen to change</button> : null}
             </>
           ) : null}
           {fromEstimate && !sent ? <p className="text-xs text-muted">From an accepted estimate: if nothing changed, confirm it below instead of sending again.</p> : null}
@@ -2696,6 +2694,16 @@ function LabourDiscountDialog({ kind: initialKind, value: initialValue, scope: i
           <Button type="button" tone="ghost" size="md" onClick={onClose}>Cancel</Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** One figure of a part line with its small label above it (13 November 2026, Section 1a). */
+function PartCell({ label, className = "", right = false, children, ...data }: { label: string; className?: string; right?: boolean; children?: ReactNode } & Record<`data-${string}`, string | number | boolean | undefined>) {
+  return (
+    <div className={`flex flex-col gap-0.5 ${right ? "items-end" : ""} ${className}`} {...data}>
+      <span className="text-[11px] font-bold uppercase tracking-[0.04em] text-muted">{label}</span>
+      {children}
     </div>
   );
 }

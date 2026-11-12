@@ -44,7 +44,10 @@ export function GateOutForm({
   drivers = [],
   lastPin = null,
   mileage = null,
+  signoffLock = null,
 }: {
+  /** 13 November 2026 (Section 1e): the bodyshop release sign-off still missing - shown ONCE, at the button. */
+  signoffLock?: string | null;
   jobId: string;
   action: FormAction;
   keysCount: number;
@@ -238,7 +241,7 @@ export function GateOutForm({
                     <span className="text-sm font-bold">Keychain handed back ✓</span>
                   </label>
                 ) : null}
-                <button type="button" onClick={() => setKeysDiffer(true)} className="self-start text-xs font-semibold text-muted underline underline-offset-4 min-h-8" data-keys-differ>
+                <button type="button" onClick={() => setKeysDiffer(true)} className="self-start min-h-11 text-xs font-semibold text-muted underline underline-offset-4" data-keys-differ>
                   Different number of keys?
                 </button>
               </>
@@ -324,7 +327,8 @@ export function GateOutForm({
           ) : null}
 
           <div className="flex flex-col gap-1">
-            <SubmitButton tone={(mismatch && !canOverride) || (blocked && !canApproveRelease) ? "secondary" : "primary"} disabled={odoSending} className="self-start">{method === "recovery" ? "Stamp: left the workshop" : "Gate out and close the job"}</SubmitButton>
+            {signoffLock ? <div data-signoff-lock><Notice tone="error">{signoffLock}</Notice></div> : null}
+            <SubmitButton tone={signoffLock || (mismatch && !canOverride) || (blocked && !canApproveRelease) ? "secondary" : "primary"} disabled={odoSending || !!signoffLock} className="self-start">{method === "recovery" ? "Stamp: left the workshop" : "Gate out and close the job"}</SubmitButton>
             {odoSending ? <p className="text-xs font-semibold text-amber-text" data-gate-out-waiting>Waiting for the dashboard photo to arrive – the car leaves once the server has it.</p> : null}
           </div>
         </>

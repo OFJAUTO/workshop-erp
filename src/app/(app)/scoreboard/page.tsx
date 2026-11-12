@@ -72,12 +72,12 @@ export default async function ScoreboardPage({ searchParams }: { searchParams: P
     <>
       <PageHeader title="Scoreboard" subtitle={`${label} · ${(jobs ?? []).length} car${(jobs ?? []).length === 1 ? "" : "s"} finished`} actions={<span className="flex gap-2"><Link href={`/scoreboard?month=${shift(-1)}`} className="inline-flex min-h-11 items-center rounded-control border border-line-strong bg-white px-3 text-sm font-bold">Previous month</Link><Link href={`/scoreboard?month=${shift(1)}`} className="inline-flex min-h-11 items-center rounded-control border border-line-strong bg-white px-3 text-sm font-bold">Next month</Link></span>} />
       {list.length === 0 ? <Empty title="No technicians" /> : null}
-      <Card className="p-0 overflow-x-auto">
+      <Card className="p-0 overflow-x-auto" data-scroll-ok>
         <SectionLabel>Per technician</SectionLabel>
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-xs uppercase tracking-[0.08em] text-muted border-b border-line">
-              <th className="px-5 py-2">Technician</th><th className="px-3 py-2">Cars</th><th className="px-3 py-2">Hours charged</th><th className="px-3 py-2">Hours used</th><th className="px-3 py-2">Difference</th><th className="px-3 py-2">QC send-backs</th><th className="px-3 py-2">Manager send-backs</th><th className="px-3 py-2">Pauses</th><th className="px-3 py-2">Comebacks</th><th className="px-3 py-2">Verdicts</th>
+            <tr className="text-left text-xs uppercase text-muted border-b border-line">
+              <th className="px-4 py-2">Technician</th><th className="px-2 py-2">Cars</th><th className="px-2 py-2">Hours charged</th><th className="px-2 py-2">Hours used</th><th className="px-2 py-2">Difference</th><th className="px-2 py-2">QC send-backs</th><th className="px-2 py-2">Manager send-backs</th><th className="px-2 py-2">Pauses</th><th className="px-2 py-2">Comebacks</th><th className="px-2 py-2">Verdicts</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -85,16 +85,16 @@ export default async function ScoreboardPage({ searchParams }: { searchParams: P
               const diff = r.hoursCharged * 60 - r.minutesUsed;
               return (
                 <tr key={r.id}>
-                  <td className="px-5 py-2 font-semibold">{r.name}</td>
-                  <td className="px-3 py-2">{r.jobs}</td>
-                  <td className="px-3 py-2">{r.hoursCharged.toFixed(1)} h</td>
-                  <td className="px-3 py-2">{hm(r.minutesUsed)}</td>
-                  <td className={`px-3 py-2 font-semibold ${diff < 0 ? "text-red" : "text-green-text"}`}>{r.jobs ? `${diff < 0 ? "−" : "+"}${hm(Math.abs(diff))}` : ""}</td>
-                  <td className={`px-3 py-2 ${r.qcSendbacks ? "text-red font-semibold" : ""}`}>{r.qcSendbacks}</td>
-                  <td className={`px-3 py-2 ${r.managerSendbacks ? "text-amber-text font-semibold" : ""}`}>{r.managerSendbacks}</td>
-                  <td className="px-3 py-2">{r.pauses ? `${r.pauses} · ${hm(r.pauseMinutes)}${r.notAccepted ? ` · ${r.notAccepted} not accepted` : ""}` : "0"}</td>
-                  <td className={`px-3 py-2 ${r.comebacks ? "text-red font-semibold" : ""}`}>{r.comebacks}</td>
-                  <td className="px-3 py-2 flex flex-wrap gap-1">{r.good ? <Badge tone="green">{r.good} good</Badge> : null}{r.talk ? <Badge tone="red">{r.talk} needs a talk</Badge> : null}</td>
+                  <td className="px-4 py-2 font-semibold">{r.name}</td>
+                  <td className="px-2 py-2">{r.jobs}</td>
+                  <td className="px-2 py-2">{r.hoursCharged.toFixed(1)} h</td>
+                  <td className="px-2 py-2">{hm(r.minutesUsed)}</td>
+                  <td className={`px-2 py-2 font-semibold ${diff < 0 ? "text-red" : "text-green-text"}`}>{r.jobs ? `${diff < 0 ? "−" : "+"}${hm(Math.abs(diff))}` : ""}</td>
+                  <td className={`px-2 py-2 ${r.qcSendbacks ? "text-red font-semibold" : ""}`}>{r.qcSendbacks}</td>
+                  <td className={`px-2 py-2 ${r.managerSendbacks ? "text-amber-text font-semibold" : ""}`}>{r.managerSendbacks}</td>
+                  <td className="px-2 py-2">{r.pauses ? `${r.pauses} · ${hm(r.pauseMinutes)}${r.notAccepted ? ` · ${r.notAccepted} not accepted` : ""}` : "0"}</td>
+                  <td className={`px-2 py-2 ${r.comebacks ? "text-red font-semibold" : ""}`}>{r.comebacks}</td>
+                  <td className="px-2 py-2 flex flex-wrap gap-1">{r.good ? <Badge tone="green">{r.good} good</Badge> : null}{r.talk ? <Badge tone="red">{r.talk} needs a talk</Badge> : null}</td>
                 </tr>
               );
             })}

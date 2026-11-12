@@ -118,7 +118,7 @@ async function seedPages() {
   const who = (await sql("select customer_id::text as c, vehicle_id::text as v from public.jobs where id = $1", [job]))[0];
   if (who) await sql("insert into public.payments (customer_id, method, amount_aed, is_deposit, status, notes, vehicle_id) values ($1, 'cash', 250, true, 'recorded', 'Layout check: an advance not allocated yet', $2)", [who.c, who.v]);
   return {
-    staff: [...(who ? [`/vehicles/${who.v}`, `/vehicles/${who.v}/edit`, `/customers/${who.c}`] : []), `/jobs/${job}`, `/jobs/${job}/quote/${seededCar.quotationId}`, `/jobs/${job}/inspection`, `/jobs/${job}/invoice`, `/jobs/${job}/work`, `/jobs/${job}/gate-in`, `/parts/${job}`, `/estimates/new`, `/settings`, `/settings/inspection`, `/settings/services`],
+    staff: [...(who ? [`/vehicles/${who.v}`, `/vehicles/${who.v}/edit`, `/customers/${who.c}`] : []), `/jobs/${job}`, `/jobs/${job}/quote/${seededCar.quotationId}`, `/jobs/${job}/inspection`, `/jobs/${job}/invoice`, `/jobs/${job}/work`, `/jobs/${job}/gate-in`, `/jobs/${job}/gate-out`, `/parts/${job}`, `/estimates/new`, `/settings`, `/settings/inspection`, `/settings/services`],
     customer: [qToken ? `/quote/${qToken}` : null, seededCar.invoice?.token ? `/invoice/${seededCar.invoice.token}` : null, seededCar.invoice?.token ? `/proforma/${seededCar.invoice.token}` : null, insp ? `/report/${reportToken}` : null, `/approve/${approvalToken}`].filter(Boolean),
   };
 }
@@ -140,7 +140,10 @@ const roles = [
 // Pages reached from inside another page (not in the menu) that still need checking.
 // The parts desk's estimate pricing page (30 October 2026) opens any estimate read-only: the newest one is used.
 const anEstimate = (await sql("select id from public.quotations where kind = 'estimate' and is_active and deleted_at is null order by created_at desc limit 1"))[0]?.id ?? null;
-const EXTRA_PAGES = { owner: ["/settings/packages", "/commissions", "/settings/warranty", "/warranties", "/card-settlements", "/estimates/new", "/reports/inspection-fees", "/settings/problems", "/parts/approvals", "/team/sign-ins", "/account/sign-in"], advisor: ["/estimates/new", "/account/sign-in"], accounts: ["/commissions", "/card-settlements", "/account/sign-in"], parts: ["/account/sign-in", "/parts/inspections", ...(anEstimate ? [`/parts/estimate/${anEstimate}`] : [])] };
+// 13 November 2026 (Section 1): a DRAFT quotation and estimate with parts and labour, so the editor itself is always measured.
+const draftWithParts = await sql("select q.id, q.kind, q.job_id from public.quotations q where q.status = 'draft' and q.is_active and q.deleted_at is null and exists (select 1 from public.quotation_lines l where l.quotation_id = q.id and l.is_active and l.line_type = 'part') and exists (select 1 from public.quotation_lines l where l.quotation_id = q.id and l.is_active and l.line_type = 'labour') order by q.created_at desc limit 20");
+const draftPages = [draftWithParts.find((r) => r.kind === "quotation" && r.job_id), draftWithParts.find((r) => r.kind === "estimate")].filter(Boolean).map((r) => (r.kind === "estimate" ? `/estimates/${r.id}` : `/jobs/${r.job_id}/quote/${r.id}`));
+const EXTRA_PAGES = { owner: ["/settings/packages", "/commissions", "/settings/warranty", "/warranties", "/card-settlements", "/estimates/new", "/reports/inspection-fees", "/settings/problems", "/parts/approvals", "/team/sign-ins", "/account/sign-in", "/team/new", "/stickers?tab=warranty", "/stickers?tab=history", ...draftPages], advisor: ["/estimates/new", "/account/sign-in"], accounts: ["/commissions", "/card-settlements", "/account/sign-in"], parts: ["/account/sign-in", "/parts/inspections", ...(anEstimate ? [`/parts/estimate/${anEstimate}`] : [])] };
 const slice = (list) => {
   if (partOf <= 1) return list;
   const size = Math.ceil(list.length / partOf);

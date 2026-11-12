@@ -6,6 +6,7 @@ import { staffWords } from "@/lib/db-words";
 import { KeptSelect } from "./KeptSelect";
 import type { TextCase } from "@/lib/text-case";
 import type { ReactNode } from "react";
+import { Words } from "./Words";
 
 /* ---------------------------------------------------------------------------
    Shared building blocks. Every tappable thing is at least 44px tall.
@@ -122,7 +123,7 @@ export function PageHeader({
       </div>
       {/* THE HEADER ROW (11 November 2026, Section 13): view buttons, then the actions, then the bell - in that order on
           every page; on a tablet the row takes the full width and its buttons share it equally. */}
-      <div className="ml-auto flex flex-wrap items-center gap-2 max-lg:w-full max-lg:[&>*:not(#header-bell-slot)]:flex-1 max-lg:[&>*:not(#header-bell-slot)]:basis-40 max-lg:[&>*>a]:w-full max-lg:[&>*>button]:w-full max-lg:[&>a]:w-full max-lg:[&>button]:w-full" data-header-row>
+      <div className="ml-auto flex flex-wrap items-start gap-2 max-lg:w-full max-lg:[&>*:not(#header-bell-slot)]:flex-1 max-lg:[&>*:not(#header-bell-slot)]:basis-40 max-lg:[&>*>a]:w-full max-lg:[&>*>button]:w-full max-lg:[&>a]:w-full max-lg:[&>button]:w-full" data-header-row>
         {views}
         {actions}
         <span id="header-bell-slot" className="inline-flex shrink-0 items-center" />
@@ -157,7 +158,8 @@ export function Badge({ children, tone = "neutral", ...data }: { children: React
       {...data}
       className={`inline-flex max-w-full items-center text-xs font-bold px-2.5 py-1 rounded-full ${badgeClass[tone]}`}
     >
-      {children}
+      {/* 13 November 2026 (Section 1): a badge's words, amounts and codes never split across two lines. */}
+      {typeof children === "string" ? <Words text={children} /> : children}
     </span>
   );
 }
@@ -249,12 +251,13 @@ export function ChoiceButtons({
   defaultValue?: string | null;
   columns?: 2 | 3 | 4;
 }) {
-  // 11 November 2026 (Section 13): the choices are ONE strip with the chosen one highlighted (a long list wraps).
+  // 13 November 2026 (Section 1b): every option is the SAME size, aligned left, whatever wraps (a flex strip
+  // stretched the leftovers of a wrapped row into giant cells). One grid of equal tiles; the chosen one is black.
   void columns;
   return (
-    <div className="flex flex-wrap overflow-hidden rounded-control border border-line-strong bg-white" data-choice-strip>
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))] gap-1.5" data-choice-strip>
       {options.map((o) => (
-        <label key={o.value} className="min-w-[7rem] flex-1 cursor-pointer border-line-strong [&:not(:first-child)]:border-l">
+        <label key={o.value} className="cursor-pointer" data-choice-option>
           <input
             type="radio"
             name={name}
@@ -262,7 +265,7 @@ export function ChoiceButtons({
             defaultChecked={defaultValue === o.value}
             className="peer sr-only"
           />
-          <span className="flex h-full min-h-11 flex-col items-center justify-center bg-white px-3 py-2 text-center text-sm font-semibold peer-checked:bg-ink peer-checked:text-on-dark peer-focus-visible:ring-2 peer-focus-visible:ring-inset peer-focus-visible:ring-ink/30">
+          <span className="flex h-full min-h-11 flex-col items-center justify-center rounded-control border border-line-strong bg-white px-3 py-2 text-center text-sm font-semibold peer-checked:border-ink peer-checked:bg-ink peer-checked:text-on-dark peer-focus-visible:ring-2 peer-focus-visible:ring-inset peer-focus-visible:ring-ink/30">
             {o.label}
             {o.hint ? <span className="text-xs font-medium opacity-70">{o.hint}</span> : null}
           </span>

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { CarThumb } from "./CarThumb";
+import { Words } from "./Words";
 import { PaidSoFar } from "./PaidSoFar";
 import { Badge } from "./ui";
 import { MONEY_STEPS, type MoneyState, type MoneyStepKey } from "@/lib/money-steps";
@@ -79,7 +80,7 @@ export function MoneyRow({ r, href, canAddAuth = false }: { r: MoneyRowData; hre
         <Link href={to} className="min-w-0 flex-1 px-4 py-3 flex flex-wrap items-center gap-3" data-money-row-open>
           <div className="flex flex-col min-w-44">
             <span className="font-extrabold">{credit ? r.customer : r.plate || r.customer}</span>
-            <span className="text-xs text-muted">{credit ? `Credit · not allocated${r.plate ? ` · ${r.plate}` : ""}` : r.kind === "estimate" ? `Car not here yet · ${r.jobNumber}${r.car ? ` · ${r.car}` : ""}` : `Pending charge · ${r.what ?? ""}`}</span>
+            <Words className="text-xs text-muted" text={credit ? `Credit · not allocated${r.plate ? ` · ${r.plate}` : ""}` : r.kind === "estimate" ? `Car not here yet · ${r.jobNumber}${r.car ? ` · ${r.car}` : ""}` : `Pending charge · ${r.what ?? ""}`} />
             {!credit && r.plate ? <span className="text-xs text-muted">{r.customer}</span> : null}
           </div>
           <div className="flex flex-col gap-1 flex-1 min-w-64">

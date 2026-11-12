@@ -77,6 +77,26 @@ export function measurePage({ touch = false, limit = 20 } = {}) {
     return { left: x1, top: y1, right: x2, bottom: y2, width: Math.max(0, x2 - x1), height: Math.max(0, y2 - y1) };
   };
 
+  /* ---- 0b. Content spilling out of its box (13 November 2026, Section 1): a box whose content is wider than the
+     box itself, so part of it is cut off or must be scrolled sideways to be seen. On a computer and a tablet held
+     sideways (1024 px and wider) every box shows all of its content; a portrait tablet may scroll a wide table
+     inside its own box only when the box says so (data-scroll-ok). ---- */
+  for (const n of document.querySelectorAll("body *")) {
+    if (n.tagName === "INPUT" || n.tagName === "TEXTAREA" || n.tagName === "SELECT" || n instanceof SVGElement) continue;
+    const cs = getComputedStyle(n);
+    if (!/(auto|scroll|hidden|clip)/.test(cs.overflowX)) continue;
+    if (n.scrollWidth <= n.clientWidth + 8 || n.clientWidth < 40) continue;
+    if (ignored(n) || hiddenByDetails(n) || !visibleStyle(n) || isSrOnly(n)) continue;
+    if (n.closest("[data-spill-ok]")) continue;
+    // A deliberate one-line "…" (truncate) hides the rest of its text on purpose.
+    if (cs.textOverflow === "ellipsis") continue;
+    if (W < 1024 && n.closest("[data-scroll-ok]")) continue;
+    const r = n.getBoundingClientRect();
+    if (r.height < 8 || r.bottom < 0) continue;
+    const what = ((n.getAttribute("data-layout-name") || n.firstElementChild?.textContent || n.textContent || "").trim().replace(/\s+/g, " ")).slice(0, 50);
+    problems.push(`spills out of its box (${n.scrollWidth}px of content in a ${n.clientWidth}px ${/(auto|scroll)/.test(cs.overflowX) ? "scrolling strip" : "box"}): ${n.tagName.toLowerCase()} "${what}"`);
+  }
+
   /* ---- 1. Controls: overlap, cut off at the right edge, too small for a finger ---- */
   const controls = [...document.querySelectorAll("button, a[href], input, select, textarea, [role='button']")].filter((el) => {
     if (ignored(el) || hiddenByDetails(el) || !visibleStyle(el)) return false;
@@ -157,6 +177,12 @@ export function measurePage({ touch = false, limit = 20 } = {}) {
         at += p.length + 1;
       }
       if (bad) words.push({ el, word: m[0] });
+    }
+    // An amount split across two lines ("AED" / "200.00"), 13 November 2026: a money figure reads as one piece.
+    const money = /AED\s+[\d,.]+/g;
+    let mm;
+    while ((mm = money.exec(text)) && words.length < 20000) {
+      if (linesOf(mm.index, mm.index + mm[0].length).size > 1) words.push({ el, word: mm[0] });
     }
   }
   for (const w of words.slice(0, 6)) problems.push(`word broken across two lines: "${w.word}" in ${label(w.el.closest("button, a, li, td, div, span, p") ?? w.el)}`);

@@ -8,6 +8,7 @@ import { PA_QUICK, PA_STATUS, PA_TABS, aedWords, asPaTab, filterBalances, filter
 import { filterInvoices, invoiceFilterOf, invoiceFilterParams } from "@/lib/supplier-invoice-rows";
 import { SupplierInvoicesView, type SiSearch } from "../supplier-invoices/SupplierInvoicesView";
 import { LinesTab, LposTab, PaymentsTab, ProblemsTab, ReturnsTab } from "./PartsAccountsTabs";
+import { Words } from "@/components/Words";
 
 export const dynamic = "force-dynamic";
 
@@ -35,12 +36,12 @@ function TotalsStrip({ t, f }: { t: PaTotals; f: PaFilter }) {
     { key: "problems", label: "Problems", value: String(t.problems), sub: t.problems ? `${t.problemsRed} red · tap to see them` : "nothing to look at ✓", href: hrefOf("problems", f), tone: t.problemsRed ? "border-red-bar" : t.problems ? "border-amber-bar" : "" },
   ];
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-5" data-pa-totals>
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-3" data-pa-totals>
       {tiles.map((x) => (
         <a key={x.key} href={x.href} className={`flex flex-col gap-0.5 rounded-card border bg-white px-4 py-3 hover:border-ink ${x.tone || "border-line"}`} data-pa-tile={x.key} data-tile-value={x.value}>
           <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{x.label}</span>
-          <span className={`text-xl font-extrabold ${x.key === "problems" && t.problemsRed ? "text-red" : ""}`}>{x.value}</span>
-          <span className="text-xs text-muted">{x.sub}</span>
+          <Words className={`text-xl font-extrabold ${x.key === "problems" && t.problemsRed ? "text-red" : ""}`} text={String(x.value)} />
+          <Words className="text-xs text-muted" text={String(x.sub ?? "")} />
         </a>
       ))}
     </div>

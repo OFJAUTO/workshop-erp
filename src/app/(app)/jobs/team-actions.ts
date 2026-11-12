@@ -42,7 +42,7 @@ export async function setJobDepartment(jobId: string, formData: FormData) {
   const n = { type: "planning", title: `${job.job_number} is now ${DEPARTMENT_WORDS[value]}`, body: `${staff.display_name} changed the department from ${from} to ${DEPARTMENT_WORDS[value]}. Check the planning and the people on the car.`, jobId, href: `/jobs/${jobId}#planning` };
   await notifyManagers("mechanical", n);
   await notifyManagers("bodyshop", n);
-  return back(jobId, { message: `Department changed to ${DEPARTMENT_WORDS[value]} ✓ — planning and the pickers follow; anyone who no longer fits is listed under Teams.` });
+  return back(jobId, { message: `Department changed to ${DEPARTMENT_WORDS[value]} ✓` });
 }
 
 /** "Team: Paint ▾" on one line of the car's work: who does it. Logged; the planning and the pickers follow. */

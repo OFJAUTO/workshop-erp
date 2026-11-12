@@ -73,11 +73,11 @@ export function QuotationList({ jobId, families, canQuote, jobOpen, kind = "quot
         })}
       </ul>
       <p className="text-xs font-semibold" data-quote-money>
-        <span className="text-green-text">{estimates ? "Accepted" : "Approved"} so far {aed(money.approved)}</span>
+        <span className="text-green-text">{estimates ? "Accepted" : "Approved"} so far <span className="whitespace-nowrap">{aed(money.approved)}</span></span>
         <span className="text-muted"> · </span>
-        <span className={money.waiting > 0 ? "text-amber-text" : "text-muted"}>Waiting for {estimates ? "the customer" : "approval"} {aed(money.waiting)}</span>
+        <span className={money.waiting > 0 ? "text-amber-text" : "text-muted"}>Waiting for {estimates ? "the customer" : "approval"} <span className="whitespace-nowrap">{aed(money.waiting)}</span></span>
         <span className="text-muted"> · </span>
-        <span className={money.declined > 0 ? "text-red" : "text-muted"}>Declined {aed(money.declined)}</span>
+        <span className={money.declined > 0 ? "text-red" : "text-muted"}>Declined <span className="whitespace-nowrap">{aed(money.declined)}</span></span>
       </p>
       {canQuote && jobOpen && !estimates && jobId ? (
         preparing ? (

@@ -255,7 +255,7 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
                 <button type="button" onClick={() => setPartialKind("percent")} aria-pressed={partialKind === "percent"} data-em-partial-kind="percent" className={`min-h-11 px-3 text-sm font-bold ${partialKind === "percent" ? "bg-ink text-on-dark" : "bg-white"}`}>%</button>
                 <button type="button" onClick={() => setPartialKind("aed")} aria-pressed={partialKind === "aed"} data-em-partial-kind="aed" className={`min-h-11 px-3 text-sm font-bold ${partialKind === "aed" ? "bg-ink text-on-dark" : "bg-white"}`}>AED</button>
               </span>
-              <NumericInput value={partialValue} onChange={(e) => setPartialValue((e.target as HTMLInputElement).value)} placeholder={partialKind === "percent" ? "e.g. 50" : "amount"} style={{ width: "9rem" }} data-em-partial-value />
+              <NumericInput value={partialValue} onChange={(e) => setPartialValue((e.target as HTMLInputElement).value)} placeholder={partialKind === "percent" ? "e.g. 50" : "amount"} className="min-h-11 rounded-control border border-line-strong bg-white px-3" style={{ width: "9rem" }} data-em-partial-value />
               {partialKind === "percent" && Number(partialValue) > 0 && money.total > 0 ? <span className="text-sm text-muted">= {aed(Math.round(money.total * Number(partialValue)) / 100)}</span> : null}
             </div>
           ) : null}
