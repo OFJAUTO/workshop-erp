@@ -11,7 +11,11 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Backup taken first (read-only): `backups/2026-11-12T06-24-28` (128 tables, 277,139 rows).
+Nothing.
+
+## Applied on 12 November 2026, afternoon
+
+The owner replied "apply". A fresh backup was taken first: `backups/2026-11-12T12-02-42` (128 tables, 279,114 rows). The file was run with `scripts/db-sql.mjs` without an error and recorded with `scripts/db-record-migration.mjs`. Checked on live: `upload_pending` exists with RLS on, no policies, and no read for anon or the login role. `npm run check:live`: 33 passed, 0 failed.
 
 | # | What | What it does on live | Size |
 |---|---|---|---|

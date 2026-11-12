@@ -1,3 +1,15 @@
+# Handover – 12 November 2026, 16:05 Dubai (upload_pending applied)
+
+**Applied on live:** `20261214090000_upload_pending.sql` (backup `backups/2026-11-12T12-02-42`). Switched on by itself: "4 files still uploading from Mech 3" on the report and the job card, the customer's report held back while files are still on a tablet, and the advisor's bell after 15 minutes. Live check 33/33.
+
+**WAITING FOR APPLY:** nothing.
+
+**NEEDS OMAR:**
+1. Switch auto-approve ON before you travel: Settings > "Approvals while I'm away" > ON > end date (optional) > Save.
+2. Test on a real workshop tablet (steps in the report).
+
+---
+
 # Handover – 12 November 2026, 12:45 Dubai (URGENT: auto-approve while the owner travels)
 
 **Live after this push (no database change, no apply needed):**
