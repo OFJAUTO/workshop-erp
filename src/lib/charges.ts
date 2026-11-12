@@ -1,4 +1,5 @@
 import { countsAsPaid } from "@/lib/bank-status";
+import { autoAllowsFreeCharge, logFreeChargeAuto } from "./auto-approve";
 import "server-only";
 import { chargeNet, chargeProblem, chargeTitle, chargeTotals, type ChargeInput, type ChargeLineRow } from "./charge-rules";
 import { chargeCostsOnce, chargeItems, rootLineOf, recoveryAlready, recoveryAlreadyWords, recoveryWords, type ChargeCostRow, type ChargeCosts, type ChargeItem, type ChargeQuoteVersion, type ChargeTrip } from "./charge-items";
@@ -107,7 +108,11 @@ export async function addCharges(home: { jobId?: string; entryId?: string }, inp
     if (already.length) alreadyNote = ` (a different trip from ${already.map(recoveryWords).join("; ")}, confirmed by ${staff.display_name})`;
   }
   const owner = staff.role_id === "owner";
-  const rows = inputs.map((c) => ({ ...lineRecord(c, settings), job_id: home.jobId ?? null, entry_id: home.entryId ?? null, free_status: c.free ? (owner ? "approved" : "pending_owner") : null, created_by: staff.id, updated_by: staff.id }));
+  // 12 November 2026: a free charge of a ticked type (free recovery by default) is approved at once while the owner is
+  // away - logged in the job's history, no bell to him. Only on a job (a pending charge without a car still asks).
+  const records = inputs.map((c) => lineRecord(c, settings));
+  const autoFree = await Promise.all(inputs.map((c, i) => (c.free && !owner && home.jobId ? autoAllowsFreeCharge(c.kind, Number(records[i].cost_aed) || 0) : Promise.resolve(false))));
+  const rows = inputs.map((c, i) => ({ ...records[i], job_id: home.jobId ?? null, entry_id: home.entryId ?? null, free_status: c.free ? (owner || autoFree[i] ? "approved" : "pending_owner") : null, created_by: staff.id, updated_by: staff.id }));
   const { data: made, error } = await admin.from("charge_lines").insert(rows).select(LINE_COLS);
   if (error || !made) return { error: "Couldn't save the charges. Try again." };
   const lines = (made as Record<string, unknown>[]).map(toRow);
@@ -115,6 +120,7 @@ export async function addCharges(home: { jobId?: string; entryId?: string }, inp
   if (job) await admin.from("job_events").insert({ job_id: job.id, event_type: "charge_added", note: `${lines.map((l) => `${l.description}: cost ${money(l.cost_aed)}, charge ${l.free ? "free" : money(l.charge_aed)}${l.provider ? ` (${l.provider})` : ""}`).join("; ")} added by ${staff.display_name}${alreadyNote}`, created_by: staff.id });
   const above = lines.filter((l) => !l.free && l.cost_aed > l.charge_aed + 0.005);
   if (above.length && !owner) await notifyRoles(["owner"], { type: "owner_approval_needed", title: `Charge below its cost · ${where}`, body: above.map((l) => `${l.description}: cost ${money(l.cost_aed)}, charged ${money(l.charge_aed)}`).join("; "), jobId: job?.id ?? null, href: job ? `/jobs/${job.id}#charges` : "/pending-charges" });
+  if (job) for (const [i, l] of lines.entries()) if (autoFree[i] && l.free) await logFreeChargeAuto(job.id, { description: l.description, cost_aed: Number(l.cost_aed) || 0, kind: l.kind }, staff);
   const free = lines.filter((l) => l.free && l.free_status === "pending_owner");
   if (free.length) await notifyRoles(["owner"], { type: "owner_approval_needed", title: `Free charge to approve · ${where}`, body: `${free.map((l) => `${l.description} (cost ${money(l.cost_aed)})`).join("; ")} – ${staff.display_name} asks for it free of charge.`, jobId: job?.id ?? null, href: job ? `/jobs/${job.id}#charges` : "/pending-charges" });
   let quotation: string | null = null;

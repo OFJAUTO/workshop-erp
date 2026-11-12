@@ -42,6 +42,7 @@ import { workSidesForJobs } from "@/lib/staff-picker";
 import { loadQuoteHistory } from "@/lib/quote-history-data";
 import { additionalWaitingChip, pickItems } from "@/lib/quote-history";
 import { paymentReportsReady } from "@/lib/schema-ready";
+import { AutoApproveBanner } from "@/components/AutoApproveBanner";
 
 type Row = JobRow & {
   parts_pricing_done_at?: string | null;
@@ -219,6 +220,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
       <WaitingPanel staff={staff} extra={role === "service_advisor" || role === "owner" ? [...moneyWaiting, ...finalChecks, ...(role === "owner" ? (await Promise.all([lpoApprovalsWaiting("owner"), zohoWaitingExtra()])).flat() : [])] : []} />
 
+      {role === "owner" ? <AutoApproveBanner /> : null}
       {role === "owner" ? <ApprovalsTile /> : null}
       {role === "owner" && !staff.viewingAs && (await hrReady()) ? <HrExpiringTile /> : null}
       {role === "owner" && profit ? (

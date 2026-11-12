@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { autoApproveHourly } from "@/lib/auto-approve";
 import { hrReady, hrRemindersHourly } from "@/lib/hr";
 import { passwordSummaryDaily } from "@/lib/password-alerts";
 import { autoPauseBodyshopBreaks } from "@/lib/bodyshop";
@@ -625,6 +626,14 @@ async function runHousekeeping(): Promise<Record<string, number>> {
       await admin.from("settings").update({ value: last }).eq("key", "monthly_summary_sent_for");
       report.monthlySummary = 1;
     }
+  }
+
+  // 35. Auto-approve while the owner is away (12 November 2026): one evening summary to him, and the switch goes off by
+  //     itself once its end date has passed.
+  try {
+    report.autoApprove = (await autoApproveHourly()) ? 1 : 0;
+  } catch {
+    report.autoApprove = -1;
   }
 
   // 30. Passkey challenges (7 November 2026): each lasts five minutes and is used once; anything older than a day goes.

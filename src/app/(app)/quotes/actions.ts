@@ -1,4 +1,5 @@
 "use server";
+import { tryAutoApproveQuote } from "@/lib/auto-approve";
 import { atOurCostQuotations, comebackFreeJob, loadComebackExtra } from "@/lib/comeback-cost";
 import { dbWords, dbDetail } from "@/lib/app-errors";
 
@@ -698,7 +699,10 @@ export async function sendQuotation(quotationId: string, _prev: SendQuoteState, 
   const reasons = approvalReasonsNow(bundle, settings, { discount: setterRow?.role_id === "owner", rounding: await roundingByOwnerOf(q.id, q.rounded_total_aed !== null && q.rounded_total_aed !== undefined) });
   // The owner's approval covers what he saw: the same reasons, or a total or discount that has only gone down since.
   // Anything new or bigger goes back to him.
-  if (reasons.length && staff.role_id !== "owner" && !approvalCovers(q.owner_approved_at ? q.owner_approval_reason : null, reasons)) {
+  // 12 November 2026: while the owner is away, a ticked type (complimentary by default) is approved at once and the
+  // send goes on - logged "AUTO-APPROVED (OWNER AWAY)", no bell to the owner. Anything not covered waits as usual.
+  const autoApproved = reasons.length > 0 && staff.role_id !== "owner" && !approvalCovers(q.owner_approved_at ? q.owner_approval_reason : null, reasons) && (await tryAutoApproveQuote(bundle, reasons, staff, settings));
+  if (!autoApproved && reasons.length && staff.role_id !== "owner" && !approvalCovers(q.owner_approved_at ? q.owner_approval_reason : null, reasons)) {
     if (q.status !== "pending_owner") {
       await admin.from("quotations").update({ status: "pending_owner", owner_approval_reason: reasons.join("; "), owner_approved_by: null, owner_approved_at: null, updated_by: staff.id }).eq("id", q.id);
       await logQuoteEvent(q.id, q.job_id, staff.id, "quote_owner_approval", `${q.number} sent to the owner for approval: ${reasons.join("; ")}`);

@@ -1,3 +1,18 @@
+# Handover – 12 November 2026, 12:45 Dubai (URGENT: auto-approve while the owner travels)
+
+**Live after this push (no database change, no apply needed):**
+- Settings > "Approvals while I'm away" (owner only): one ON/OFF switch with an optional end date. It has a tick and an optional cost limit per type; only the free items are pre-ticked.
+- A ticked request is approved at once and the advisor carries on. It is logged "AUTO-APPROVED (OWNER AWAY)" with no bell to the owner.
+- Requests already waiting are approved when the switch goes ON.
+- The Approvals page has an "Auto-approved" list, the dashboard shows an amber line while ON, and one evening summary bell is sent.
+- Note: `docs/auto-approve-12-nov-note.md`.
+
+**Tests:** test:autoapprove 18/18, unit, lint, security, test:charges 32/32, and a clean layout on the changed pages (390, 800, 1440). The upload fix's full simulation was 713/713.
+
+**WAITING FOR APPLY:** still only `20261214090000_upload_pending.sql` (see below).
+
+---
+
 # Handover – 12 November 2026, 10:50 Dubai (URGENT: inspection photos and videos never lost)
 
 **Live after this push:**
