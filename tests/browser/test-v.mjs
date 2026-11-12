@@ -135,10 +135,10 @@ await section("3 large stickers", async () => {
   check("3: the print bar names Printer 2", /Print on Printer 2/.test((await op.locator(".bar").textContent()) ?? ""));
   // Settings > Stickers: the sizes, the printers, the WhatsApp number and text.
   await go(op, `${base}/settings/stickers`);
-  check("3: Settings shows the battery sticker as 50 × 100", (await op.locator("[data-battery-w]").inputValue()) === "50" && (await op.locator("[data-battery-h]").inputValue()) === "100");
+  check("3: Settings shows the warranty and service label (battery too) as 50 × 100", (await op.locator("[data-large-w]").inputValue()) === "50" && (await op.locator("[data-large-h]").inputValue()) === "100");
   check("3: Settings shows the printer names and the WhatsApp message", /Printer 1/.test(await op.locator("[data-printer-part]").inputValue()) && /\[PLATE\]/.test(await op.locator("[data-wa-text]").inputValue()));
   await op.locator("[data-wa-number]").fill("971501234567");
-  await op.locator("button", { hasText: /^Save sticker settings$/ }).click();
+  await op.locator("button", { hasText: /^Save label settings$/ }).click();
   await submitted(op);
   const wa = (await sql("select value from public.settings where key = 'sticker_service_whatsapp_number'"))[0]?.value;
   check("3: the WhatsApp number saves", wa === "971501234567", JSON.stringify(wa));

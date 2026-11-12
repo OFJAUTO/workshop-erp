@@ -108,7 +108,10 @@ export async function receivePartsByTechnician(jobId: string, input: { technicia
   const now = new Date().toISOString();
   const items: HandoverItem[] = takeable.map((p) => ({ id: p.id, description: p.description, part_number: realPartNumber(p.part_number), quantity: p.received_qty || Number(p.confirmed_quantity ?? p.quantity) || 1 }));
   const fromStaff = (takeable.find((p) => p.ready_for_handover_by)?.ready_for_handover_by as string | null) ?? null;
-  const { data: handover, error } = await admin.from("part_handovers").insert({ job_id: jobId, kind: "handover", status: "confirmed", from_staff: fromStaff, to_staff: tech.id, confirmed_by: tech.id, confirmed_at: now, pin_used: true, signed_at_counter: false, device_id: input.deviceId ?? null, items, stickers: {}, created_by: actor.id, updated_by: actor.id }).select("id").single();
+  // 13 November 2026 (Section 10): every battery handed over gets its warranty label, ready to print (the list was saved empty).
+  const plan: StickerPlan = {};
+  for (const p of takeable) if (isBatteryPart(p)) plan[p.id] = { count: 1, code: "", kind: "battery", brand: p.brand ?? null, model: p.battery_model ?? null, serial: p.serial_number ?? null };
+  const { data: handover, error } = await admin.from("part_handovers").insert({ job_id: jobId, kind: "handover", status: "confirmed", from_staff: fromStaff, to_staff: tech.id, confirmed_by: tech.id, confirmed_at: now, pin_used: true, signed_at_counter: false, device_id: input.deviceId ?? null, items, stickers: plan, created_by: actor.id, updated_by: actor.id }).select("id").single();
   if (error || !handover) return { error: (error ? dbWords(error, "lib/handover") : "Could not record the receipt.") };
   for (const it of items) {
     await admin.from("part_items").update({ issue_status: "confirmed", issued_qty: it.quantity, tech_received_qty: it.quantity, not_received_at: null, issued_at: now, issued_by: fromStaff, issue_confirmed_at: now, issue_confirmed_by: tech.id, handover_id: handover.id, pending_handover_id: null, updated_by: actor.id }).eq("id", it.id);

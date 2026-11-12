@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { handoverLabelPlan } from "@/lib/handover-labels";
 import { BatterySticker, PartSticker, batteryLine, stickerPageCss } from "@/components/StickerArt";
 import { stickerPosition } from "@/lib/parts-list";
 import { requireStaff } from "@/lib/auth";
@@ -33,7 +34,8 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
   const h = raw as unknown as HandoverRow & { job: { job_number: string; vehicle: { vin: string | null } | null } | null };
   const vin = h.job?.vehicle?.vin ?? "";
   const date = formatDate(h.confirmed_at ?? h.created_at);
-  const plan = Object.entries(h.stickers ?? {});
+  // 13 November 2026 (Section 10): THE label list of the handover (rebuilt for those saved empty).
+  const plan = await handoverLabelPlan(handoverId, h.job_id, h.stickers, staff.id);
   const { data: wmRows } = plan.length ? await admin.from("part_items").select("id, warranty_months, positions").in("id", plan.map(([id]) => id)) : { data: [] as { id: string; warranty_months: number | null; positions: string[] | null }[] };
   const partPositions = new Map((wmRows ?? []).map((r) => [r.id as string, ((r as { positions?: string[] | null }).positions ?? null)]));
   const partMonths = new Map((wmRows ?? []).map((r) => [r.id as string, (r.warranty_months as number | null) ?? null]));
@@ -64,12 +66,12 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
     <div>
       <style>{stickerPageCss(w, hh)}</style>
       {stickers.length === 0 ? (
-        <div className="bar"><span>No stickers were asked for on this handover.</span><a href={back || `/parts/handover/${h.job_id}`} style={{ marginLeft: "auto" }}>Back to the handover</a></div>
+        <div className="bar"><span>No labels on this handover.</span><a href="/stickers?tab=warranty">Print a battery warranty label</a><a href={back || `/parts/handover/${h.job_id}`} style={{ marginLeft: "auto" }}>Back</a></div>
       ) : (
         <StickerSheet
           items={sheetItems}
           printer={battery ? ss.printerLarge : ss.printerPart}
-          info={`${stickers.length} sticker${stickers.length === 1 ? "" : "s"} · ${h.job?.job_number ?? ""}${first ? "" : " · printed again"}`}
+          info={`${stickers.length} label${stickers.length === 1 ? "" : "s"} · ${h.job?.job_number ?? ""}${first ? "" : " · printed again"}`}
           extra={<><a href={`/api/pdf/stickers/${handoverId}`}>Download PDF</a><a href={back || `/parts/handover/${h.job_id}`} style={{ marginLeft: "auto" }}>Back to the handover</a></>}
         >
           {stickers}

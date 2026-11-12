@@ -50,8 +50,9 @@ export function stickerSettings(settings: Settings): StickerSettings {
     large: Number(settings.sticker_large_mm) || 60,
     battery: Number(settings.sticker_battery_mm) || Number(settings.sticker_large_mm) || 60,
     service: Number(settings.sticker_service_mm) || Number(settings.sticker_large_mm) || 60,
-    batteryW: Number(settings.sticker_battery_w_mm) || 50,
-    batteryH: Number(settings.sticker_battery_h_mm) || 100,
+    // 13 November 2026 (Section 10): the battery warranty label is the same size as the service label (one setting).
+    batteryW: Number(settings.sticker_service_w_mm) || 50,
+    batteryH: Number(settings.sticker_service_h_mm) || 100,
     serviceW: Number(settings.sticker_service_w_mm) || 50,
     serviceH: Number(settings.sticker_service_h_mm) || 100,
     printerPart: String(settings.sticker_printer_part || "Printer 1 (40 × 30 mm)"),

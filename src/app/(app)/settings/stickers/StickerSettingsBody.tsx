@@ -24,24 +24,27 @@ export async function StickerSettingsBody({ message, error }: { message?: string
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <form action={saveStickerSettings} className="xl:col-span-2 flex flex-col gap-4">
           <Card className="flex flex-col gap-4">
-            <SectionLabel>Part sticker (40 × 30)</SectionLabel>
+            <SectionLabel right={`${ss.partW} × ${ss.partH} mm`}>Part label</SectionLabel>
+            <a href="/print/sticker-test?kind=part" target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-fit items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-test-print="part">Test print: part label</a>
             <p className="text-xs text-muted">Logo on top, QR in the middle, date and the last 8 characters of the VIN underneath. Optional: the handover counter starts at 0, except for the part types below.</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <Field label="Width (mm)"><Input name="sticker_part_width_mm" defaultValue={String(ss.partW)} inputMode="decimal" required /></Field>
               <Field label="Height (mm)"><Input name="sticker_part_height_mm" defaultValue={String(ss.partH)} inputMode="decimal" required /></Field>
             </div>
-            <Field label="Part types that get a sticker by default" hint="One per line or separated by commas, as written in the part types list (for example Genuine). The counter starts at the quantity for these." optional>
+            <Field label="Part types that get a label by default" hint="One per line or separated by commas, as written in the part types list (for example Genuine). The counter starts at the quantity for these." optional>
               <Textarea name="sticker_part_types" defaultValue={(settings.sticker_part_types as string[] | undefined)?.join("\n") ?? ""} rows={2} />
             </Field>
             <label className="flex items-start gap-3 cursor-pointer text-sm"><input type="checkbox" name="part_labels_enabled" defaultChecked={settings.part_labels_enabled === true} className="mt-1 h-5 w-5 accent-ink" /><span><span className="font-semibold">Tracking labels for boxes</span><span className="block text-xs text-muted">Off: nothing is made when parts arrive. A part that waits on a shelf still has its Print label button.</span></span></label>
           </Card>
           <Card className="flex flex-col gap-4">
-            <SectionLabel>Battery warranty sticker</SectionLabel>
+            <SectionLabel right={`${ss.serviceW} × ${ss.serviceH} mm · same as the service label`}>Battery warranty label</SectionLabel>
+            <a href="/print/sticker-test?kind=battery" target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-fit items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-test-print="battery">Test print: battery warranty label</a>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <Field label="Battery sticker width (mm)" hint="Portrait, 50 × 100 mm by default."><Input name="sticker_battery_w_mm" defaultValue={String(ss.batteryW)} inputMode="decimal" required data-battery-w /></Field>
-              <Field label="Battery sticker height (mm)"><Input name="sticker_battery_h_mm" defaultValue={String(ss.batteryH)} inputMode="decimal" required data-battery-h /></Field>
-              <Field label="Oil service sticker width (mm)" hint="Portrait, 50 × 100 mm by default."><Input name="sticker_service_w_mm" defaultValue={String(ss.serviceW)} inputMode="decimal" required /></Field>
-              <Field label="Oil service sticker height (mm)"><Input name="sticker_service_h_mm" defaultValue={String(ss.serviceH)} inputMode="decimal" required /></Field>
+              {/* 13 November 2026 (Section 10): ONE size for the service and the battery warranty labels (never the part label's). */}
+              <Field label="Warranty and service label width (mm)" hint="The service label and the battery warranty label share this size. Portrait, 50 × 100 mm by default."><Input name="sticker_service_w_mm" defaultValue={String(ss.serviceW)} inputMode="decimal" required data-large-w /></Field>
+              <Field label="Warranty and service label height (mm)"><Input name="sticker_service_h_mm" defaultValue={String(ss.serviceH)} inputMode="decimal" required data-large-h /></Field>
+              <input type="hidden" name="sticker_battery_w_mm" value={String(ss.serviceW)} />
+              <input type="hidden" name="sticker_battery_h_mm" value={String(ss.serviceH)} />
               <input type="hidden" name="sticker_large_mm" value={String(ss.large)} />
               <input type="hidden" name="sticker_battery_mm" value={String(ss.battery)} />
               <input type="hidden" name="sticker_service_mm" value={String(ss.service)} />
@@ -53,7 +56,8 @@ export async function StickerSettingsBody({ message, error }: { message?: string
             <label className="flex items-start gap-3 cursor-pointer text-sm"><input type="checkbox" name="sticker_battery_required" defaultChecked={ss.batteryRequired} className="mt-1 h-5 w-5 accent-ink" /><span><span className="font-semibold">Required</span><span className="block text-xs text-muted">The handover of a battery cannot finish without printing one sticker per battery.</span></span></label>
           </Card>
           <Card className="flex flex-col gap-4">
-            <SectionLabel>Oil service sticker</SectionLabel>
+            <SectionLabel right={`${ss.serviceW} × ${ss.serviceH} mm`}>Oil service label</SectionLabel>
+            <a href="/print/sticker-test?kind=service" target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-fit items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-test-print="service">Test print: service label</a>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <Field label="Next service after (months)"><Input name="service_interval_months" defaultValue={String(ss.intervalMonths)} inputMode="numeric" required /></Field>
               <Field label="Next service after (km)"><Input name="service_interval_km" defaultValue={String(ss.intervalKm)} inputMode="numeric" required /></Field>
@@ -71,12 +75,12 @@ export async function StickerSettingsBody({ message, error }: { message?: string
             <SectionLabel>Printers</SectionLabel>
             <p className="text-xs text-muted">The name shown on each print page so the right printer is picked. Every sticker page is sized exactly to the sticker with no browser margins; in the print dialog choose the printer, its custom paper size, Scale 100%, Margins None, and untick headers and footers. The set-up steps for Windows are in the delivery note.</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <Field label="Printer for part stickers (40 × 30)"><Input name="sticker_printer_part" defaultValue={ss.printerPart} data-printer-part /></Field>
-              <Field label="Printer for battery and service stickers (50 × 100)"><Input name="sticker_printer_large" defaultValue={ss.printerLarge} data-printer-large /></Field>
+              <Field label={`Printer for part labels (${ss.partW} × ${ss.partH})`}><Input name="sticker_printer_part" defaultValue={ss.printerPart} data-printer-part /></Field>
+              <Field label={`Printer for warranty and service labels (${ss.serviceW} × ${ss.serviceH})`}><Input name="sticker_printer_large" defaultValue={ss.printerLarge} data-printer-large /></Field>
             </div>
           </Card>
           <input type="hidden" name="w_part" value={ss.wording.part} />
-          <div><Button type="submit" size="lg">Save sticker settings</Button></div>
+          <div><Button type="submit" size="lg">Save label settings</Button></div>
         </form>
         <div className="flex flex-col gap-4">
           <Card className="flex flex-col gap-3">

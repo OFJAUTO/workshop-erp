@@ -1,4 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { handoverLabelPlan } from "@/lib/handover-labels";
 import { getCurrentStaff } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 import { HANDOVER_SELECT, type HandoverRow } from "@/lib/handover";
@@ -45,10 +46,11 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
   const h = raw as unknown as HandoverRow & { job: { job_number: string; vehicle: { vin: string | null } | null } | null };
   const vin = h.job?.vehicle?.vin ?? "";
   const date = formatDate(h.confirmed_at ?? h.created_at);
-  const planIds = Object.keys(h.stickers ?? {});
+  const plan = await handoverLabelPlan(id, h.job_id, h.stickers, null);
+  const planIds = plan.map(([pid]) => pid);
   const { data: wmRows } = planIds.length ? await admin.from("part_items").select("id, warranty_months").in("id", planIds) : { data: [] as { id: string; warranty_months: number | null }[] };
   const partMonths = new Map((wmRows ?? []).map((r) => [r.id as string, (r.warranty_months as number | null) ?? null]));
-  for (const [partId, s] of Object.entries(h.stickers ?? {})) {
+  for (const [partId, s] of plan) {
     const item = h.items.find((i) => i.id === partId);
     for (let n = 0; n < s.count; n++) {
       if (s.kind === "battery") {

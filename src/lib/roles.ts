@@ -55,7 +55,8 @@ export const PERMISSIONS = {
   manageTablets: ["owner"],
   manageSettings: ["owner"],
   // 11 November 2026 (Section 12): the Stickers tab - part stickers, warranty stickers, history, printer setup.
-  printStickers: ["owner", "parts", "service_advisor", "workshop_manager"],
+  // 13 November 2026 (Section 10): the gate-in role prints warranty labels too (Warranty labels and History only).
+  printStickers: ["owner", "parts", "service_advisor", "workshop_manager", "gate_in"],
   viewAudit: ["owner"],
   viewCustomers: ["owner", "service_advisor", "accounts"],
   editCustomers: ["owner", "service_advisor"],
