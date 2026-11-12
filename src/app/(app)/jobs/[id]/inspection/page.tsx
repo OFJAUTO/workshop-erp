@@ -32,6 +32,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { Collapsible } from "@/components/Collapsible";
 import { InspectionReport } from "@/components/InspectionReport";
 import { loadReportData } from "@/lib/report-data";
+import { pendingForInspection } from "@/lib/upload-pending";
+import { pendingFilesWords } from "@/lib/upload-pending-words";
 
 export const dynamic = "force-dynamic";
 
@@ -196,6 +198,8 @@ export default async function InspectionReportPage({ params }: { params: Promise
   const reportToken = can(role, "viewCustomers") ? ((reportLink?.token as string | undefined) ?? null) : null;
   // eslint-disable-next-line react-hooks/purity -- a server page: rendered once per request, the clock is read once
   const previewSignedAt = Date.now();
+  // 12 November 2026: inspection files still on a tablet: said at the top; the report waits for them before it goes out.
+  const uploadsWaiting = await pendingForInspection(insp.id);
 
   const bodyChecked = (await createAdminClient().from("inspections").select("bodyshop_checked_at").eq("id", insp.id).maybeSingle()).data?.bodyshop_checked_at as string | null | undefined;
   const body = { initial: await loadBodyState(insp.id), canEdit: await canEditBody(staff, { job_id: id, status: insp.status, bodyshop_checked_at: bodyChecked ?? null }), canCheck: isBodyshopStaff(staff) && !staff.viewingAs };
@@ -267,6 +271,13 @@ export default async function InspectionReportPage({ params }: { params: Promise
         }
       />
 
+      {uploadsWaiting ? (
+        <div data-uploads-waiting={uploadsWaiting.count}>
+          <Notice tone={uploadsWaiting.stopped ? "error" : "info"}>
+            {pendingFilesWords(uploadsWaiting)}. They join this report by themselves as they arrive; the report cannot go to the customer until then.
+          </Notice>
+        </div>
+      ) : null}
       {dangers.length ? <Notice tone="error">Dangerous to drive: {dangers.join("; ")}. The quotation line is Urgent and the customer sees a safety warning.</Notice> : null}
       {reviewing ? <Notice tone="info">You are reviewing. You can change any item, remark, parts list, number or photo before approving; each change is stamped with your name and the technician&apos;s original is kept.</Notice> : null}
 

@@ -2,6 +2,7 @@
 
 import { useRef, useState, type ReactNode } from "react";
 import { CameraCapture } from "./CameraCapture";
+import { holdWhilePicking } from "@/lib/screen-hold";
 
 /** A phone or tablet with a camera the page can open itself. On a PC the file picker is used. */
 export function usesInPageCamera(): boolean {
@@ -45,6 +46,7 @@ export function PhotoButton({
     const el = inputRef.current;
     if (!el) return;
     el.value = "";
+    holdWhilePicking(el, "picking a photo");
     el.click();
   }
   function onClick() {

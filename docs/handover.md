@@ -1,3 +1,28 @@
+# Handover – 12 November 2026, 10:50 Dubai (URGENT: inspection photos and videos never lost)
+
+**Live after this push:**
+- The tablet's idle lock never signs out while a camera, a file picker or the camera app is open, or while files are being prepared.
+- Inspection videos record inside the page at 1080p, with the camera app as a backup.
+- Three photos send at a time.
+- The screen stays on while files send, and the tablet asks before the page is closed.
+- The pill reads "7 of 12 uploaded".
+- The report is never held up by files still sending.
+
+Cause and lost-media list: `docs/inspection-uploads-12-nov-note.md`.
+
+**Tests:**
+- New `npm run test:inspuploads`: 24/24. 10 photos and 1 video, through a screen lock, the page closed, another technician signing in and the network off and on. All arrived on the right items, under the right technician.
+- test:uploads 23/23. Layout owner and technician clean at 800×1280 and 1440×900. Security passed. Unit passed.
+- Stale and not from today: test-videos2 (it marks several items Bad without remarks; since the 11 Nov inspection-type section only the first registers).
+
+**WAITING FOR APPLY:** 1 – `20261214090000_upload_pending.sql` (backup `backups/2026-11-12T06-24-28`). Until then "4 files still uploading from Mech 3", the customer-report hold and the 15-minute bell are off. Everything else above works now.
+
+**NEEDS OMAR:**
+1. Reply "apply".
+2. Test on a real workshop tablet. The steps are in the report.
+
+---
+
 # Handover – 12 November 2026, early morning Dubai (11 Nov list of 16 sections: ALL DONE)
 
 **Done so far:** S1 stock LPOs in Supplier invoices and payments (41df358) · S2 parts belong to one quotation (dormant until apply) · S3 apply supplier advances without a new payment + invoice date check · S4 approvals box + Approvals page · S5 void a duplicate receipt + one cheque never more than its amount · S6 lathe bills · S7 complimentary in one tap · S8 department tablets · S9 jobs to do · S10 inspection type + could not check · S11 car-card dashboards (parts desk, gate-in) + VIN checks · S12 Stickers tab + QR page signed out (57d3df2) · S13 neat pages: one 44 px button, header order, one black button, bell square (b9fbd7c) · S14 password sign-ins: one evening summary, new device at once (4896e5b) · S15 HR under Team, owner and head accountant (9da5dc6, dormant until the apply) · S16 speed: dashboards 35-50% faster, no paid plan needed (c9fd475, docs/speed-11-nov-note.md).

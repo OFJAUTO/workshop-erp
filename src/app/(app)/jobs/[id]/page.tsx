@@ -111,6 +111,8 @@ import { ItemsCard } from "./ItemsCard";
 import { LOOSE_SKIP_STAGES, loadJobItems } from "@/lib/loose-items";
 import { ComebackCard } from "./ComebackCard";
 import { ApprovalSendControl, ReportSendControl, type ReportLinkRow } from "./SendControls";
+import { pendingForInspection } from "@/lib/upload-pending";
+import { pendingFilesWords, reportWaitsWords } from "@/lib/upload-pending-words";
 import { StaffPicker } from "@/components/StaffPicker";
 import { bodyshopOnCar, fitsTeams, lineTeamsOfJob, pickablePeople, presentTeams, workTeamsOf } from "@/lib/staff-picker";
 import { LINE_TEAM_LABELS, lineTeamDef, teamWithCar, teamsWords } from "@/lib/line-teams";
@@ -347,6 +349,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const approverContacts = seesCustomerDetails && customer ? await loadApproverContacts(customer.id) : [];
 
   const insp = inspection?.inspection ?? null;
+  // 12 November 2026: inspection files still on a tablet ("4 files still uploading from Mech 3"); the report waits for them.
+  const uploadsWaiting = insp ? await pendingForInspection(insp.id) : null;
   // The five parts steps as dots (the same rule as the parts page).
   const [{ data: stepRows }, { data: stepJob }, { data: declinedRows }, partsChanges] = await Promise.all([
     createAdminClient().from("part_items").select("id, is_active, order_status, received_qty, quantity, confirmed_quantity, issue_status, availability, supplier, po_id, return_status, cost_aed, removed_at, disposition").eq("job_id", id),
@@ -869,7 +873,12 @@ export default async function JobPage({ params, searchParams }: { params: Promis
               </LinkButton>
             ) : null}
           </div>
-          {seesCustomerDetails && (canSendReport || reportLink) ? <ReportSendControl jobId={id} link={reportLink} shortLink={reportLink?.token ? await shortFor(`${PRODUCTION_SITE_URL}/report/${reportLink.token}`) : null} messageTemplate={reportTemplate} siteUrl={site} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} canSend={!!canSendReport} /> : reportLink?.sent_at ? <span className="text-xs text-muted" data-report-plain>Sent to the customer {formatDayTime(reportLink.sent_at)}</span> : null}
+          {uploadsWaiting ? (
+            <span className={`text-xs font-semibold ${uploadsWaiting.stopped ? "text-red" : "text-amber-text"}`} data-uploads-waiting={uploadsWaiting.count}>
+              {pendingFilesWords(uploadsWaiting)}
+            </span>
+          ) : null}
+          {seesCustomerDetails && (canSendReport || reportLink) ? <ReportSendControl waiting={reportWaitsWords(uploadsWaiting)} jobId={id} link={reportLink} shortLink={reportLink?.token ? await shortFor(`${PRODUCTION_SITE_URL}/report/${reportLink.token}`) : null} messageTemplate={reportTemplate} siteUrl={site} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} canSend={!!canSendReport} /> : reportLink?.sent_at ? <span className="text-xs text-muted" data-report-plain>Sent to the customer {formatDayTime(reportLink.sent_at)}</span> : null}
           {reportLink?.sent_at && inspection && inspection.inspection.updated_at > reportLink.sent_at ? (
             <span className="text-xs font-semibold text-amber-bar" data-report-changed>Changed after it was sent. The customer&apos;s link always shows the latest; use Send again to tell them, or keep it internal.</span>
           ) : null}

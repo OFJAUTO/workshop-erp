@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { forgetGrants, listRecords, onSendEvent, removeQueued, retryNow, startSendRunner, wakeRunner, type SendRecord } from "@/lib/send-queue";
+import { forgetGrants, listRecords, onSendEvent, readBatch, removeQueued, resetBatch, retryNow, startSendRunner, wakeRunner, type SendBatch, type SendRecord } from "@/lib/send-queue";
 
 /** Pages a customer or a driver opens: no staff queue there (the driver page keeps its own). */
 const NOT_STAFF = ["/approve", "/report", "/quote", "/invoice", "/proforma", "/warranty", "/handover", "/progress", "/p/", "/lpo", "/terms", "/drive", "/m/", "/d/", "/i/", "/r/", "/q/", "/s/"];
@@ -49,6 +49,48 @@ export function SendQueueHost() {
   const [rows, setRows] = useState<SendRecord[]>([]);
   const [progress, setProgress] = useState<Record<string, number>>({});
   const [open, setOpen] = useState(false);
+  const [batch, setBatch] = useState<SendBatch>({ total: 0, sent: 0 });
+  const sendable = rows.filter((r) => !r.permanent).length;
+
+  // 12 November 2026: while files are on their way the screen stays on (a dark tablet freezes the page and the sending
+  // stops), and closing or reloading the page asks first. Nothing is lost either way: the files stay on the device.
+  useEffect(() => {
+    if (!staffPage || !sendable) return;
+    type Sentinel = { release: () => Promise<void>; released?: boolean };
+    let lock: Sentinel | null = null;
+    let live = true;
+    const ask = async () => {
+      try {
+        const wl = (navigator as Navigator & { wakeLock?: { request: (t: "screen") => Promise<Sentinel> } }).wakeLock;
+        if (!wl || document.visibilityState !== "visible" || (lock && !lock.released)) return;
+        const got = await wl.request("screen");
+        if (!live) void got.release().catch(() => undefined);
+        else lock = got;
+      } catch {
+        // No wake lock (an old browser, battery saver): the files still send while the screen is on.
+      }
+    };
+    const onVis = () => void ask();
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    // A new version reloads the page by itself: no question then (the files are on the device and carry on after it).
+    const quiet = () => window.removeEventListener("beforeunload", warn);
+    void ask();
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("beforeunload", warn);
+    window.addEventListener("erp:before-reload", quiet);
+    document.documentElement.dataset.sendingFiles = String(sendable);
+    return () => {
+      live = false;
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("beforeunload", warn);
+      window.removeEventListener("erp:before-reload", quiet);
+      delete document.documentElement.dataset.sendingFiles;
+      void lock?.release().catch(() => undefined);
+    };
+  }, [staffPage, sendable]);
 
   // Read through a ref: the runner starts once for the page's life, never stopped and restarted by a page change.
   const pathRef = useRef(path);
@@ -84,7 +126,14 @@ export function SendQueueHost() {
   useEffect(() => {
     if (!staffPage) return;
     let live = true;
-    const read = () => void listRecords().then((r) => live && setRows(r));
+    const read = () =>
+      void listRecords().then((r) => {
+        if (!live) return;
+        setRows(r);
+        // Nothing left on the device: the next file starts a new "n of m".
+        if (!r.length) resetBatch();
+        setBatch(r.length ? readBatch() : { total: 0, sent: 0 });
+      });
     read();
     const off = onSendEvent((e) => {
       if (e.type === "sending") setProgress((p) => ({ ...p, [e.id]: e.progress }));
@@ -111,11 +160,17 @@ export function SendQueueHost() {
   const stopped = rows.filter((r) => r.permanent).length;
   const sending = rows.filter((r) => !r.permanent && progress[r.id] !== undefined && (progress[r.id] ?? 0) > 0).length;
   const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  // "7 of 12 uploaded": the count of this wave on this device (other tabs count too). Never fewer than what is waiting.
+  const total = Math.max(batch.total, batch.sent + rows.length);
+  const done = Math.min(batch.sent, total - rows.length);
+  const ofWords = total > 1 ? `${done} of ${total} uploaded` : null;
   const label = stopped
     ? `${stopped} file${stopped === 1 ? "" : "s"} could not be sent`
     : offline
       ? `${rows.length} file${rows.length === 1 ? "" : "s"} saved on this device – no signal`
-      : sending
+      : ofWords
+        ? `${ofWords} – sending, keep the tablet on`
+        : sending
         ? `Sending ${rows.length} file${rows.length === 1 ? "" : "s"}…`
         : `${rows.length} file${rows.length === 1 ? "" : "s"} waiting to send`;
 
@@ -129,6 +184,8 @@ export function SendQueueHost() {
         aria-expanded={open}
         data-send-queue-pill
         data-send-queue-count={rows.length}
+        data-send-queue-done={done}
+        data-send-queue-total={total}
       >
         <span aria-hidden>↑</span>
         <span>{label}</span>

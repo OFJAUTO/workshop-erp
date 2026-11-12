@@ -17,6 +17,10 @@ begin
   select coalesce(array_agg(id), '{}') into cust_ids from public.customers where id::text like '22222222-0000-4000-8000-00000000e%' or full_name ilike 'E2E PENDING%';
   select coalesce(array_agg(id), '{}') into veh_ids from public.vehicles where id::text like '22222222-0000-4000-8000-00000000e%' or customer_id = any(cust_ids);
   select coalesce(array_agg(id), '{}') into job_ids from public.jobs where id::text like '22222222-0000-4000-8000-00000000e%' or customer_id = any(cust_ids) or vehicle_id = any(veh_ids);
+  -- Files still on a device (12 November 2026): the test cars' rows and those of the test tablets.
+  if to_regclass('public.upload_pending') is not null then
+    delete from public.upload_pending where job_id = any(job_ids) or inspection_id in (select id from public.inspections where job_id = any(job_ids)) or device_id in (select id from public.devices where name ilike 'E2e %') or staff_id in (select id from public.staff where display_name ilike 'E2e %');
+  end if;
   -- Pending charges and early charges (1 November 2026): the lines, the entries, their job-less proformas and tax invoices.
   if to_regclass('public.charge_lines') is not null then
     delete from public.charge_lines where job_id = any(job_ids) or entry_id in (select id from public.charge_entries where customer_id = any(cust_ids) or job_id = any(job_ids));

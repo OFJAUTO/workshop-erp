@@ -9,6 +9,7 @@ const LazyScanner = dynamic(() => import("./DocumentScanner").then((m) => m.Docu
 import { pendingWords, useSendQueue, type PendingFile, type SentResult } from "@/lib/use-send-queue";
 import { shrinkPhoto } from "@/lib/upload-client";
 import { newUuid } from "@/lib/uuid";
+import { holdWhilePicking } from "@/lib/screen-hold";
 
 /** The proof places this uploader serves: one document (a photo or a PDF) for one record. */
 export type ProofTarget = Extract<SendTarget, "supplier_proof" | "commission_proof" | "credit_note" | "estimate_report">;
@@ -177,6 +178,7 @@ export function QueuedProofView({
             const el = inputRef.current;
             if (!el) return;
             el.value = "";
+            holdWhilePicking(el, "picking a file");
             el.click();
           }}
           className={buttonClass}

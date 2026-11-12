@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { holdIdleLock } from "@/lib/screen-hold";
 
 type Facing = "environment" | "user";
 type Problem = { kind: "denied" | "nocamera" | "busy" | "other"; message: string };
@@ -64,6 +65,8 @@ export function CameraCapture({ multiple = false, title = "Take a photo", onCapt
   const [attempt, setAttempt] = useState(0);
   const onProblemRef = useRef(onProblem);
   useEffect(() => { onProblemRef.current = onProblem; }, [onProblem]);
+  // The tablet's idle lock never signs out while the camera is open (the photos taken would be lost).
+  useEffect(() => holdIdleLock("taking photos", 15 * 60_000), []);
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());

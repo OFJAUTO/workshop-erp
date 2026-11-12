@@ -11,7 +11,11 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Nothing.
+Backup taken first (read-only): `backups/2026-11-12T06-24-28` (128 tables, 277,139 rows).
+
+| # | What | What it does on live | Size |
+|---|---|---|---|
+| 1 | `supabase/migrations/20261214090000_upload_pending.sql` (12 Nov, inspection uploads fix) | Adds the server-only `upload_pending` table: one row per photo or video the moment it is saved on a tablet (the file's own id, car, inspection item, who took it, which tablet, size, sending state), marked arrived when the server records the file. RLS on, no policies, no grants to the login role. Until then the tablets keep every file and send it as now (saved on the tablet first, the camera inside the page, the idle lock waiting, three photos at a time, screen kept on), but the report cannot say "4 files still uploading from Mech 3", the customer's report is not held back for missing files and the advisor gets no 15-minute bell. | 1 table + 2 indexes |
 
 ## Applied on 11 November 2026, night
 

@@ -168,6 +168,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <meta name="erp-known-words" content={((settings.known_words ?? []) as string[]).join("|")} />
       {/* Who is signed in, for the send queue: a sending permit is only ever kept and used for this person. */}
       <meta name="erp-staff-id" content={staff.id} />
+      {device?.name ? <meta name="erp-device-name" content={device.name} /> : null}
       {/* 1 November 2026: the spell check while typing (dotted underline, tap for suggestions), every word box. */}
       <SpellHost />
       {staff.login_type === "pin" && !staff.actingAs && device?.kind !== "personal" ? <IdleLock seconds={Number(settings.tablet_idle_lock_seconds) || 120} /> : null}

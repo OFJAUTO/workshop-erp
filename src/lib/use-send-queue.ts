@@ -185,7 +185,7 @@ export function pendingWords(p: PendingFile): string {
   if (p.state === "sending") return `Sending… ${Math.round(p.progress * 100)}%`;
   if (p.state === "stopped") return p.error ?? "Could not be sent.";
   if (p.state === "waiting") return p.error ?? "Waiting to send – it will try again by itself.";
-  return p.memoryOnly ? "Waiting to send – keep this page open" : "Saved on this device – sending";
+  return p.memoryOnly ? "Waiting to send – keep this page open" : "Saved on this device – uploading";
 }
 
 export type { SentResult };

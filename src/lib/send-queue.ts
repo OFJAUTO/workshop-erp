@@ -63,6 +63,8 @@ export type SendRecord = {
   logged: string[];
   /** Kept in memory only (the device would not keep it): sent while this page stays open. */
   memoryOnly?: boolean;
+  /** The server was told this file is on the device (12 November 2026): the report shows it as still uploading. */
+  announced?: boolean;
 };
 
 /** What the server answered for a file, handed to the screen that queued it. */
@@ -423,7 +425,13 @@ export async function enqueue(input: SendInput): Promise<SendRecord> {
   } catch {
     // Only a hint for the runner on pages that never sent anything.
   }
+  writeBatch((b) => ({ total: b.total + 1, sent: Math.min(b.sent, b.total + 1) }));
   emit({ type: "queued", id: rec.id, scope });
+  // The server hears at once that the file is on this device (the report shows it as still uploading).
+  void announce(rec, "waiting").then(async (ok) => {
+    if (ok && !rec.memoryOnly) await updateRecord(rec.id, (cur) => ({ ...cur, announced: true }));
+    else if (ok) rec.announced = true;
+  });
   // A file picked without a permit asks for one now (still signed in), so it can outlive the session - only one for the
   // same person who took it.
   if (!rec.grant) void askGrant(rec.target, rec.scopeId, grantBodyOf(rec)).then(async (info) => {
@@ -456,6 +464,98 @@ function grantBodyOf(r: Pick<SendRecord, "fields" | "contentType">): Record<stri
   return { kind: f.kind, token: f.token, caption: f.caption, itemKey: f.itemKey, itemId: f.itemId, contentType: r.contentType };
 }
 
+/* ------------------------------------------------------------------------------------------------------------ */
+/* Telling the server a file is on this device (12 November 2026): "4 files still uploading from Mech 3"          */
+/* ------------------------------------------------------------------------------------------------------------ */
+
+type AnnounceState = "waiting" | "sending" | "stopped" | "removed";
+const lastAnnounced = new Map<string, number>();
+
+async function storageFacts(): Promise<{ quotaMb: number | null; usedMb: number | null; persisted: boolean | null } | null> {
+  try {
+    const est = navigator.storage?.estimate ? await navigator.storage.estimate() : null;
+    const persisted = navigator.storage?.persisted ? await navigator.storage.persisted() : null;
+    return { quotaMb: est?.quota ? Math.round(est.quota / 1048576) : null, usedMb: est?.usage ? Math.round(est.usage / 1048576) : null, persisted };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The file's news for the server. Never throws and never holds the send up: the file is safe on the device either way.
+ * True when the server took it. A "sending" news goes at most once a minute per file.
+ */
+async function announce(r: SendState | SendRecord, state: AnnounceState, extra: { progress?: number; error?: string | null } = {}): Promise<boolean> {
+  if (state === "sending") {
+    const last = lastAnnounced.get(r.id) ?? 0;
+    if (Date.now() - last < 60_000) return true;
+  }
+  lastAnnounced.set(r.id, Date.now());
+  try {
+    const f = r.fields;
+    const res = await fetch("/api/uploads/announce", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: r.size < 50_000,
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
+      body: JSON.stringify({
+        fileId: r.id,
+        target: r.target,
+        scopeId: r.scopeId,
+        grant: r.grant,
+        takenBy: r.staffId ?? undefined,
+        takenAt: r.takenAt,
+        itemKey: f.itemKey ?? null,
+        kind: f.kind ?? null,
+        contentType: r.contentType,
+        size: r.size,
+        attempts: r.attempts,
+        state,
+        progress: extra.progress ?? null,
+        error: extra.error ?? null,
+        storage: state === "waiting" && !r.announced ? await storageFacts() : null,
+      }),
+    });
+    if (!res.ok) return false;
+    const j = (await res.json().catch(() => ({}))) as { ok?: boolean };
+    return j.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+/* ------------------------------------------------------------------------------------------------------------ */
+/* "7 of 12 uploaded": one count for this device, from the first file of a wave until the queue is empty again   */
+/* ------------------------------------------------------------------------------------------------------------ */
+
+const BATCH_KEY = "erp-send-batch";
+export type SendBatch = { total: number; sent: number };
+
+export function readBatch(): SendBatch {
+  try {
+    const b = JSON.parse(localStorage.getItem(BATCH_KEY) ?? "null") as SendBatch | null;
+    return b && Number.isFinite(b.total) && Number.isFinite(b.sent) ? b : { total: 0, sent: 0 };
+  } catch {
+    return { total: 0, sent: 0 };
+  }
+}
+function writeBatch(fn: (b: SendBatch) => SendBatch) {
+  try {
+    localStorage.setItem(BATCH_KEY, JSON.stringify(fn(readBatch())));
+  } catch {
+    // Only the count on screen.
+  }
+}
+/** The queue is empty: the next file starts a new count. */
+export function resetBatch() {
+  try {
+    localStorage.removeItem(BATCH_KEY);
+  } catch {
+    // Only the count on screen.
+  }
+}
+
 /** Tries a waiting (or stopped) file again now. */
 export async function retryNow(id: string): Promise<void> {
   heldBack.delete(id);
@@ -468,6 +568,10 @@ export async function retryNow(id: string): Promise<void> {
 export async function removeQueued(id: string): Promise<void> {
   const r = await getRecord(id);
   await deleteRecord(id);
+  if (r) {
+    void announce(r, "removed");
+    writeBatch((b) => ({ total: Math.max(0, b.total - 1), sent: Math.min(b.sent, Math.max(0, b.total - 1)) }));
+  }
   if (r) emit({ type: "removed", id, scope: r.scope });
 }
 
@@ -550,6 +654,11 @@ async function sendOne(rec: SendRecord): Promise<SentResult> {
       await keep(r);
     }
   }
+  // The server was not told yet (no signal when it was taken): now, before the file itself.
+  if (!r.announced && (await announce(r, "waiting"))) {
+    r = { ...r, announced: true };
+    await keep(r);
+  }
   // takenBy: when the permit has run out, the server sends it under the signed-in person only if that is the taker.
   const base = { ...r.fields, target: r.target, scopeId: r.scopeId, grant: r.grant, takenAt: r.takenAt, takenBy: r.staffId ?? undefined };
   // Already in storage on an earlier try: only the record step is left (never "Sending… 0%" again).
@@ -563,7 +672,10 @@ async function sendOne(rec: SendRecord): Promise<SentResult> {
     if (!prep.json.exists) {
       const url = String(prep.json.url ?? "");
       try {
-        await putWithProgress(url, r.blob, r.contentType, (p) => emit({ type: "sending", id: r.id, scope: r.scope, progress: Math.min(0.97, p) }));
+        await putWithProgress(url, r.blob, r.contentType, (p) => {
+          emit({ type: "sending", id: r.id, scope: r.scope, progress: Math.min(0.97, p) });
+          void announce(r, "sending", { progress: Math.min(0.97, p) });
+        });
       } catch (err) {
         const status = (err as { status?: number }).status ?? null;
         const said = `${err instanceof Error ? err.message : ""} ${String((err as { body?: string }).body ?? "")}`;
@@ -598,7 +710,7 @@ async function sendOne(rec: SendRecord): Promise<SentResult> {
     await keep(r);
   }
   // 3. Record it.
-  const reg = await post("/api/uploads/register", { ...base, path: r.path, contentType: r.contentType, posterPath: r.posterPath ?? undefined, caption: r.fields.caption ?? (r.contentType === "application/pdf" ? r.name : undefined) });
+  const reg = await post("/api/uploads/register", { ...base, fileId: r.id, path: r.path, contentType: r.contentType, posterPath: r.posterPath ?? undefined, caption: r.fields.caption ?? (r.contentType === "application/pdf" ? r.name : undefined) });
   if (!reg.ok) {
     if (reg.status === 409) await keep({ ...r, uploaded: false });
     throw stopOf(reg, "Could not record the file.");
@@ -615,6 +727,8 @@ async function sendRecord(id: string): Promise<void> {
     const result = await sendOne(cur);
     // Sent: if the device could not forget it, this tab never takes it again (another tab's register answers the same row).
     if (!(await deleteRecord(cur.id))) heldBack.set(cur.id, Number.POSITIVE_INFINITY);
+    writeBatch((b) => ({ total: Math.max(b.total, b.sent + 1), sent: b.sent + 1 }));
+    lastAnnounced.delete(cur.id);
     emit({ type: "sent", id: cur.id, scope: cur.scope, result, fields: cur.fields });
   } catch (err) {
     const stop = err instanceof Stop ? err : new Stop(err instanceof Error ? err.message : "Upload failed.", false, null);
@@ -639,6 +753,8 @@ async function sendRecord(id: string): Promise<void> {
       emit(stop.permanent ? { type: "stopped", id: cur.id, scope: cur.scope, error: words } : { type: "waiting", id: cur.id, scope: cur.scope, error: words, attempts });
       return;
     }
+    // The server hears what is happening to it (a stop at once; a retry at most once a minute).
+    if (!offline) void announce(next, stop.permanent ? "stopped" : "sending", { error: words });
     if (firstTime && !offline) {
       reportUploadFailure({ jobId: ["gate_in", "job_file", "loose_item"].includes(cur.target) ? cur.scopeId : null, inspectionId: cur.target === "inspection" ? cur.scopeId : null, kind: `${cur.target}:${String(cur.fields.kind ?? "file")}`, step: next.uploaded ? "register" : "upload", error: words, sizeBytes: cur.size, contentType: cur.contentType, extra: { attempts: next.attempts, permanent: stop.permanent, status: stop.status, queued: true } });
     }
@@ -674,6 +790,7 @@ async function claimAndSend(id: string): Promise<boolean> {
 }
 
 const inLane = (r: SendRecord, big: boolean) => (r.size > SMALL_BYTES) === big;
+const SMALL_LANES = 3;
 
 /** One lane: the next due file of its size after every send, so a file queued meanwhile starts as soon as the lane is free. */
 async function laneLoop(big: boolean, stopped: { value: boolean }) {
@@ -723,7 +840,9 @@ export function startSendRunner(): () => void {
   window.addEventListener("erp:send-queued", kick);
   document.addEventListener("visibilitychange", kick);
   bc();
-  void laneLoop(false, stopped);
+  // Photos go three at a time (12 November 2026: one at a time, 14 photos of an inspection took minutes); big files
+  // (videos) one at a time in their own lane, so a photo never waits behind a video.
+  for (let i = 0; i < SMALL_LANES; i += 1) void laneLoop(false, stopped);
   void laneLoop(true, stopped);
   return () => {
     stopped.value = true;

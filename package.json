@@ -147,6 +147,7 @@
     "test:docs": "node --env-file=.env.test.local tests/browser/test-docs.mjs",
     "test:checkin": "node --env-file=.env.test.local tests/browser/test-checkin.mjs",
     "test:uploads": "node --env-file=.env.test.local tests/browser/test-uploads.mjs",
+    "test:inspuploads": "node --env-file=.env.test.local tests/browser/test-inspection-uploads.mjs",
     "test:uploads-video": "node --env-file=.env.test.local tests/browser/test-uploads-video.mjs",
     "test:lpo": "node --env-file=.env.test.local tests/browser/test-lpo-approvals.mjs",
     "test:undo": "node --env-file=.env.test.local tests/browser/test-undo.mjs",

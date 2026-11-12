@@ -12,6 +12,7 @@ import { reportUploadFailure, shrinkPhoto } from "@/lib/upload-client";
 import { listRecords, onSendEvent, scopeOf, type SendEvent } from "@/lib/send-queue";
 import { pendingWords, useSendQueue, type PendingFile, type SentResult } from "@/lib/use-send-queue";
 import { isUuid, newUuid } from "@/lib/uuid";
+import { holdWhilePicking } from "@/lib/screen-hold";
 
 /** A file on a job as the server recorded it. `refId`: what it was sent tied to (a form's key, an LPO, a stage). */
 export type JobFile = { id: string; path: string; url: string | null; caption?: string | null; contentType?: string | null; refId?: string | null };
@@ -526,7 +527,7 @@ function Uploader({ jobId, kind, refId = null, files, accept = "photo", label, d
           ) : (
             <>
               <input ref={fileRef} type="file" accept={acceptAttr} multiple={accept !== "pdf" && !single} onChange={(e) => { const list = Array.from(e.target.files ?? []); e.target.value = ""; void handleFiles(list); }} className="sr-only" tabIndex={-1} aria-hidden />
-              <button type="button" onClick={() => { const el = fileRef.current; if (el) { el.value = ""; el.click(); } }} className={btn}>{text}</button>
+              <button type="button" onClick={() => { const el = fileRef.current; if (el) { el.value = ""; holdWhilePicking(el, "picking a file"); el.click(); } }} className={btn}>{text}</button>
             </>
           )}
           {scan ? (

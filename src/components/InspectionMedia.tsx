@@ -3,10 +3,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Lightbox } from "./Lightbox";
-import { PhotoButton } from "./PhotoButton";
+import { PhotoButton, usesInPageCamera } from "./PhotoButton";
+import { VideoRecorder } from "./VideoRecorder";
 import { listRecords, onSendEvent, scopeOf, type SendRecord, type SendTarget } from "@/lib/send-queue";
 import { reportUploadFailure } from "@/lib/upload-client";
 import { pendingWords, useSendQueue, type PendingFile, type SentResult } from "@/lib/use-send-queue";
+import { holdIdleLock, holdWhilePicking } from "@/lib/screen-hold";
 
 export type InspectionFile = { id: string; kind: "photo" | "video" | "pdf"; url: string | null; caption?: string | null; isPrescan?: boolean };
 
@@ -151,6 +153,9 @@ function fileName(p: PendingFile): string {
 /** "this tablet", "this phone" or "this computer" (only ever shown in the browser). */
 export function thisDevice(): string {
   if (typeof window === "undefined") return "this device";
+  // A registered tablet says its own name ("Mech 3"), so the words match what the advisor sees.
+  const named = document.querySelector('meta[name="erp-device-name"]')?.getAttribute("content");
+  if (named) return named;
   const coarse = window.matchMedia?.("(pointer: coarse)")?.matches ?? false;
   return coarse ? (window.innerWidth < 640 ? "this phone" : "this tablet") : "this computer";
 }
@@ -336,7 +341,8 @@ function CameraIcon({ className = "h-5 w-5" }: { className?: string }) {
 function PendingTile({ p, size, small }: { p: PendingFile; size: string; small: boolean }) {
   const stopped = p.state === "stopped";
   const pct = Math.round(p.progress * 100);
-  const band = stopped ? "Not sent" : p.state === "sending" ? `${pct}%` : "Waiting";
+  // The small tyre tiles are 48 px: their words must fit whole ("Not sent" was cut to "Not …").
+  const band = stopped ? (small ? "Failed" : "Not sent") : p.state === "sending" ? `${pct}%` : small ? "Wait" : "Waiting";
   return (
     <span className={`relative inline-block shrink-0 overflow-hidden rounded-control border-2 bg-chip ${size} ${stopped ? "border-red-bar" : "border-dashed border-amber-bar"}`} title={pendingWords(p)} data-inspection-pending={p.id} data-pending-state={p.state}>
       {p.previewUrl ? (
@@ -395,6 +401,7 @@ export function InspectionMedia({
   const [preparing, setPreparing] = useState(0);
   const [open, setOpen] = useState<number | null>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [recorder, setRecorder] = useState(false);
   const videoRef = useRef<HTMLInputElement>(null);
   const pdfRef = useRef<HTMLInputElement>(null);
   const online = useOnline();
@@ -420,6 +427,8 @@ export function InspectionMedia({
     const pickedAt = Date.now();
     const place = { itemKey: where.itemKey ?? null, requestId: where.requestId ?? null, isPrescan: !!where.isPrescan };
     setPreparing((n) => n + list.length);
+    // Never signed out half-way (the idle lock): a file is safe only once it is saved on the device.
+    const release = holdIdleLock("getting files ready");
     let problem: string | null = null;
     for (const file of list) {
       try {
@@ -441,12 +450,14 @@ export function InspectionMedia({
         setPreparing((n) => Math.max(0, n - 1));
       }
     }
+    release();
     if (problem) setError(problem);
   }
   function pick(ref: React.RefObject<HTMLInputElement | null>) {
     const el = ref.current;
     if (!el) return;
     el.value = "";
+    holdWhilePicking(el, "picking a file");
     el.click();
   }
   function takeInput(e: React.ChangeEvent<HTMLInputElement>, from: "video" | "pdf") {
@@ -488,7 +499,7 @@ export function InspectionMedia({
       ? `${filesWords(moving)} saved on ${device} – no signal. ${moving.length === 1 ? "It sends by itself" : "They send by themselves"} when the signal is back.`
       : sendingNow
         ? `Sending ${filesWords(moving)}… ${Math.round(sendingNow.progress * 100)}%`
-        : `${filesWords(moving)} saved on ${device} – sending`
+        : `${filesWords(moving)} saved on ${device} – uploading`
     : null;
   const keepOpen = moving.some((p) => p.memoryOnly);
 
@@ -597,7 +608,24 @@ export function InspectionMedia({
               <PhotoButton source="camera" className={btn} title="Photo" onFiles={(f) => void handleFiles(f, "photo")} onProblem={logProblem}><CameraIcon className="h-4 w-4" /> Photo</PhotoButton>
               <PhotoButton source="gallery" multiple className={btn} title="Gallery" onFiles={(f) => void handleFiles(f, "photo")}>Gallery</PhotoButton>
               <input ref={videoRef} type="file" accept="video/*" capture="environment" onChange={(e) => takeInput(e, "video")} className="sr-only" tabIndex={-1} aria-hidden />
-              <button type="button" onClick={() => pick(videoRef)} className={btn} title="A video of up to 60 seconds">Video</button>
+              {/* 12 November 2026: the video is recorded INSIDE the page at 1080p (the camera app took the page away,
+                  and the idle lock or Android closing the page lost the video on its way back); the camera app stays
+                  as a backup. On a PC the file picker. */}
+              <button type="button" onClick={() => (usesInPageCamera() ? setRecorder(true) : pick(videoRef))} className={btn} title="A video of up to 60 seconds" data-inspection-video>Video</button>
+              {recorder ? (
+                <VideoRecorder
+                  maxSeconds={MAX_VIDEO_SECONDS}
+                  onClose={() => setRecorder(false)}
+                  onFallback={() => {
+                    setRecorder(false);
+                    pick(videoRef);
+                  }}
+                  onDone={(file) => {
+                    setRecorder(false);
+                    void handleFiles([file], "video");
+                  }}
+                />
+              ) : null}
               {extra}
             </>
           )}
@@ -638,11 +666,17 @@ export function useSendGuard({
   words,
   blocked = null,
   placeOf,
+  ask = true,
 }: {
   pending: PendingFile[];
   go: () => void;
   words: SendGuardWords;
   blocked?: string | null;
+  /**
+   * false (the inspection report, 12 November 2026): never ask - the report goes at once and the files join it as they
+   * arrive; the line beside the button still says what is on its way. Only a hard `blocked` still holds it.
+   */
+  ask?: boolean;
   placeOf?: (p: PendingFile) => { label: string; key: string | null };
 }): { mayGo: () => boolean; note: ReactNode; dialog: ReactNode; waiting: boolean } {
   const [asking, setAsking] = useState(false);
@@ -689,7 +723,7 @@ export function useSendGuard({
   const mayGo = () => {
     const list = pendingRef.current;
     if (!list.length) return true;
-    if (!blocked && list.every((p) => accepted.current.has(p.id))) return true;
+    if (!blocked && (!ask || list.every((p) => accepted.current.has(p.id)))) return true;
     setAsking(true);
     return false;
   };

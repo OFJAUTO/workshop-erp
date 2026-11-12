@@ -157,6 +157,7 @@ export function ReviewBar({ inspectionId = null }: { inspectionId?: string | nul
   const guard = useSendGuard({
     pending,
     go: () => submit("approve-form"),
+    ask: false,
     words: { wait: "Wait, then approve", now: "Approve now", nowNote: "Photos and videos taken before you approve still join the report when they arrive.", goes: "the report is approved by itself." },
   });
   return (

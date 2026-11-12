@@ -661,6 +661,9 @@ export function InspectionForm({
     go: trySubmit,
     blocked: bodyBlocked,
     placeOf,
+    // 12 November 2026: the report is never held up by files still sending; they join it as they arrive, and the
+    // report cannot go to the customer until they have.
+    ask: false,
     words: { wait: "Wait, then send", now: "Send the report now", nowNote: "Photos and videos taken before you send still join the report when they arrive.", goes: "the report goes by itself." },
   });
   const prescanSending = pendingFor({ isPrescan: true }).length > 0;

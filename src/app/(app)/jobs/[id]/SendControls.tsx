@@ -35,7 +35,7 @@ function StatusLine({ tone, text, onAgain }: { tone: keyof typeof TONE_CLASS; te
 export type ReportLinkRow = { id: string; token: string; status: "created" | "sent" | "opened"; sent_at: string | null; opened_at: string | null; created_at: string };
 
 /** Inspection report card: "Send to customer" creates the link and opens the window; afterwards the status and "Send again". */
-export function ReportSendControl({ jobId, link, shortLink = null, messageTemplate, siteUrl, phoneDigits, canSend }: { jobId: string; link: ReportLinkRow | null; /** The short address for the message (erp.ofjauto.com/m/xxxx). */ shortLink?: string | null; messageTemplate: string; siteUrl: string; phoneDigits: string; canSend: boolean }) {
+export function ReportSendControl({ jobId, link, shortLink = null, messageTemplate, siteUrl, phoneDigits, canSend, waiting = null }: { jobId: string; link: ReportLinkRow | null; /** Inspection files still on a tablet (12 November 2026): the report cannot go to the customer yet. */ waiting?: string | null; /** The short address for the message (erp.ofjauto.com/m/xxxx). */ shortLink?: string | null; messageTemplate: string; siteUrl: string; phoneDigits: string; canSend: boolean }) {
   const router = useRouter();
   const [current, setCurrent] = useState<{ id: string; token: string; short?: string | null } | null>(link ? { id: link.id, token: link.token, short: shortLink } : null);
   const [open, setOpen] = useState(false);
@@ -69,12 +69,13 @@ export function ReportSendControl({ jobId, link, shortLink = null, messageTempla
 
   return (
     <div className="flex flex-col gap-1.5">
-      {status ? <StatusLine tone={status.tone} text={status.text} onAgain={canSend ? () => setOpen(true) : undefined} /> : null}
+      {status ? <StatusLine tone={status.tone} text={status.text} onAgain={canSend && !waiting ? () => setOpen(true) : undefined} /> : null}
       {!link && canSend ? (
-        <Button type="button" size="md" disabled={pending} onClick={create}>
-          {pending ? "Creating the link…" : "Send to customer"}
+        <Button type="button" size="md" disabled={pending || !!waiting} onClick={create} data-report-send>
+          {pending ? "Creating the link…" : waiting ? "Waiting for the photos" : "Send to customer"}
         </Button>
       ) : null}
+      {waiting && canSend ? <span className="text-xs font-semibold text-amber-text" data-report-waits>{waiting}</span> : null}
       {error ? <span className="text-xs font-semibold text-red">{error}</span> : null}
       {open ? <SendLinkDialog title="Inspection report to the customer" message={message} phoneDigits={phoneDigits} onSent={sent} onClose={() => setOpen(false)} /> : null}
     </div>

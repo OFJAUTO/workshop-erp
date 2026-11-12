@@ -9,6 +9,8 @@ import { loadInspection } from "@/lib/inspection-data";
 import { newToken } from "@/lib/media";
 import { can, type RoleId } from "@/lib/roles";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { pendingForInspection } from "@/lib/upload-pending";
+import { reportWaitsWords } from "@/lib/upload-pending-words";
 
 export type ReportLinkState = { error?: string; ok?: boolean; id?: string; token?: string; /** The short address for the message (erp.ofjauto.com/m/xxxx). */ short?: string };
 
@@ -26,6 +28,9 @@ export async function createReportLink(jobId: string, _prev: ReportLinkState, _f
   const bundle = await loadInspection(jobId);
   if (!bundle) return { error: "This job has no inspection report yet." };
   if (bundle.inspection.status !== "approved") return { error: "The report can be sent once the workshop manager has approved it." };
+  // 12 November 2026: never to the customer with photos or videos still on a tablet.
+  const waits = reportWaitsWords(await pendingForInspection(bundle.inspection.id));
+  if (waits) return { error: waits };
   const admin = createAdminClient();
   const { data: existing, error: readError } = await admin.from("report_links").select("id, token").eq("job_id", jobId).order("created_at", { ascending: false }).limit(1).maybeSingle();
   if (readError) return { error: `Could not check for an existing link: ${dbDetail(readError, "jobs/report-actions")}` };

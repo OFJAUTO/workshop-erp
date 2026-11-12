@@ -4,13 +4,14 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "@/components/ui";
 import { VIDEO_BITRATE, VIDEO_TARGET, qualityProblem, qualityWords, recorderType } from "@/lib/video-quality";
+import { holdIdleLock } from "@/lib/screen-hold";
 
 /**
  * THE gate-in video recorder (9 November 2026, Section 7): the page records itself with the back camera at 1920 × 1080,
  * 30 fps (the phone's camera app through a web page gave 480 × 360), and hands over the file EXACTLY as recorded. A
  * camera that cannot give at least 720p is refused with words. Stops by itself at the time limit.
  */
-export function VideoRecorder({ maxSeconds = 240, onDone, onClose }: { maxSeconds?: number; onDone: (file: File, info: { width: number; height: number }) => void; onClose: () => void }) {
+export function VideoRecorder({ maxSeconds = 240, onDone, onClose, onFallback }: { maxSeconds?: number; onDone: (file: File, info: { width: number; height: number }) => void; onClose: () => void; /** "Use the camera app instead" (the inspection, 12 November 2026). */ onFallback?: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
@@ -20,6 +21,9 @@ export function VideoRecorder({ maxSeconds = 240, onDone, onClose }: { maxSecond
   const [quality, setQuality] = useState<{ width: number; height: number; fps: number | null } | null>(null);
   const [recording, setRecording] = useState(false);
   const [seconds, setSeconds] = useState(0);
+
+  // The tablet's idle lock never signs out while the recorder is open (the video would be lost).
+  useEffect(() => holdIdleLock("recording a video", 15 * 60_000), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -101,6 +105,11 @@ export function VideoRecorder({ maxSeconds = 240, onDone, onClose }: { maxSecond
           {!recording ? <Button type="button" size="lg" className="flex-1" disabled={!quality || !!error} onClick={start} data-recorder-start>Start recording</Button> : <Button type="button" size="lg" tone="danger" className="flex-1" onClick={stop} data-recorder-stop>Stop</Button>}
           {!recording ? <Button type="button" size="lg" tone="secondary" onClick={onClose} data-recorder-close>Cancel</Button> : null}
         </div>
+        {!recording && onFallback ? (
+          <button type="button" onClick={onFallback} className="min-h-11 text-sm font-semibold underline underline-offset-4" data-recorder-fallback>
+            Use the camera app instead
+          </button>
+        ) : null}
       </div>
     </div>
   );

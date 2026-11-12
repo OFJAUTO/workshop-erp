@@ -9,6 +9,7 @@ import { qualityProblem } from "@/lib/video-quality";
 import { VideoRecorder } from "@/components/VideoRecorder";
 import type { Checklist } from "@/lib/media";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
+import { holdWhilePicking } from "@/lib/screen-hold";
 import { pendingWords, useSendQueue, type PendingFile } from "@/lib/use-send-queue";
 
 export const MAX_VIDEO_SECONDS = 240;
@@ -275,7 +276,7 @@ export function VideoCapture({
           <button type="button" onClick={() => setRecorderOpen(true)} className={`inline-flex min-h-14 w-full items-center justify-center rounded-control px-5 text-base font-bold ${finished || onDevice ? "border border-line-strong bg-white" : "bg-ink text-on-dark"}`} data-record-video>
             {finished || onDevice ? "Record again" : "Record video (1080p)"}
           </button>
-          <button type="button" onClick={() => { const el = inputRef.current; if (el) { el.value = ""; el.click(); } }} className="min-h-11 text-sm font-semibold underline underline-offset-4" data-choose-video>
+          <button type="button" onClick={() => { const el = inputRef.current; if (el) { el.value = ""; holdWhilePicking(el, "picking a video"); el.click(); } }} className="min-h-11 text-sm font-semibold underline underline-offset-4" data-choose-video>
             Choose a video already on this phone (at least 720p)
           </button>
           {ios ? <p className="text-xs text-muted">iPhone or iPad: allow the camera and the microphone for erp.ofjauto.com when asked.</p> : null}
