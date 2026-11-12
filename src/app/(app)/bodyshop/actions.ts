@@ -187,8 +187,11 @@ export async function signOffAction(jobId: string, formData: FormData) {
   const role = staff.role_id as RoleId;
   const wanted = String(formData.get("role_key") ?? "") as SignoffKey;
   const own = signoffKeyOf(role, staff.department_id);
-  const onBehalf = role === "owner" && own !== wanted;
-  if (role !== "owner" && own !== wanted) back(jobId, { error: "That sign-off is for another person." }, "", "#signoff");
+  // 13 November 2026 (Section 5): the bodyshop manager may sign for an absent team leader (with his own PIN, logged
+  // "on behalf"); the owner may sign any.
+  const managerForLeader = own === "manager" && wanted !== "manager";
+  const onBehalf = (role === "owner" && own !== wanted) || managerForLeader;
+  if (role !== "owner" && own !== wanted && !managerForLeader) back(jobId, { error: "That sign-off is for another person." }, "", "#signoff");
   if (role !== "owner") {
     const pin = String(formData.get("pin") ?? "").trim();
     const { data: priv } = await createAdminClient().from("staff_private").select("pin_hash").eq("staff_id", staff.id).maybeSingle();

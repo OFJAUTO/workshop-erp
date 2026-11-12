@@ -60,7 +60,17 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
   const bodyshopCar = !recheckVisit && (jd?.department === "bodyshop" || jd?.department === "both");
   if (bodyshopCar) {
     const st = await signoffState(jobId);
-    if (st.hasStages && !st.complete) return { error: `Release sign-off missing: waiting on ${st.waitingOn.map((k) => SIGNOFF_LABELS[k]).join(", ")}. Sign it on the bodyshop page.`, values };
+    if (st.hasStages && !st.complete) {
+      // 13 November 2026 (Section 5): "Release as owner" - the missing sign-offs are recorded as SKIPPED BY OWNER (never
+      // as signed), with his reason; the leaders are told.
+      const ownerReason = String(formData.get("owner_release_reason") ?? "").trim();
+      if (role !== "owner" || formData.get("owner_release") !== "on") return { error: `Release sign-off missing: waiting on ${st.waitingOn.map((k) => SIGNOFF_LABELS[k]).join(", ")}. Sign it on the bodyshop page.`, values };
+      if (ownerReason.length < 5) return { error: "Write a short reason for releasing as owner (logged).", values };
+      const skipped = st.waitingOn.map((k) => SIGNOFF_LABELS[k]).join(", ");
+      await admin.from("job_events").insert({ job_id: jobId, event_type: "owner_release", note: `RELEASED BY THE OWNER (${staff.display_name}): sign-offs SKIPPED BY OWNER, not signed: ${skipped}. Reason: ${ownerReason}`, created_by: staff.id });
+      const { notifyRoles } = await import("@/lib/notifications");
+      await notifyRoles(["team_leader", "workshop_manager"], { type: "bodyshop_signoff", title: `${job.job_number}: released by the owner`, body: `Sign-offs SKIPPED BY OWNER (${skipped}): ${ownerReason}`, href: `/bodyshop/${jobId}`, jobId }).catch(() => null);
+    }
   }
   const { data: gi } = await admin.from("gate_ins").select("keys_count, keys_keychain, dash_cam, old_parts_return, mileage, mileage_unit, mileage_miles").eq("job_id", jobId).maybeSingle();
   if (!gi) return { error: "No gate-in record found.", values };
@@ -164,14 +174,16 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
     releaseBy = staff.id;
     releaseReason = "Declined quotation, no charge: the car leaves free";
   } else if (bal.state === "no_invoice") {
-    if (!can(role, "approveRelease")) return { error: "No invoice has been issued for this job. Accounts must issue it before the car leaves.", values };
+    // 13 November 2026 (Section 5): releasing a car with money owing is the OWNER's, with its own confirmation.
+    if (role !== "owner") return { error: "No invoice has been issued for this job. Accounts must issue it before the car leaves (only the owner can release it without one).", values };
     if (releaseReason.length < 5) return { error: "No invoice issued yet. Write the reason to release without one (logged).", values };
     releaseBy = staff.id;
   } else if (bal.balance > 0 && creditDays > 0) {
     releaseBy = staff.id;
     releaseReason = `Credit terms: ${creditDays} days, balance AED ${bal.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })} due by ${new Date(Date.now() + creditDays * 86400000).toISOString().slice(0, 10)}`;
   } else if (bal.balance > 0) {
-    if (!can(role, "approveRelease")) return { error: `Balance due AED ${bal.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}. Only the owner or accounts can approve the release.`, values };
+    if (role !== "owner") return { error: `Balance due AED ${bal.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}. Only the owner can release the car with money owing.`, values };
+    if (formData.get("unpaid_confirmed") !== "yes") return { error: `Confirm "Releasing with AED ${bal.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })} unpaid" first.`, values };
     if (releaseReason.length < 5) return { error: "Write the reason for releasing with a balance due (logged).", values };
     releaseBy = staff.id;
   }
@@ -333,7 +345,7 @@ export async function collectItems(jobId: string, _state: FormState, formData: F
   const releaseReason = String(formData.get("release_reason") ?? "").trim();
   const blocked = bal.state === "no_invoice" || bal.balance > 0;
   if (blocked) {
-    if (!can(role, "approveRelease")) return { error: bal.state === "no_invoice" ? "No invoice has been issued for this job. Accounts must issue it before the items leave." : `Balance due AED ${bal.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}. Only the owner or accounts can approve the release.`, values };
+    if (role !== "owner") return { error: bal.state === "no_invoice" ? "No invoice has been issued for this job. Accounts must issue it before the items leave." : `Balance due AED ${bal.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}. Only the owner or accounts can approve the release.`, values };
     if (releaseReason.length < 5) return { error: "Write the reason for releasing with the balance open (logged).", values };
     await admin.from("job_events").insert({ job_id: jobId, event_type: "override", note: `Release approved by ${staff.display_name} with ${bal.state === "no_invoice" ? "no invoice" : `AED ${bal.balance.toLocaleString("en-GB")} due`}: ${releaseReason}`, created_by: staff.id });
   }

@@ -43,6 +43,7 @@ import { loadQuoteHistory } from "@/lib/quote-history-data";
 import { additionalWaitingChip, pickItems } from "@/lib/quote-history";
 import { paymentReportsReady } from "@/lib/schema-ready";
 import { AutoApproveBanner } from "@/components/AutoApproveBanner";
+import { OutWithBalance } from "@/components/OutWithBalance";
 
 type Row = JobRow & {
   parts_pricing_done_at?: string | null;
@@ -222,6 +223,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
       {role === "owner" ? <AutoApproveBanner /> : null}
       {role === "owner" ? <ApprovalsTile /> : null}
+      {role === "owner" ? <OutWithBalance settings={settings} /> : null}
       {role === "owner" && !staff.viewingAs && (await hrReady()) ? <HrExpiringTile /> : null}
       {role === "owner" && profit ? (
         <ProfitPanel live target={Number(settings.daily_profit_target_aed) || 0} data={profit} />

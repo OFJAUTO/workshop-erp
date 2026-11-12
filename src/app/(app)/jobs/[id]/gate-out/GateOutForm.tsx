@@ -45,7 +45,10 @@ export function GateOutForm({
   lastPin = null,
   mileage = null,
   signoffLock = null,
+  ownerRelease = false,
 }: {
+  /** 13 November 2026 (Section 5): the owner may release a bodyshop car without its sign-offs (recorded SKIPPED BY OWNER). */
+  ownerRelease?: boolean;
   /** 13 November 2026 (Section 1e): the bodyshop release sign-off still missing - shown ONCE, at the button. */
   signoffLock?: string | null;
   jobId: string;
@@ -96,6 +99,8 @@ export function GateOutForm({
   const [chipDate, setChipDate] = useState<string>("");
   const [slotChoice, setSlotChoice] = useState<string>("afternoon");
   const [keysDiffer, setKeysDiffer] = useState(false);
+  const [releasing, setReleasing] = useState(false);
+  const [releaseWhy, setReleaseWhy] = useState("");
   const [returned, setReturned] = useState<string>(String(keysCount));
   const [chain, setChain] = useState<string>(keychain ? "yes" : "no");
   const [photos, setPhotos] = useState<JobFile[]>([]);
@@ -293,11 +298,17 @@ export function GateOutForm({
           {blocked ? (
             canApproveRelease ? (
               <>
-                <Notice tone="error">{blockedText} You can approve the release with a reason (logged).</Notice>
+                <Notice tone="error">{blockedText} You can release it with a reason (logged).</Notice>
+                {balance.balance > 0 && !noAmounts ? (
+                  <label className="flex min-h-12 items-center gap-3 rounded-control border-2 border-red-bar bg-white px-4 cursor-pointer" data-unpaid-confirm>
+                    <input type="checkbox" name="unpaid_confirmed" value="yes" required className="h-5 w-5 accent-ink" />
+                    <span className="text-sm font-bold">Releasing with AED {balance.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })} unpaid</span>
+                  </label>
+                ) : null}
                 <ReasonChips name="release_reason" label="Reason for releasing" rows={2} options={reasons.release} defaultValue={v.release_reason ?? ""} required placeholder="Tap a reason, or type" />
               </>
             ) : (
-              <Notice tone="error">{blockedText} Gate-out is blocked until the owner or accounts approve the release.</Notice>
+              <Notice tone="error">{blockedText} Gate-out is blocked until it is paid, or the owner releases it.</Notice>
             )
           ) : declinedFree ? (
             <div data-declined-free><Notice tone="info">Declined quotation, no charge: the car leaves free of charge. This is written on the job.</Notice></div>
@@ -328,7 +339,16 @@ export function GateOutForm({
 
           <div className="flex flex-col gap-1">
             {signoffLock ? <div data-signoff-lock><Notice tone="error">{signoffLock}</Notice></div> : null}
-            <SubmitButton tone={signoffLock || (mismatch && !canOverride) || (blocked && !canApproveRelease) ? "secondary" : "primary"} disabled={odoSending || !!signoffLock} className="self-start">{method === "recovery" ? "Stamp: left the workshop" : "Gate out and close the job"}</SubmitButton>
+            {signoffLock && ownerRelease ? (
+              <div className="flex flex-col gap-2 rounded-control border border-line p-3" data-owner-release>
+                <label className="flex min-h-11 items-center gap-3 cursor-pointer">
+                  <input type="checkbox" name="owner_release" checked={releasing} onChange={(e) => setReleasing(e.target.checked)} className="h-5 w-5 accent-ink" data-owner-release-tick />
+                  <span className="text-sm font-bold">Release as owner: the missing sign-offs are recorded as SKIPPED BY OWNER (never as signed); the leaders are told</span>
+                </label>
+                {releasing ? <Input name="owner_release_reason" value={releaseWhy} onChange={(e) => setReleaseWhy(e.target.value)} placeholder="Short reason (logged)" textCase="sentence" data-owner-release-reason /> : null}
+              </div>
+            ) : null}
+            <SubmitButton tone={(signoffLock && !(ownerRelease && releasing)) || (mismatch && !canOverride) || (blocked && !canApproveRelease) ? "secondary" : "primary"} disabled={odoSending || (!!signoffLock && !(ownerRelease && releasing && releaseWhy.trim().length >= 5))} className="self-start">{method === "recovery" ? "Stamp: left the workshop" : "Gate out and close the job"}</SubmitButton>
             {odoSending ? <p className="text-xs font-semibold text-amber-text" data-gate-out-waiting>Waiting for the dashboard photo to arrive – the car leaves once the server has it.</p> : null}
           </div>
         </>

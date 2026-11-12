@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { OutWithBalance } from "@/components/OutWithBalance";
 import { HrExpiringTile } from "@/components/HrExpiringTile";
 import { hrReady } from "@/lib/hr";
 import { LiveRefresh } from "@/components/LiveRefresh";
@@ -70,6 +71,7 @@ export async function AccountsDashboard({ staff, settings }: { staff: CurrentSta
       {staff.is_head_accountant && !staff.viewingAs && (await hrReady()) ? <HrExpiringTile /> : null}
       <MoneyTilesRow t={tiles} />
       <WaitingPanel staff={staff} extra={await accountsWaitingExtra()} />
+      <OutWithBalance settings={settings} />
       {/* 2 November 2026: the advisors' payments to record (where the old counter-payments card was; advisors never record). */}
       <PaymentReportsCard staff={staff} settings={settings} />
       <section className="flex flex-col gap-3" data-awaiting-payment>

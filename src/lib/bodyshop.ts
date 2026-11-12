@@ -156,8 +156,7 @@ export async function loadBodyshopJob(jobId: string): Promise<BodyshopJob | null
   const photoPaths = (asg ?? []).map((a) => (a.staff as unknown as { photo_path: string | null } | null)?.photo_path).filter((p): p is string => !!p);
   const { data: signed } = photoPaths.length ? await admin.storage.from("staff-photos").createSignedUrls(Array.from(new Set(photoPaths)), 3600) : { data: [] as { path: string | null; signedUrl: string }[] };
   const urlOf = new Map((signed ?? []).filter((s) => s.path).map((s) => [s.path as string, s.signedUrl]));
-  const sections = stages.map((s) => s.section);
-  const needed = neededSignoffs(sections);
+  const needed = neededSignoffs(workedSections(stages));
   const signoffs: SignoffRow[] = (sig ?? []).map((s) => ({ id: s.id, job_id: s.job_id, role_key: s.role_key as SignoffKey, staff_id: s.staff_id, signed_at: s.signed_at, on_behalf: !!s.on_behalf, name: (s.staff as unknown as { display_name: string } | null)?.display_name ?? "" }));
   return {
     job,
@@ -404,7 +403,7 @@ export async function setStageDone(stageId: string, actor: Actor, settings: Sett
     const handover = stages.find((s) => s.key === "handover");
     if (handover && handover.status === "pending") await admin.from("bodyshop_stages").update({ status: "active", started_at: now, updated_by: actor.id }).eq("id", handover.id);
     await admin.from("job_events").insert({ job_id: job.id, event_type: "bodyshop_stage", note: `Bodyshop side complete (${actor.display_name}); the mechanical side takes the car through QC to Ready`, created_by: actor.id });
-    const needed = neededSignoffs(stages.map((s) => s.section));
+    const needed = neededSignoffs(workedSections(stages));
     await notifyStaff(await involvedIds(job.id, stages.map((s) => s.section), job.gated_in_by, true), { type: "bodyshop_signoff", title: `Sign-off needed · ${shortCar(job.vehicle)}`, body: `The bodyshop work is complete; the mechanical work carries on. Sign the release: ${needed.map((k) => ({ manager: "bodyshop manager", ppf: "PPF leader", detailing: "detailing leader", paint: "paint leader" })[k]).join(", ")}.`, jobId: job.id, href: `/bodyshop/${job.id}#signoff` });
   }
   // A PPF recheck: the car is Ready to go back (nothing to invoice, no release sign-off) and the ORIGINAL job's 10-day
@@ -425,7 +424,7 @@ export async function setStageDone(stageId: string, actor: Actor, settings: Sett
     }
     const handover = stages.find((s) => s.key === "handover");
     if (handover) await admin.from("bodyshop_stages").update({ status: "active", started_at: now, updated_by: actor.id }).eq("id", handover.id);
-    const needed = neededSignoffs(stages.map((s) => s.section));
+    const needed = neededSignoffs(workedSections(stages));
     await notifyStaff(await involvedIds(job.id, stages.map((s) => s.section), job.gated_in_by, true), { type: "bodyshop_signoff", title: `Sign-off needed · ${shortCar(job.vehicle)}`, body: `The work is complete. Sign the release: ${needed.map((k) => ({ manager: "bodyshop manager", ppf: "PPF leader", detailing: "detailing leader", paint: "paint leader" })[k]).join(", ")}. Handover ${formatDate(job.promised_at)}.`, jobId: job.id, href: `/bodyshop/${job.id}#signoff` });
   }
   return { ok: true };
@@ -682,10 +681,17 @@ export async function bodyshopLabourCost(jobId: string, settings: Settings): Pro
 /* Release sign-off                                                                                                */
 /* ------------------------------------------------------------------------------------------------------------ */
 
+/** The sections that really worked on the car: a stage started or done (13 November 2026, Section 5). */
+export function workedSections(stages: { section: string; status: string }[]): string[] {
+  return stages.filter((s) => s.status === "done" || s.status === "active").map((s) => s.section);
+}
+
 export async function signoffState(jobId: string) {
   const [stages, { data: sig }, { data: kindRow }] = await Promise.all([loadStages(jobId), createAdminClient().from("bodyshop_signoffs").select("role_key").eq("job_id", jobId).eq("is_active", true), createAdminClient().from("jobs").select("job_kind").eq("id", jobId).maybeSingle()]);
   // A PPF recheck is free and fixes only what the original work needs: no release sign-off.
-  const needed = kindRow?.job_kind === "recheck" ? [] : neededSignoffs(stages.map((s) => s.section));
+  // 13 November 2026 (Section 5): a sign-off only from the teams that actually worked on the car (a stage started or
+  // done), never from a team whose stage was only planned (J-00991, a PPF car, asked detailing and paint).
+  const needed = kindRow?.job_kind === "recheck" ? [] : neededSignoffs(workedSections(stages));
   const signed = new Set((sig ?? []).map((s) => s.role_key as SignoffKey));
   return { needed, signed: Array.from(signed), waitingOn: needed.filter((k) => !signed.has(k)), complete: needed.every((k) => signed.has(k)), hasStages: stages.length > 0 };
 }
@@ -865,7 +871,7 @@ export async function loadBoard(): Promise<{ cars: BoardCar[]; goingOut: BoardCa
       ? real
       : planned.map((p, i) => toStage({ id: `plan:${job.id}:${p.key}`, job_id: job.id, position: i, key: p.key, label: p.label, section: p.section, est_hours: null, due_date: null, status: "pending", started_at: null, done_at: null, done_by: null, heads_up_sent_at: null, late_notified_at: null } as unknown as Record<string, unknown>));
     const current = currentStage(real);
-    const needed = neededSignoffs(stages.map((s) => s.section));
+    const needed = neededSignoffs(workedSections(stages));
     const signedKeys = (sig ?? []).filter((s) => s.job_id === job.id).map((s) => s.role_key as SignoffKey);
     const due = current?.due_date ?? job.promised_at;
     const tone: BoardCar["tone"] = due && due < today ? "red" : due === today ? "amber" : "normal";

@@ -149,7 +149,8 @@ export const SIGNOFF_LABELS: Record<SignoffKey, string> = { manager: "Bodyshop m
 export function neededSignoffs(sections: string[]): SignoffKey[] {
   const out: SignoffKey[] = ["manager"];
   if (sections.includes("ppf")) out.push("ppf");
-  out.push("detailing");
+  // 13 November 2026 (Section 5): only teams that worked on the car sign (detailing too).
+  if (sections.includes("detailing")) out.push("detailing");
   if (sections.includes("paint")) out.push("paint");
   return out;
 }

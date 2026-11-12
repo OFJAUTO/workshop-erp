@@ -20,7 +20,8 @@ export function SignoffPanel({ needed, signed, mine, isOwner, canAct, onSign, on
       <ul className="divide-y divide-line">
         {needed.map((k) => {
           const s = signed.find((x) => x.role_key === k);
-          const may = canAct && (isOwner || mine === k);
+          // The bodyshop manager may sign for an absent leader (13 November 2026, Section 5), logged "on behalf".
+          const may = canAct && (isOwner || mine === k || mine === "manager");
           return (
             <li key={k} className="py-2 flex flex-wrap items-center gap-2" data-signoff-row={k} data-signed={!!s}>
               <span className={`inline-flex h-7 w-7 items-center justify-center rounded-full text-sm font-extrabold ${s ? "bg-green text-on-dark" : "border border-line-strong text-transparent"}`}>✓</span>
@@ -32,7 +33,7 @@ export function SignoffPanel({ needed, signed, mine, isOwner, canAct, onSign, on
                     <form action={onSign} className="flex items-center gap-2">
                       <input type="hidden" name="role_key" value={k} />
                       {!isOwner ? <Input name="pin" inputMode="numeric" pattern="\d{4}" maxLength={4} placeholder="PIN" autoFocus required className="w-20 text-center tracking-[0.3em]" aria-label="Your PIN" data-signoff-pin /> : null}
-                      <Button type="submit" size="md" data-signoff-confirm>{isOwner ? `Sign${mine === k ? "" : " on behalf"}` : "Sign"}</Button>
+                      <Button type="submit" size="md" data-signoff-confirm>{mine === k ? "Sign" : "Sign on behalf"}</Button>
                       <Button type="button" tone="ghost" size="md" onClick={() => setOpen(null)}>Cancel</Button>
                     </form>
                   ) : notReady === k ? (
