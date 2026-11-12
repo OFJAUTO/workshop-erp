@@ -247,7 +247,8 @@ export async function createEstimateProforma(
       subtotal_aed: totals.gross, discount_aed: totals.discount, taxable_aed: totals.taxable, vat_aed: totals.vat, total_aed: totals.total, agreed_total_aed: null, warranty_credit_aed: 0,
       discount_note: discountNote, bill_to: billTo, valid_until: validUntil,
       issue_reason: input.mode === "complete" ? `Estimate ${[e, ...combined].map((x) => x.number).join(" + ")} (complete)` : `Estimate ${e.number} (partial advance)`,
-      notes: "PROFORMA INVOICE – not a tax invoice. The tax invoice is issued the moment the payment is received.",
+      // 13 November 2026 (Section 6): the template prints this line itself; saved again here it printed twice.
+      notes: null,
       prepared_by: staff.id, issued_by: staff.id, customer_snapshot: customer ?? null,
       vehicle_snapshot: v ? { title: [v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" "), variant: v.variant, plate: formatPlate(v), vin: v.vin } : null,
       created_by: staff.id, updated_by: staff.id,

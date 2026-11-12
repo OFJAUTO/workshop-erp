@@ -1,3 +1,4 @@
+import { formatPhone } from "@/lib/messages";
 import { ApprovalsHere } from "@/components/ApprovalsHere";
 import { compJobChoices } from "@/lib/quote-data";
 import { ViewAsCustomer } from "@/components/ViewAsCustomer";
@@ -205,6 +206,8 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           customerId={q.customer_id}
           vehicleId={q.vehicle_id ?? null}
           phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")}
+          customerName={customer?.company_name ?? customer?.full_name ?? ""}
+          customerPhone={formatPhone(customer?.phone ?? "")}
         />
       ) : null}
       <QuoteEditor

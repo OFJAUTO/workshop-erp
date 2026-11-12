@@ -2477,7 +2477,7 @@ export function QuoteEditor({
                 </Button>
               ) : null}
               {!sent && completed && canSend ? <SendQuoteControl isOwner={isOwner} quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={blockers.length > 0} onBlocked={scrollToFirstBlocker} existingToken={quotation.token} shortLink={shortLink} status={quotation.status} autoOpen={autoSend} compact /> : null}
-              {canSend && sent && quotation.token && (quotation.status === "sent" || quotation.status === "opened") ? <SendQuoteControl quotationId={quotation.id} kind={quotation.kind} siteUrl={siteUrl} messageTemplate={messageTemplate} phoneDigits={phoneDigits} blocked={false} onBlocked={() => {}} existingToken={quotation.token} shortLink={shortLink} status={quotation.status} again /> : null}
+              {/* 13 November 2026 (Section 6): ONE resend, "Resend estimate/quote" in the header (QuoteSendButton): no second "Send again" here. */}
             </span>
           </div>
         </div>

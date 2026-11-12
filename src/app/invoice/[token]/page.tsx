@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { advanceMoneyRows, ADVANCE_FINAL_LINE, isProformaBoilerplate } from "@/lib/doc-totals";
 import { staffPreview } from "@/lib/customer-preview";
 import { stillDueOf, WAITING_CLEAR } from "@/lib/still-due";
 import { unbroken } from "@/lib/text-case";
@@ -147,7 +148,18 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
         {notpaid && !paid ? <Notice tone="error">The payment was not completed. You can try again with Pay now, or pay by transfer with the bank details below.</Notice> : null}
         {cancelled && !paid ? <Notice tone="info">Payment cancelled. Nothing was charged.</Notice> : null}
         {isProforma ? <p className="text-xs text-[#5F6368]">This is not a tax invoice. It shows what is due for the work approved; the tax invoice follows on full payment.</p> : null}
-        {payable ? (
+        {/* 13 November 2026 (Section 6): an advance against an estimate - THE advance block, each number once. */}
+        {bundle.advance && !paid ? (
+          <div className="flex flex-col gap-1 rounded-lg bg-[#F4F4F5] px-4 py-4" data-advance-block>
+            {advanceMoneyRows(bundle.advance).map((r) => (
+              <div key={r.label} className={`flex items-baseline justify-between gap-3 ${r.kind === "total" ? "py-1" : ""}`}>
+                <span className={`text-xs font-bold uppercase tracking-[0.06em] ${r.kind === "total" ? "text-ink" : "text-[#5F6368]"}`}>{r.label}</span>
+                <span className={`whitespace-nowrap ${r.kind === "total" ? "text-3xl font-extrabold" : "text-sm font-bold"}`} data-advance-row={r.kind}>{aed(r.value)}</span>
+              </div>
+            ))}
+            <span className="text-[11px] font-semibold uppercase text-[#5F6368]">{ADVANCE_FINAL_LINE}</span>
+          </div>
+        ) : payable ? (
           <div className={`rounded-lg px-4 py-4 flex flex-col gap-1 ${paid ? "bg-green-soft" : "bg-[#F4F4F5]"}`}>
             <span className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]" data-amount-heading>{paid ? "Paid, thank you" : waitingClear ? WAITING_CLEAR : stillDue.state === "part" ? "Still to pay" : "Amount due"}</span>
             <span className="text-3xl font-extrabold" data-amount-due>{paid ? aed(invoice.total_aed) : waitingClear ? aed(stillDue.pending) : aed(stillDue.due)}</span>
@@ -164,7 +176,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
           </div>
         )}
         {tintOutsidePackage && tintWords ? <TintCard words={tintWords} /> : null}
-        {splitDeclinedNotes(invoice.notes).rest ? <p className="whitespace-pre-line rounded-lg border border-[#D4D4D8] px-4 py-3 text-sm" data-invoice-note>{splitDeclinedNotes(invoice.notes).rest}</p> : null}
+        {!isProformaBoilerplate(invoice.notes) && splitDeclinedNotes(invoice.notes).rest ? <p className="whitespace-pre-line rounded-lg border border-[#D4D4D8] px-4 py-3 text-sm" data-invoice-note>{splitDeclinedNotes(invoice.notes).rest}</p> : null}
         {bundle.declined.length ? (
           <>
             <p className="text-sm font-semibold text-[#5F6368]" data-declined-summary>{declinedSummary(bundle.declined.length, "below")}</p>

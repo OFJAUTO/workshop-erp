@@ -35,7 +35,10 @@ export type MoneyCardFacts = {
  * block (company, address, TRN, attention, PO number — may differ from the car's owner), send through
  * the one dialog, and the money recorded by accounts; the tax invoice follows by itself when paid.
  */
-export function EstimateMoneyCard({ estimateId, number, approved, money, billTo, canCreate, canRecord, recordReadOnly, canReport = false, isOwner = false, customerId, vehicleId, phoneDigits }: {
+export function EstimateMoneyCard({ estimateId, number, approved, money, billTo, canCreate, canRecord, recordReadOnly, canReport = false, isOwner = false, customerId, vehicleId, phoneDigits, customerName = "", customerPhone = "" }: {
+  /** 13 November 2026 (Section 6): the customer record's name and mobile (the bill-to default, never retyped). */
+  customerName?: string;
+  customerPhone?: string;
   estimateId: string;
   number: string;
   approved: boolean;
@@ -57,6 +60,10 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
   const [partialKind, setPartialKind] = useState<"percent" | "aed">("percent");
   const [partialValue, setPartialValue] = useState("");
   const [bt, setBt] = useState<BillTo>(billTo);
+  // THE CUSTOMER (default, from the customer record) or A COMPANY OR SOMEONE ELSE (the fields appear only then).
+  const [billChoice, setBillChoice] = useState<"customer" | "other">(billTo.company.trim() && billTo.company.trim().toUpperCase() !== customerName.trim().toUpperCase() ? "other" : "customer");
+  const sentBillTo: BillTo = billChoice === "customer" ? { company: "", address: "", trn: "", attention: "", po_number: bt.po_number } : bt;
+  const billPreview = billChoice === "customer" ? `Bill to: ${customerName || "the customer"}${customerPhone ? ` · ${customerPhone}` : ""}${bt.po_number ? ` · PO ${bt.po_number}` : ""}` : `Bill to: ${[bt.company || "(company name)", bt.attention ? `Attn: ${bt.attention}` : null, bt.trn ? `TRN ${bt.trn}` : null, bt.po_number ? `PO ${bt.po_number}` : null].filter(Boolean).join(" · ")}`;
   const [error, setError] = useState<string | null>(null);
   const [send, setSend] = useState<ProformaSendInfo | null>(null);
   const [voiding, setVoiding] = useState(false);
@@ -79,7 +86,7 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
 
   const create = () => start(async () => {
     setError(null);
-    const r = await createEstimateProformaAction(estimateId, { mode, partialKind, partialValue: Number(partialValue.replace(/,/g, "")), billTo: bt, combineIds: mode === "complete" ? Array.from(combine) : [] });
+    const r = await createEstimateProformaAction(estimateId, { mode, partialKind, partialValue: Number(partialValue.replace(/,/g, "")), billTo: sentBillTo, combineIds: mode === "complete" ? Array.from(combine) : [] });
     if (r.error) { setError(r.error); return; }
     setSend(r);
     router.refresh();
@@ -125,14 +132,25 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
 
   const btBox = (
     <div className="flex flex-col gap-2" data-em-billto>
-      <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Bill to (can differ from the car&apos;s owner)</span>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <Input placeholder="Company name" value={bt.company} onChange={(e) => setBt({ ...bt, company: e.target.value })} data-em-billto-company />
-        <Input placeholder="Attention (person)" value={bt.attention} onChange={(e) => setBt({ ...bt, attention: e.target.value })} data-em-billto-attention />
-        <Input placeholder="TRN (15 digits, if VAT-registered)" inputMode="numeric" value={bt.trn} onChange={(e) => setBt({ ...bt, trn: e.target.value })} data-em-billto-trn />
-        <Input placeholder="Customer PO / reference number" value={bt.po_number} onChange={(e) => setBt({ ...bt, po_number: e.target.value })} data-em-billto-po />
+      <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Bill to</span>
+      <div className="grid grid-cols-[repeat(auto-fill,minmax(12rem,1fr))] gap-1.5" data-em-billto-choice>
+        <button type="button" aria-pressed={billChoice === "customer"} onClick={() => setBillChoice("customer")} className={`min-h-11 rounded-control border px-3 text-left text-sm font-bold ${billChoice === "customer" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-em-billto-customer>THE CUSTOMER</button>
+        <button type="button" aria-pressed={billChoice === "other"} onClick={() => { setBillChoice("other"); if (bt.company.trim().toUpperCase() === customerName.trim().toUpperCase()) setBt({ ...bt, company: "" }); }} className={`min-h-11 rounded-control border px-3 text-left text-sm font-bold ${billChoice === "other" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-em-billto-other>A COMPANY OR SOMEONE ELSE</button>
       </div>
-      <Input placeholder="Address" value={bt.address} onChange={(e) => setBt({ ...bt, address: e.target.value })} data-em-billto-address />
+      {billChoice === "customer" ? (
+        <p className="rounded-control bg-chip px-3 py-2 text-sm font-semibold" data-em-billto-record>{customerName || "The customer"}{customerPhone ? ` · ${customerPhone}` : ""} <span className="font-normal text-muted">(from the customer record)</span></p>
+      ) : (
+        <>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Input placeholder="Company name" value={bt.company} onChange={(e) => setBt({ ...bt, company: e.target.value })} data-em-billto-company />
+            <Input placeholder="Attention (person)" value={bt.attention} onChange={(e) => setBt({ ...bt, attention: e.target.value })} data-em-billto-attention />
+            <Input placeholder="TRN (15 digits, if VAT-registered)" inputMode="numeric" value={bt.trn} onChange={(e) => setBt({ ...bt, trn: e.target.value })} data-em-billto-trn />
+          </div>
+          <Input placeholder="Address" value={bt.address} onChange={(e) => setBt({ ...bt, address: e.target.value })} data-em-billto-address />
+        </>
+      )}
+      <Input placeholder="Customer PO / reference number (optional)" value={bt.po_number} onChange={(e) => setBt({ ...bt, po_number: e.target.value })} data-em-billto-po />
+      <p className="text-sm font-bold" data-em-billto-preview>{billPreview}</p>
     </div>
   );
 

@@ -67,3 +67,25 @@ export function validUntilOf(q: { valid_until?: string | null; sent_at?: string 
   d.setUTCDate(d.getUTCDate() + Math.max(0, Number(q.validity_days) || 7));
   return d.toISOString();
 }
+
+/* ---- THE advance block (13 November 2026, Section 6): a proforma for an advance against an estimate, its receipt and
+   the final tax invoice all print the same money in the same order, each number once. ---- */
+
+export const ADVANCE_FINAL_LINE = "FINAL AMOUNT AS PER THE APPROVED QUOTATION";
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
+export type AdvanceFacts = { estimateTotal: number; alreadyPaid: number; payableNow: number };
+
+/** ESTIMATE TOTAL (INCL. VAT) > ALREADY PAID (only if any) > ADVANCE PAYABLE NOW (the large figure) > BALANCE AFTER THIS PAYMENT. */
+export function advanceMoneyRows(f: AdvanceFacts): MoneyRow[] {
+  const rows: MoneyRow[] = [{ label: "ESTIMATE TOTAL (INCL. VAT)", value: r2(f.estimateTotal), kind: "plain" }];
+  if (f.alreadyPaid > 0.004) rows.push({ label: "ALREADY PAID", value: r2(f.alreadyPaid), kind: "paid" });
+  rows.push({ label: "ADVANCE PAYABLE NOW", value: r2(f.payableNow), kind: "total" });
+  rows.push({ label: "BALANCE AFTER THIS PAYMENT", value: r2(Math.max(0, f.estimateTotal - f.alreadyPaid - f.payableNow)), kind: "after" });
+  return rows;
+}
+
+/** The proforma's own boilerplate saved in its notes (printed by the template already): never printed twice. */
+export function isProformaBoilerplate(notes: string | null | undefined): boolean {
+  return /^\s*(PROFORMA INVOICE\s*[–-]\s*not a tax invoice|This is not a tax invoice)/i.test(notes ?? "");
+}

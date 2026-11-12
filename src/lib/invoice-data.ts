@@ -220,6 +220,8 @@ export type InvoiceBundle = {
   estimate?: { id: string; number: string } | null;
   billTo?: { company?: string | null; address?: string | null; trn?: string | null; attention?: string | null; po_number?: string | null } | null;
   validUntil?: string | null;
+  /** 13 November 2026 (Section 6): an advance against an estimate - THE advance block (doc-totals advanceMoneyRows). */
+  advance?: { estimateTotal: number; alreadyPaid: number; payableNow: number; sections: { labour: number; parts: number; other: number } } | null;
 };
 
 export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
@@ -250,6 +252,30 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
       if (est) estimate = { id: String(est.id), number: String(est.number) };
     }
   }
+  // 13 November 2026 (Section 6): a proforma for an ADVANCE against an estimate prints THE advance block - the
+  // estimate's total, what is already paid, the advance payable now and the balance after it - and the estimate's
+  // section totals above it.
+  let advance: InvoiceBundle["advance"] = null;
+  if (estimate && invoice.kind === "proforma" && invoice.deposit_for_quotation_id) {
+    try {
+      const { estimateMoneyMany } = await import("./estimate-money");
+      const view = (await estimateMoneyMany([estimate.id])).get(estimate.id);
+      const own = ((payments ?? []) as { amount_aed: number; status: string }[]).filter((p) => p.status === "recorded").reduce((a, p) => a + Number(p.amount_aed || 0), 0);
+      const { data: ql } = await admin.from("quotation_lines").select("line_type, line_total, visible_to_customer, left_off, is_active").eq("quotation_id", estimate.id).eq("is_active", true);
+      const sec = { labour: 0, parts: 0, other: 0 };
+      for (const l of (ql ?? []) as { line_type: string; line_total: number | null; visible_to_customer: boolean | null; left_off: boolean | null }[]) {
+        if (l.visible_to_customer === false || l.left_off) continue;
+        const v = Number(l.line_total) || 0;
+        if (l.line_type === "part") sec.parts += v;
+        else if (["recovery", "other", "fee", "charge"].includes(l.line_type)) sec.other += v;
+        else sec.labour += v;
+      }
+      const r2 = (n: number) => Math.round(n * 100) / 100;
+      if (view) advance = { estimateTotal: r2(view.total), alreadyPaid: r2(Math.max(0, view.paid - own)), payableNow: r2(invoice.total_aed), sections: { labour: r2(sec.labour), parts: r2(sec.parts), other: r2(sec.other) } };
+    } catch {
+      advance = null;
+    }
+  }
   // The declined-work section (5 November 2026): the structured rows first; an old invoice whose
   // note carries the whole list falls back to what the note says.
   let declined: DeclinedDocItem[] = [];
@@ -264,6 +290,7 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
     invoice,
     credited: (await creditsOnDocs([invoice.id])).get(invoice.id) ?? 0,
     estimate,
+    advance,
     billTo,
     validUntil,
     declined,

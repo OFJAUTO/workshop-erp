@@ -28,7 +28,7 @@ import { CUT_EXPLAIN, cutWords, lineIsPpf } from "@/lib/ppf-cut";
 import { decorateTint, lineTintWords } from "@/lib/tint";
 import { tintLimitOf, tintSpecForJob } from "@/lib/tint-data";
 import { RED, PALE, INK, GREY, GREEN, Amount, DocumentTail, InfoBoxes, PackageSection, PdfDocument, PoLinesTable, TitleRow, boxesWithTail, type BoxSpec, TotalsBlock, WarrantyPanel, WarrantySection, companyOf, currencyOf, px, qtyText, styles, type PoDocRow, type SectionLine, type StatusBox, type Box } from "./template";
-import { docMoneyRows, sectionSubtotalShown } from "@/lib/doc-totals";
+import { docMoneyRows, sectionSubtotalShown, advanceMoneyRows, ADVANCE_FINAL_LINE, isProformaBoilerplate } from "@/lib/doc-totals";
 import { renderByPageRules } from "@/lib/pdf-read";
 import { addMonthsIso, dubaiDay } from "@/lib/warranty";
 import { positionsWords } from "@/lib/parts-list";
@@ -86,11 +86,16 @@ function customerBox(b: Pick<InvoiceBundle, "customer" | "invoice" | "billTo">) 
 function vehicleBox(b: Pick<InvoiceBundle, "vehicle" | "invoice" | "mileage">) {
   const v = b.vehicle;
   const snap = b.invoice.vehicle_snapshot ?? {};
-  const title = snap.title ?? [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
-  const plate = snap.plate ?? (v ? formatPlate(v) : null);
+  const full = [v?.make?.name, v?.model?.name, v?.model_year].filter(Boolean).join(" ");
+  // 13 November 2026 (Section 6): the car in full (LAND ROVER RANGE ROVER SPORT), never the model alone.
+  const make = v?.make?.name ?? "";
+  const title = snap.title ? (make && !snap.title.toUpperCase().includes(make.toUpperCase()) ? `${make} ${snap.title}` : snap.title) : full;
+  const rawPlate = snap.plate ?? (v ? formatPlate(v) : null);
+  const plate = rawPlate && !/^no plate$/i.test(rawPlate.trim()) ? rawPlate : null;
+  const unregistered = !plate && (v?.has_plate === false || /^no plate$/i.test((rawPlate ?? "").trim()));
   const vin = snap.vin ?? v?.vin ?? null;
   const km = b.mileage?.in ? [`Mileage in ${b.mileage.in}`, b.mileage.out ? `out ${b.mileage.out}` : null].filter(Boolean).join(" · ") : null;
-  return { title: "Vehicle", strong: title || "Vehicle", lines: [snap.variant ?? v?.variant ?? null, plate ? `Plate ${plate}` : null, vin ? `VIN ${vin}` : null, km] };
+  return { title: "Vehicle", strong: title || "Vehicle", lines: [snap.variant ?? v?.variant ?? null, plate ? `Plate ${plate}` : unregistered ? "PLATE: NOT REGISTERED YET" : null, vin ? `VIN ${vin}` : null, km] };
 }
 
 /** What the status box says at this moment, from the payments: amount due, balance due, paid in full, or cheque pending. */
@@ -153,10 +158,11 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const gross = round2(pkgRows.reduce((a, l) => a + l.unit_price * l.quantity, 0) + [...services, ...parts, ...fees].reduce((a, l) => a + l.amount, 0));
   const paidRows = isCredit ? [] : live.map((p) => {
     const pending = awaitsBank(p);
-    const what = p.is_deposit ? (p.deposit_invoice_number ? `Deposit invoiced (${p.deposit_invoice_number})` : `Deposit paid (${p.number})`) : `Paid ${formatDate(p.received_at)} · ${METHOD_LABELS[p.method] ?? p.method} (${p.number})`;
+    const what = p.is_deposit ? (p.deposit_invoice_number ? `Less advance paid (${p.deposit_invoice_number})` : `Less advance paid (${p.number})`) : `Paid ${formatDate(p.received_at)} · ${METHOD_LABELS[p.method] ?? p.method} (${p.number})`;
     return { label: pending ? `Cheque pending, not counted yet (${p.number})` : what, value: p.amount_aed, kind: pending ? ("after" as const) : ("paid" as const) };
   });
-  const rows = docMoneyRows({
+  const advanceRows = bundle.advance ? advanceMoneyRows(bundle.advance) : null;
+  const rows = advanceRows ?? docMoneyRows({
     sections: sectionCounts,
     gross,
     green: [...pkgDiscounts, ...(invoice.discount_aed ? [{ label: discountLabel, value: invoice.discount_aed }] : []), ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: invoice.warranty_credit_aed }] : []), ...(rounding < 0 ? [{ label: "Round-off", value: Math.abs(rounding) }] : [])],
@@ -177,11 +183,13 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
       ? `Paid in full${bal.paidAt ? ` on ${formatDate(bal.paidAt)}` : ""}. Thank you.`
       : invoice.kind === "proforma"
         ? bundle.estimate
-          ? "PROFORMA INVOICE – not a tax invoice. The tax invoice is issued the moment the payment is received."
+          ? bundle.advance
+            ? `${ADVANCE_FINAL_LINE}. PROFORMA INVOICE – not a tax invoice: the tax invoice is issued the moment the payment is received.`
+            : "PROFORMA INVOICE – not a tax invoice. The tax invoice is issued the moment the payment is received."
           : "Please pay the total to collect the vehicle. The tax invoice follows the payment."
         : "Thank you for your business.";
   // The boxes of lines; when the totals would start a page alone, the last two lines travel with them (boxesWithTail).
-  const boxes: BoxSpec[] = [
+  const boxes: BoxSpec[] = bundle.advance ? [] : [
     ...(services.length || !pkgRows.length ? [{ key: "services", title: "Labour and services", lines: services, subtotalLabel: "Labour subtotal", showSubtotal: sectionSubtotalShown(sectionCounts, "services") }] : []),
     ...(parts.length ? [{ key: "parts", title: "Parts", descLabel: "Part", lines: parts, subtotalLabel: "Parts subtotal", showSubtotal: sectionSubtotalShown(sectionCounts, "parts") }] : []),
     ...(fees.length ? [{ key: "fees", title: "Other charges", lines: fees, subtotalLabel: "Other charges subtotal", showSubtotal: sectionSubtotalShown(sectionCounts, "fees") }] : []),
@@ -191,7 +199,8 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
     const { body, lead } = boxesWithTail(boxes, keepLast, tight);
     // 5 November 2026 (J-00970): the declined list never rides inside the note - an old note's block
     // is taken out here, and the list gets its own page-2 section below.
-    const cleanNotes = splitDeclinedNotes(invoice.notes).rest;
+    // The proforma's own boilerplate saved in its notes is printed once, by the tail (13 November 2026).
+    const cleanNotes = isProformaBoilerplate(invoice.notes) ? "" : splitDeclinedNotes(invoice.notes).rest;
     const notes = cleanNotes ? (
       <View style={styles.note} wrap={false}>
         <Text style={styles.smallTitle}>Note</Text>
@@ -214,6 +223,21 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
         const docModel = packageDocOf(l.package_items, { car: null, decorate: decorateTint(tintSpec, tintLimit), ppfNote: lineIsPpf({ title: l.description, package_items: l.package_items }) ? cutWords(l.cut_method, l.cut_note) : null, ppfExplain: CUT_EXPLAIN });
         return docModel ? <PackageSection tight={tight} key={l.id} doc={docModel} price={round2(l.unit_price * l.quantity)} /> : null;
       })}
+      {bundle.advance ? (
+        <View style={{ marginTop: px(10) }} wrap={false} data-advance-section>
+          <Text style={{ fontSize: px(10), fontWeight: 800, letterSpacing: 0.6 }}>ADVANCE PAYMENT</Text>
+          <Text style={{ fontSize: px(9.5), marginTop: px(3) }}>{`ADVANCE AGAINST ESTIMATE ${bundle.estimate?.number ?? ""}`}</Text>
+          <View style={{ marginTop: px(8), borderTopWidth: 0.6, borderTopColor: "#D4D4D8", paddingTop: px(6) }}>
+            <Text style={{ fontSize: px(8.5), fontWeight: 700, color: "#5F6368" }}>{`ESTIMATE ${bundle.estimate?.number ?? ""} · SECTION TOTALS (BEFORE VAT)`}</Text>
+            {([["LABOUR AND SERVICES", bundle.advance.sections.labour], ["PARTS", bundle.advance.sections.parts], ["OTHER CHARGES", bundle.advance.sections.other]] as const).filter(([, v]) => v > 0.004).map(([label, v]) => (
+              <View key={label} style={{ flexDirection: "row", justifyContent: "space-between", marginTop: px(3) }}>
+                <Text style={{ fontSize: px(9.5) }}>{label}</Text>
+                <Text style={{ fontSize: px(9.5) }}>{v.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      ) : null}
       {body}
       {bundle.declined.length ? (
         <View style={{ marginTop: px(8) }} wrap={false}>

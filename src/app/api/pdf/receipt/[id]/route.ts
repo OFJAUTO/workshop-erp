@@ -66,9 +66,9 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
   const v = (((job as { vehicle?: unknown } | null)?.vehicle ?? (carOnly as { vehicle?: unknown } | null)?.vehicle) as VehicleRow | null) ?? null;
   const snap = (invoice?.invoice as { vehicle_snapshot?: { title?: string | null; plate?: string | null; vin?: string | null } | null } | undefined)?.vehicle_snapshot ?? null;
   const vehicle = v
-    ? { title: [v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" ") || null, plate: v.has_plate === false ? "NO PLATE" : formatPlate(v), vin: v.vin ?? null }
+    ? { title: [v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" ") || null, plate: v.has_plate === false ? "NOT REGISTERED YET" : formatPlate(v), vin: v.vin ?? null }
     : snap
-      ? { title: snap.title ?? null, plate: snap.plate ?? "NO PLATE", vin: snap.vin ?? null }
+      ? { title: snap.title ?? null, plate: snap.plate && !/^no plate$/i.test(snap.plate) ? snap.plate : "NOT REGISTERED YET", vin: snap.vin ?? null }
       : null;
 
   // Paid to date on the job: every recorded payment, deposits included (a pending cheque counts, with its note).
@@ -94,6 +94,13 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     // A credit note on the invoice comes off its total (audit H1), so total − paid = the balance the customer owes.
     const credited = invoice.credited ?? 0;
     if (kind !== "credit_note") summary = summaryOf(kind === "proforma" ? "Proforma total" : credited ? "Invoice total after credit note" : "Invoice total", round2(invoice.invoice.total_aed - credited));
+    // 13 November 2026 (Section 6): an advance against an estimate - THE advance block's figures (estimate total, paid so far
+    // including this advance, balance after it).
+    if (invoice.advance) {
+      const paidAll = round2(invoice.advance.alreadyPaid + paid);
+      summary = { totalLabel: "Estimate total (incl. VAT)", total: invoice.advance.estimateTotal, paid: paidAll, balance: round2(Math.max(0, invoice.advance.estimateTotal - paidAll)), paidInFull: invoice.advance.estimateTotal - paidAll <= 0.005 && !pendingCheque, pendingCheque };
+      forLine = `Advance payment against estimate ${invoice.estimate?.number ?? ""} (proforma ${invoice.invoice.number})`;
+    }
   } else {
     const st = payment.job_id ? await depositState(payment.job_id) : null;
     const qn = st?.quotationNumbers.join(", ") || null;

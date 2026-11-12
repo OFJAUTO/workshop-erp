@@ -221,7 +221,7 @@ await section("4-5 revise, declined, gate-out", async () => {
   const { browser, page } = await browserFor("owner", { viewport: { width: 1366, height: 900 } });
   await go(page, `${base}/jobs/${jobId}/quote/${v2}`);
   await until(async () => ((await page.locator("[data-revise-bar]").count()) ? 1 : null), 30, 500);
-  check("4: ONE 'Revise → version 3' at the top next to Preview PDF (5 November 2026: no second one in the bottom bar), Send again in the bar", (await page.locator("[data-revise-bar]").count()) === 1 && (await page.locator("[data-revise]").count()) === 1 && /Revise → version 3/.test((await page.locator("[data-revise]").textContent()) ?? "") && (await page.locator("button", { hasText: /Send again/ }).count()) === 1);
+  check("4: ONE 'Revise → version 3' at the top next to Preview PDF (5 November 2026: no second one in the bottom bar), ONE resend in the header (13 Nov: no Send again in the bar)", (await page.locator("[data-revise-bar]").count()) === 1 && (await page.locator("[data-revise]").count()) === 1 && /Revise → version 3/.test((await page.locator("[data-revise]").textContent()) ?? "") && (await page.locator("button", { hasText: /Send again/ }).count()) === 0 && (await page.locator("[data-quote-send]").count()) === 1);
   check("4: the separate Revise box is gone", (await page.locator("button", { hasText: /^Start version/ }).count()) === 0);
   const det = page.locator("[data-mark-declined]");
   check("4: 'Mark as declined' is a small link whose reason box only opens when tapped", (await det.count()) === 1 && !(await det.locator("textarea").isVisible()));
