@@ -197,7 +197,8 @@
     "test:s13-5": "node --env-file=.env.test.local tests/browser/test-s13-5-gate-out.mjs",
     "test:s13-6": "node --env-file=.env.test.local tests/browser/test-s13-6-advance-proforma.mjs",
     "test:s13-7": "node --env-file=.env.test.local tests/browser/test-s13-7-estimate-order.mjs",
-    "test:s13-8": "node --env-file=.env.test.local tests/browser/test-s13-8-suppliers.mjs"
+    "test:s13-8": "node --env-file=.env.test.local tests/browser/test-s13-8-suppliers.mjs",
+    "test:s13-9": "node --env-file=.env.test.local tests/browser/test-s13-9-zoho-tab.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

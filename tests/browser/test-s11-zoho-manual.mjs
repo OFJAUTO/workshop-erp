@@ -155,7 +155,7 @@ try {
       const bills = await grp("bills");
       const bps = await grp("billpayments");
       check("11.2: tax invoices counted as in the database", inv.count === (counts.invoice ?? 0), `${inv.count} vs ${counts.invoice}`);
-      check("11.2: payments and deposits counted together, the held one left out", pays.count === (counts.payment ?? 0) + (counts.deposit ?? 0), `${pays.count} vs ${(counts.payment ?? 0) + (counts.deposit ?? 0)}`);
+      check("11.2: payments and deposits counted together, the held one left out", pays.count === (counts.payment ?? 0) + (counts.deposit ?? 0) + (counts.paygroup ?? 0), `${pays.count} vs ${(counts.payment ?? 0) + (counts.deposit ?? 0) + (counts.paygroup ?? 0)}`); // combined payments joined this group on 9 Nov
       check("review: the payments' total is first posts only (the two voided receipts, AED 777 and 888, are not in it)", Math.abs(Number(pays.total) - paymentsTotal) < 0.005, `${pays.total} vs ${paymentsTotal.toFixed(2)}`);
       const moneyIn = await text(preview.locator("[data-zoho-preview-money-in]"));
       check("review: Money in is the payments' first posts, never a voided receipt", moneyIn.includes(Number(pays.total).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })), moneyIn);
