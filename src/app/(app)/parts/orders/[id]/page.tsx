@@ -7,6 +7,7 @@ import { LpoInvoicesCard } from "./LpoInvoicesCard";
 import { lpoInvoiceGross, lpoInvoiceState, lpoInvoicesReady } from "@/lib/lpo-invoices";
 import Link from "next/link";
 import { SupplierPayBox } from "@/components/SupplierPayBox";
+import { LpoAdvanceCard } from "@/components/LpoAdvanceCard";
 import { advancesOf, openInvoicesOf, paymentsOnPo, supplierPaymentsReadyNow } from "@/lib/supplier-payments";
 import { SupplierPaymentHistory } from "@/components/SupplierPaymentHistory";
 import { CopyVin } from "@/components/CopyVin";
@@ -553,6 +554,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             <InvoiceEditHistory entries={invoiceEdits} />
           </Card>
           {/* The payment box of every supplier LPO, a stock order (no car) included: "Pay on the LPO" lands here. */}
+          {/* 13 November 2026 (Section 4): the advance to the supplier (pay before the invoice, apply it after). */}
+          {!isMain ? <LpoAdvanceCard po={po} role={role} viewingAs={!!staff.viewingAs} /> : null}
           {seesPay && !isMain && po.status !== "pending_approval" && po.status !== "cancelled" && (po.supplier_invoice_status !== "none" || invoiceFiles.length > 0 || po.status === "received") ? (
             <Card className="flex flex-col gap-3 scroll-mt-4" id="paid" data-supplier-pay>
               <SectionLabel>{po.job_id ? <>Invoice files &amp; payment</> : "Payment"}</SectionLabel>

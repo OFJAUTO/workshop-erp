@@ -18,6 +18,7 @@ import { changeWords } from "@/lib/price-change";
 import { enterInvoiceFromList } from "@/app/(app)/parts/order-actions";
 import { checkInvoiceAction, queryInvoiceAction } from "./actions";
 import { ScanEnterInvoice } from "./ScanEnterInvoice";
+import { LpoAdvanceByPoId } from "@/components/LpoAdvanceCard";
 
 const money = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const STATUS_TONE: Record<InvoiceStatus, "amber" | "red" | "neutral" | "green" | "ink" | "outline"> = { waiting: "amber", queried: "red", new: "ink", checked: "outline", zoho: "outline", paid: "green" };
@@ -250,6 +251,8 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome }: { ro
       </div>
       <InvoiceEditHistory entries={edits} />
       {outcome ? <div data-si-outcome={outcome.tone}><Notice tone={outcome.tone}>{outcome.text}</Notice></div> : null}
+      {/* 13 November 2026 (Section 4): a row still waiting for its invoice - pay the supplier in advance from here. */}
+      {row.status === "waiting" && row.shares.length === 1 ? <LpoAdvanceByPoId poId={row.shares[0].poId} role={acts ? "accounts" : "viewer"} viewingAs={!acts} /> : null}
       {/* 4 November 2026: a row still waiting for its invoice - accounts scan the paper and enter it right here. */}
       {acts && row.status === "waiting" && row.shares.length === 1 ? (
         <ScanEnterInvoice

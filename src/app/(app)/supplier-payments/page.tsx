@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PayFirstList } from "@/components/LpoAdvanceCard";
 import { notFound } from "next/navigation";
 import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { SupplierAmount } from "@/components/SupplierAmount";
@@ -51,6 +52,9 @@ export default async function SupplierPaymentsPage({ searchParams }: { searchPar
       <PageHeader title="Supplier payments" subtitle="What is due to each supplier, oldest first. Record a payment across several invoices, with its proof." actions={<LinkButton href={exportHref} tone="secondary" size="md" data-sp-export>Export to Excel</LinkButton>} />
       {!tab.read ? <Notice tone="error">Couldn&apos;t read the supplier invoices just now: reload the page.</Notice> : null}
       {!tab.ready ? <Notice tone="info">Recording supplier payments switches on once the database change is applied.</Notice> : null}
+
+      {/* 13 November 2026 (Section 4): suppliers who want payment before the order, each with Pay in advance. */}
+      <PayFirstList role={staff.role_id} viewingAs={!!staff.viewingAs} />
 
       <Card className="flex flex-col gap-2" data-sp-due>
         <SectionLabel right={`AED ${money(totalDue)} incl. VAT`}>Due by supplier</SectionLabel>

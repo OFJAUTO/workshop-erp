@@ -237,6 +237,9 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
       hint: "Money paid with no job to put it on yet. Allocate it to the job or invoice it is for.",
     });
   }
+  // 13 November 2026 (Section 4): "Pay first" tasks and advances paid whose parts are late.
+  const { lpoAdvanceWaiting } = await import("./lpo-advance");
+  out.push(...(await lpoAdvanceWaiting().catch(() => [])));
   return out;
 }
 
