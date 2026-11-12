@@ -49,13 +49,18 @@ export async function saveZohoMapping(formData: FormData) {
   const missing = [
     ...INCOME_TYPES.filter((t) => !map.income[t.key]).map((t) => t.label),
     ...DEPOSIT_METHODS.filter((m) => !map.depositTo[m.key]).map((m) => `Deposit-to for ${m.label}`),
-    ...PURCHASE_TYPES.filter((p) => !map.purchases[p.key]).map((p) => p.label),
+    ...PURCHASE_TYPES.filter((p) => p.key !== "stockused" && !map.purchases[p.key]).map((p) => p.label),
     ...EXPENSE_TYPES.filter((e) => !map.expense[e.key]).map((e) => e.label),
     ...(map.paidFrom ? [] : ["Paid-from account"]),
   ];
-  const { error } = await createAdminClient().from("settings").update({ value: map as unknown as Record<string, unknown>, updated_by: staff.id }).eq("key", "zoho_account_map");
+  const admin = createAdminClient();
+  const { error } = await admin.from("settings").update({ value: map as unknown as Record<string, unknown>, updated_by: staff.id }).eq("key", "zoho_account_map");
   if (error) return back("error", dbWords(error, "settings/zoho/mapping/actions"));
-  return back("message", missing.length ? `Saved. Still missing: ${missing.join(", ")} — those documents will fail with "Mapping missing" until picked.` : "Saved. Every line type and payment method has its account.");
+  // 13 November 2026 (Section 2): the documents that failed on the mapping try again at the next Sync to Zoho.
+  const { data: again } = await admin.from("zoho_outbox").update({ status: "pending", last_error: null, attempts: 0, claimed_at: null, updated_at: new Date().toISOString() })
+    .eq("status", "failed").or("last_error.ilike.%Mapping missing%,last_error.ilike.%inventory account%,last_error.ilike.%stock account%,last_error.ilike.%Account not found%").select("id");
+  const retried = again?.length ? ` ${again.length} document${again.length === 1 ? "" : "s"} that failed on the mapping will go again with the next Sync to Zoho.` : "";
+  return back("message", (missing.length ? `Saved. Still missing: ${missing.join(", ")} — those documents will fail with "Mapping missing" until picked.` : "Saved. Every line type and payment method has its account.") + retried);
 }
 
 /** One tap fills every empty box with the suggested name; missing accounts are created in OFJ TEST at the first sync. */

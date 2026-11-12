@@ -69,10 +69,16 @@ export async function recordStockMovement(itemId: string, input: { kind: Movemen
   // not write puts the item's figures back, so the count and its history never disagree.
   const { error: upErr } = await admin.from("stock_items").update({ quantity: after, unit_cost: unitCost, ...(input.kind === "count" ? { last_counted_at: now, last_counted_by: actor.id } : {}), ...(after > item.minimum_level ? { low_notified_at: null } : {}), updated_by: actor.id }).eq("id", itemId);
   if (upErr) return { error: `Couldn't update the stock item: ${dbDetail(upErr, "lib/stock")}` };
-  const { error: mvErr } = await admin.from("stock_movements").insert({ stock_item_id: itemId, kind: input.kind, quantity: input.kind === "count" ? round2(after - item.quantity) : input.kind === "out" ? -qty : qty, unit_cost: input.kind === "in" || input.kind === "return" ? (input.unitCost ?? item.unit_cost) : item.unit_cost, quantity_after: after, job_id: input.jobId ?? null, po_id: input.poId ?? null, part_item_id: input.partItemId ?? null, note: input.note ?? null, created_by: actor.id, updated_by: actor.id });
+  const { data: mv, error: mvErr } = await admin.from("stock_movements").insert({ stock_item_id: itemId, kind: input.kind, quantity: input.kind === "count" ? round2(after - item.quantity) : input.kind === "out" ? -qty : qty, unit_cost: input.kind === "in" || input.kind === "return" ? (input.unitCost ?? item.unit_cost) : item.unit_cost, quantity_after: after, job_id: input.jobId ?? null, po_id: input.poId ?? null, part_item_id: input.partItemId ?? null, note: input.note ?? null, created_by: actor.id, updated_by: actor.id }).select("id").maybeSingle();
   if (mvErr) {
     await admin.from("stock_items").update({ quantity: item.quantity, unit_cost: item.unit_cost, updated_by: actor.id }).eq("id", itemId);
     return { error: `Couldn't record the stock movement: ${dbDetail(mvErr, "lib/stock")}` };
+  }
+  // 13 November 2026 (Section 2, option B): stock used on a job (or put back from one) moves its VALUE in Zoho too.
+  const movementId = (mv as { id?: string } | null)?.id ?? null;
+  if (movementId && input.jobId && (input.kind === "out" || input.kind === "return")) {
+    const z = await import("@/lib/zoho-sync");
+    if (await z.stockUseColumnReady()) await z.tryEnqueueZoho("stockuse", movementId, input.jobId, actor.id).catch(() => null);
   }
   return { after };
 }

@@ -45,6 +45,7 @@ export const KIND_WORDS: Record<ZohoKind, [string, string]> = {
   paygroup: ["Combined payment", "Combined payments"],
   lathebill: ["Lathe bill", "Lathe bills"],
   lpoinvoice: ["Further supplier invoice", "Further supplier invoices"],
+  stockuse: ["Stock used on a job", "Stock used on jobs"],
 };
 
 export const ZOHO_KINDS = Object.keys(KIND_WORDS) as ZohoKind[];
@@ -177,7 +178,7 @@ export function resultWords(kind: string, result: Record<string, unknown> | null
  * invoice that applies them, the invoice before its credit notes and payments, the bill before its payment and
  * credits). A manual sync sorts the WHOLE list this way, so a parent always goes before its children in one run.
  */
-export const POSTING_ORDER: Record<ZohoKind, number> = { contact: 0, vendor: 1, deposit: 2, paygroup: 2, invoice: 3, creditnote: 4, payment: 5, cnrefund: 6, bill: 7, vendorcredit: 8, billpayment: 9, supplierpay: 9, lathebill: 8, lpoinvoice: 7, commission: 10, recovery: 11, settlement: 12 };
+export const POSTING_ORDER: Record<ZohoKind, number> = { contact: 0, vendor: 1, deposit: 2, paygroup: 2, invoice: 3, creditnote: 4, payment: 5, cnrefund: 6, bill: 7, vendorcredit: 8, billpayment: 9, supplierpay: 9, lathebill: 8, lpoinvoice: 7, stockuse: 8, commission: 10, recovery: 11, settlement: 12 };
 
 export function sortForPosting<T extends { kind: string; enqueued_at: string }>(rows: T[]): T[] {
   const rank = (k: string) => (POSTING_ORDER as Record<string, number>)[k] ?? 99;
@@ -195,6 +196,7 @@ export const PREVIEW_GROUPS: { key: string; label: string; kinds: ZohoKind[]; mo
   { key: "bills", label: "Supplier bills (lathe bills and further invoices on an LPO too)", kinds: ["bill", "lathebill", "lpoinvoice"], money: null },
   { key: "billpayments", label: "Supplier payments", kinds: ["billpayment", "supplierpay"], money: "out" },
   { key: "vendorcredits", label: "Supplier credits", kinds: ["vendorcredit"], money: null },
+  { key: "stockuse", label: "Stock used on jobs (value moved, no money)", kinds: ["stockuse"], money: null },
   { key: "settlements", label: "Bank postings (card, link, cheque, transfer)", kinds: ["settlement"], money: null },
   { key: "expenses", label: "Expenses (commissions, recovery months)", kinds: ["commission", "recovery"], money: "out" },
   { key: "records", label: "Customer and supplier records", kinds: ["contact", "vendor"], money: null, countOnly: true },
@@ -282,7 +284,7 @@ export const CLAIM_FRESH_MS = 10 * 60 * 1000;
 export const RUN_CAP_TEST_ROWS = 120;
 
 /** Rough Zoho calls per row (search, create, check), for the "about N Zoho calls" line. */
-export const CALLS_PER_KIND: Record<ZohoKind, number> = { contact: 2, vendor: 2, deposit: 3, payment: 3, invoice: 6, creditnote: 4, cnrefund: 4, bill: 6, billpayment: 4, supplierpay: 5, vendorcredit: 4, commission: 3, recovery: 3, settlement: 4, paygroup: 3, lathebill: 5, lpoinvoice: 6 };
+export const CALLS_PER_KIND: Record<ZohoKind, number> = { contact: 2, vendor: 2, deposit: 3, payment: 3, invoice: 6, creditnote: 4, cnrefund: 4, bill: 6, billpayment: 4, supplierpay: 5, vendorcredit: 4, commission: 3, recovery: 3, settlement: 4, paygroup: 3, lathebill: 5, lpoinvoice: 6, stockuse: 2 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -627,4 +629,32 @@ export function shiftDay(day: string, by: number): string {
 /** The rows whose own `date` is the day (Zoho's list filter can drift a day around midnight). */
 export function rowsOnDay<T extends Record<string, unknown>>(rows: T[], day: string): T[] {
   return rows.filter((r) => String(r.date ?? "").slice(0, 10) === day);
+}
+
+/* ---- Plain words for Zoho's refusals (13 November 2026, Section 2): what Zoho refused, why, and the fix. ---- */
+
+/** The stock VALUE mapped to a Zoho inventory account (option B: the ERP keeps the count, Zoho only the value). */
+export function stockAccountWords(account: string): string {
+  return `Zoho refused it: "${account}" is a Zoho inventory account, and Zoho wants a Zoho item on every line that goes to one. Why: the ERP keeps the stock count, Zoho only keeps the value. Fix: on Settings > Zoho Books > Mapping pick an Other Current Asset account for "Stock value" (OFJ TEST makes "Parts stock (ERP count)" by itself), then press Retry.`;
+}
+
+const KNOWN_ZOHO: { re: RegExp; words: string }[] = [
+  {
+    re: /Item field under stock account cannot be empty/i,
+    words: `Zoho refused this bill: its parts went to a Zoho inventory account, and Zoho wants a Zoho item on every inventory line. Why: the ERP keeps the stock count, Zoho only keeps the value. Fix: on Settings > Zoho Books > Mapping pick an Other Current Asset account for "Stock value" (for example "Parts stock (ERP count)"), then press Retry.`,
+  },
+  {
+    re: /amount entered is more than the balance due for the selected bills/i,
+    words: "Zoho refused this payment: it applied more to a bill than that bill still owes in Zoho. Why: the bill in Zoho is smaller than the payment (an extra was paid, or the bill was changed in Zoho). Fix: press Retry - the ERP now applies only what each bill still owes and leaves the rest as an advance with the supplier.",
+  },
+  {
+    re: /VAT or Exemption cannot be applied/i,
+    words: "Zoho refused the VAT on this bill: the supplier is not VAT registered in Zoho. Fix: add the supplier's 15-digit TRN on Parts > Suppliers (or untick \"VAT registered\"), then press Retry.",
+  },
+];
+
+/** A raw Zoho refusal ("Zoho said: …") in plain words when it is one we know; anything else is kept as it is. */
+export function zohoPlainWords(raw: string): string {
+  for (const k of KNOWN_ZOHO) if (k.re.test(raw)) return k.words;
+  return raw;
 }

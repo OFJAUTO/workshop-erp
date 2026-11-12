@@ -7,7 +7,8 @@ import { reconDue, reconOrgFor } from "@/lib/zoho-reconcile";
 import { validMonth } from "@/lib/zoho-close";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { setSyncMode, zohoCronTick, zohoWaitingReminder } from "@/lib/zoho-manual";
+import { e2eFake, setSyncMode, zohoCronTick, zohoWaitingReminder } from "@/lib/zoho-manual";
+import { runOutboxRows } from "@/lib/zoho-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -74,6 +75,11 @@ export async function POST(request: NextRequest) {
       reconDue: (b.reconDue ?? []).map((c) => reconDue(c.row, c.day, c.nowMs, c.saturated)),
       months: (b.months ?? []).map((m) => validMonth(m)),
     });
+  }
+  if (body.action === "run_rows") {
+    // 13 November 2026 (Section 2): send named outbox rows with the test stand-in (rows carrying e2e_stub only).
+    const r = await runOutboxRows(((body as { ids?: string[] }).ids ?? []), { deadlineMs: Date.now() + 30000, fake: e2eFake() });
+    return NextResponse.json(r);
   }
   if (body.action === "manual_cron") {
     // Section 11 (3 November 2026): the five-minute run's own function, as the cron calls it (no Zoho here: on

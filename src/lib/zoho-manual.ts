@@ -319,7 +319,7 @@ export async function pendingNeedsMap(rows: PendingRow[]): Promise<Map<string, N
 /* ------------------------------------------------------- the run ------------------------------------------------------- */
 
 /** The stand-in for Zoho on the TEST server (the browser proof): a row a test marked with zoho_result.e2e_stub. */
-function e2eFake(): FakeZoho | undefined {
+export function e2eFake(): FakeZoho | undefined {
   if (!isTestEnvironment()) return undefined;
   return {
     applies: (row) => typeof row.zoho_result?.e2e_stub === "string",

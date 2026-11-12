@@ -16,7 +16,7 @@ check("a missing setting is manual", syncModeOf(undefined) === "manual" && syncM
 check("only the exact word 'automatic' is automatic", syncModeOf("automatic") === "automatic" && syncModeOf("Automatic") === "manual" && syncModeOf(true) === "manual" && syncModeOf("manual") === "manual");
 
 // Words.
-check("every kind has its words, and every kind has a posting rank", ZOHO_KINDS.length === 17 && ZOHO_KINDS.every((k) => KIND_WORDS[k] && typeof POSTING_ORDER[k] === "number"));
+check("every kind has its words, and every kind has a posting rank", ZOHO_KINDS.length === 18 && ZOHO_KINDS.every((k) => KIND_WORDS[k] && typeof POSTING_ORDER[k] === "number"));
 check("kind words read as the sync page always did", kindWord("invoice") === "Tax invoice" && kindWord("billpayment") === "Supplier payment" && kindWord("nonsense") === "Document");
 check("counts in a sentence: one and many", kindCount("invoice", 1) === "1 tax invoice" && kindCount("invoice", 5) === "5 tax invoices" && kindCount("settlement", 2) === "2 bank postings");
 check("items: 1 item / 12 items", itemsWord(1) === "1 item" && itemsWord(12) === "12 items" && itemsWord(0) === "0 items");
@@ -211,6 +211,18 @@ check("a free waiting row says its turn (manual and automatic)", /Sync to Zoho/.
   check("the day before and after (across a month end)", shiftDay("2026-11-01", -1) === "2026-10-31" && shiftDay("2026-11-30", 1) === "2026-12-01");
   const rows = [{ date: "2026-11-03", reference_number: "STL-00006" }, { date: "2026-11-02", reference_number: "STL-00005" }, { date: "2026-11-03T00:00:00+0400" }];
   check("STL-00006 listed under 2 Nov still counts on 3 Nov", rowsOnDay(rows, "2026-11-03").length === 2 && rowsOnDay(rows, "2026-11-02").length === 1);
+}
+
+
+// 13 November 2026 (Section 2): Zoho refusals in plain words (what, why, the fix) and the stock option B words.
+{
+  const stock = R.zohoPlainWords("Zoho said: Item field under stock account cannot be empty.");
+  check("the stock-account refusal says what, why and the fix", /inventory account/.test(stock) && /ERP keeps the stock count/.test(stock) && /Mapping/.test(stock) && /Retry/.test(stock), stock);
+  const pay = R.zohoPlainWords("Zoho said: The amount entered is more than the balance due for the selected bills.");
+  check("the over-balance payment refusal is in plain words", /still owes/.test(pay) && /advance/.test(pay), pay);
+  check("an unknown refusal is kept as it is", R.zohoPlainWords("Zoho said: something new") === "Zoho said: something new");
+  check("the stock account words name the account", /"Inventory Asset" is a Zoho inventory account/.test(R.stockAccountWords("Inventory Asset")));
+  check("stock used is its own kind, after the bills", R.POSTING_ORDER.stockuse > R.POSTING_ORDER.bill && R.kindWord("stockuse") === "Stock used on a job");
 }
 
 console.log(failed ? `${failed} FAILED` : "all passed");

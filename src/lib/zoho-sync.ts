@@ -14,7 +14,7 @@ import { positionsWords } from "@/lib/parts-list";
 import { returnCreditOf } from "@/lib/part-endings";
 import { schemaReady } from "@/lib/schema-ready";
 import { isTestEnvironment } from "@/lib/environment";
-import { ACCOUNTS_WAIT_WORDS, CLAIM_FRESH_MS, POSTING_ORDER, RATE_LIMIT_WORDS, doneOutcome, figuresDiffWords, isRateLimitError, resultWords, type RunItem } from "@/lib/zoho-sync-rules";
+import { ACCOUNTS_WAIT_WORDS, CLAIM_FRESH_MS, POSTING_ORDER, RATE_LIMIT_WORDS, stockAccountWords, zohoPlainWords, doneOutcome, figuresDiffWords, isRateLimitError, resultWords, type RunItem } from "@/lib/zoho-sync-rules";
 
 /**
  * Zoho Books, phase 1 (26 October 2026, docs/zoho-plan.md): customers, tax invoices, payments and deposits post to
@@ -60,7 +60,11 @@ export const PURCHASE_TYPES = [
   { key: "parts", label: "Parts purchases" },
   { key: "courier", label: "Courier & freight" },
   // 11 November 2026 (Section 1): a stock purchase (no car) is bought for the shelf: its bill goes to the stock account.
-  { key: "stock", label: "Stock purchases (inventory)" },
+  // 13 November 2026 (Section 2, option B): the ERP is the ONLY stock count; Zoho keeps the VALUE in an Other Current
+  // Asset account (never Zoho's own Inventory Asset, which wants a Zoho item on every line).
+  { key: "stock", label: "Stock value (the ERP keeps the count)" },
+  // A stock item used on a job moves its cost from the stock value to this cost account (empty = Parts purchases).
+  { key: "stockused", label: "Stock used on jobs (cost)" },
 ] as const;
 export type PurchaseKey = (typeof PURCHASE_TYPES)[number]["key"];
 
@@ -101,6 +105,8 @@ export type ZohoAccountMap = {
   undeposited?: string;
 };
 
+/** THE suggested stock VALUE account (13 November 2026, Section 2, option B): an Other Current Asset, made in OFJ TEST by itself. */
+export const STOCK_VALUE_ACCOUNT = "Parts stock (ERP count)";
 /** The pre-fill when the live chart has no better match; also what "Create the suggested accounts" makes in OFJ TEST. */
 export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Record<MethodKey, string>; purchases: Record<PurchaseKey, string>; expense: Record<ExpenseKey, string>; paidFrom: string; paidFromBy: Record<SupplierPayKey, string>; bankCharges: string; bankTxnFees: string; advances: string; advancesRefund: string; undeposited: string } = {
   income: {
@@ -121,7 +127,8 @@ export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Reco
   purchases: {
     parts: "Parts purchases",
     courier: "Courier and freight",
-    stock: "Inventory Asset",
+    stock: STOCK_VALUE_ACCOUNT,
+    stockused: "Parts purchases",
   },
   expense: {
     commission: "Sales commissions",
@@ -305,15 +312,17 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
     const clean = (name ?? "").trim();
     if (!clean) throw new ZohoError(`Mapping missing: ${label}. Pick the account on Settings > Zoho Books > Mapping.`);
     const found = byName.get(clean.toLowerCase());
+    // Option B (13 November 2026): the stock VALUE never goes to a Zoho inventory account (it wants a Zoho item per line).
+    if (found && kind === "stock" && /^(stock|inventory)/i.test(String(found.account_type ?? ""))) throw new ZohoError(stockAccountWords(clean));
     if (found) return found.account_id;
     if (!mayCreate) throw new ZohoError(create ? `Account not found in this organization: ${clean}. The accountant creates it in Zoho first.` : `Account not found in this organization: ${clean} (the next Sync to Zoho makes it in OFJ TEST; in the REAL book the accountant creates it).`);
     // OFJ TEST only: make the mapped account so testing never waits on the accountant.
     const made =
       kind === "bank"
         ? await zohoFetch<{ bankaccount?: { account_id: string } }>("/bankaccounts", { org, method: "POST", body: { account_name: clean, account_type: "bank" } }).then((j) => j.bankaccount?.account_id)
-        : await zohoFetch<{ chart_of_account?: { account_id: string } }>("/chartofaccounts", { org, method: "POST", body: { account_name: clean, account_type: kind } }).then((j) => j.chart_of_account?.account_id);
+        : await zohoFetch<{ chart_of_account?: { account_id: string } }>("/chartofaccounts", { org, method: "POST", body: { account_name: clean, account_type: kind === "stock" ? "other_current_asset" : kind } }).then((j) => j.chart_of_account?.account_id);
     if (!made) throw new ZohoError(`Zoho did not return the new account ${clean}.`);
-    byName.set(clean.toLowerCase(), { account_id: made, account_name: clean, account_type: kind });
+    byName.set(clean.toLowerCase(), { account_id: made, account_name: clean, account_type: kind === "stock" ? "other_current_asset" : kind });
     return made;
   };
   const income = {} as Record<IncomeKey, string>;
@@ -324,10 +333,12 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
   // The phase 2 groups fail softly: only the rows needing them carry the reason.
   try {
     const purchases = {} as Record<PurchaseKey, string>;
-    for (const p of PURCHASE_TYPES) if (p.key !== "stock") purchases[p.key] = await resolve(map.purchases[p.key], p.label, "expense");
+    for (const p of PURCHASE_TYPES) if (p.key !== "stock" && p.key !== "stockused") purchases[p.key] = await resolve(map.purchases[p.key], p.label, "expense");
+    // Stock used on jobs: its own cost account, or Parts purchases when none is picked (never fails the bills).
+    purchases.stockused = (map.purchases.stockused ?? "").trim() ? await resolve(map.purchases.stockused, "Stock used on jobs (cost)", "expense").catch(() => purchases.parts) : purchases.parts;
     // The stock account resolves on its own: a missing one fails only the stock purchases' bills.
     try {
-      purchases.stock = await resolve(map.purchases.stock, "Stock purchases (inventory)", "stock");
+      purchases.stock = await resolve(map.purchases.stock, "Stock value (the ERP keeps the count)", "stock");
     } catch (e) {
       out.purchasesStockError = e instanceof Error ? e.message : String(e);
     }
@@ -383,7 +394,7 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
 
 /* ------------------------------------------------------- the outbox ------------------------------------------------------- */
 
-export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery" | "vendorcredit" | "cnrefund" | "settlement" | "supplierpay" | "paygroup" | "lathebill" | "lpoinvoice";
+export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery" | "vendorcredit" | "cnrefund" | "settlement" | "supplierpay" | "paygroup" | "lathebill" | "lpoinvoice" | "stockuse";
 export type OutboxRow = {
   id: string;
   kind: ZohoKind;
@@ -970,6 +981,65 @@ async function syncPayGroupRow(org: string, accounts: Resolved, groupId: string)
  * resurfacing (SUB-00012)") plus the bill's lines with no ticket, on the parts purchases account; once accounts mark it
  * paid, ONE vendor payment for the whole bill from the mapped account. Each is searched before it is made.
  */
+/**
+ * Stock used on a job (13 November 2026, Section 2, option B): the ERP keeps the stock count, Zoho only its VALUE.
+ * A stock item issued to a job moves its cost from the stock value account to the "stock used" cost account in one
+ * journal (a part put back on the shelf from a job moves it back). The reference names the job; a second run finds the
+ * journal by its reference and never posts it twice.
+ */
+async function syncStockUseRow(org: string, accounts: Resolved, movementId: string): Promise<HandlerOut> {
+  const admin = createAdminClient();
+  const { data: raw } = await admin.from("stock_movements").select("id, kind, quantity, unit_cost, job_id, stock_item_id, created_at, is_active").eq("id", movementId).maybeSingle();
+  const m = raw as { id: string; kind: string; quantity: number | string; unit_cost: number | string | null; job_id: string | null; stock_item_id: string; created_at: string; is_active: boolean } | null;
+  if (!m) return { result: { skipped: "The stock movement no longer exists in the ERP." } };
+  if (!m.job_id || (m.kind !== "out" && m.kind !== "return")) return { result: { skipped: "Not stock used on a job: nothing for Zoho (the count lives in the ERP only)." } };
+  const day = new Date(new Date(m.created_at).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+  const gate = await startDateSkip(day, "stockuse", m.id);
+  if (gate) return gate;
+  const [{ data: item }, { data: job }] = await Promise.all([
+    admin.from("stock_items").select("name, unit_cost").eq("id", m.stock_item_id).maybeSingle(),
+    admin.from("jobs").select("job_number").eq("id", m.job_id).maybeSingle(),
+  ]);
+  const unit = Number(m.unit_cost ?? (item as { unit_cost?: number } | null)?.unit_cost ?? 0) || 0;
+  const amount = round2(Math.abs(Number(m.quantity) || 0) * unit);
+  if (amount < 0.01) return { result: { skipped: "This stock item has no cost yet: nothing to move in Zoho." } };
+  const purchases = needAccounts(accounts.purchases, accounts.purchasesError);
+  if (!purchases.stock) throw new ZohoError(accounts.purchasesStockError ?? `Mapping missing: Stock value. Pick it on Settings > Zoho Books > Mapping (an Other Current Asset account such as "${STOCK_VALUE_ACCOUNT}"), then press Retry.`);
+  const usedAccount = purchases.stockused ?? purchases.parts;
+  const jobNo = (job as { job_number?: string } | null)?.job_number ?? "job";
+  const name = (item as { name?: string } | null)?.name ?? "Stock item";
+  const ref = cut(`STK ${jobNo} ${m.id.slice(0, 8)}`, 50);
+  const out = m.kind === "out";
+  const what = `${out ? "Used on" : "Back to the shelf from"} ${jobNo}: ${name} × ${Math.abs(Number(m.quantity) || 0)} at ${unit.toFixed(2)}`;
+  const found = await zohoFetch<{ journals?: { journal_id: string; reference_number?: string }[] }>(`/journals?reference_number=${encodeURIComponent(ref)}`, { org });
+  let zid = found.journals?.find((j) => j.reference_number === ref)?.journal_id ?? null;
+  const adopted = !!zid;
+  if (!zid) {
+    const made = await zohoFetch<{ journal?: { journal_id: string } }>("/journals", {
+      org,
+      method: "POST",
+      body: {
+        journal_date: day,
+        reference_number: ref,
+        notes: cut(`ERP stock ${out ? "used" : "returned"} · ${what}`, 500),
+        line_items: [
+          { account_id: out ? usedAccount : purchases.stock, debit_or_credit: "debit", amount, description: cut(what, 500) },
+          { account_id: out ? purchases.stock : usedAccount, debit_or_credit: "credit", amount, description: cut(what, 500) },
+        ],
+      },
+    });
+    zid = made.journal?.journal_id ?? null;
+  }
+  if (!zid) throw new ZohoError("Zoho did not return the journal for this stock movement: press Retry.");
+  if (await stockUseColumnReady()) await admin.from("stock_movements").update({ zoho_journal_id: zid }).eq("id", m.id);
+  return { zohoId: zid, result: { journal: ref, job: jobNo, item: name, amount, direction: out ? "used" : "returned", adopted } };
+}
+
+/** The column that marks the stock-use posting as switched on (migration 20261215090000, WAITING FOR APPLY). */
+export async function stockUseColumnReady(): Promise<boolean> {
+  return schemaReady("stock_movements", "zoho_journal_id");
+}
+
 async function syncLatheBillRow(org: string, accounts: Resolved, billId: string): Promise<HandlerOut> {
   const admin = createAdminClient();
   const { data: raw } = await admin.from("lathe_bills").select("id, supplier_id, supplier_name, bill_number, bill_date, before_vat_aed, vat_aed, total_aed, extra_lines, paid_at, paid_method, paid_reference, zoho_bill_id, zoho_payment_id, is_active").eq("id", billId).maybeSingle();
@@ -1567,7 +1637,7 @@ function billDiffWords(z: ZohoBill, net: number, vat: number, total: number): st
 /** THE account a supplier bill's parts post to: the stock account for a stock purchase (tools stay a purchase), else parts purchases. */
 function billPartsAccount(po: PoRow, accounts: Resolved, purchases: Record<PurchaseKey, string>): string {
   if (po.kind === "stock" && po.order_type !== "tools") {
-    if (!purchases.stock) throw new ZohoError(accounts.purchasesStockError ?? "Mapping missing: Stock purchases (inventory). Pick the account on Settings > Zoho Books > Mapping.");
+    if (!purchases.stock) throw new ZohoError(accounts.purchasesStockError ?? `Mapping missing: Stock value. Pick it on Settings > Zoho Books > Mapping (an Other Current Asset account such as "${STOCK_VALUE_ACCOUNT}"), then press Retry.`);
     return purchases.stock;
   }
   return purchases.parts;
@@ -1761,6 +1831,16 @@ async function syncSupplierPayRow(org: string, accounts: Resolved, paymentId: st
       return { wait: `Waiting for the bill of ${po.number} to reach Zoho first.` };
     }
     bills.push({ bill_id: po.zoho_bill_id, amount_applied: l.amount });
+  }
+  // 13 November 2026 (Section 2): never apply more to a bill than it still owes IN ZOHO (SPAY-00003 paid 657.00
+  // against a 656.25 bill and Zoho refused the whole payment): the rest stays unused, an advance with the supplier.
+  if (!pay.zoho_payment_id) {
+    for (const b of bills) {
+      const { bill } = await zohoFetch<{ bill?: { balance?: number } }>(`/bills/${encodeURIComponent(b.bill_id)}`, { org });
+      const owes = round2(Number(bill?.balance ?? b.amount_applied));
+      if (owes < b.amount_applied) b.amount_applied = Math.max(0, owes);
+    }
+    for (let i = bills.length - 1; i >= 0; i--) if (bills[i].amount_applied <= 0.004) bills.splice(i, 1);
   }
   const fee = round2(Number(pay.fee_aed) || 0);
   const amount = round2((Number(pay.amount_aed) || 0) - fee);
@@ -2479,6 +2559,7 @@ async function processOutboxRow(row: WorkRow, ctx: RunCtx): Promise<RowDone> {
           : row.kind === "paygroup" ? await syncPayGroupRow(org, accounts, row.record_id)
           : row.kind === "lathebill" ? await syncLatheBillRow(org, accounts, row.record_id)
           : row.kind === "lpoinvoice" ? await syncLpoInvoiceRow(org, accounts, row.record_id)
+          : row.kind === "stockuse" ? await syncStockUseRow(org, accounts, row.record_id)
           : await syncPaymentRow(org, accounts, row.record_id);
       }
     }
@@ -2498,7 +2579,7 @@ async function processOutboxRow(row: WorkRow, ctx: RunCtx): Promise<RowDone> {
     // went, internal, before the go-live start): three different answers on the results list, never all "posted".
     return s?.length ? { outcome: doneOutcome(out.result ?? null), words: resultWords(row.kind, out.result ?? null), result: out.result ?? null } : { outcome: "waiting", words: "Changed while it was being sent: it goes again with the next sync." };
   } catch (e) {
-    const msg = (e instanceof Error ? e.message : String(e)).slice(0, 500);
+    const msg = zohoPlainWords((e instanceof Error ? e.message : String(e)).slice(0, 500));
     // Zoho's own call allowance used up (OFJ TEST: 1,000 a day): nothing is wrong with the document — it waits, and
     // the run stops instead of burning the rest of the list on the same refusal.
     if (isRateLimitError(msg)) {

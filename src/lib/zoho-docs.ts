@@ -125,6 +125,11 @@ export async function outboxDocs(rows: { kind: ZohoKind; record_id: string; zoho
     const amount = round2(Number(b.total_aed) || 0);
     put(`lathebill:${b.id}`, `Lathe bill ${b.bill_number} · ${b.supplier_name} · ${aed(amount)}`, amount, { inZoho: !!b.zoho_bill_id, notForZoho: null });
   });
+  // Stock used on a job (13 November 2026, Section 2): the value moved from stock to the job's cost, no money.
+  await each<{ id: string; kind: string; quantity: number | string; unit_cost: number | string | null; is_active: boolean }>("stock_movements", "id, kind, quantity, unit_cost, is_active", idsOf("stockuse"), (m) => {
+    const amount = round2(Math.abs(Number(m.quantity) || 0) * (Number(m.unit_cost) || 0));
+    put(`stockuse:${m.id}`, `Stock ${m.kind === "return" ? "back to the shelf" : "used on a job"} · ${aed(amount)}`, amount, { inZoho: false, notForZoho: null });
+  });
   // A further supplier invoice on an LPO (10 November 2026, Section 3): its own bill, with VAT as printed (else 5%).
   await each<{ id: string; number: string; supplier_name: string; amount_aed: number | string; vat_aed: number | string | null; is_active: boolean; zoho_bill_id: string | null }>("lpo_invoices", "id, number, supplier_name, amount_aed, vat_aed, is_active, zoho_bill_id", idsOf("lpoinvoice"), (b) => {
     const net = round2(Number(b.amount_aed) || 0);
