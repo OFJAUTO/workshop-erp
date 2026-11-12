@@ -1313,7 +1313,7 @@ type SupplierLite = { id: string; name: string; phone: string | null; email: str
  * The supplier's Zoho vendor: stored id first, then the exact name among vendors, then create. Zoho contact names
  * are unique across customers AND vendors, so a clash with a customer gets the "· Supplier" suffix.
  */
-export async function ensureVendor(org: string, supplierId: string): Promise<string> {
+export async function ensureVendor(org: string, supplierId: string, opts: { /** The vendor row itself (sent after a rename): Zoho takes the ERP's current name. */ rename?: boolean } = {}): Promise<string> {
   const admin = createAdminClient();
   const { data } = await admin.from("suppliers").select("id, name, phone, email, trn, zoho_vendor_id").eq("id", supplierId).maybeSingle();
   const s = data as SupplierLite | null;
@@ -1353,6 +1353,11 @@ export async function ensureVendor(org: string, supplierId: string): Promise<str
       if (!zid) throw new ZohoError("Zoho did not return the new vendor.");
     }
     await admin.from("suppliers").update({ zoho_vendor_id: zid }).eq("id", s.id);
+  }
+  else if (opts.rename) {
+    // 13 November 2026 (Section 8): a supplier renamed in the ERP - the Zoho vendor takes the same name (OFJ TEST until go-live).
+    const { contact } = await zohoFetch<{ contact?: ZohoContact }>(`/contacts/${encodeURIComponent(zid)}`, { org });
+    if (contact && !sameName(contact)) await zohoFetch(`/contacts/${encodeURIComponent(zid)}`, { org, method: "PUT", body: { contact_name: cut(name, 200), company_name: cut(name, 200) } });
   }
   await admin.from("zoho_outbox").update({ status: "synced", zoho_id: zid, synced_at: new Date().toISOString(), last_error: null }).eq("kind", "vendor").eq("record_id", s.id).neq("status", "synced");
   return zid;
@@ -2527,7 +2532,7 @@ async function processOutboxRow(row: WorkRow, ctx: RunCtx): Promise<RowDone> {
     if (ctx.fake && ctx.fake.applies(row)) out = ctx.fake.run(row, row.attempts + 1);
     else if (!ctx.org) throw new ZohoError(NOT_SET_UP_WORDS);
     else if (row.kind === "contact") out = { zohoId: await ensureContact(ctx.org, row.record_id) };
-    else if (row.kind === "vendor") out = { zohoId: await ensureVendor(ctx.org, row.record_id) };
+    else if (row.kind === "vendor") out = { zohoId: await ensureVendor(ctx.org, row.record_id, { rename: true }) };
     else {
       const org = ctx.org;
       if (!ctx.accounts && !ctx.accountsError) {

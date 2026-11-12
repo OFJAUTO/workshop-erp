@@ -11,7 +11,7 @@ import { syncLineForPart } from "../actions";
 import { flagZohoAttention, retrySupplierRows } from "@/lib/zoho-sync";
 import { supplierContactReady } from "@/lib/schema-ready";
 
-const back = (msg: string, ok: boolean) => redirect(`/parts/suppliers?${ok ? "message" : "error"}=${encodeURIComponent(msg)}`);
+const back = (msg: string, ok: boolean, other: string | null = null) => redirect(`/parts/suppliers?${ok ? "message" : "error"}=${encodeURIComponent(msg)}${other ? `&other=${other}` : ""}`);
 
 /** The standard discounts on the form: Parts, accounts and the owner may change them (every change is logged). */
 function readDiscounts(formData: FormData): { default_discount_percent: number; discount_by_type: Record<string, number> } | null {
@@ -73,6 +73,11 @@ export async function addSupplier(formData: FormData) {
   const staff = await requirePermission("manageSuppliers");
   const row = read(formData, await supplierContactReady());
   const admin = createAdminClient();
+  // 13 November 2026 (Section 8): a TRN already on the list shows that record instead of a second one.
+  if (row.trn) {
+    const { data: byTrn } = await admin.from("suppliers").select("id, name").eq("trn", row.trn).eq("is_active", true).limit(1);
+    if (byTrn?.length) back(`A supplier with TRN ${row.trn} is already on the list: ${byTrn[0].name}. Open it below (use that record, or merge).`, false, byTrn[0].id as string);
+  }
   const { data: same } = await admin.from("suppliers").select("id, is_active").ilike("name", row.name).maybeSingle();
   if (same) {
     if (!same.is_active) {
@@ -95,8 +100,24 @@ export async function updateSupplier(id: string, formData: FormData) {
   const admin = createAdminClient();
   const { data: before } = await admin.from("suppliers").select("name, trn, default_discount_percent, discount_by_type, vat_registered").eq("id", id).maybeSingle();
   const discounts = readDiscounts(formData);
+  // 13 November 2026 (Section 8): a name change always saves, unless ANOTHER supplier already has that name - then the
+  // refusal says so in plain words and links to the other record (the check never counts the supplier being edited).
+  const { data: clash } = await admin.from("suppliers").select("id, name, is_active").ilike("name", row.name).neq("id", id).limit(1);
+  if (clash?.length) back(`Not saved: another supplier is already called "${clash[0].name}"${clash[0].is_active ? "" : " (inactive)"}. Open it below, or merge the two.`, false, clash[0].id as string);
+  const renamed = !!before && before.name.trim().toLowerCase() !== row.name.trim().toLowerCase();
   const { error } = await admin.from("suppliers").update({ ...row, ...(discounts ?? {}), updated_by: staff.id }).eq("id", id);
   if (error) back(dbWords(error, "parts/suppliers/actions"), false);
+  if (renamed && before) {
+    // The old name stays searchable ("also known as") and the Zoho vendor takes the new name on the next sync.
+    const { supplierMergeReady } = await import("@/lib/supplier-merge");
+    if (await supplierMergeReady()) {
+      const { data: cur } = await admin.from("suppliers").select("also_known_as").eq("id", id).maybeSingle();
+      const aka = Array.from(new Set([...((cur?.also_known_as as string[] | null) ?? []), before.name])).filter((x) => x.toLowerCase() !== row.name.toLowerCase());
+      await admin.from("suppliers").update({ also_known_as: aka }).eq("id", id);
+    }
+    const { reopenZoho } = await import("@/lib/zoho-sync");
+    await reopenZoho("vendor", id).catch(() => null);
+  }
   // Bills already in Zoho carry the VAT standing they were posted with: a change now makes each of them wrong,
   // so each turns red on the Zoho page for the accountant to correct (never silently re-figured).
   if (before && (before.vat_registered !== false) !== row.vat_registered) await flagBillsAfterVatChange(id, row.name, row.vat_registered);
@@ -174,4 +195,24 @@ export async function setSupplierActive(id: string, formData: FormData) {
   revalidatePath("/parts/suppliers");
   revalidatePath("/parts");
   back(active ? "Supplier back on the list." : "Supplier taken off the list (history kept).", true);
+}
+
+/** 13 November 2026 (Section 8): merge two supplier records (owner and accounts). Nothing is deleted. */
+export async function mergeSuppliersAction(formData: FormData) {
+  const staff = await requirePermission("manageSuppliers");
+  if (staff.viewingAs) back("View as is read-only – use Act as.", false);
+  const keep = String(formData.get("keep") ?? "");
+  let gone = String(formData.get("gone") ?? "");
+  // Two records: the one not kept goes (whatever the drop-down still shows).
+  const pair = String(formData.get("pair") ?? "").split(",").filter(Boolean);
+  if (pair.length === 2 && (gone === keep || !gone)) gone = pair.find((x) => x !== keep) ?? gone;
+  const { mergeSuppliers } = await import("@/lib/supplier-merge");
+  const r = await mergeSuppliers(keep, gone, String(formData.get("reason") ?? ""), { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+  if (r.error) back(r.error, false);
+  const { reopenZoho } = await import("@/lib/zoho-sync");
+  await reopenZoho("vendor", keep).catch(() => null);
+  revalidatePath("/parts/suppliers");
+  revalidatePath("/supplier-invoices");
+  revalidatePath("/parts-accounts");
+  back(r.words ?? "Merged.", true);
 }

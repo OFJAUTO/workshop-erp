@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { supplierMergeReady, suppliersSharingTrn } from "@/lib/supplier-merge";
 import { advancesBySupplier } from "@/lib/supplier-payments";
 import { advanceWords } from "@/lib/supplier-payment-rules";
 import { Badge, Button, Card, Empty, Field, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
@@ -11,7 +12,7 @@ import { loadSupplierInvoices } from "@/lib/supplier-invoices";
 import { NO_TRN_WORDS, NO_VAT_WORDS, SUPPLIER_FILTER_WORDS, asSupplierFilter, supplierChargesVat, supplierNeedsTrn, supplierSearchHit, type SupplierFilter } from "@/lib/supplier-rules";
 import { SupplierAmount } from "@/components/SupplierAmount";
 import { moneyFrom } from "@/lib/supplier-money";
-import { addSupplier, applySupplierDiscount, setSupplierActive, updateSupplier } from "./actions";
+import { addSupplier, applySupplierDiscount, setSupplierActive, updateSupplier, mergeSuppliersAction } from "./actions";
 import { getSettings } from "@/lib/settings";
 import { creditExpectedBySupplier, returnCreditsToUse } from "@/lib/purchase-returns";
 
@@ -53,18 +54,18 @@ function SupplierFields({ s, types, canDiscount, contactOn }: { s?: Supplier; ty
  * cannot go to Zoho) and "Unpaid balance" (from THE unpaid figure of the Supplier invoices tab), each supplier with its
  * "Unpaid AED x (n)".
  */
-export default async function SuppliersPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; show?: string; apply?: string; count?: string; q?: string; filter?: string }> }) {
+export default async function SuppliersPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; show?: string; apply?: string; count?: string; q?: string; filter?: string; other?: string }> }) {
   const staff = await requirePermission("manageSuppliers");
   // Parts, accounts and the owner all set the standard discounts (evening of 12 October 2026, item 11).
   const canDiscount = true;
-  const { message, error, show, apply, count, q = "", filter: rawFilter } = await searchParams;
+  const { message, error, show, apply, count, q = "", filter: rawFilter, other } = await searchParams;
   const filter = asSupplierFilter(rawFilter);
   const admin = createAdminClient();
   // The unpaid figures: a failed read says so in words (never "nothing unpaid" because a read failed).
-  const [settings, contactOn, invoiceRead] = await Promise.all([getSettings(), supplierContactReady(), loadSupplierInvoices({ strict: true }).catch(() => null)]);
+  const [settings, contactOn, invoiceRead, mergeOn] = await Promise.all([getSettings(), supplierContactReady(), loadSupplierInvoices({ strict: true }).catch(() => null), supplierMergeReady()]);
   const invoiceRows = invoiceRead?.rows ?? [];
   const types = ((settings.part_types ?? []) as string[]).map((t) => t.toLowerCase());
-  const { data } = await admin.from("suppliers").select(`id, name, trn, vat_registered, phone, email, address, payment_terms, notes, is_active, default_discount_percent, discount_by_type${contactOn ? ", contact_name" : ""}`).order("name");
+  const { data } = await admin.from("suppliers").select(`id, name, trn, vat_registered, phone, email, address, payment_terms, notes, is_active, default_discount_percent, discount_by_type${contactOn ? ", contact_name" : ""}${mergeOn ? ", also_known_as, merged_into" : ""}`).order("name");
   const all = (data ?? []) as unknown as Supplier[];
   // THE unpaid figure (the Supplier invoices tab's), keyed by the supplier's id.
   const advanceOf = await advancesBySupplier();
@@ -73,7 +74,12 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
   const [expectedOf, creditsToUse] = await Promise.all([creditExpectedBySupplier(), returnCreditsToUse()]);
   const unpaidOf = new Map(unpaidBySupplier(invoiceRows).filter((u) => u.supplierId).map((u) => [u.supplierId as string, u]));
   const listed = show === "all" ? all : all.filter((s) => s.is_active);
-  const searched = listed.filter((s) => supplierSearchHit(s, q));
+  // 13 November 2026 (Section 8): a supplier is found by any name it was known by (a rename, a merge).
+  const searched = listed.filter((s) => supplierSearchHit(s, q) || ((s as { also_known_as?: string[] }).also_known_as ?? []).some((n) => !!q.trim() && n.toLowerCase().includes(q.trim().toLowerCase())));
+  const sharing = await suppliersSharingTrn();
+  const pairs = Array.from(new Map(all.filter((x) => x.is_active && sharing.has(x.id)).map((x) => { const group = [x, ...(sharing.get(x.id) ?? []).map((o) => all.find((a) => a.id === o.id)!).filter(Boolean)].sort((a, b) => a.name.localeCompare(b.name)); return [group.map((g) => g.id).join(","), group] as const; })).values());
+  const canMerge = mergeOn && (staff.role_id === "owner" || staff.role_id === "accounts") && !staff.viewingAs;
+  const otherRow = other ? all.find((x) => x.id === other) ?? null : null;
   const inFilter = (s: Supplier, f: SupplierFilter) => (f === "no_trn" ? supplierNeedsTrn(s) : (unpaidOf.get(s.id)?.total ?? 0) > 0);
   const list = filter ? searched.filter((s) => inFilter(s, filter)) : searched;
   if (filter === "unpaid") list.sort((a, b) => (unpaidOf.get(b.id)?.total ?? 0) - (unpaidOf.get(a.id)?.total ?? 0));
@@ -97,6 +103,31 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
           <form action={applySupplierDiscount.bind(null, apply)} className="ml-auto"><Button type="submit" size="md">Apply to the open lines</Button></form>
           <LinkButton href="/parts/suppliers" tone="ghost" size="md">Not now</LinkButton>
         </div>
+      ) : null}
+      {otherRow ? <p className="text-sm font-semibold" data-supplier-other><a href={`#s-${otherRow.id}`} className="underline underline-offset-4">Open {otherRow.name}{otherRow.is_active ? "" : " (inactive)"}</a></p> : null}
+      {pairs.length ? (
+        <Card className="flex flex-col gap-3 !border-amber-bar" data-trn-duplicates>
+          <SectionLabel right={String(pairs.length)}>Suppliers sharing a TRN</SectionLabel>
+          {pairs.map((group) => (
+            <div key={group.map((g) => g.id).join(",")} className="flex flex-col gap-2 border-t border-line pt-2" data-trn-pair={group[0].trn ?? ""}>
+              <span className="text-sm font-bold">TRN {group[0].trn}: {group.map((g) => g.name).join(" · ")}</span>
+              {canMerge ? (
+                <form action={mergeSuppliersAction} className="flex flex-col gap-2" data-merge-form>
+                  <span className="text-xs font-semibold text-muted">Merge: keep this record (the other&apos;s LPOs, invoices, payments and advances move to it; its name stays as &quot;also known as&quot;; nothing is deleted)</span>
+                  <div className="flex flex-wrap gap-2">
+                    {group.map((g, i) => <label key={g.id} className="flex min-h-11 cursor-pointer items-center gap-2 rounded-control border border-line-strong px-3 text-sm font-semibold"><input type="radio" name="keep" value={g.id} defaultChecked={i === 0} className="h-5 w-5 accent-ink" data-merge-keep={g.id} />Keep {g.name}</label>)}
+                  </div>
+                  {group.length === 2 ? <input type="hidden" name="pair" value={group.map((g) => g.id).join(",")} /> : null}
+                  <select name="gone" className="min-h-11 rounded-control border border-line-strong bg-white px-3 text-sm" defaultValue={group[1].id} data-merge-gone>
+                    {group.map((g) => <option key={g.id} value={g.id}>Merge away: {g.name}</option>)}
+                  </select>
+                  <Input name="reason" required minLength={3} placeholder="Why they are the same (logged)" data-merge-reason />
+                  <div><Button type="submit" size="md" data-merge-submit>Merge suppliers</Button></div>
+                </form>
+              ) : <span className="text-xs text-muted">The owner or accounts can merge them.</span>}
+            </div>
+          ))}
+        </Card>
       ) : null}
       <Card className="flex flex-col gap-3">
         <SectionLabel>Add a supplier</SectionLabel>
@@ -134,10 +165,11 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
         {list.map((s) => {
           const unpaid = unpaidOf.get(s.id) ?? null;
           return (
-            <Card key={s.id} className="flex flex-col gap-2" data-supplier-row={s.id} data-supplier-name={s.name}>
+            <Card key={s.id} id={`s-${s.id}`} className={`flex flex-col gap-2 scroll-mt-4 ${other === s.id ? "!border-ink ring-2 ring-amber-bar" : ""}`} data-supplier-row={s.id} data-supplier-name={s.name}>
               <details>
                 <summary className="list-none cursor-pointer min-h-11 flex flex-wrap items-center gap-3">
                   <span className="font-extrabold">{s.name}</span>
+                  {((s as { also_known_as?: string[] }).also_known_as ?? []).length ? <span className="text-xs text-muted" data-also-known-as>also known as {((s as { also_known_as?: string[] }).also_known_as ?? []).join(", ")}</span> : null}
                   {!s.is_active ? <Badge tone="neutral">Inactive</Badge> : null}
                   {supplierNeedsTrn(s) ? <span data-no-trn><Badge tone="red">{NO_TRN_WORDS}</Badge></span> : !supplierChargesVat(s) ? <span data-no-vat><Badge tone="neutral">{NO_VAT_WORDS}</Badge></span> : null}
                   <span className="text-sm text-muted">{[s.trn ? `TRN ${s.trn}` : null, s.contact_name, s.phone, s.payment_terms, s.default_discount_percent ? `${s.default_discount_percent}% discount` : null].filter(Boolean).join(" · ") || "No details yet"}</span>
