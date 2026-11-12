@@ -66,6 +66,7 @@ export async function PartsDashboard({ staff, sp = {} }: { staff: CurrentStaff; 
     { key: "invoices-missing", label: "Supplier invoices missing", count: pos.filter((p) => p.supplier_invoice_status === "to_follow").length, href: "/parts/orders?tab=invoices" },
   ];
 
+  const toOrder = await (await import("@/lib/estimate-order")).estimatesToOrder().catch(() => []);
   // 11 November 2026 (Section 11): car cards, the tiles as filters, most urgent first, done cars folded, search and makes.
   const q = (sp.q ?? "").trim();
   const make = (sp.make ?? "").trim();
@@ -124,6 +125,18 @@ export async function PartsDashboard({ staff, sp = {} }: { staff: CurrentStaff; 
           </Link>
         ))}
       </div>
+      {/* 13 November 2026 (Section 7): accepted estimates whose parts can be ordered before the car arrives. */}
+      {toOrder.length ? (
+        <Card className="flex flex-col gap-2" data-ready-to-order>
+          <SectionLabel right={String(toOrder.filter((r) => r.state !== "waiting_deposit").length)}>Ready to order ({toOrder.filter((r) => r.state !== "waiting_deposit").length})</SectionLabel>
+          {toOrder.map((r) => (
+            <Link key={r.estimateId} href={`/parts/estimate/${r.estimateId}#order-parts`} className="flex min-h-11 flex-wrap items-center justify-between gap-2 border-t border-line pt-2 text-sm hover:underline" data-ready-to-order-row={r.state}>
+              <span className="font-bold">{r.number} · {r.parts} part{r.parts === 1 ? "" : "s"}</span>
+              <span className={r.state === "ready" ? "font-semibold text-green-text" : "font-semibold text-amber-text"}>{r.state === "ready" ? "Advance received – order now" : r.words}</span>
+            </Link>
+          ))}
+        </Card>
+      ) : null}
       <form method="get" action="/dashboard" className="flex gap-2" data-parts-search>
         {tile ? <input type="hidden" name="tile" value={tile} /> : null}
         <input name="q" defaultValue={q} placeholder="Plate, VIN, make, model or job" className="min-h-12 flex-1 rounded-control border border-line-strong bg-white px-3 text-base" data-parts-search-input data-spell="" autoComplete="off" />

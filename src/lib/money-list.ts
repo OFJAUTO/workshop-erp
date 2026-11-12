@@ -71,6 +71,8 @@ export type MoneyRowData = {
 export const MONEY_FILTERS = [
   { key: "", label: "All" },
   { key: "awaiting", label: "Awaiting payment" },
+  // 13 November 2026 (Section 7): every proforma still waiting for its money (job or estimate), each with Pay.
+  { key: "proforma_waiting", label: "Proformas waiting for payment" },
   { key: "says_paid", label: "Customer says paid / reported" },
   { key: "part", label: "Part paid" },
   { key: "advance", label: "Advance, no proforma yet" },
@@ -122,6 +124,7 @@ export function inFilter(key: string, r: MoneyRowData): boolean {
     case "auth_missing": return (r.authMissing ?? []).length > 0;
     case "paid": return r.kind !== "credit" && r.total !== null && r.balance !== null && r.balance <= 0.005 && r.paid > 0.005;
     case "proforma": return !!r.proforma && !r.taxInvoice;
+    case "proforma_waiting": return !!r.proforma && !r.taxInvoice && owes(r);
     case "tax": return !!r.taxInvoice;
     case "released": return r.kind === "job" && r.state.current === "released" && !r.isOpen;
     default: return true;

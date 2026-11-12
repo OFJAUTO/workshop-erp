@@ -351,6 +351,8 @@ export async function afterEstimatePayment(invoiceId: string, by: Actor, setting
   if (!(await estimateMoneyReady())) return;
   const { data } = await createAdminClient().from("invoices").select("id, kind, estimate_id, converted_to, status").eq("id", invoiceId).maybeSingle();
   if (data && data.kind === "proforma" && data.estimate_id && !data.converted_to && data.status === "issued") await convertEstimateProformaIfPaid(invoiceId, by, settings);
+  // 13 November 2026 (Section 7): the money is in (or a cheque waits) - the parts desk is told to order.
+  if (data?.estimate_id) await (await import("./estimate-order")).alertOrderParts(String(data.estimate_id)).catch(() => null);
 }
 
 /**
@@ -508,7 +510,8 @@ export async function cancelEstimateWithMoney(estimateId: string, input: { reaso
  * normal rules; with no advance received the owner sees the warning at approval and may approve anyway.
  */
 export async function orderEstimatePartsNow(estimateId: string, staff: { id: string; display_name: string; role_id: string }): Promise<{ error?: string; jobId?: string; jobNumber?: string; lpoNumber?: string; held?: string }> {
-  if (!["owner", "service_advisor"].includes(staff.role_id)) return { error: "Advisors or the owner order an estimate's parts." };
+  // 13 November 2026 (Section 7): the parts desk orders too (the ORDER PARTS alert opens their list).
+  if (!["owner", "service_advisor", "parts"].includes(staff.role_id)) return { error: "Advisors, the parts desk or the owner order an estimate's parts." };
   const admin = createAdminClient();
   const e = await loadEstimate(estimateId);
   if (!e || !e.is_active || e.deleted_at) return { error: "Estimate not found." };

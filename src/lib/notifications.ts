@@ -69,6 +69,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "quote_expired", label: "A quotation expired without a reply", locked: true },
   { type: "parts_to_order", label: "Approved parts to order (Parts)", locked: true },
   { type: "estimate_accepted", label: "Customer accepted an estimate", locked: true },
+  { type: "order_parts_estimate", label: "ORDER PARTS: an accepted estimate is ready to order (advance received, or a cheque not cleared yet)", locked: true },
   { type: "estimate_followup", label: "Estimate with no reply: follow up", locked: true },
   { type: "estimate_parts_to_price", label: "Estimate parts to price, car not here yet (Parts)", locked: true },
   { type: "estimate_price_check", label: "Check a price an advisor typed on an estimate (Parts)", locked: true },

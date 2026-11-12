@@ -1,4 +1,6 @@
 import { notFound } from "next/navigation";
+import { estimateOrderState } from "@/lib/estimate-order";
+import { OrderPartsNow } from "@/app/(app)/estimates/[id]/OrderPartsNow";
 import { Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { VinCopy } from "@/components/VinCopy";
 import { requirePermission } from "@/lib/auth";
@@ -42,6 +44,7 @@ export default async function EstimatePartsDesk({ params }: { params: Promise<{ 
     partUnitsReady(),
   ]);
   const { q } = desk;
+  const orderState = await estimateOrderState(q.id);
   const vehicle = (qx?.vehicle as unknown as (PlateFields & { vin: string | null; variant?: string | null; model_year: number | null; make: { name: string } | null; model: { name: string } | null }) | null) ?? null;
   const advisor = (qx?.creator as unknown as { display_name: string } | null)?.display_name ?? null;
   const suppliers: SupplierOption[] = (supplierRows ?? []).map((s) => ({ id: s.id as string, name: s.name as string, discount: Number(s.default_discount_percent) || 0, byType: (s.discount_by_type as Record<string, number> | null) ?? {} }));
@@ -106,6 +109,16 @@ export default async function EstimatePartsDesk({ params }: { params: Promise<{ 
         actions={<LinkButton href="/parts" tone="secondary" size="lg">Parts</LinkButton>}
       />
       {q.carried_job_id ? <Notice tone="info">The car has arrived: these parts are on the job now and are priced there.</Notice> : null}
+      {/* 13 November 2026 (Section 7): accepted - order the parts now, or wait for the deposit (THE order state). */}
+      {orderState.state !== "none" ? (
+        <Card id="order-parts" className="flex flex-col gap-2 scroll-mt-4" data-desk-order-state={orderState.state}>
+          <SectionLabel>Order the parts</SectionLabel>
+          {orderState.state === "waiting_deposit" ? <p className="text-sm font-bold text-amber-text">Approved: waiting for deposit. Order once accounts record the money.</p> : null}
+          {orderState.state === "cheque_pending" ? <p className="text-sm font-bold text-amber-text">The advance is a cheque not cleared yet: the owner approves the order on the LPO.</p> : null}
+          {orderState.state === "ordered" ? <p className="text-sm font-bold text-green-text">Ordered: the LPO is made.</p> : null}
+          {(orderState.state === "ready" || orderState.state === "cheque_pending") && !staff.viewingAs ? <OrderPartsNow estimateId={q.id} pricedCount={orderState.parts} /> : null}
+        </Card>
+      ) : null}
       {editable ? <Notice tone="info">{q.number} was sent to the customer{q.sent_at ? ` (${formatDateTime(q.sent_at)})` : ""}. You can still change a price or the supplier: the customer&apos;s price stays as it is and the advisor is told, to revise it if needed.</Notice> : null}
       {!desk.preparing && !q.carried_job_id && !editable ? <Notice tone="info">{q.number} is {QUOTE_STATUS_LABELS[q.status as keyof typeof QUOTE_STATUS_LABELS]?.toLowerCase() ?? q.status}{q.sent_at ? ` (sent ${formatDateTime(q.sent_at)})` : ""}: prices are not changed here any more. Check the advisor&apos;s prices, or tell him a price is different.</Notice> : null}
       <Card id="pricing" className="flex flex-col gap-3 overflow-visible" data-desk-estimate={q.number}>

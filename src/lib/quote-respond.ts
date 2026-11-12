@@ -87,6 +87,8 @@ export async function applyCustomerResponse(quotationId: string, answer: { appro
       body: answer.approve ? `${answer.name} accepted the estimate (${totalText}). Offer to book the car in.` : `${answer.name} declined the estimate.`,
       href: `/estimates/${quotationId}`,
     });
+    // 13 November 2026 (Section 7): no deposit asked = the parts desk is told to order at once (a deposit asked waits for the money).
+    if (answer.approve) await (await import("./estimate-order")).alertOrderParts(quotationId).catch(() => null);
     return { status };
   }
   if (!q.job_id) return { status };

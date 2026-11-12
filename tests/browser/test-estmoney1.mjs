@@ -64,7 +64,7 @@ cleanupDb();
 try {
   await api("/api/e2e/stage", { stage: "assign" }); // a seed so the shared helpers have their staff rows
   const cust = (await sql("insert into public.customers (customer_type, full_name, company_name, phone, trn) values ('company', 'Lars Petersen E2e', 'E2E LARS TRADING', '+971500000094', null) returning id"))[0].id;
-  const car = (await sql("insert into public.vehicles (customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, make_id, model_id, model_year, vin) values ($1, true, 'UAE', 'Dubai', 'M', '92978', $2, $3, 2023, 'E2EESTMONEYVIN01X') returning id", [cust, mm.make_id, mm.model_id]))[0].id;
+  const car = (await sql("insert into public.vehicles (customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, make_id, model_id, model_year, vin) values ($1, true, 'UAE', 'Dubai', 'ZZ', '90071', $2, $3, 2023, 'E2EESTMNEYVN0001X') returning id", [cust, mm.make_id, mm.model_id]))[0].id;
   const mkEstimate = async (title, hours, rate, total) => {
     const est = (await sql("insert into public.quotations (kind, customer_id, vehicle_id, status, validity_days, vat_percent, total_aed, created_by, updated_by) values ('estimate', $1, $2, 'draft', 7, 5, $3, $4, $4) returning id, number", [cust, car, total, advisor.id]))[0];
     await sql("insert into public.quotation_lines (quotation_id, position, line_type, title, source_type, quantity, hours, labour_rate, line_total, created_by, updated_by) values ($1, 1, 'labour', $2, 'manual', 1, $3, $4, $5, $6, $6)", [est.id, title, hours, rate, hours * rate, advisor.id]);
@@ -83,6 +83,7 @@ try {
   await go(adv.page, `${base}/estimates/${e1.id}`);
   check("A1: the money card is on the estimate page", (await adv.page.locator("[data-em-card]").count()) === 1);
   await adv.page.locator('[data-em-mode="complete"]').click();
+  await adv.page.locator("[data-em-billto-other]").click(); // 13 Nov: the company fields appear only for A COMPANY OR SOMEONE ELSE
   await adv.page.locator("[data-em-billto-company]").fill("E2E LARS TRADING LLC");
   await adv.page.locator("[data-em-billto-trn]").fill("100200300400500");
   await adv.page.locator("[data-em-billto-attention]").fill("Lars Petersen");
@@ -113,7 +114,8 @@ try {
   await dialog(acc.page).waitFor({ timeout: 15000 });
   await until(async () => (await dialog(acc.page).locator("[data-pay-targets]").count()) > 0, 40, 300);
   check("B1: the window offers the estimate's proforma by itself", (await dialog(acc.page).locator(`[data-pay-target="inv:${pro1.id}"]`).count()) === 1);
-  const rct1 = await pay(acc.page, { target: `inv:${pro1.id}`, method: "transfer", amount: 2100, proof: true, reference: "TRF-E2E-61" });
+  // 13 Nov: a transfer waits in Accounts posting since 9 Nov; a card counts at once, so the conversion is proven here.
+  const rct1 = await pay(acc.page, { target: `inv:${pro1.id}`, method: "card", amount: 2100, proof: true, reference: "TRF-E2E-61" });
   check("B2: the transfer is recorded", !!rct1, rct1 ?? "no receipt");
   const tax1 = await until(async () => (await sql("select id, number, token, total_aed::float as total, converted_from, deposit_for_quotation_id, (bill_to->>'company') as co from public.invoices where estimate_id = $1 and kind = 'tax_invoice' and is_active", [e1.id]))[0]);
   check("B3: the FULL tax invoice issued itself from the paid proforma", !!tax1 && tax1.total === 2100 && tax1.converted_from === pro1.id && !tax1.deposit_for_quotation_id && tax1.co === "E2E LARS TRADING LLC", JSON.stringify(tax1));
@@ -124,7 +126,7 @@ try {
   check("B5: the tax invoice joined the Zoho outbox (manual sync sends it)", zoho1.some((z) => z.kind === "invoice"), JSON.stringify(zoho1));
   const pay1 = (await sql("select id, token from public.payments where invoice_id = $1 limit 1", [tax1.id]))[0];
   const rcpt = await pdfText(`${base}/api/pdf/receipt/${pay1.id}?p=${pay1.token}`);
-  check("B6: the job-less receipt shows PAID IN FULL and the car", /Paid in full/i.test(rcpt) && /92978/.test(rcpt), rcpt.slice(0, 200));
+  check("B6: the job-less receipt shows PAID IN FULL and the car", /Paid in full/i.test(rcpt) && /90071/.test(rcpt), rcpt.slice(0, 200));
   check("B7: the estimate page reads Prepaid", await until(async () => { await go(acc.page, `${base}/estimates/${e1.id}`); return (await acc.page.locator('[data-em-badge="Prepaid"]').count()) === 1; }, 5, 800));
   await acc.page.screenshot({ path: path.join(dir, "b1-prepaid.png"), fullPage: true });
   const taxPdf = await pdfText(`${base}/api/pdf/invoice/${tax1.token}`);
@@ -160,7 +162,7 @@ try {
   await acc.page.locator("[data-record-payment-open]").first().click();
   await dialog(acc.page).waitFor({ timeout: 15000 });
   await until(async () => (await dialog(acc.page).locator("[data-pay-targets]").count()) > 0, 40, 300);
-  const rct2 = await pay(acc.page, { target: `inv:${pro2.id}`, method: "transfer", amount: 1050, proof: true, reference: "TRF-E2E-62" });
+  const rct2 = await pay(acc.page, { target: `inv:${pro2.id}`, method: "card", amount: 1050, proof: true, reference: "TRF-E2E-62" });
   check("C5: the 50% transfer is recorded", !!rct2);
   const tax2 = await until(async () => (await sql("select id, number, total_aed::float as total, taxable_aed::float as taxable, vat_aed::float as vat, deposit_for_quotation_id, issue_reason from public.invoices where estimate_id = $1 and kind = 'tax_invoice' and is_active", [e2.id]))[0]);
   check("C6: the ADVANCE tax invoice issued itself, VAT inside the amount", !!tax2 && tax2.total === 1050 && tax2.taxable === 1000 && tax2.vat === 50 && tax2.deposit_for_quotation_id === e2.id && /Advance payment against/i.test(tax2.issue_reason ?? ""), JSON.stringify(tax2));
@@ -236,7 +238,7 @@ try {
   check("F6: the window opens on the report with the proforma as the one target", (await d6.locator(`[data-pay-target="inv:${pro3.id}"]`).count()) === 1);
   console.log("   report keys:", await d6.getAttribute("data-report-keys"));
   await acc.page.screenshot({ path: path.join(dir, "f1-report-window.png") });
-  const rct3 = await pay(acc.page, { method: "transfer", amount: 500, reference: "TRF-E2E-63" });
+  const rct3 = await pay(acc.page, { method: "card", amount: 500, reference: "TRF-E2E-63" });
   check("F7: the reported transfer is recorded", !!rct3);
   const repDone = await until(async () => (await sql("select status, payment_id from public.payment_reports where id = $1 and status = 'recorded'", [rep.id]))[0]);
   check("F8: the report is closed by its receipt", !!repDone && !!repDone.payment_id);
@@ -283,7 +285,7 @@ try {
 
   /* ---------- Part 3: changes, cancellations and refunds (a fresh car) ---------- */
   const cust2 = (await sql("insert into public.customers (customer_type, full_name, company_name, phone) values ('company', 'Hans E2e', 'E2E NORD SHIPPING', '+971500000096') returning id"))[0].id;
-  const car2 = (await sql("insert into public.vehicles (customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, make_id, model_id, model_year, vin) values ($1, true, 'UAE', 'Dubai', 'N', '55210', $2, $3, 2022, 'E2EESTMONEYVIN02X') returning id", [cust2, mm.make_id, mm.model_id]))[0].id;
+  const car2 = (await sql("insert into public.vehicles (customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, make_id, model_id, model_year, vin) values ($1, true, 'UAE', 'Dubai', 'ZZ', '90072', $2, $3, 2022, 'E2EESTMNEYVN0002X') returning id", [cust2, mm.make_id, mm.model_id]))[0].id;
   const mkEst2 = async (title, hours, rate, total, status = "approved") => {
     const est = (await sql(`insert into public.quotations (kind, customer_id, vehicle_id, status, validity_days, vat_percent, total_aed, created_by, updated_by) values ('estimate', $1, $2, 'draft', 7, 5, ${total}, $3, $3) returning id, number`, [cust2, car2, advisor.id]))[0];
     await sql("insert into public.quotation_lines (quotation_id, position, line_type, title, source_type, quantity, hours, labour_rate, line_total, created_by, updated_by) values ($1, 1, 'labour', $2, 'manual', 1, $3, $4, $5, $6, $6)", [est.id, title, hours, rate, hours * rate, advisor.id]);
@@ -299,6 +301,7 @@ try {
   await adv.page.locator('[data-em-mode="complete"]').click();
   check("H1: the accepted additional estimate is offered to bill together", (await adv.page.locator(`[data-em-combine="${e4.id}"]`).count()) === 1);
   await adv.page.locator(`[data-em-combine="${e4.id}"]`).click();
+  await adv.page.locator("[data-em-billto-other]").click();
   await adv.page.locator("[data-em-billto-company]").fill("E2E NORD SHIPPING FZE");
   await adv.page.locator("[data-em-issue]").click();
   const proC = await until(async () => (await sql("select id, number, total_aed::float as total, covers_estimate_ids, issue_reason from public.invoices where estimate_id = $1 and kind = 'proforma' and status = 'issued' and is_active", [e3.id]))[0]);
@@ -321,7 +324,7 @@ try {
   await acc.page.locator("[data-record-payment-open]").first().click();
   await dialog(acc.page).waitFor({ timeout: 15000 });
   await until(async () => (await dialog(acc.page).locator("[data-pay-targets]").count()) > 0, 40, 300);
-  check("I2: paid in full (transfer)", !!(await pay(acc.page, { target: `inv:${pro5.id}`, method: "transfer", amount: 2100, proof: true, reference: "TRF-E2E-71" })));
+  check("I2: paid in full (transfer)", !!(await pay(acc.page, { target: `inv:${pro5.id}`, method: "card", amount: 2100, proof: true, reference: "TRF-E2E-71" })));
   const inv5 = await until(async () => (await sql("select id, number from public.invoices where estimate_id = $1 and kind = 'tax_invoice' and is_active", [e5.id]))[0]);
   check("I3: the full tax invoice issued itself", !!inv5);
   // The estimate is revised DOWN to 1,575 (the lock lets a status flip through; the line follows).
@@ -356,7 +359,7 @@ try {
   await acc.page.locator("[data-record-payment-open]").first().click();
   await dialog(acc.page).waitFor({ timeout: 15000 });
   await until(async () => (await dialog(acc.page).locator("[data-pay-targets]").count()) > 0, 40, 300);
-  check("J1: the 50% advance is paid", !!(await pay(acc.page, { target: `inv:${pro6.id}`, method: "transfer", amount: 1050, proof: true, reference: "TRF-E2E-72" })));
+  check("J1: the 50% advance is paid", !!(await pay(acc.page, { target: `inv:${pro6.id}`, method: "card", amount: 1050, proof: true, reference: "TRF-E2E-72" })));
   const inv6 = await until(async () => (await sql("select id, number, deposit_for_quotation_id from public.invoices where estimate_id = $1 and kind = 'tax_invoice' and is_active", [e6.id]))[0]);
   check("J2: the advance tax invoice stands (deposit document)", !!inv6 && inv6.deposit_for_quotation_id === e6.id);
   // A plain cancel is refused while money is on it; the owner cancels from the card with a fee.
@@ -398,7 +401,7 @@ try {
   await acc.page.locator("[data-record-payment-open]").first().click();
   await dialog(acc.page).waitFor({ timeout: 15000 });
   await until(async () => (await dialog(acc.page).locator("[data-pay-targets]").count()) > 0, 40, 300);
-  check("K1: AED 500 is paid on the sent estimate", !!(await pay(acc.page, { target: `inv:${pro7.id}`, method: "transfer", amount: 500, proof: true, reference: "TRF-E2E-73" })));
+  check("K1: AED 500 is paid on the sent estimate", !!(await pay(acc.page, { target: `inv:${pro7.id}`, method: "card", amount: 500, proof: true, reference: "TRF-E2E-73" })));
   await sql("update public.quotations set valid_until = now() - interval '2 days' where id = $1", [e7.id]);
   await sql("update public.quotations set status = 'sent' where id = $1", [e7.id]);
   const cronRun = async () => (await fetch(`${base}/api/cron/housekeeping`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } })).json();
@@ -415,7 +418,7 @@ try {
 
   /* ---------- L. ORDER PARTS NOW: the held job, the LPO with the no-advance warning, gate-in reuses it ---------- */
   const cust3 = (await sql("insert into public.customers (customer_type, full_name, phone) values ('individual', 'E2e Early Parts', '+971500000098') returning id"))[0].id;
-  const car3 = (await sql("insert into public.vehicles (customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, make_id, model_id, model_year, vin) values ($1, true, 'UAE', 'Dubai', 'P', '77310', $2, $3, 2021, 'E2EESTMONEYVIN03X') returning id", [cust3, mm.make_id, mm.model_id]))[0].id;
+  const car3 = (await sql("insert into public.vehicles (customer_id, has_plate, plate_country, plate_emirate, plate_code, plate_number, make_id, model_id, model_year, vin) values ($1, true, 'UAE', 'Dubai', 'ZZ', '90073', $2, $3, 2021, 'E2EESTMNEYVN0003X') returning id", [cust3, mm.make_id, mm.model_id]))[0].id;
   const e8 = (await sql("insert into public.quotations (kind, customer_id, vehicle_id, status, validity_days, vat_percent, total_aed, created_by, updated_by) values ('estimate', $1, $2, 'draft', 7, 5, 1890, $3, $3) returning id, number", [cust3, car3, advisor.id]))[0];
   await sql("insert into public.quotation_lines (quotation_id, position, line_type, title, source_type, quantity, unit_cost, markup_percent, unit_price, line_total, supplier_text, part_number, availability, delivery_days, priced_at, priced_by, created_by, updated_by) values ($1, 1, 'part', 'E2E FRONT WISHBONE', 'manual', 2, 450, 100, 900, 1800, 'E2e Supplier', 'A2033304700', 'to_order', 2, now(), $2, $2, $2)", [e8.id, advisor.id]);
   await sql("update public.quotations set status = 'approved', sent_at = now(), responded_at = now(), approver_name = 'EARLY' where id = $1", [e8.id]);
