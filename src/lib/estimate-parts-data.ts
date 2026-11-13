@@ -1,4 +1,5 @@
 import "server-only";
+import { schemaReady } from "./schema-ready";
 import { createAdminClient } from "./supabase/admin";
 import { formatPlate, type PlateFields } from "./types";
 import { estimatePartState, isEstimatePart, type EstimatePartState } from "./estimate-parts";
@@ -45,7 +46,11 @@ export function carWords(v: CarRow | null): string {
   return [v.make?.name, v.model?.name, v.model_year].filter(Boolean).join(" ");
 }
 
-type LineRow = { quotation_id: string; unit_cost: number | string | null; price_requested_at: string | null; priced_at: string | null; priced_by_advisor: boolean | null; price_checked_at: string | null; left_off: boolean | null };
+type LineRow = { quotation_id: string; unit_cost: number | string | null; price_requested_at: string | null; priced_at: string | null; priced_by_advisor: boolean | null; price_checked_at: string | null; left_off: boolean | null; parts_add_status?: string | null };
+/** A part the desk added (13 November 2026, Section 5) is left off the estimate until the advisor accepts it, but the
+ * desk still prices it: it counts on the desk while it waits. */
+const onDesk = (l: { left_off?: unknown; parts_add_status?: unknown }) => !l.left_off || l.parts_add_status === "pending";
+const deskAddReady = () => schemaReady("quotation_lines", "parts_add_status");
 
 /**
  * When the parts desk last pressed "Pricing done – send to advisor" on each estimate: the estimate's own stamp
@@ -87,19 +92,20 @@ export async function loadEstimatesToPrice(onlyId?: string): Promise<EstimateToP
   if (!qs.length) return [];
   // 2. Their part lines sent to the desk, or priced by the advisor (both may still need the desk), in short pieces.
   const ids = qs.map((q) => q.id);
+  const addCols = (await deskAddReady()) ? ", parts_add_status" : "";
   const lines = await pageAllIn<LineRow>(ids, (piece, from, to) =>
     admin
       .from("quotation_lines")
-      .select("quotation_id, unit_cost, price_requested_at, priced_at, priced_by_advisor, price_checked_at, left_off")
+      .select(("quotation_id, unit_cost, price_requested_at, priced_at, priced_by_advisor, price_checked_at, left_off" + addCols) as "quotation_id")
       .in("quotation_id", piece)
       .eq("line_type", "part")
       .is("part_item_id", null)
       .eq("is_active", true)
       .or("price_requested_at.not.is.null,priced_by_advisor.eq.true")
       .order("id")
-      .range(from, to),
+      .range(from, to) as unknown as PromiseLike<{ data: LineRow[] | null; error: { message: string } | null }>,
   ).catch(() => [] as LineRow[]);
-  const rows = lines.filter((l) => !l.left_off);
+  const rows = lines.filter(onDesk);
   if (!rows.length) return [];
   const withLines = new Set(rows.map((l) => l.quotation_id));
   const stamps = await estimateSentStamps(Array.from(withLines), stampReady ? new Map(qs.map((q) => [q.id, q.parts_priced_at ?? null])) : undefined);
@@ -188,18 +194,18 @@ const text = (n: number | string | null | undefined) => (n === null || n === und
 /** The estimate's desk lines with their row values, state and cost question, in the estimate's order. */
 export async function loadEstimateDesk(quotationId: string): Promise<EstimateDesk | null> {
   const admin = createAdminClient();
-  const [stampReady, unitsReady, lineReady] = await Promise.all([estimatePricingReady(), partUnitsReady(), lineCostConfirmReady()]);
+  const [stampReady, unitsReady, lineReady, addReady] = await Promise.all([estimatePricingReady(), partUnitsReady(), lineCostConfirmReady(), deskAddReady()]);
   const { data: qRaw } = await admin.from("quotations").select(`id, number, version, kind, status, sent_at, created_by, carried_job_id, vehicle_id, is_active${stampReady ? ", parts_priced_at, parts_priced_by" : ""}`).eq("id", quotationId).maybeSingle();
   const q = qRaw as unknown as (EstimateDesk["q"] & { kind: string; is_active: boolean }) | null;
   if (!q || q.kind !== "estimate" || !q.is_active) return null;
   const { data: lineRows } = await admin
     .from("quotation_lines")
-    .select(`id, line_type, title, quantity, positions, parts_note, unit_cost, part_item_id, is_active, left_off, option_group, chosen, price_requested_at, price_requested_by, priced_at, priced_by_advisor, price_checked_at, supplier_text, part_number, part_type, brand, availability, delivery_days, position${lineReady ? ", stock_item_id, cost_confirmed_aed" : ""}`)
+    .select(`id, line_type, title, quantity, positions, parts_note, unit_cost, part_item_id, is_active, left_off, option_group, chosen, price_requested_at, price_requested_by, priced_at, priced_by_advisor, price_checked_at, supplier_text, part_number, part_type, brand, availability, delivery_days, position${lineReady ? ", stock_item_id, cost_confirmed_aed" : ""}${addReady ? ", parts_add_status" : ""}`)
     .eq("quotation_id", q.id)
     .eq("line_type", "part")
     .eq("is_active", true)
     .order("position");
-  const raw = ((lineRows ?? []) as unknown as Record<string, unknown>[]).filter((l) => isEstimatePart({ line_type: l.line_type as string, part_item_id: l.part_item_id as string | null }) && !l.left_off);
+  const raw = ((lineRows ?? []) as unknown as Record<string, unknown>[]).filter((l) => isEstimatePart({ line_type: l.line_type as string, part_item_id: l.part_item_id as string | null }) && onDesk(l));
   const { data: extraRows } = unitsReady && raw.length ? await admin.from("quotation_lines").select(PART_LINE_EXTRA_SELECT).in("id", raw.map((l) => l.id as string)) : { data: [] as unknown[] };
   const extra = new Map(((extraRows ?? []) as { id: string; unit: string | null; asked_quantity: number | string | null; list_price_aed: number | string | null; supplier_discount_percent: number | string | null }[]).map((r) => [r.id, r]));
   // The stock item behind a price, in words (as the job's row shows it).

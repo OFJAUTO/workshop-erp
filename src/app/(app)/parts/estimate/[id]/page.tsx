@@ -17,6 +17,7 @@ import { lastQuantitiesFor } from "@/lib/part-memory";
 import { PartsTable, type TableRow } from "../../[jobId]/PartsTable";
 import { vatChargingSupplierNames } from "@/lib/supplier-vat";
 import { estimatePricingDone } from "../../estimate-actions";
+import { deskPartsOf, deskPartsReady, deskRowWords } from "@/lib/desk-parts";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +60,14 @@ export default async function EstimatePartsDesk({ params }: { params: Promise<{ 
     const hit = ((changeEvents ?? []) as { note: string }[]).find((e) => e.note.includes(`: ${title.toUpperCase()}: `));
     return hit ? hit.note.replace(`: ${title.toUpperCase()}: `, ": ") : null;
   };
+  // 13 November 2026 (Section 5): parts the desk added, and the estimate's jobs for "For job:".
+  const [addReady, deskParts, { data: jobRows }] = await Promise.all([
+    deskPartsReady(),
+    deskPartsOf(q.id),
+    admin.from("quotation_lines").select("id, title, line_type, left_off").eq("quotation_id", q.id).eq("is_active", true).neq("line_type", "part").order("position"),
+  ]);
+  const deskById = new Map(deskParts.map((p) => [p.id, p]));
+  const addJobs = addReady && !q.carried_job_id && !staff.viewingAs ? ((jobRows ?? []) as { id: string; title: string; line_type: string; left_off: boolean | null }[]).filter((l) => !l.left_off && l.line_type !== "fee" && l.title?.trim()).map((l) => ({ id: l.id, title: l.title })) : null;
   const rows: TableRow[] = desk.lines.map((l) => ({
     changedWords: changedOf(l.title),
     key: l.id,
@@ -70,7 +79,7 @@ export default async function EstimatePartsDesk({ params }: { params: Promise<{ 
     techQty: l.askedQuantity ?? l.quantity,
     askedBy: "advisor",
     askedUnit: l.askedQuantity !== null ? "pc" : l.unit,
-    info: null,
+    info: deskById.get(l.id) ? deskRowWords(deskById.get(l.id)!) : null,
     values: l.values,
     optionGroup: null,
     unavailable: false,
@@ -123,13 +132,13 @@ export default async function EstimatePartsDesk({ params }: { params: Promise<{ 
       {!desk.preparing && !q.carried_job_id && !editable ? <Notice tone="info">{q.number} is {QUOTE_STATUS_LABELS[q.status as keyof typeof QUOTE_STATUS_LABELS]?.toLowerCase() ?? q.status}{q.sent_at ? ` (sent ${formatDateTime(q.sent_at)})` : ""}: prices are not changed here any more. Check the advisor&apos;s prices, or tell him a price is different.</Notice> : null}
       <Card id="pricing" className="flex flex-col gap-3 overflow-visible" data-desk-estimate={q.number}>
         <SectionLabel right={[toPrice ? `${toPrice} to price` : null, toCheck ? `${toCheck} to check` : null].filter(Boolean).join(" · ") || "all priced"}>Parts on this estimate</SectionLabel>
-        {rows.length === 0 ? (
+        {rows.length === 0 && !addJobs ? (
           <p className="text-sm text-muted">Nothing sent to the parts desk on this estimate.</p>
         ) : (
           <PartsTable
             jobId=""
             vatSupplierNames={await vatChargingSupplierNames()}
-            estimate={{ id: q.id, number: q.number, preparing: desk.preparing, editable }}
+            estimate={{ id: q.id, number: q.number, preparing: desk.preparing, editable, addJobs }}
             rows={rows}
             suppliers={suppliers}
             types={types.length ? types : ["genuine", "oem", "aftermarket", "used"]}
@@ -150,6 +159,19 @@ export default async function EstimatePartsDesk({ params }: { params: Promise<{ 
           />
         )}
       </Card>
+      {deskParts.length ? (
+        <Card className="flex flex-col gap-2" data-desk-added-list>
+          <SectionLabel>Added by Parts</SectionLabel>
+          <ul className="flex flex-col gap-1 text-sm">
+            {deskParts.map((p) => (
+              <li key={p.id} data-desk-added={p.status} className="flex flex-wrap gap-x-2">
+                <span className="font-semibold uppercase">{p.title} × {p.quantity}</span>
+                <span className={p.status === "accepted" ? "font-bold text-green-text" : p.status === "declined" ? "font-bold text-red" : "text-muted"}>{deskRowWords(p).replace(/^Added by Parts · /, "")}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
       {showBar ? <div className="h-28" /> : null}
     </>
   );

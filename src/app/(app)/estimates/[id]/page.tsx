@@ -46,6 +46,8 @@ import { billToFromCustomer, type BillTo } from "@/lib/estimate-money-rules";
 import { estimateMoneyReady } from "@/lib/schema-ready";
 import { OPEN_ESTIMATE_STATUSES } from "@/lib/quote-history";
 import { EstimateMoneyCard, type MoneyCardFacts } from "./EstimateMoneyCard";
+import { DeskPartsCard } from "./DeskPartsCard";
+import { deskPartsOf } from "@/lib/desk-parts";
 import { OrderPartsNow } from "./OrderPartsNow";
 
 export const dynamic = "force-dynamic";
@@ -70,6 +72,8 @@ export default async function EstimatePage({ params, searchParams }: { params: P
   if (!(isOwner || can(role, "viewEstimates"))) redirect("/estimates");
   const mayManage = !staff.viewingAs && (isOwner || mine);
   const canEdit = mayManage && q.status === "draft";
+  // 13 November 2026 (Section 5): parts the parts desk added, for the advisor to accept or decline.
+  const deskParts = await deskPartsOf(q.id);
   // The one send/resend button (6 November 2026), next to Revise.
   const sendState = sendStateOf(bundle.versions.map((v) => ({ id: v.id, version: v.version, status: v.status })), { kind: "estimate" });
   const resentWords = await lastResendWords(bundle.versions.map((v) => v.id));
@@ -171,6 +175,7 @@ export default async function EstimatePage({ params, searchParams }: { params: P
         </div>
       ) : null}
       <HandbackBanner handback={handback} leadName={leadName} />
+      {deskParts.length ? <DeskPartsCard estimateId={q.id} parts={deskParts} canDecide={!staff.viewingAs && (isOwner || role === "service_advisor") && ["draft", "pending_owner"].includes(q.status)} /> : null}
       {q.status === "cancelled" ? <Notice tone="info">Cancelled{q.cancel_reason ? `: ${q.cancel_reason}` : ""}. Kept because the customer saw it; their link says it was withdrawn.</Notice> : null}
       {accepted ? (
         <Card className="flex flex-col gap-2 border-green">

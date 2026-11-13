@@ -21,6 +21,7 @@ import { PartChangeDialog, RelinkDialog } from "./PartChangeDialog";
 import { refreshWhenIdle } from "@/lib/refresh-idle";
 import { ReasonChips } from "@/components/ReasonChips";
 import { PartPicker } from "@/components/PartPicker";
+import { DeskForJobWindow } from "./DeskForJobWindow";
 import { type CatalogueRow } from "@/lib/parts-list";
 import { addSupplierQuick, askManager, attachDiagram, autoSavePartRow, checkPartPrice, closePartRequest, confirmPartCost, coverRequest, markRequestUnavailable, noteCustomPartNames, replaceRefusedPart, splitPart } from "../actions";
 import { endPartFromParts, putBackPart, removeNotNeeded } from "../remove-actions";
@@ -130,7 +131,7 @@ export type TableRow = {
 type Action = (formData: FormData) => void | Promise<void>;
 type SendAction = (state: FormState, formData: FormData) => Promise<FormState>;
 /** The estimate the table prices (estimate mode): the desk prices the estimate's own part lines, no job yet. */
-type EstimateDesk = { id: string; number: string; preparing: boolean; /** Sent but not accepted yet (6 November 2026): the desk may still change the price and the supplier. */ editable?: boolean };
+type EstimateDesk = { id: string; number: string; preparing: boolean; /** Sent but not accepted yet (6 November 2026): the desk may still change the price and the supplier. */ editable?: boolean; /** "+ Add a part" by the desk (13 November 2026): the estimate's jobs for "For job:", when adding is allowed. */ addJobs?: { id: string; title: string }[] | null };
 
 /**
  * The columns, sized to their content and starting from the left. The Part column is capped at the width of a
@@ -249,6 +250,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
   const progress = pricingProgress(rows.map((r) => ({ key: r.key, name: r.name, state: stateOf(r), missing: rowMissing(r.values).map((m) => m.long) })));
   const barMode: "open" | "editing" | "sent" = pricingMode ?? (pricingLocked ? "sent" : reopenedAt && pricingDoneAt ? "editing" : "open");
   const isJob = !estimate;
+  const [deskPicked, setDeskPicked] = useState<{ name: string; qty: number; positions: string[] }[] | null>(null);
 
   function toggleUnpriced() {
     setOnlyUnpriced((cur) => (cur ? null : new Set(rows.filter((r) => stateOf(r) !== "priced" && stateOf(r) !== "removed").map((r) => r.key))));
@@ -257,6 +259,13 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
   function addPicked(entries: { name: string; qty: number; positions: string[]; catalogue_id: string | null; unit?: string }[]) {
     setAdding(false);
     if (!entries.length) return;
+    // An estimate (13 November 2026, Section 5): the server makes the line, after "For job:".
+    if (estimate) {
+      setDeskPicked(entries.map((e) => ({ name: e.name, qty: e.qty, positions: e.positions })));
+      const custom0 = entries.filter((e) => !e.catalogue_id).map((e) => e.name);
+      if (custom0.length) void noteCustomPartNames(custom0);
+      return;
+    }
     const stamp = Date.now();
     setRows((p) => [
       ...p,
@@ -488,6 +497,8 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
         </div>
       </div>
       {isJob && canPrice && !pricingLocked ? <Button type="button" tone="secondary" size="md" onClick={() => setAdding(true)} className="self-start" data-add-part>+ Add a part the technician did not list</Button> : null}
+      {estimate?.addJobs && canPrice ? <Button type="button" tone="secondary" size="md" onClick={() => setAdding(true)} className="self-start" data-add-part data-desk-add-part>+ Add a part</Button> : null}
+      {deskPicked && estimate ? <DeskForJobWindow estimateId={estimate.id} entries={deskPicked} jobs={estimate.addJobs ?? []} onClose={() => setDeskPicked(null)} /> : null}
       {adding ? <PartPicker title="Add parts" catalogue={catalogue} selected={[]} itemKey={null} source="custom" onDone={(entries) => addPicked(entries.map((e) => ({ name: e.name, qty: e.qty, positions: e.positions, catalogue_id: e.catalogue_id, unit: e.unit })))} onClose={() => setAdding(false)} /> : null}
       <datalist id="part-pool">{catalogue.map((c) => <option key={c.id} value={c.name} />)}</datalist>
       {listOpen ? <SupplierList rows={rows} car={car} vin={vin} openingLine={openingLine} onClose={() => setListOpen(false)} /> : null}

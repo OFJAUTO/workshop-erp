@@ -11,7 +11,13 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Nothing is waiting.
+Backup taken first: `backups/2026-11-13T13-13-55` (134 tables, 284,533 rows). Applied on the TEST database and tested there.
+
+| # | What | What it does on live | Size |
+|---|---|---|---|
+| 1 | `supabase/migrations/20261216120000_desk_added_parts.sql` (Section 5, E-00092) | Adds five columns to `quotation_lines`: when and by whom the parts desk added a part to an estimate, its state (waiting / accepted / declined), and who decided and when. No new table, nothing else changes. Until it is applied, the parts desk's "+ Add a part" on an estimate and the advisor's "Added by Parts" card stay hidden. | 5 columns |
+
+**From your phone:** reply **"apply"** (with auto mode off). Nothing else is needed.
 
 ## Applied on 13 November 2026, afternoon
 
