@@ -1,7 +1,7 @@
 # Handover – evening list of 13 November 2026 (ALL DONE; last update 13 Nov, evening, Dubai)
 
 **NEEDS OMAR (top first):**
-1. **Apply one database change** (Section 5, parts desk "+ Add a part" on an estimate): turn auto mode off and reply **"apply"**. Details in `docs/waiting-for-apply.md` → "Waiting now"; backup `backups/2026-11-13T13-13-55`.
+1. ~~Apply one database change~~ **Done 13 Nov evening:** Section 5 is live (backup `backups/2026-11-13T16-57-44`, live check 33 of 33).
 2. **Mathew: Zoho sync page → the LPO-00076-2 bill (1260925425) → "Re-post with one line per part".** It stays at 921.90 and the payment stays applied. The other bills posted as one line get the same button. Side-by-side for him: `docs/zoho-bill-lines-for-mathew.md`.
 3. **Set the department on the 12 shared tablets** at Team → Tablets; **give KHADIJA a password** (she logs in by PIN only, which shared tablets now refuse for office roles).
 4. **A real test print of the new battery label:** a photo of it on the battery.
@@ -18,7 +18,7 @@
 - S2 labels (8552aae);
 - S3 shared tablets (6841c9d);
 - S4 every warning with its fix (7ea67db);
-- S5 desk "+ Add a part" on estimates (7ba83b3, waiting for the apply);
+- S5 desk "+ Add a part" on estimates (7ba83b3, applied, live);
 - S6 estimate and quotation lists (0552846);
 - S7 Zoho bill lines (e60e121);
 - S8 profit on every invoice (a53b7a6).
