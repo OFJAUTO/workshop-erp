@@ -11,6 +11,12 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
+Nothing is waiting.
+
+## Applied on 13 November 2026, afternoon
+
+The owner replied "apply". A fresh backup was taken first: `backups/2026-11-13T11-15-32` (129 tables, 283,375 rows). The 11 files were run in this order with `scripts/db-sql.mjs` without an error; the 9 migrations were recorded with `scripts/db-record-migration.mjs` (the 2 data fixes are not migrations). Checked on live: `back_orders`, `part_receipts`, `receipt_files`, `send_checks` and `part_changes` have RLS on, no policies and no grants to anon or the login role; the six new columns exist. `npm run check:live`: 33 passed, 0 failed.
+
 ### FIRST: back orders (URGENT, J-00317, 13 November 2026)
 
 Apply this one first, ahead of the 8 below. A live backup was taken first: `backups/2026-11-13T04-57-14` (129 tables, 280,605 rows).
@@ -27,8 +33,6 @@ Backup taken first: `backups/2026-11-13T06-50-12` (129 tables, 281,784 rows).
 |---|---|---|---|
 | 0b | `supabase/migrations/20261216100000_part_receipts.sql` | Adds two server-only tables (RLS on, no policies, no grants to the login role, audit/stamp/no-delete triggers): `part_receipts`, one row per delivery received (what, when, who, the supplier's invoice number or "INVOICE DUE BY", reminders, retake requests, number corrections), and `receipt_files` (delivery paper and invoice photos; a retake adds a file and marks the old one replaced, nothing deleted). It also adds `suppliers.invoice_later_allowed` and `invoice_later_days` (1 to 5). From the apply, every receipt needs the supplier's invoice number (or "Invoice comes later" for a marked supplier), and the old daily "invoice missing" reminder stops: older receipts are only listed. | 2 tables + 2 columns |
 | 0c | `supabase/migrations/20261216110000_send_checks.sql` | Adds the server-only table `send_checks`: each "check before you send" confirmation (who, when, which lines were highlighted). The window itself works without it; the apply adds the log and the approver's "Checked before sending" box. | 1 table |
-
-**From your phone:** turn auto mode off and reply **"apply"**. I run 0, 0b and 0c first (backup, run, record, live check), then the 8 below.
 
 ### Then the 8 from the overnight list
 
