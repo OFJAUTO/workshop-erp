@@ -40,7 +40,7 @@ import {
   isFluidItem,
   isLeakItem,
   itemStatusLabel,
-  itemStatusesFor,
+  itemStatusesFor, INJECTOR_CYLINDERS,
   leakPartFor,
   leakRemark,
   reportProblemsOf,
@@ -189,9 +189,9 @@ function useAutosave(inspectionId: string) {
 /** Good / Average / Bad (or OK / Required on a job item), plus N/A in grey. */
 function StatusButtons({ value, onPick, disabled, statuses, style = "grade" }: { value: ItemStatus | null; onPick: (s: ItemStatus) => void; disabled: boolean; statuses: readonly ItemStatus[]; style?: ItemStyle }) {
   return (
-    <div className={`grid gap-2 ${statuses.length === 4 ? "grid-cols-4" : "grid-cols-3"}`}>
+    <div className={`grid gap-2 ${statuses.length === 4 ? "grid-cols-4" : statuses.length === 2 ? "grid-cols-2" : "grid-cols-3"}`}>
       {statuses.map((s) => (
-        <button key={s} type="button" disabled={disabled} onClick={() => onPick(s)} aria-pressed={value === s} className={`min-h-12 rounded-control border-2 text-sm font-extrabold tracking-[0.04em] ${value === s ? STATUS_CLASS[s] : s === "na" ? "border-line bg-white text-muted" : "border-line-strong bg-white"} ${disabled ? "opacity-60" : ""}`}>
+        <button key={s} type="button" disabled={disabled} onClick={() => onPick(s)} aria-pressed={value === s} className={`min-h-12 rounded-control border-2 px-2 text-sm leading-tight font-extrabold tracking-[0.04em] ${value === s ? STATUS_CLASS[s] : s === "na" ? "border-line bg-white text-muted" : "border-line-strong bg-white"} ${disabled ? "opacity-60" : ""}`}>
           {itemStatusLabel(s, style)}
         </button>
       ))}
@@ -788,6 +788,25 @@ export function InspectionForm({
                   {hintOf(it) ? <p className="-mt-2 text-xs text-muted" data-item-hint={it.key}>{hintOf(it)}</p> : null}
                   {/wheel condition/i.test(it.label) && wheelConditions.length ? <p className="text-xs text-muted">At gate-in: {wheelConditions.map((w) => `${w.label} ${w.text}`).join(" · ")}</p> : null}
                   <StatusButtons value={it.status} onPick={(s) => setItemStatus(it.key, s)} disabled={locked} statuses={itemStatusesFor(it.style)} style={it.style} />
+                  {/* 13 November 2026 (Section 14): the PCV and injector details (optional). */}
+                  {it.key.endsWith("pcv_valve") ? (
+                    <button type="button" disabled={locked} aria-pressed={measurements.pcv_in_valve_cover === "1"} onClick={() => setMeasurement("pcv_in_valve_cover", measurements.pcv_in_valve_cover === "1" ? "" : "1", true)} className={`self-start min-h-11 rounded-control border px-3 text-sm font-bold ${measurements.pcv_in_valve_cover === "1" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-pcv-in-cover>
+                      {measurements.pcv_in_valve_cover === "1" ? "✓ " : ""}Built into the valve cover
+                    </button>
+                  ) : null}
+                  {it.key.endsWith("fuel_injectors") && (it.status === "average" || it.status === "bad") ? (
+                    <div className="flex flex-col gap-1" data-injector-cylinders>
+                      <span className="text-xs font-semibold text-muted">Which cylinders? (optional)</span>
+                      <span className="flex flex-wrap gap-1.5">
+                        {INJECTOR_CYLINDERS.map((c) => {
+                          const list = (measurements.injector_cylinders ?? "").split(",").filter(Boolean);
+                          const on = list.includes(c);
+                          const next = c === "All" ? (on ? [] : ["All"]) : on ? list.filter((x) => x !== c) : [...list.filter((x) => x !== "All"), c].sort();
+                          return <button key={c} type="button" disabled={locked} aria-pressed={on} onClick={() => setMeasurement("injector_cylinders", next.join(","), true)} className={`min-h-11 min-w-11 rounded-control border px-2 text-sm font-bold ${on ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-cylinder={c}>{c}</button>;
+                        })}
+                      </span>
+                    </div>
+                  ) : null}
                   {disc ? (
                     <div className="flex flex-col gap-2 rounded-control bg-chip p-2">
                       <span className="text-xs font-semibold text-muted">Disc condition</span>

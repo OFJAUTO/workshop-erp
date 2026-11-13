@@ -48,7 +48,7 @@ export function needsOf(item: { key: string; label: string; sectionKey?: string 
   const t = `${item.key} ${item.label} ${item.sectionKey ?? ""}`.toLowerCase();
   const out = new Set<Need>();
   if (/road|drive|driving|gear ?shift|shifting|clutch|steering feel|wheel alignment|vibration|brak(e|ing) (feel|performance)|cruise|acceleration/.test(t)) out.add("driving");
-  if (/engine (noise|idle|running|performance)|idle|a\/?c (cool|perform)|cooling|oil pressure|exhaust smoke|smoke|charging|alternator|turbo|misfire|warning light/.test(t)) out.add("engine");
+  if (/pcv|injector|engine (noise|idle|running|performance)|idle|a\/?c (cool|perform)|cooling|oil pressure|exhaust smoke|smoke|charging|alternator|turbo|misfire|warning light/.test(t)) out.add("engine");
   if (/light|lamp|electric|window|mirror|screen|display|infotainment|radio|camera|sensor|horn|wiper|central lock|seat (motor|heater)|battery/.test(t)) out.add("power");
   if (out.has("driving")) { out.add("engine"); out.add("power"); }
   if (out.has("engine")) out.add("power");

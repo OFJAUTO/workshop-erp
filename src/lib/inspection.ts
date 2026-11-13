@@ -12,17 +12,39 @@ export const ITEM_STATUS_LABELS: Record<ItemStatus, string> = { good: "Good", av
  * Three answer styles: a component is graded Good / Average / Bad; a service item is a job, OK or Required; the A/C
  * gas (23 October 2026) is Good / Low / Empty (stored as good / average / bad), with the recharge ticked by itself.
  */
-export type ItemStyle = "grade" | "job" | "gas";
-export const ITEM_STYLE_LABELS: Record<ItemStyle, string> = { grade: "Good / Average / Bad", job: "OK / Required", gas: "Good / Low / Empty (A/C gas)" };
+export type ItemStyle = "grade" | "job" | "gas" | "pcv" | "injector";
+export const ITEM_STYLE_LABELS: Record<ItemStyle, string> = { grade: "Good / Average / Bad", job: "OK / Required", gas: "Good / Low / Empty (A/C gas)", pcv: "OK / Faulty, replace (PCV)", injector: "OK / Needs service / Replace (fuel injectors)" };
 export const JOB_ITEM_STATUSES = ["good", "bad", "na"] as const;
+/* 13 November 2026 (Section 14): the PCV valve (OK / Faulty, replace) and the fuel injectors (OK / Needs service and
+   further check / Replace). "Could not check" is the usual not-checked answer (automatic when the engine does not run). */
+export const PCV_ITEM_STATUSES = ["good", "bad"] as const;
+export const INJECTOR_ITEM_STATUSES = ["good", "average", "bad"] as const;
 export function itemStatusesFor(style?: ItemStyle | string | null): readonly ItemStatus[] {
+  if (style === "pcv") return PCV_ITEM_STATUSES;
+  if (style === "injector") return INJECTOR_ITEM_STATUSES;
   return style === "job" ? JOB_ITEM_STATUSES : ITEM_STATUSES;
+}
+/** The engine-only items (combustion engines): left off the checklist of an electric car. */
+export const ENGINE_ONLY_KEYS = ["engine_bay.pcv_valve", "engine_bay.fuel_injectors"];
+/** The optional details of the two items: "Built into the valve cover", "Cylinders 1, 3". */
+export const INJECTOR_CYLINDERS = ["1", "2", "3", "4", "5", "6", "7", "8", "All"] as const;
+export function engineOptionWords(itemKey: string | null | undefined, m: Record<string, unknown> | null | undefined): string[] {
+  const k = itemKey ?? "";
+  if (k.endsWith("pcv_valve") && String(m?.pcv_in_valve_cover ?? "") === "1") return ["Built into the valve cover"];
+  if (k.endsWith("fuel_injectors")) {
+    const c = String(m?.injector_cylinders ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+    if (c.includes("All")) return ["All cylinders"];
+    if (c.length) return [`Cylinder${c.length === 1 ? "" : "s"} ${c.join(", ")}`];
+  }
+  return [];
 }
 /** The word on the button and on the report for one answer, by style. */
 export function itemStatusLabel(status: ItemStatus | null | undefined, style?: ItemStyle | string | null): string {
   if (!status) return "";
   if (style === "job") return status === "good" ? "OK" : status === "bad" ? "Required" : status === "na" ? "N/A" : "Average";
   if (style === "gas") return status === "good" ? "Good" : status === "average" ? "Low" : status === "bad" ? "Empty" : "N/A";
+  if (style === "pcv") return status === "good" ? "OK" : status === "bad" ? "Faulty, replace" : status === "na" ? "N/A" : "Average";
+  if (style === "injector") return status === "good" ? "OK" : status === "average" ? "Needs service and further check" : status === "bad" ? "Replace" : "N/A";
   return ITEM_STATUS_LABELS[status];
 }
 
@@ -64,8 +86,8 @@ export function needsAttention(i: { status: ItemStatus | null; style?: string | 
   return i.status === "bad" || (i.status === "average" && i.style !== "job") || (!!i.service_due && i.status !== "na");
 }
 /** The extra words under an item on the report: "Service due", "Recharge needed: R1234yf 600 g" (unless the remark says it already). */
-export function itemExtraWords(i: { style?: string | null; service_due?: boolean | null; recharge_needed?: boolean | null; fluid_grade?: string | null; fluid_qty?: string | number | null; remarks?: string | null }): string[] {
-  const out: string[] = [];
+export function itemExtraWords(i: { item_key?: string | null; style?: string | null; service_due?: boolean | null; recharge_needed?: boolean | null; fluid_grade?: string | null; fluid_qty?: string | number | null; remarks?: string | null }, m?: Record<string, unknown> | null): string[] {
+  const out: string[] = [...engineOptionWords(i.item_key, m)];
   if (i.service_due) out.push("Service due");
   if (i.style === "gas" && i.recharge_needed && !/recharge/i.test(i.remarks ?? "")) out.push(rechargeWords(i));
   return out;
@@ -107,6 +129,8 @@ export type ChecklistItem = { key: string; label: string; style?: ItemStyle; due
 /** What to look at, under the item's name on the tablet (1 November 2026). The checklist in Settings may carry its own. */
 export const ITEM_HINTS: Record<string, string> = {
   "engine_bay.intake_manifold": "cracks, leaks, gasket, flaps / runner actuator",
+  "engine_bay.pcv_valve": "engine running: whistling or hissing, oil in the intake, rough idle, cap suction",
+  "engine_bay.fuel_injectors": "engine running: misfire, rough idle, fuel smell or leaks at the rail",
 };
 export const hintOf = (it: { key: string; hint?: string | null }) => it.hint || ITEM_HINTS[it.key] || null;
 export type ChecklistSection = { key: string; title: string; items: ChecklistItem[] };
@@ -179,6 +203,8 @@ export const DEFAULT_CHECKLIST: ChecklistSection[] = [
     "Ignition coil + wiring",
     "Valve cover",
     "Intake manifold",
+    "PCV valve",
+    "Fuel injectors",
     "Wiper tank + pipes/connector/hoses + wiper blades",
     "Brake fluid",
     "Supercharger / turbo system + brake vacuum pump",
@@ -297,6 +323,9 @@ export function cleanMeasurementValue(key: string, raw: string): string | null {
     return TYRE_ACTIONS.some((a) => a.value === value) ? value : "";
   }
   if (key === "tyre_size_front" || key === "tyre_size_rear") return tyreSizeText(value);
+  // 13 November 2026 (Section 14): the PCV and injector details.
+  if (key === "pcv_in_valve_cover") return value === "1" ? "1" : "";
+  if (key === "injector_cylinders") return value.split(",").map((x) => x.trim()).filter((x) => (INJECTOR_CYLINDERS as readonly string[]).includes(x)).join(",");
   return MEASUREMENTS.some((m) => m.key === key) ? value : null;
 }
 
@@ -367,6 +396,11 @@ export const MEASUREMENTS: MeasurementField[] = [
   { key: "battery_cca", label: "Battery CCA (optional)", unit: "CCA", kind: "number", group: "Battery test", optional: true },
   { key: "vent_temp", label: "A/C vent temperature", unit: "°C", kind: "number", group: "Air conditioning" },
 ];
+// 13 November 2026 (Section 14): the PCV valve and the fuel injectors get their own answers.
+for (const it of DEFAULT_CHECKLIST.find((x) => x.key === "engine_bay")?.items ?? []) {
+  if (it.key === "engine_bay.pcv_valve") it.style = "pcv";
+  if (it.key === "engine_bay.fuel_injectors") it.style = "injector";
+}
 
 export function measurementMissing(values: Record<string, string | number | null | undefined>) {
   return MEASUREMENTS.filter((m) => {
@@ -401,7 +435,7 @@ export function cleanChecklist(input: unknown): ChecklistSection[] | string {
       keys.add(ikey);
       const style = (i as { style?: unknown }).style;
       const due = (i as { due?: unknown }).due === true;
-      items.push({ key: ikey, label, ...(style === "job" || style === "gas" ? { style } : {}), ...(due ? { due: true } : {}) });
+      items.push({ key: ikey, label, ...(style === "job" || style === "gas" || style === "pcv" || style === "injector" ? { style } : {}), ...(due ? { due: true } : {}) });
     }
     if (items.length === 0) return `The section "${title}" has no items.`;
     out.push({ key, title, items });
@@ -651,7 +685,8 @@ export function autoRemarkFor(i: StructuredItem): string {
  * result, tyres with their answers. Plain Good / Average / Bad items still need the remark.
  */
 export function hasStructuredDetail(i: StructuredItem, measurements: Record<string, string> = {}): boolean {
-  if (i.style === "job") return true;
+  if (i.style === "job" || i.style === "pcv") return true;
+  if (i.style === "injector") return !!measurements.injector_cylinders?.trim();
   if (autoRemarkFor(i)) return true;
   const l = i.label.toLowerCase();
   if (/brake pad/.test(l)) {
@@ -728,7 +763,7 @@ export function toItemState(i: { item_key: string; item_label: string; section_k
     key: i.item_key,
     label: i.item_label,
     sectionKey: i.section_key,
-    style: i.style === "job" || i.style === "gas" ? (i.style as ItemStyle) : ("grade" as ItemStyle),
+    style: i.style === "job" || i.style === "gas" || i.style === "pcv" || i.style === "injector" ? (i.style as ItemStyle) : ("grade" as ItemStyle),
     service_due: !!i.service_due,
     recharge_needed: !!i.recharge_needed,
     status: i.status,

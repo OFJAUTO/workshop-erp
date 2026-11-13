@@ -173,7 +173,7 @@ export function buildReportLayout(input: LayoutInput): ReportLayout {
   for (const i of items.filter(needsAttention)) {
     const part = partOf(i);
     const { chip, rank } = chipOf(i);
-    const extra = itemExtraWords(i).filter((w) => !(w === "Service due" && chip.text === "Service due"));
+    const extra = itemExtraWords(i, m).filter((w) => !(w === "Service due" && chip.text === "Service due"));
     findings.push({ key: i.id, chip, rank, title: i.item_label, reason: reasonOf(i, m), extra, section: part ? PART_TITLE[part] : i.section_title.toUpperCase(), mediaKeys: [i.item_key, ...(isPadItem(i.item_label) ? [`measure.${isRear(i.item_label) ? "pad_rear" : "pad_front"}`] : [])], dangerous: i.dangerous, home: part ?? i.section_key });
   }
 

@@ -27,6 +27,7 @@ export type QuoteReference = {
 /** The report folded into a reference strip for the quotation: requests, Bad and Average findings (Required service items too), the tyres, the battery, the manager's notes. */
 export function quoteReferenceOf(b: InspectionBundle, requests: string[], roadTest: RoadTestRow | null = null): QuoteReference {
   const findings: ReferenceFinding[] = [];
+  const mm = (b.inspection.measurements ?? {}) as Record<string, unknown>;
   for (const i of b.items) {
     if (!needsAttention(i)) continue;
     const dueOnly = i.status !== "bad" && i.status !== "average";
@@ -35,9 +36,10 @@ export function quoteReferenceOf(b: InspectionBundle, requests: string[], roadTe
       sourceKey: i.item_key,
       keys: [i.item_key],
       label: `${i.section_title} · ${i.item_label}`,
-      status: i.status === "bad" ? "bad" : "average",
+      // An injector that needs service is a fault to quote (13 November 2026, Section 14).
+      status: i.status === "bad" || (i.style === "injector" && i.status === "average") ? "bad" : "average",
       statusLabel: dueOnly ? "Service due" : itemStatusLabel(i.status, i.style),
-      remark: [i.remarks?.trim(), ...itemExtraWords(i).filter((w) => !(dueOnly && w === "Service due"))].filter(Boolean).join(" · ") || null,
+      remark: [i.remarks?.trim(), ...itemExtraWords(i, mm).filter((w) => !(dueOnly && w === "Service due"))].filter(Boolean).join(" · ") || null,
       dangerous: !!i.dangerous,
     });
   }

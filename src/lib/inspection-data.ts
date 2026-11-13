@@ -1,6 +1,6 @@
 import "server-only";
 import { createAdminClient } from "./supabase/admin";
-import { TYRE_POSITIONS, checklistItems, reportProblemsOf, type ChecklistSection, type InspectionLimits, type InspectionStatus, type ItemStatus } from "./inspection";
+import { ENGINE_ONLY_KEYS, TYRE_POSITIONS, checklistItems, reportProblemsOf, type ChecklistSection, type InspectionLimits, type InspectionStatus, type ItemStatus } from "./inspection";
 import { workingHoursBetween, type WorkingTime } from "./working-time";
 
 export const INSPECTION_BUCKET = "inspection-media";
@@ -83,7 +83,7 @@ export type InspectionItemRow = {
   disc_minimum: number | null;
   parts_rows: unknown;
   /** grade: Good / Average / Bad. job: OK / Required. gas: Good / Low / Empty (the A/C gas). */
-  style: "grade" | "job" | "gas" | null;
+  style: "grade" | "job" | "gas" | "pcv" | "injector" | null;
   /** A fluid whose change is due (the old "... service due" items, folded in on 23 October 2026). */
   service_due?: boolean | null;
   /** The A/C gas needs a recharge (ticked by itself when low or empty). */
@@ -195,8 +195,10 @@ export async function ensureInspection(jobId: string, technicianId: string, chec
     return existing.id as string;
   }
   // The car's tyre sizes from its last visit are filled in already.
-  const { data: jobRow } = await admin.from("jobs").select("vehicle:vehicles(tyre_size_front, tyre_size_rear)").eq("id", jobId).maybeSingle();
-  const veh = (jobRow as unknown as { vehicle: { tyre_size_front: string | null; tyre_size_rear: string | null } | null } | null)?.vehicle ?? null;
+  const { data: jobRow } = await admin.from("jobs").select("vehicle:vehicles(tyre_size_front, tyre_size_rear, fuel_type)").eq("id", jobId).maybeSingle();
+  const veh = (jobRow as unknown as { vehicle: { tyre_size_front: string | null; tyre_size_rear: string | null; fuel_type: string | null } | null } | null)?.vehicle ?? null;
+  // 13 November 2026 (Section 14): an electric car has no PCV valve or fuel injectors - they are left off its checklist.
+  if (veh?.fuel_type === "electric") checklist = checklist.map((sec) => ({ ...sec, items: sec.items.filter((it) => !ENGINE_ONLY_KEYS.includes(it.key)) }));
   const measurements: Record<string, string> = {};
   if (veh?.tyre_size_front) measurements.tyre_size_front = veh.tyre_size_front;
   if (veh?.tyre_size_rear) measurements.tyre_size_rear = veh.tyre_size_rear;
@@ -212,7 +214,7 @@ export async function ensureInspection(jobId: string, technicianId: string, chec
     section_title: i.sectionTitle,
     item_key: i.key,
     item_label: i.label,
-    style: i.style === "job" || i.style === "gas" ? i.style : "grade",
+    style: i.style === "job" || i.style === "gas" || i.style === "pcv" || i.style === "injector" ? i.style : "grade",
     position,
     created_by: by,
     updated_by: by,
