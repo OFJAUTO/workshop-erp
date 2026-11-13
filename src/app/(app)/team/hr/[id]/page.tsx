@@ -1,9 +1,15 @@
 import { notFound } from "next/navigation";
 import { Badge, Button, Card, Field, Input, LinkButton, Notice, PageHeader, SectionLabel, Select, Textarea } from "@/components/ui";
 import { formatDateTime } from "@/lib/format";
-import { hrGate, loadHrPerson, logHr } from "@/lib/hr";
-import { HR_DOC_KINDS, expiryTone, expiryWords } from "@/lib/hr-rules";
+import { HR_BUCKET, hrGate, hrOtherReady, loadHrPerson, logHr } from "@/lib/hr";
+import { HR_DOC_KINDS, NO_LOGIN_ROLES, expiryTone, expiryWords, maskNumber } from "@/lib/hr-rules";
+import { thumbsFor } from "@/lib/media-urls";
+import { ROLE_LABELS, type RoleId } from "@/lib/roles";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { DEPARTMENT_LEVELS, LEVEL_TEAMS, placeWords, roleTitleOf } from "@/lib/teams";
+import { HrAttach } from "../HrAttach";
 import { markPersonLeft, savePerson, uploadHrDocument } from "../actions";
+import Link from "next/link";
 import { HrGateNotice } from "../HrGateNotice";
 import { RevealNumber } from "../RevealNumber";
 
@@ -26,12 +32,20 @@ export default async function HrPersonPage({ params, searchParams }: { params: P
   const today = new Date(Date.now() + 4 * 3600_000).toISOString().slice(0, 10);
   const left = p.status === "left";
   const current = docs.filter((d) => !d.replaced_at);
+  // 13 November 2026 (Section 13): role and department come from the Team record for anyone with an ERP login.
+  const { data: team } = staff ? await createAdminClient().from("staff").select("role_id, department_id, team").eq("id", staff.id).maybeSingle() : { data: null };
+  const teamRole = team ? roleTitleOf(team as { role_id: string; department_id: string | null; team: string | null }, ROLE_LABELS[team.role_id as RoleId] ?? String(team.role_id)) : null;
+  const teamPlace = team ? placeWords(team as { role_id: string; department_id: string | null; team: string | null }) : null;
+  const places = DEPARTMENT_LEVELS.flatMap((d) => (d.key === "office" ? [d.label] : [d.label, ...LEVEL_TEAMS[d.key].map((t) => `${d.label} · ${t.label}`)]));
+  const thumbs = await thumbsFor(HR_BUCKET, current.filter((d) => (d.content_type ?? "").startsWith("image/")).map((d) => d.storage_path), 160, 600);
+  const otherOn = await hrOtherReady();
+  const attach = uploadHrDocument.bind(null, id);
   const older = docs.filter((d) => d.replaced_at);
   return (
     <>
       <PageHeader
         title={p.passport_name}
-        subtitle={[p.role_title, p.department, staff ? (staff.is_active ? "ERP login" : "ERP login off") : "No ERP login", left ? "LEFT" : null].filter(Boolean).join(" · ")}
+        subtitle={[teamRole ?? p.role_title, teamPlace ?? p.department, staff ? (staff.is_active ? "ERP login" : "ERP login off") : "No ERP login", left ? "LEFT" : null].filter(Boolean).join(" · ")}
         views={<LinkButton href="/team/hr" tone="secondary">HR</LinkButton>}
         actions={current.length ? <LinkButton href={`/api/hr/zip/${id}`} tone="secondary" data-hr-download-all>Download all documents</LinkButton> : null}
       />
@@ -42,8 +56,27 @@ export default async function HrPersonPage({ params, searchParams }: { params: P
         <SectionLabel>Details</SectionLabel>
         <form action={savePerson.bind(null, id)} className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Name as on the passport"><Input name="passport_name" defaultValue={p.passport_name} required /></Field>
-          <Field label="Role" optional><Input name="role_title" defaultValue={p.role_title ?? ""} /></Field>
-          <Field label="Department" optional><Input name="department" defaultValue={p.department ?? ""} /></Field>
+          {team ? (
+            <div className="flex flex-col gap-1 text-sm sm:col-span-2" data-hr-team-record>
+              <span className="text-xs font-semibold text-muted">Role and department (from the Team page)</span>
+              <span className="font-semibold">{teamRole}{teamPlace ? ` · ${teamPlace}` : ""} · <Link href={`/team/${staff?.id}`} className="underline underline-offset-4">change on Team</Link></span>
+            </div>
+          ) : (
+            <>
+              <Field label="Role">
+                <Select name="role_title" defaultValue={p.role_title ?? ""} data-hr-role>
+                  <option value="">Not set</option>
+                  {(NO_LOGIN_ROLES.includes(p.role_title ?? "") || !p.role_title ? NO_LOGIN_ROLES : [p.role_title, ...NO_LOGIN_ROLES]).map((r) => <option key={r} value={r}>{r}</option>)}
+                </Select>
+              </Field>
+              <Field label="Department and team">
+                <Select name="department" defaultValue={p.department ?? ""} data-hr-department>
+                  <option value="">None</option>
+                  {(places.includes(p.department ?? "") || !p.department ? places : [p.department, ...places]).map((d) => <option key={d} value={d}>{d}</option>)}
+                </Select>
+              </Field>
+            </>
+          )}
           <Field label="Joining date" optional><Input name="joining_date" type="date" defaultValue={p.joining_date ?? ""} /></Field>
           <Field label="Phone" optional><Input name="phone" type="tel" defaultValue={p.phone ?? ""} /></Field>
           <Field label="Emergency contact (name)" optional><Input name="emergency_name" defaultValue={p.emergency_name ?? ""} /></Field>
@@ -54,44 +87,60 @@ export default async function HrPersonPage({ params, searchParams }: { params: P
         </form>
       </Card>
       <Card className="flex flex-col gap-3" data-hr-documents>
-        <SectionLabel right={`${current.length}`}>Documents</SectionLabel>
-        {current.length === 0 ? <p className="text-sm text-muted">Nothing uploaded yet.</p> : (
-          <ul className="flex flex-col divide-y divide-line">
-            {current.map((d) => {
-              const tone = expiryTone(d.kind, d.expires_on, today);
-              return (
-                <li key={d.id} className="flex min-h-12 flex-wrap items-center gap-3 py-2" data-hr-doc={d.kind}>
-                  <span className="w-36 shrink-0 font-bold">{HR_DOC_KINDS.find((k) => k.kind === d.kind)?.label ?? d.kind}</span>
-                  <RevealNumber documentId={d.id} masked={d.doc_number ?? ""} />
-                  <span className="min-w-0 flex-1 text-sm">{d.expires_on ? <>{d.expires_on} · </> : null}{tone === "none" ? <span className="text-muted">{expiryWords(d.expires_on, today)}</span> : <Badge tone={tone === "red" ? "red" : "amber"} data-hr-expiry={tone}>{expiryWords(d.expires_on, today)}</Badge>}</span>
-                  <LinkButton href={`/api/hr/file/${d.id}`} tone="secondary" target="_blank" rel="noreferrer" data-hr-view={d.id}>View</LinkButton>
-                  <LinkButton href={`/api/hr/file/${d.id}?download=1`} tone="secondary" data-hr-download={d.id}>Download</LinkButton>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <SectionLabel right={`${HR_DOC_KINDS.filter((k) => current.some((d) => d.kind === k.kind)).length} of ${HR_DOC_KINDS.length}`}>Documents</SectionLabel>
+        <ul className="flex flex-col divide-y divide-line">
+          {[...HR_DOC_KINDS.map((k) => ({ key: k.kind, kind: k.kind, label: k.label, numbered: k.numbered, warn: !!k.warnDays, files: current.filter((d) => d.kind === k.kind) })),
+            ...Array.from(new Set(current.filter((d) => d.kind === "other").map((d) => (d as { other_label?: string | null }).other_label ?? "Other"))).map((label) => ({ key: `other:${label}`, kind: "other", label, numbered: true, warn: false, files: current.filter((d) => d.kind === "other" && ((d as { other_label?: string | null }).other_label ?? "Other") === label) }))].map((row) => {
+            const first = row.files[0];
+            const tone = first ? expiryTone(row.kind, first.expires_on, today) : "none";
+            return (
+              <li key={row.key} className="flex min-h-16 flex-wrap items-center gap-3 py-2" data-hr-doc={row.kind} data-hr-doc-state={first ? "have" : "missing"}>
+                <span className="w-40 shrink-0 font-bold">{row.label}</span>
+                {!first ? (
+                  <>
+                    <span className="min-w-0 flex-1"><Badge tone="outline" data-hr-missing>Missing</Badge></span>
+                    {!left ? <HrAttach action={attach} kind={row.kind} label={row.label} numbered={row.numbered} needsExpiry={row.warn} trigger="Attach" /> : null}
+                  </>
+                ) : (
+                  <>
+                    <span className="flex gap-1.5">
+                      {row.files.slice(0, 3).map((d) =>
+                        thumbs.get(d.storage_path) ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- a signed thumbnail of a private file
+                          <a key={d.id} href={`/api/hr/file/${d.id}`} target="_blank" rel="noreferrer"><img src={thumbs.get(d.storage_path)} alt={row.label} className="h-12 w-16 rounded border border-line object-cover" data-hr-thumb /></a>
+                        ) : (
+                          <a key={d.id} href={`/api/hr/file/${d.id}`} target="_blank" rel="noreferrer" className="flex h-12 w-16 items-center justify-center rounded border border-line bg-chip text-xs font-bold" data-hr-thumb>PDF</a>
+                        ),
+                      )}
+                    </span>
+                    {row.numbered ? <RevealNumber documentId={first.id} masked={maskNumber(first.doc_number ?? "")} /> : null}
+                    <span className="min-w-0 flex-1 text-sm">
+                      {first.expires_on ? <>{first.expires_on} · </> : null}
+                      {tone === "none" ? <span className={first.expires_on ? "font-semibold text-green-text" : "text-muted"} data-hr-expiry="green">{expiryWords(first.expires_on, today)}</span> : <Badge tone={tone === "red" ? "red" : "amber"} data-hr-expiry={tone}>{expiryWords(first.expires_on, today)}</Badge>}
+                      {row.files.length > 1 ? <span className="whitespace-nowrap text-muted"> · {row.files.length} files</span> : null}
+                    </span>
+                    {row.files.map((d, n) => <LinkButton key={d.id} href={`/api/hr/file/${d.id}`} tone="secondary" target="_blank" rel="noreferrer" data-hr-view={d.id}>{row.files.length > 1 ? `View ${n + 1}` : "View"}</LinkButton>)}
+                    {!left && row.kind !== "other" ? <HrAttach action={attach} kind={row.kind} label={row.label} numbered={row.numbered} needsExpiry={row.warn} trigger="Replace" /> : null}
+                  </>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        {!left && otherOn ? (
+          <div className="flex flex-wrap items-center gap-3 border-t border-line pt-3" data-hr-other>
+            <span className="w-40 shrink-0 font-bold">Other document</span>
+            <span className="min-w-0 flex-1 text-xs text-muted">A trade licence, a medical certificate, anything else.</span>
+            <HrAttach action={attach} kind="other" label="Other document" numbered needsExpiry={false} other trigger="Add other document" />
+          </div>
+        ) : null}
         {older.length ? (
           <details className="text-sm">
             <summary className="min-h-11 cursor-pointer font-bold">Replaced documents ({older.length})</summary>
             <ul className="mt-1 flex flex-col gap-1">
-              {older.map((d) => <li key={d.id}>{HR_DOC_KINDS.find((k) => k.kind === d.kind)?.label} · uploaded {formatDateTime(d.created_at)} · replaced {formatDateTime(d.replaced_at)} · <a className="underline underline-offset-4" href={`/api/hr/file/${d.id}`} target="_blank" rel="noreferrer">View</a></li>)}
+              {older.map((d) => <li key={d.id}>{HR_DOC_KINDS.find((k) => k.kind === d.kind)?.label ?? "Other document"} · uploaded {formatDateTime(d.created_at)} · replaced {formatDateTime(d.replaced_at)} · <a className="underline underline-offset-4" href={`/api/hr/file/${d.id}`} target="_blank" rel="noreferrer">View</a></li>)}
             </ul>
           </details>
-        ) : null}
-        {!left ? (
-          <form action={uploadHrDocument.bind(null, id)} encType="multipart/form-data" className="grid grid-cols-1 gap-3 border-t border-line pt-3 sm:grid-cols-2 lg:grid-cols-4" data-hr-upload>
-            <Field label="Document">
-              <Select name="kind" required defaultValue="">
-                <option value="" disabled>Pick…</option>
-                {HR_DOC_KINDS.map((k) => <option key={k.kind} value={k.kind}>{k.label}</option>)}
-              </Select>
-            </Field>
-            <Field label="ID number" optional><Input name="doc_number" spell={false} autoComplete="off" /></Field>
-            <Field label="Expiry date" hint="Needed for every document but the photo." optional><Input name="expires_on" type="date" /></Field>
-            <Field label="File (photo or PDF, up to 4 MB)"><input name="file" type="file" accept="image/*,application/pdf" required className="min-h-11 text-sm" data-hr-file /></Field>
-            <Button type="submit" className="self-start" data-hr-upload-save>Upload</Button>
-          </form>
         ) : null}
       </Card>
       {!left && staff?.id !== gate.staff.id ? (

@@ -2,7 +2,9 @@ import "server-only";
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { requireStaff, type CurrentStaff } from "./auth";
-import { HR_DOC_KINDS, daysLeft, kindOf, mayOpenHr, reminderDue, reminderStage } from "./hr-rules";
+import { HR_DOC_KINDS, daysLeft, expiresWithin, hrStatusOf, isSupportRole, kindOf, mayOpenHr, reminderDue, reminderStage, type HrDocBrief, type HrStatus } from "./hr-rules";
+import { ROLE_LABELS, type RoleId } from "./roles";
+import { placeWords, roleTitleOf } from "./teams";
 import { notifyStaff } from "./notifications";
 import { passkeyCount } from "./passkey-server";
 import { schemaReady } from "./schema-ready";
@@ -114,7 +116,7 @@ export async function loadHrPerson(id: string): Promise<{ person: HrPersonRow; d
   if (!person) return null;
   const p = person as HrPersonRow;
   const [{ data: docs }, { data: log }, { data: staff }] = await Promise.all([
-    admin.from("hr_documents").select(DOC_COLS).eq("person_id", id).eq("is_active", true).order("created_at", { ascending: false }),
+    admin.from("hr_documents").select(DOC_COLS + ((await hrOtherReady()) ? ", other_label" : "")).eq("person_id", id).eq("is_active", true).order("created_at", { ascending: false }),
     admin.from("hr_access_log").select("action, detail, by_staff_id, at").eq("person_id", id).order("at", { ascending: false }).limit(40),
     p.staff_id ? admin.from("staff").select("id, is_active, display_name").eq("id", p.staff_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
@@ -123,7 +125,7 @@ export async function loadHrPerson(id: string): Promise<{ person: HrPersonRow; d
   const nameOf = new Map(((who ?? []) as { id: string; display_name: string }[]).map((w) => [w.id, w.display_name]));
   return {
     person: p,
-    docs: (docs ?? []) as HrDocRow[],
+    docs: (docs ?? []) as unknown as HrDocRow[],
     log: ((log ?? []) as { action: string; detail: string | null; by_staff_id: string | null; at: string }[]).map((l) => ({ action: l.action, detail: l.detail, by: l.by_staff_id ? (nameOf.get(l.by_staff_id) ?? null) : null, at: l.at })),
     staff: (staff as { id: string; is_active: boolean; display_name: string } | null) ?? null,
   };
@@ -174,3 +176,70 @@ export async function hrRemindersHourly(): Promise<number> {
 }
 
 export const HR_DOC_LABELS = Object.fromEntries(HR_DOC_KINDS.map((k) => [k.kind, k.label])) as Record<string, string>;
+
+/* ---------------- The HR list (13 November 2026, Section 13) ---------------- */
+export type HrBoardRow = {
+  key: string;
+  personId: string | null;
+  staffId: string | null;
+  name: string;
+  role: string;
+  phone: string | null;
+  group: string;
+  photoUrl: string | null;
+  login: boolean;
+  status: "active" | "left";
+  docs: HrDocBrief[];
+  line: HrStatus;
+  probation: boolean;
+  expiring60: boolean;
+};
+
+/**
+ * Everyone on the HR list, with what the page filters, groups and sorts by: role and department/team read from the
+ * Team record for staff (never typed again), the status line from the documents, probation, a photo (the staff photo,
+ * else the HR photo). Groups: "Mechanical · Technicians", "Bodyshop · Painting", "Office · Accounts", "Support staff".
+ */
+export async function loadHrBoard(): Promise<HrBoardRow[]> {
+  const admin = createAdminClient();
+  const today = new Date(Date.now() + 4 * 3600_000).toISOString().slice(0, 10);
+  const [{ data: staff }, { data: people }, { data: docs }] = await Promise.all([
+    admin.from("staff").select("id, full_name, role_id, department_id, team, photo_path, is_active").order("full_name"),
+    admin.from("hr_people").select(PERSON_COLS).eq("is_active", true),
+    admin.from("hr_documents").select("person_id, kind, expires_on, storage_path, content_type, created_at").eq("is_active", true).is("replaced_at", null).is("archived_at", null).order("created_at", { ascending: false }),
+  ]);
+  const docRows = (docs ?? []) as { person_id: string; kind: string; expires_on: string | null; storage_path: string; content_type: string | null }[];
+  const docsOf = new Map<string, HrDocBrief[]>();
+  const hrPhoto = new Map<string, string>();
+  for (const d of docRows) {
+    docsOf.set(d.person_id, [...(docsOf.get(d.person_id) ?? []), { kind: d.kind, expires_on: d.expires_on }]);
+    if (d.kind === "photo" && (d.content_type ?? "").startsWith("image/") && !hrPhoto.has(d.person_id)) hrPhoto.set(d.person_id, d.storage_path);
+  }
+  const staffRows = (staff ?? []) as { id: string; full_name: string; role_id: string; department_id: string | null; team: string | null; photo_path: string | null; is_active: boolean }[];
+  const staffPhotos = staffRows.map((s) => s.photo_path).filter((p): p is string => !!p);
+  const [sp, hp] = await Promise.all([
+    staffPhotos.length ? admin.storage.from("staff-photos").createSignedUrls(staffPhotos, 3600) : Promise.resolve({ data: [] as { path: string | null; signedUrl: string }[] }),
+    hrPhoto.size ? admin.storage.from(HR_BUCKET).createSignedUrls(Array.from(hrPhoto.values()), 600) : Promise.resolve({ data: [] as { path: string | null; signedUrl: string }[] }),
+  ]);
+  const urlOf = new Map([...(sp.data ?? []), ...(hp.data ?? [])].map((x) => [x.path ?? "", x.signedUrl]));
+  const persons = (people ?? []) as HrPersonRow[];
+  const byStaff = new Map(persons.filter((p) => p.staff_id).map((p) => [p.staff_id as string, p]));
+  const row = (base: Omit<HrBoardRow, "line" | "probation" | "expiring60" | "docs">, p: HrPersonRow | null): HrBoardRow => {
+    const d = p ? (docsOf.get(p.id) ?? []) : [];
+    return { ...base, docs: d, line: hrStatusOf(d, today), probation: !!p?.probation_end && p.probation_end >= today, expiring60: expiresWithin(d, today) };
+  };
+  const rows: HrBoardRow[] = staffRows.map((s) => {
+    const p = byStaff.get(s.id) ?? null;
+    const role = roleTitleOf(s, ROLE_LABELS[s.role_id as RoleId] ?? s.role_id);
+    const photo = s.photo_path ? urlOf.get(s.photo_path) : p && hrPhoto.get(p.id) ? urlOf.get(hrPhoto.get(p.id) as string) : null;
+    return row({ key: `s:${s.id}`, personId: p?.id ?? null, staffId: s.id, name: p?.passport_name ?? s.full_name, role, phone: p?.phone ?? null, group: placeWords(s) || "No department", photoUrl: photo ?? null, login: true, status: (p?.status ?? "active") as "active" | "left" }, p);
+  });
+  for (const p of persons.filter((x) => !x.staff_id)) {
+    const photo = hrPhoto.get(p.id);
+    rows.push(row({ key: `p:${p.id}`, personId: p.id, staffId: null, name: p.passport_name, role: p.role_title ?? "", phone: p.phone, group: isSupportRole(p.role_title) ? "Support staff" : p.department || "No department", photoUrl: photo ? (urlOf.get(photo) ?? null) : null, login: false, status: p.status }, p));
+  }
+  return rows;
+}
+
+/** "Other document" (13 November 2026, Section 13) waits for its migration: the kind and its own name. */
+export const hrOtherReady = () => schemaReady("hr_documents", "other_label");

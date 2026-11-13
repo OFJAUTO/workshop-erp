@@ -5,7 +5,7 @@ import { useState } from "react";
 import { usePathname } from "next/navigation";
 
 /** A menu entry; `badge` is a count of things waiting there (for example price requests for Parts). */
-export type NavItem = { href: string; label: string; badge?: number };
+export type NavItem = { href: string; label: string; badge?: number; /** 13 November 2026 (Section 13): drawn indented under the item above (HR under Team). */ sub?: boolean };
 /**
  * One collapsible menu group (Mathew's "Parts management", 5 November 2026): the sub-items indent
  * under one main row whose badge is the sum of theirs. The group opens by itself on any of its
@@ -16,14 +16,16 @@ export type NavGroup = { group: string; label: string; items: NavItem[] };
 export type NavEntry = NavItem | NavGroup;
 
 const isGroup = (e: NavEntry): e is NavGroup => "group" in e;
-const activeOf = (pathname: string, href: string) => pathname === href || (href !== "/home" && pathname.startsWith(href + "/"));
+const matchOf = (pathname: string, href: string) => pathname === href || (href !== "/home" && pathname.startsWith(href + "/"));
+// Only the open one is lit: when two menu items match (Team and HR on /team/hr), the longer address wins.
+const activeOf = (pathname: string, href: string, allHrefs: string[] = []) => matchOf(pathname, href) && !allHrefs.some((h) => h.length > href.length && matchOf(pathname, h));
 
 function Pill({ n, dark }: { n: number; dark: boolean }) {
   return <span className={`min-w-5 h-5 rounded-full px-1.5 text-xs font-bold flex items-center justify-center ${dark ? "bg-ink text-on-dark" : "bg-red-bar text-on-dark"}`}>{n > 99 ? "99+" : n}</span>;
 }
 
-function ItemLink({ n, pathname, sub = false }: { n: NavItem; pathname: string; sub?: boolean }) {
-  const active = activeOf(pathname, n.href);
+function ItemLink({ n, pathname, all, sub = !!n.sub }: { n: NavItem; pathname: string; all: string[]; sub?: boolean }) {
+  const active = activeOf(pathname, n.href, all);
   return (
     <Link
       href={n.href}
@@ -38,8 +40,8 @@ function ItemLink({ n, pathname, sub = false }: { n: NavItem; pathname: string; 
   );
 }
 
-function GroupRow({ g, pathname }: { g: NavGroup; pathname: string }) {
-  const inside = g.items.some((n) => activeOf(pathname, n.href));
+function GroupRow({ g, pathname, all }: { g: NavGroup; pathname: string; all: string[] }) {
+  const inside = g.items.some((n) => activeOf(pathname, n.href, all));
   // null = follow the page (open on its own pages); a tap decides until the next navigation,
   // when the group follows the page again (the prev-value setState-in-render pattern).
   const [manual, setManual] = useState<boolean | null>(null);
@@ -67,16 +69,17 @@ function GroupRow({ g, pathname }: { g: NavGroup; pathname: string }) {
           <span aria-hidden className="text-xs">{open ? "▴" : "▾"}</span>
         </span>
       </button>
-      {open ? g.items.map((n) => <ItemLink key={n.href} n={n} pathname={pathname} sub />) : null}
+      {open ? g.items.map((n) => <ItemLink key={n.href} n={n} pathname={pathname} all={all} sub />) : null}
     </div>
   );
 }
 
 export function SidebarNav({ items }: { items: NavEntry[]; /** Kept for the phone menu; the list is always one column now. */ vertical?: boolean }) {
   const pathname = usePathname();
+  const all = items.flatMap((e) => (isGroup(e) ? e.items.map((n) => n.href) : [e.href]));
   return (
     <nav className="flex flex-col gap-1 shrink-0">
-      {items.map((e) => (isGroup(e) ? <GroupRow key={e.group} g={e} pathname={pathname} /> : <ItemLink key={e.href} n={e} pathname={pathname} />))}
+      {items.map((e) => (isGroup(e) ? <GroupRow key={e.group} g={e} pathname={pathname} all={all} /> : <ItemLink key={e.href} n={e} pathname={pathname} all={all} />))}
     </nav>
   );
 }

@@ -147,14 +147,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/vehicles", label: "Cars", show: can(role, "viewVehicles") && role !== "accounts" },
     { href: "/team", label: "Team", show: can(role, "manageTeam") },
     // 11 November 2026 (Section 15): HR, under Team, for the owner and the head accountant only.
-    { href: "/team/hr", label: "HR", show: mayOpenHr(staff) && !staff.viewingAs },
-    { href: "/team/sign-ins", label: "Sign-ins", show: can(role, "manageTeam") && pkReady },
+    { href: "/team/hr", label: "HR", sub: can(role, "manageTeam"), show: mayOpenHr(staff) && !staff.viewingAs },
+    { href: "/team/sign-ins", label: "Sign-ins", sub: true, show: can(role, "manageTeam") && pkReady },
     { href: "/team/tablets", label: "Tablets", show: can(role, "viewTablets") && !can(role, "manageTeam") },
     { href: "/settings", label: "Settings", show: can(role, "manageSettings") },
     { href: "/audit", label: "Change log", show: can(role, "viewAudit") },
     { href: "/overrides", label: "Overrides", show: can(role, "viewOverrides") },
   ];
-  const nav: NavEntry[] = entries.filter((n) => n.show).map((n) => ("group" in n ? { group: n.group, label: n.label, items: n.items } : { href: n.href, label: n.label, badge: n.badge }));
+  const nav: NavEntry[] = entries.filter((n) => n.show).map((n) => ("group" in n ? { group: n.group, label: n.label, items: n.items } : { href: n.href, label: n.label, badge: n.badge, sub: "sub" in n ? !!n.sub : undefined }));
   const tabMode: TabMode | null = staff.viewingAs ? { kind: "view", id: staff.id, name: staff.display_name } : staff.actingAs ? { kind: "act", id: staff.id, name: staff.actingAs.forName } : null;
 
   return (

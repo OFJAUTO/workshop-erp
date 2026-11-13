@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { dbWords } from "@/lib/app-errors";
 import { blankToNull } from "@/lib/format";
-import { HR_BUCKET, ensureHrPerson, hrActor, logHr } from "@/lib/hr";
+import { HR_BUCKET, ensureHrPerson, hrActor, hrOtherReady, logHr } from "@/lib/hr";
 import { kindOf } from "@/lib/hr-rules";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -45,10 +45,13 @@ export async function savePerson(id: string, formData: FormData) {
   if (!by) return back(id, "HR is for the owner and the head accountant with a phone sign-in.", false);
   const name = text(formData.get("passport_name"), 120);
   if (!name || name.length < 3) return back(id, "Type the name as on the passport.", false);
+  // 13 November 2026 (Section 13): a person with an ERP login takes role and department from the Team record (never
+  // typed again here); only people with no login keep them on the HR file.
+  const { data: who } = await createAdminClient().from("hr_people").select("staff_id").eq("id", id).maybeSingle();
+  const own = who?.staff_id ? {} : { role_title: text(formData.get("role_title")), department: text(formData.get("department")) };
   const patch = {
     passport_name: name,
-    role_title: text(formData.get("role_title")),
-    department: text(formData.get("department")),
+    ...own,
     joining_date: day(formData.get("joining_date")),
     phone: text(formData.get("phone"), 30),
     emergency_name: text(formData.get("emergency_name")),
@@ -69,26 +72,40 @@ export async function uploadHrDocument(id: string, formData: FormData) {
   const by = await hrActor();
   if (!by) return back(id, "HR is for the owner and the head accountant with a phone sign-in.", false);
   const kind = String(formData.get("kind") ?? "");
-  const k = kindOf(kind);
+  // 13 November 2026 (Section 13): "Other document" (with its own name) once the apply is in; several files per
+  // document (Emirates ID front and back, passport pages); photos arrive already reduced on the device.
+  const other = kind === "other" && (await hrOtherReady());
+  const k = other ? { kind: "other", label: text(formData.get("other_label"), 60) ?? "", warnDays: null, numbered: true } : kindOf(kind);
   if (!k) return back(id, "Pick which document it is.", false);
-  const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) return back(id, "Pick the file (a photo or a PDF).", false);
-  if (file.size > 4 * 1024 * 1024) return back(id, "The file is over 4 MB: take the photo again or save the PDF smaller.", false);
-  const type = file.type || "application/octet-stream";
-  if (!(type === "application/pdf" || type.startsWith("image/"))) return back(id, "Only a photo or a PDF.", false);
+  if (other && k.label.length < 2) return back(id, "Type what the other document is (for example: Trade licence).", false);
+  const files = formData.getAll("file").filter((f): f is File => f instanceof File && f.size > 0);
+  if (!files.length) return back(id, "Attach the document (a photo or a PDF).", false);
+  if (files.length > 8) return back(id, "At most 8 files for one document.", false);
+  for (const file of files) {
+    if (file.size > 4 * 1024 * 1024) return back(id, "A PDF is over 4 MB: save it smaller. (Photos are reduced by themselves.)", false);
+    const type = file.type || "application/octet-stream";
+    if (!(type === "application/pdf" || type.startsWith("image/"))) return back(id, "Only photos or PDFs.", false);
+  }
   const expires = day(formData.get("expires_on"));
   if (k.warnDays && !expires) return back(id, `Type the ${k.label} expiry date.`, false);
   const admin = createAdminClient();
-  const path = `${id}/${kind}/${randomUUID()}`;
-  const up = await admin.storage.from(HR_BUCKET).upload(path, Buffer.from(await file.arrayBuffer()), { contentType: type, upsert: false });
-  if (up.error) return back(id, "Couldn't save the file – nothing was recorded. Try again.", false);
+  const paths: { path: string; file: File }[] = [];
+  for (const file of files) {
+    const path = `${id}/${kind}/${randomUUID()}`;
+    const up = await admin.storage.from(HR_BUCKET).upload(path, Buffer.from(await file.arrayBuffer()), { contentType: file.type || "application/octet-stream", upsert: false });
+    if (up.error) return back(id, "Couldn't save the file – nothing was recorded. Try again.", false);
+    paths.push({ path, file });
+  }
   const now = new Date().toISOString();
-  await admin.from("hr_documents").update({ replaced_at: now, updated_by: by.id }).eq("person_id", id).eq("kind", kind).eq("is_active", true).is("replaced_at", null);
-  const { data, error } = await admin.from("hr_documents").insert({ person_id: id, kind, doc_number: k.numbered ? text(formData.get("doc_number"), 40) : null, expires_on: expires, storage_path: path, file_name: file.name.slice(0, 120), content_type: type, created_by: by.id, updated_by: by.id }).select("id").single();
+  // Replacing keeps the old files (marked replaced, listed under "Replaced documents"). An "Other document" never replaces another.
+  if (!other) await admin.from("hr_documents").update({ replaced_at: now, updated_by: by.id }).eq("person_id", id).eq("kind", kind).eq("is_active", true).is("replaced_at", null);
+  const number = k.numbered ? text(formData.get("doc_number"), 40) : null;
+  const rows = paths.map(({ path, file }) => ({ person_id: id, kind, doc_number: number, expires_on: expires, storage_path: path, file_name: file.name.slice(0, 120), content_type: file.type || "application/octet-stream", created_by: by.id, updated_by: by.id, ...(other ? { other_label: k.label } : {}) }));
+  const { data, error } = await admin.from("hr_documents").insert(rows).select("id");
   if (error) return back(id, dbWords(error, "hr/upload"), false);
-  await logHr(by.id, "uploaded", { personId: id, documentId: data.id as string, detail: `${k.label}${expires ? ` · expires ${expires}` : ""}` });
+  await logHr(by.id, "uploaded", { personId: id, documentId: (data?.[0]?.id as string | undefined) ?? null, detail: `${k.label}${files.length > 1 ? ` · ${files.length} files` : ""}${expires ? ` · expires ${expires}` : ""}` });
   revalidatePath(`/team/hr/${id}`);
-  return back(id, `${k.label} saved.`, true);
+  return back(id, `${k.label} saved${files.length > 1 ? ` (${files.length} files)` : ""}.`, true);
 }
 
 /** Tapping a masked number shows it; the tap is logged. */

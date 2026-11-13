@@ -4797,10 +4797,11 @@ await section("e15", "HR: people, documents, reminders, access", async () => {
   if (!hadKey) check("h1: without a phone sign-in HR asks for one first", (await op.locator('[data-hr-gate="passkey"]').count()) === 1);
   await sql("insert into public.staff_passkeys (staff_id, credential_id, public_key, name) values ($1, $2, 'e2e', 'E2E HR key')", [owner, `e2e-hr-${Date.now()}`]);
   await go(op, `${base}/team/hr`);
-  check("h1: HR opens for the owner with a phone sign-in", (await op.locator("[data-hr-list]").count()) === 1 && (await op.locator('a[href="/team/hr"]').count()) >= 1);
+  check("h1: HR opens for the owner with a phone sign-in", (await op.locator("[data-hr-board]").count()) === 1 && (await op.locator('a[href="/team/hr"]').count()) >= 1);
   check("h1: everyone on the Team page is listed", (await op.locator("[data-hr-row]").count()) >= 3);
   // A person with no ERP login.
   await op.locator("[data-hr-add-name]").fill("E2E HR Cleaner");
+  await op.locator("[data-hr-add-role]").selectOption("Cleaner");
   await op.locator("[data-hr-add-save]").click();
   await op.waitForURL(/\/team\/hr\/[0-9a-f-]{36}/, { timeout: 15000 });
   const pid = op.url().match(/hr\/([0-9a-f-]{36})/)[1];
@@ -4808,12 +4809,15 @@ await section("e15", "HR: people, documents, reminders, access", async () => {
   // A passport expiring in 20 days.
   const exp = new Date(Date.now() + 4 * 3600000 + 20 * 86400000).toISOString().slice(0, 10);
   const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64");
-  const form = op.locator("[data-hr-upload]");
-  await form.locator('select[name="kind"]').selectOption("passport");
-  await form.locator('input[name="doc_number"]').fill("N1234567");
-  await form.locator('input[name="expires_on"]').fill(exp);
-  await form.locator("[data-hr-file]").setInputFiles({ name: "passport.png", mimeType: "image/png", buffer: png });
-  await form.locator("[data-hr-upload-save]").click();
+  // Since 13 November (Section 13): the passport row's "Attach" opens the window (Choose file, preview, number, expiry).
+  await op.locator('[data-hr-doc="passport"] [data-hr-attach="passport"]').click();
+  const win = op.locator('[data-hr-attach-window="passport"]');
+  await win.locator("[data-hr-file-input]").setInputFiles({ name: "passport.png", mimeType: "image/png", buffer: png });
+  await win.locator("[data-hr-preview]").first().waitFor({ timeout: 10000 }).catch(() => null);
+  await win.locator("[data-hr-number-input]").fill("N1234567");
+  await win.locator("[data-hr-expiry-input]").fill(exp);
+  await win.locator("[data-hr-attach-save]").click();
+  await op.locator('[data-hr-doc="passport"][data-hr-doc-state="have"]').waitFor({ timeout: 20000 }).catch(() => null);
   await op.locator('[data-hr-doc="passport"]').waitFor({ timeout: 20000 }).catch(() => null);
   const docRow = op.locator('[data-hr-doc="passport"]');
   check("h3: the passport is saved with its expiry (amber: 20 days)", (await docRow.count()) === 1 && (await docRow.locator('[data-hr-expiry="amber"]').count()) === 1);

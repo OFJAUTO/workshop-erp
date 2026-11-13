@@ -201,7 +201,8 @@
     "test:s13-9": "node --env-file=.env.test.local tests/browser/test-s13-9-zoho-tab.mjs",
     "test:s13-10": "node --env-file=.env.test.local tests/browser/test-s13-10-labels.mjs",
     "test:s13-11": "node --env-file=.env.test.local tests/browser/test-s13-11-warranty-details.mjs",
-    "test:s13-12": "node --env-file=.env.test.local tests/browser/test-s13-12-team-form.mjs"
+    "test:s13-12": "node --env-file=.env.test.local tests/browser/test-s13-12-team-form.mjs",
+    "test:s13-13": "node --env-file=.env.test.local tests/browser/test-s13-13-hr.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

@@ -5,12 +5,12 @@
 export type HrDocKind = "photo" | "emirates_id" | "passport" | "visa" | "labour_card" | "health_insurance" | "driving_licence";
 
 export const HR_DOC_KINDS: { kind: HrDocKind; label: string; warnDays: number | null; numbered: boolean }[] = [
-  { kind: "photo", label: "Photo", warnDays: null, numbered: false },
+  { kind: "photo", label: "Personal photo", warnDays: null, numbered: false },
   { kind: "emirates_id", label: "Emirates ID", warnDays: 30, numbered: true },
   { kind: "passport", label: "Passport", warnDays: 60, numbered: true },
   { kind: "visa", label: "Visa", warnDays: 60, numbered: true },
   { kind: "labour_card", label: "Labour card", warnDays: 30, numbered: true },
-  { kind: "health_insurance", label: "Health insurance", warnDays: 30, numbered: true },
+  { kind: "health_insurance", label: "Health insurance card", warnDays: 30, numbered: true },
   { kind: "driving_licence", label: "Driving licence", warnDays: 30, numbered: true },
 ];
 
@@ -75,3 +75,41 @@ export function hrFileName(kindLabel: string, person: string, original: string |
   const clean = (t: string) => t.replace(/[^\w .-]+/g, " ").replace(/\s+/g, " ").trim();
   return `${clean(kindLabel).toUpperCase()} - ${clean(person).toUpperCase()}${ext.toLowerCase()}`;
 }
+
+/* ---------------- The HR list (13 November 2026, Section 13) ---------------- */
+/** One person's documents as the list reads them: kind and expiry of each current document. */
+export type HrDocBrief = { kind: string; expires_on: string | null };
+export type HrStatus = { tone: "red" | "amber" | "grey" | "green"; words: string; have: number; total: number; missing: number; expired: number; expiringSoon: number };
+
+/** The ONE status line of a person: red (something expired), amber (the soonest expiry within its warning), grey (missing), green. */
+export function hrStatusOf(docs: HrDocBrief[], today: string): HrStatus {
+  const total = HR_DOC_KINDS.length;
+  const kinds = new Set(docs.map((d) => d.kind).filter((k) => kindOf(k)));
+  const have = kinds.size;
+  const missing = total - have;
+  const label = (k: string) => kindOf(k)?.label ?? k;
+  const dated = docs.filter((d) => kindOf(d.kind)?.warnDays && d.expires_on).map((d) => ({ ...d, left: daysLeft(d.expires_on as string, today), stage: reminderStage(d.kind, d.expires_on, today) }));
+  const expired = dated.filter((d) => d.left < 0 || d.stage === 0).sort((a, b) => a.left - b.left);
+  const soon = dated.filter((d) => d.stage !== null && d.stage !== 0).sort((a, b) => a.left - b.left);
+  const base = { have, total, missing, expired: expired.length, expiringSoon: soon.length };
+  if (expired.length) return { ...base, tone: "red", words: expired.length === 1 ? `${label(expired[0].kind)} expired` : `${label(expired[0].kind)} and ${expired.length - 1} more expired` };
+  if (soon.length) return { ...base, tone: "amber", words: `${label(soon[0].kind)} expires ${soon[0].left === 0 ? "today" : `in ${soon[0].left} day${soon[0].left === 1 ? "" : "s"}`}` };
+  if (missing) return { ...base, tone: "grey", words: `${missing} document${missing === 1 ? "" : "s"} missing` };
+  return { ...base, tone: "green", words: "All documents valid" };
+}
+
+/** Expiring within 60 days (not yet expired), for the "Expiring in 60 days" tile. */
+export function expiresWithin(docs: HrDocBrief[], today: string, days = 60): boolean {
+  return docs.some((d) => kindOf(d.kind)?.warnDays && d.expires_on && daysLeft(d.expires_on, today) >= 0 && daysLeft(d.expires_on, today) <= days);
+}
+
+/** Needs attention first: red, amber, grey, green; then by name. */
+export const HR_TONE_RANK: Record<HrStatus["tone"], number> = { red: 0, amber: 1, grey: 2, green: 3 };
+
+/** Office boys, cleaners, drivers and the like: their own group on the list. */
+export function isSupportRole(roleTitle: string | null | undefined): boolean {
+  return /office ?boy|cleaner|cleaning|driver|tea ?boy|messenger|support|watchman|security/i.test(roleTitle ?? "");
+}
+
+/** The roles offered to a person with no ERP login (the same list as the Team form, plus the support roles). */
+export const NO_LOGIN_ROLES = ["Technician", "Team leader", "Workshop manager", "Bodyshop manager", "Service advisor", "Accounts", "Parts", "Gate-in", "QC inspector", "Office boy", "Cleaner", "Driver"];
