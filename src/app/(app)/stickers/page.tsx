@@ -138,12 +138,19 @@ async function WarrantyStickers({ q, isOwner, stored }: { q: string; isOwner: bo
     if (/tint/.test(k)) return /tint/.test(w);
     return label.toLowerCase().split(/\s+/).some((x) => x.length > 3 && w.includes(x));
   };
+  // 13 November 2026 (Section 11): entered once - the batch typed for the warranty card fills the label's BATCH box.
+  const { data: we } = cars.length ? await admin.from("warranty_entries").select("job_id, product, roll_batch").in("job_id", cars.map((c) => c.id)).eq("is_active", true) : { data: [] };
+  const batchOf = (jobId: string, key: string, label: string) => {
+    const k = `${key} ${label}`.toLowerCase();
+    const product = /ppf|protection film/.test(k) ? "ppf" : /tint/.test(k) ? "tint" : null;
+    return product ? ((we ?? []) as { job_id: string; product: string; roll_batch: string | null }[]).find((e) => e.job_id === jobId && e.product === product && e.roll_batch)?.roll_batch ?? "" : "";
+  };
   const group = (c: { id: string }, t: { key: string; label: string; batch?: boolean }) => t.batch ? (
     <form key={t.key} method="get" action={`/print/warranty-sticker/${c.id}`} target="_blank" className="flex min-h-12 flex-wrap items-center gap-2 rounded-control border border-line px-3 py-1.5" data-label-group={t.key}>
       <input type="hidden" name="type" value={t.key} />
       <span className="min-w-0 flex-1 text-sm font-bold">{t.label}</span>
       <label className="flex items-center gap-1.5 text-xs font-semibold text-muted">batch
-        <input name="batch" required placeholder="___" className="min-h-11 w-24 rounded-control border border-line-strong bg-white px-2 text-sm uppercase text-ink" data-warranty-batch={t.key} autoComplete="off" />
+        <input name="batch" required placeholder="___" defaultValue={batchOf(c.id, t.key, t.label)} className="min-h-11 w-24 rounded-control border border-line-strong bg-white px-2 text-sm uppercase text-ink" data-warranty-batch={t.key} autoComplete="off" />
       </label>
       <Button type="submit" tone="secondary" data-warranty-print={t.key}>Print label</Button>
     </form>

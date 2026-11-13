@@ -41,6 +41,14 @@ async function saveRows(jobId: string, rows: WarrantyRow[], formData: FormData, 
     const areas = Array.from(new Set([...formData.getAll(fieldOf(r, "areas")).map(String), ...typed]));
     await saveWarrantyEntry(jobId, { product: r.product, itemKey: r.itemKey, rollBatch: String(formData.get(fieldOf(r, "roll")) ?? ""), productName: r.product === "ceramic" ? String(formData.get(fieldOf(r, "product")) ?? "") : null, areas: r.product === "ppf" ? areas : [] }, actor, stageId);
     saved++;
+    // Metres used (optional, 13 November 2026): the film cost of the job, from the first roll picked.
+    const metres = Number(String(formData.get(fieldOf(r, "metres")) ?? "").replace(",", "."));
+    if (r.product === "ppf" && metres > 0) {
+      const { rollsWithUse, recordFilmUsage } = await import("@/lib/film");
+      const first = String(formData.get(fieldOf(r, "roll")) ?? "").split(",")[0]?.trim().toLowerCase();
+      const roll = (await rollsWithUse("film")).find((x) => x.name.trim().toLowerCase() === first);
+      if (roll) await recordFilmUsage(jobId, roll.id, metres, null, actor.id).catch(() => null);
+    }
   }
   // A ceramic product typed by hand becomes a one-tap chip next time.
   const names = rows.filter((r) => r.product === "ceramic").map((r) => String(formData.get(fieldOf(r, "product")) ?? "").trim()).filter(Boolean);

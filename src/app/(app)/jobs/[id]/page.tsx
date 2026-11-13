@@ -37,7 +37,7 @@ import { AftercareMessage, AftercareSignoff } from "./AftercareCard";
 import { signOffAftercare } from "../aftercare-actions";
 import { activateWarrantyByHand } from "../warranty-card-actions";
 import { WarrantyCardSend } from "./WarrantyCardSend";
-import { ensureWarrantyToken, warrantyCardOf } from "@/lib/warranty-data";
+import { ensureWarrantyToken, rowMissing, warrantyCardOf } from "@/lib/warranty-data";
 import { daysBetween, dubaiDay } from "@/lib/warranty";
 import { STAGE_BOX_CARD, STAGE_BOX_TITLE, stageStates, type StageBoxState } from "@/lib/stage-style";
 import { washStateNow } from "@/lib/wash-state";
@@ -609,7 +609,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       />
       {(role === "service_advisor" || role === "owner") && !staff.viewingAs && job.is_open ? (
         <div className="-mt-3 flex flex-wrap items-center gap-2 text-xs" data-advisor-control>
-          <span className="font-semibold text-muted">Advisor in charge: {inChargeName ?? "not set"}</span>
+          {inChargeName ? <span className="font-semibold text-muted">Advisor in charge: {inChargeName}</span> : <span className="font-bold text-red" data-advisor-missing>Advisor in charge: not set – the car cannot be assigned until it is set</span>}
           <details className="relative">
             <summary className="inline-flex min-h-8 cursor-pointer items-center rounded-control px-1 text-xs font-bold text-muted underline underline-offset-4" data-advisor-change>{inChargeName ? "change" : "set advisor"}</summary>
             <div className="absolute left-0 z-30 mt-1 w-72 rounded-card border border-line bg-white p-3 shadow-xl flex flex-col gap-2">
@@ -657,7 +657,13 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           </div>
           <p className="text-sm">{wCard.rows.map((r) => `${r.name}: ${r.coverage} (${r.period})`).join(" · ")}</p>
           {staffFinalCheckWords(wCard.status) ? <p className={`text-sm font-bold ${wCard.status.checkDate ? "text-green-text" : "text-red"}`} data-final-check-staff>{staffFinalCheckWords(wCard.status)}</p> : null}
-          {wCard.missing.length ? <p className="text-xs font-semibold text-red">Details still missing: {wCard.missing.join(", ")} (bodyshop page).</p> : null}
+          {/* 13 November 2026 (Section 11): each missing detail names who it is waiting on, with Enter now for anyone allowed. */}
+          {wCard.rows.filter((r) => rowMissing(r).length).map((r) => (
+            <p key={`${r.product}:${r.itemKey}`} className="flex flex-wrap items-center gap-2 text-xs font-semibold text-red" data-warranty-waiting={r.product}>
+              <span>{r.name}: {rowMissing(r).join(", ")} missing · waiting on the {r.product === "ceramic" ? "detailing leader" : "PPF and tint leader"}</span>
+              {!staff.viewingAs && (role === "owner" || role === "team_leader" || role === "workshop_manager") ? <a href={`/bodyshop/${id}#stages`} className="inline-flex min-h-9 items-center rounded-control border border-red-bar bg-white px-2 font-bold" data-warranty-enter-now>Enter now</a> : null}
+            </p>
+          ))}
           {wMessage && (role === "owner" || role === "service_advisor") && !staff.viewingAs ? (
             <WarrantyCardSend jobId={id} message={wMessage} phoneDigits={(card.customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={wCard.sentAt} />
           ) : !job.gated_out_at ? (

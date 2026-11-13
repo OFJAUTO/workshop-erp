@@ -76,7 +76,7 @@ export function daysBetween(fromDay: string, toDay: string): number {
 }
 
 /** The form field names of one product's details (shared by the stage form, the details card and the server action). */
-export const fieldOf = (r: { product: string; itemKey: string }, what: "roll" | "product" | "areas" | "area_other") => `w:${r.product}:${r.itemKey}:${what}`;
+export const fieldOf = (r: { product: string; itemKey: string }, what: "roll" | "product" | "areas" | "area_other" | "metres") => `w:${r.product}:${r.itemKey}:${what}`;
 
 /** The PPF areas the team leader ticks at the end of the PPF stage. */
 export const PPF_AREAS = ["Full body", "Full front", "Bonnet", "Front bumper", "Front wings", "Mirrors", "Headlights", "A-pillars", "Roof", "Door edges", "Door cups", "Rocker panels", "Rear bumper", "Boot lid", "Interior screens & trims"] as const;

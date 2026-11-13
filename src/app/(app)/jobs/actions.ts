@@ -1,4 +1,5 @@
 "use server";
+import { advisorInChargeOf, NO_ADVISOR_WORDS } from "@/lib/job-advisor";
 import { dbWords } from "@/lib/app-errors";
 
 import { redirect } from "next/navigation";
@@ -93,9 +94,10 @@ export async function assignJob(jobId: string, formData: FormData) {
   const staff = await requirePermission("assignJobs");
   const technicianIds = formData.getAll("technician").map(String).filter(Boolean);
   const supabase = await createClient();
-  const { data: job } = await supabase.from("jobs").select("id, status, assigned_to, is_open, first_approval_at, department").eq("id", jobId).maybeSingle();
+  const { data: job } = await supabase.from("jobs").select("id, status, assigned_to, is_open, first_approval_at, department, advisor_id, gated_in_by").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) redirect(`/jobs/${jobId}?error=` + encodeURIComponent("This job is closed."));
   const back = String(formData.get("back") ?? "") === "/assign" ? "/assign" : `/jobs/${jobId}`;
+  if (!(await advisorInChargeOf(job))) redirect(`${back}?error=` + encodeURIComponent(NO_ADVISOR_WORDS));
   // Server-enforced sides (section 6): a manager assigns his own side's work only; the owner assigns anything.
   const mySide = staff.role_id === "owner" ? null : sideOfDepartment(staff.department_id);
   if (mySide && !jobConcernsSide(job.department, mySide)) redirect(`${back}?error=` + encodeURIComponent("This car belongs to the other side: its own manager assigns it."));

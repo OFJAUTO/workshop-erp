@@ -91,12 +91,12 @@ await go(dp, `${base}/bodyshop/${jobId}#stages`);
 const cform = dp.locator('[data-stage-warranty-form="detail"]');
 check("2: the final detail asks for the ceramic product and batch", (await cform.count()) === 1 && (await cform.locator("[data-warranty-product]").count()) === 1);
 await cform.locator("[data-warranty-product]").pressSequentially("E2e Ceramic Pro 9H");
-await cform.locator("[data-warranty-roll]").pressSequentially("CB-2219");
+// Since 9 November a ceramic coating carries no batch (the batch is for PPF and tint only).
 await cform.locator('[data-stage-warranty-save="detail"]').click();
 await submitted(dp);
 await handOver(dp, "detail", "1234");
 const cer = (await sql("select product_name, roll_batch from public.warranty_entries where job_id = $1 and product = 'ceramic' and is_active", [jobId]))[0];
-check("2: the ceramic product and batch are kept, the product becomes a one-tap chip", cer?.product_name === "E2e Ceramic Pro 9H" && cer?.roll_batch === "CB-2219" && JSON.stringify((await sql("select value from public.settings where key = 'ceramic_products_used'"))[0]?.value ?? []).includes("E2e Ceramic Pro 9H"), JSON.stringify(cer ?? {}));
+check("2: the ceramic product is kept (no batch since 9 Nov), the product becomes a one-tap chip", cer?.product_name === "E2e Ceramic Pro 9H" && !cer?.roll_batch && JSON.stringify((await sql("select value from public.settings where key = 'ceramic_products_used'"))[0]?.value ?? []).includes("E2e Ceramic Pro 9H"), JSON.stringify(cer ?? {}));
 await db.close();
 
 /* ---------------- 3. QC: "Warranty details complete" before Ready ---------------- */
@@ -118,7 +118,7 @@ const pf = (await sql("select id, token from public.invoices where job_id = $1 a
 if (!pf?.token) { console.error("no proforma"); process.exit(1); }
 await sql("update public.invoices set kind = 'tax_invoice', number = 'INV-E2E-' || left(id::text, 8) where id = $1", [pf.id]);
 const before = await pdfOf(`/api/pdf/invoice/${pf.token}`);
-check("4: the tax invoice has the WARRANTY table per product (product, coverage, roll/batch, cutting, darkness, period)", /WARRANTY/.test(before.text) && /OFJ Bespoke PPF – Gloss/i.test(before.text) && /E2E-PPF-0042/.test(before.text) && /Hand-cut/i.test(before.text) && !/Bespoke hand-cut/i.test(before.text) && /E2E-TINT-007/.test(before.text) && /sides & rear 50% darkness/i.test(before.text) && /E2e Ceramic Pro 9H/i.test(before.text) && /CB-2219/.test(before.text), before.text.match(/WARRANTY.{0,300}/)?.[0] ?? String(before.status));
+check("4: the tax invoice has the WARRANTY table per product (product, coverage, roll/batch, cutting, darkness, period)", /WARRANTY/.test(before.text) && /OFJ Bespoke PPF – Gloss/i.test(before.text) && /E2E-PPF-0042/.test(before.text) && /Hand-cut/i.test(before.text) && !/Bespoke hand-cut/i.test(before.text) && /E2E-TINT-007/.test(before.text) && /sides & rear 50% darkness/i.test(before.text) && /E2e Ceramic Pro 9H/i.test(before.text) && !/CB-2219/.test(before.text), before.text.match(/WARRANTY.{0,300}/)?.[0] ?? String(before.status));
 check("4: before the handover the dates start on the handover day", /Starts on the handover day/i.test(before.text) && /From handover/i.test(before.text));
 check("4: the framed panel: YOUR OFJ WARRANTY, 'Scan to view and verify your warranty', VIN and plate", /YOUR OFJ WARRANTY/.test(before.text) && /Scan to view and verify your warranty/.test(before.text) && /VIN WDC/i.test(before.text));
 const wToken = (await sql("select warranty_token from public.jobs where id = $1", [jobId]))[0]?.warranty_token;

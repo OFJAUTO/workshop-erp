@@ -80,3 +80,17 @@ export async function fillMissingAdvisor(jobId: string): Promise<string | null> 
   await admin.from("job_events").insert({ job_id: jobId, event_type: "advisor_set", note: "Advisor set from the quotation or estimate (the job had none)", created_by: pick });
   return pick;
 }
+
+/**
+ * THE ADVISOR IN CHARGE (13 November 2026, Section 11): `jobs.advisor_id`, else the person who gated the car in when
+ * that person is an active advisor or the owner. Null = "Advisor in charge: not set", and then the job cannot go past
+ * approval (assigning the inspection or the work is refused until someone sets it on the job card).
+ */
+export async function advisorInChargeOf(job: { advisor_id?: string | null; gated_in_by?: string | null }): Promise<string | null> {
+  const id = job.advisor_id ?? job.gated_in_by ?? null;
+  if (!id) return null;
+  const { data } = await createAdminClient().from("staff").select("id").eq("id", id).in("role_id", ["service_advisor", "owner"]).eq("is_active", true).maybeSingle();
+  return data?.id ?? null;
+}
+
+export const NO_ADVISOR_WORDS = "Advisor in charge is not set: set it at the top of the job card first (the car's updates go to that person).";

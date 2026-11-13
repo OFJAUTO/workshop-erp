@@ -59,6 +59,10 @@ export function WarrantyFields({ row, rolls = [], products = [], disabled = fals
           </span>
           {areas.filter((a) => (PPF_AREAS as readonly string[]).includes(a)).map((a) => <input key={a} type="hidden" name={fieldOf(row, "areas")} value={a} />)}
           <Input name={fieldOf(row, "area_other")} defaultValue={extra.join(", ")} disabled={disabled} placeholder="Other areas (optional)" textCase="sentence" />
+          {/* 13 November 2026 (Section 11): metres used (optional) - it feeds the film cost of this job's profit. */}
+          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Metres of film used (optional)
+            <Input name={fieldOf(row, "metres")} inputMode="decimal" disabled={disabled} placeholder="e.g. 12.5" className="w-40" data-warranty-metres={`${row.product}:${row.itemKey}`} />
+          </label>
         </div>
       ) : null}
     </div>
