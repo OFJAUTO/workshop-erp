@@ -80,6 +80,8 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "lathe_unmatched", label: "A lathe bill has lines with no ticket: find the car each was for (Parts)", locked: true },
   { type: "batch_missing", label: "A PPF or tint batch number is missing, so the warranty certificate waits (bodyshop manager, advisor)", locked: true },
   { type: "qty_reduced", label: "Fewer parts used than the customer approved: reduce the price (or an advance/refund is due)", locked: true },
+  { type: "ready_to_send", label: "An estimate or quotation of yours is ready to send for 2 days" },
+  { type: "ready_to_send_count", label: "Evening count: estimates and quotations ready to send for 2+ days (owner)" },
   { type: "fix_reminder", label: "Someone needs you to fix something on a car (Remind on a warning)", locked: true },
   { type: "pin_locked", label: "A PIN tile was locked after too many wrong PINs (owner)", locked: true },
   { type: "back_order", label: "Back orders: a part fitted on a later visit (asked, approved, part arrived - book the customer)", locked: true },

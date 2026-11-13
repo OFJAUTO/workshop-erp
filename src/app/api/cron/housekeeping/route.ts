@@ -655,6 +655,13 @@ async function runHousekeeping(): Promise<Record<string, number>> {
     } catch {
       report.lpoNudges = -1;
     }
+    // 13 November 2026 (Section 6): ready to send for 2 days reminds the advisor; the owner's evening count.
+    try {
+      const { readyToSendHourly } = await import("@/lib/ready-reminders");
+      report.readyToSend = await readyToSendHourly();
+    } catch {
+      report.readyToSend = -1;
+    }
     // 13 November 2026 (back orders): a back-ordered part that arrived, and a follow-up visit that is done.
     try {
       const { noticeBackOrderArrivals } = await import("@/lib/back-orders");

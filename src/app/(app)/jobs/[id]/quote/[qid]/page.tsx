@@ -1,3 +1,4 @@
+import { ReasonChips } from "@/components/ReasonChips";
 import { AddPartsHere, type OtherPart } from "@/components/AddPartsHere";
 import { FixIt } from "@/components/FixIt";
 import { remindToFix } from "@/app/(app)/jobs/fix-actions";
@@ -20,7 +21,7 @@ import { quoteLockOf } from "@/lib/quote-lock";
 import { VinCopy } from "@/components/VinCopy";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { redirect } from "next/navigation";
-import { Input,Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
+import { Input,Badge, Button, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { dubaiDate, workingTimeOf } from "@/lib/jobs";
@@ -70,11 +71,11 @@ import { QtyReduceCard } from "@/components/QtyReduceCard";
 export const dynamic = "force-dynamic";
 
 /** The quotation builder for a job. Only the owner and the job's advisor can open it; everyone else goes back to the job card. */
-export default async function QuotePage({ params, searchParams }: { params: Promise<{ id: string; qid: string }>; searchParams: Promise<{ message?: string; error?: string; send?: string; approve?: string; revise?: string; approval?: string }> }) {
+export default async function QuotePage({ params, searchParams }: { params: Promise<{ id: string; qid: string }>; searchParams: Promise<{ message?: string; error?: string; send?: string; approve?: string; revise?: string; approval?: string; decline?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
   const { id, qid } = await params;
-  const { message, error, send, approve, revise, approval } = await searchParams;
+  const { message, error, send, approve, revise, approval, decline } = await searchParams;
   const { data: declinedRow } = await createAdminClient().from("jobs").select("declined_out_at, is_open, inspection_fee_aed, inspection_fee_choice").eq("id", id).maybeSingle();
   const declinedOut = !!declinedRow?.declined_out_at;
   const jobOpen = declinedRow?.is_open !== false;
@@ -426,12 +427,12 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
           ) : null}
           {mayDeclineAll ? <div><DeclinedAllButton jobId={id} fee={Number(declinedRow?.inspection_fee_aed) || 0} isOwner={isOwner} oldWording={(await approvedFeeOf(id))?.oldWording && Number(declinedRow?.inspection_fee_aed) > 0 ? inclusiveSplit(Number(declinedRow?.inspection_fee_aed), 5) : null} /></div> : null}
           {canSend && ["sent", "opened", "expired"].includes(q.status) ? (
-            <details className="text-sm" data-mark-declined>
-              <summary className="cursor-pointer font-semibold underline underline-offset-4 min-h-11 flex items-center">Mark as declined</summary>
+            <details id="not-going-ahead" className="text-sm scroll-mt-4" open={decline === "1"} data-mark-declined>
+              <summary className="cursor-pointer font-semibold underline underline-offset-4 min-h-11 flex items-center">Not going ahead (customer declined)</summary>
               <form action={declineQuotation.bind(null, q.id)} className="mt-2 flex flex-col gap-2">
-                <p className="text-xs text-muted">The customer&apos;s page has no Declined button: after talking to the customer, mark it here.</p>
-                <Textarea name="reason" rows={1} placeholder="Reason (optional)" />
-                <div><Button type="submit" tone="secondary" size="md">Mark as declined</Button></div>
+                <p className="text-xs text-muted">The customer&apos;s page has no Declined button: after talking to the customer, mark it here with the reason. It moves to Closed.</p>
+                <ReasonChips name="reason" label="Why?" rows={1} required options={["Customer not interested", "Price too high", "Went elsewhere", "Will do it later", "Car sold"]} placeholder="Why is the customer not going ahead?" />
+                <div><Button type="submit" tone="secondary" size="md" data-not-going-save>Not going ahead</Button></div>
               </form>
             </details>
           ) : null}

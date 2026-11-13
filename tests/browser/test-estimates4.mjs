@@ -32,7 +32,8 @@ const rowOf = (n) => page.locator(`[data-estimate-row="${n}"]`);
 
 /* 1. Delete a draft */
 await rowOf(draft.number).locator("[data-estimate-dots]").click();
-check("1: a draft's menu offers Delete (and Copy), not Cancel", (await page.locator('[data-estimate-action="delete"]').count()) === 1 && (await page.locator('[data-estimate-action="cancel"]').count()) === 0);
+// 13 November 2026 (Section 6): a draft also offers "Not going ahead" (kept with the reason); Delete stays for one never sent.
+check("1: a draft's menu offers Delete (and Copy) and Not going ahead", (await page.locator('[data-estimate-action="delete"]').count()) === 1 && (await page.locator('[data-estimate-action="cancel"]').count()) === 1);
 await page.locator('[data-estimate-action="delete"]').click();
 check("1: Delete asks first in a centre window", /Delete .* never sent/.test(await text(page.locator('[data-estimate-dialog="delete"]'))));
 await page.screenshot({ path: shot("est4-1-delete-confirm.png") });
@@ -40,6 +41,7 @@ await page.locator("[data-estimate-confirm]").click();
 check("1: the draft is gone from the list (inactive, logged)", !!(await until(async () => ((await sql("select is_active from public.quotations where id = $1", [draft.id]))[0]?.is_active === false ? 1 : null))) && (await until(async () => ((await rowOf(draft.number).count()) === 0 ? 1 : null), 20, 500)) === 1);
 
 /* 2. Cancel a sent one with a reason */
+await go(page, `${base}/estimates?tab=sent&who=all`);
 await rowOf(sent.number).locator("[data-estimate-dots]").click();
 check("2: a sent estimate offers Cancel, never Delete", (await page.locator('[data-estimate-action="cancel"]').count()) === 1 && (await page.locator('[data-estimate-action="delete"]').count()) === 0);
 await page.locator('[data-estimate-action="cancel"]').click();
@@ -48,8 +50,11 @@ await page.screenshot({ path: shot("est4-2-cancel-reason.png") });
 await page.locator("[data-estimate-confirm]").click();
 const c = await until(async () => { const r = (await sql("select status, cancel_reason, is_active from public.quotations where id = $1", [sent.id]))[0]; return r?.status === "cancelled" ? r : null; });
 check("2: cancelled with the reason, kept (never deleted)", !!c && c.is_active && c.cancel_reason === `Replaced by ${old.number}`, JSON.stringify(c));
-await go(page, `${base}/estimates`);
-check("2: it moved to the folded 'Cancelled / expired' section", (await page.locator(`[data-estimates-closed] [data-estimate-row="${sent.number}"]`).count()) === 1 && (await page.locator("[data-estimates-closed]").getAttribute("open")) === null);
+// 13 November 2026 (Section 6): Closed sits behind a link, not on the open tabs.
+await go(page, `${base}/estimates?who=all`);
+const onOpen = await page.locator(`[data-estimate-row="${sent.number}"]`).count();
+await go(page, `${base}/estimates?tab=closed&who=all`);
+check("2: it moved to Closed (behind the link), off the open tabs", onOpen === 0 && (await page.locator(`[data-estimate-row="${sent.number}"][data-list-tab="closed"]`).count()) === 1);
 const { browser: cb, page: cp } = await browserFor("owner", { viewport: { width: 420, height: 800 } });
 await go(cp, `${base}/quote/${sent.token}`);
 check("2: the customer's link says it was withdrawn", /withdrawn/i.test(await text(cp.locator("main"))));
@@ -60,9 +65,8 @@ const { browser: xb, page: xp } = await browserFor("owner", { viewport: { width:
 await go(xp, `${base}/quote/${old.token}`);
 await xb.close();
 check("3: past 'valid until' without a reply, it is Expired", (await sql("select status from public.quotations where id = $1", [old.id]))[0]?.status === "expired");
-await go(page, `${base}/estimates`);
-await page.locator("[data-estimates-closed] summary").click();
-check("3: the expired one is under Cancelled / expired too", (await page.locator(`[data-estimates-closed] [data-estimate-row="${old.number}"]`).count()) === 1);
+await go(page, `${base}/estimates?tab=closed&who=all`);
+check("3: the expired one is under Closed too", (await page.locator(`[data-estimate-row="${old.number}"][data-list-tab="closed"]`).count()) === 1);
 await page.screenshot({ path: shot("est4-3-closed-section.png") });
 await rowOf(old.number).locator("[data-estimate-dots]").click();
 await page.locator('[data-estimate-action="extend"]').click();
@@ -103,7 +107,7 @@ await page.screenshot({ path: shot("est4-6-copy.png") });
 
 /* 6. An accepted estimate: Copy only */
 await sql("update public.quotations set status = 'approved', responded_at = now(), approver_name = 'E2e Customer' where id = $1", [newId]);
-await go(page, `${base}/estimates`);
+await go(page, `${base}/estimates?tab=approved&who=all`);
 await rowOf(copy.number).locator("[data-estimate-dots]").click();
 check("6: an accepted estimate offers Copy only (no Delete, no Cancel)", (await page.locator('[data-estimate-action="copy"]').count()) === 1 && (await page.locator('[data-estimate-action="delete"], [data-estimate-action="cancel"], [data-estimate-action="extend"]').count()) === 0);
 await browser.close();

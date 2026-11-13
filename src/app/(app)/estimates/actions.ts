@@ -137,8 +137,8 @@ export async function cancelEstimate(id: string, reason: string): Promise<{ erro
   if ("error" in r) return r;
   const { staff, q } = r;
   const why = String(reason ?? "").replace(/\s+/g, " ").trim().slice(0, 200);
-  if (why.length < 3) return { error: "Write why it is cancelled (for example: replaced by E-00011)." };
-  if (!["sent", "opened", "urgent_requested", "pending_owner", "expired", "declined"].includes(String(q.status))) return { error: q.status === "approved" ? "An accepted estimate became a job: it cannot be cancelled here." : "Only a sent estimate can be cancelled; one being prepared is deleted." };
+  if (why.length < 3) return { error: "Write why it is not going ahead (for example: price too high)." };
+  if (!["draft", "sent", "opened", "urgent_requested", "pending_owner", "expired", "declined"].includes(String(q.status))) return { error: q.status === "approved" ? "An accepted estimate became a job: it cannot be closed here." : "This estimate is already closed." };
   // Part 3 (4 November 2026): money on the estimate means the OWNER cancels it from the money card
   // (fee, then refund or customer credit through a credit note) — never a plain cancel.
   {
@@ -148,7 +148,7 @@ export async function cancelEstimate(id: string, reason: string): Promise<{ erro
   }
   const admin = createAdminClient();
   await admin.from("quotations").update({ status: "cancelled", cancelled_at: new Date().toISOString(), cancelled_by: staff.id, cancel_reason: why, updated_by: staff.id }).eq("id", id);
-  await logQuoteEvent(id, null, staff.id, "estimate_cancelled", `${q.number} cancelled by ${staff.display_name}: ${why}`);
+  await logQuoteEvent(id, null, staff.id, "estimate_cancelled", `${q.number} not going ahead (${staff.display_name}): ${why}`);
   revalidatePath("/estimates");
   return { ok: true };
 }

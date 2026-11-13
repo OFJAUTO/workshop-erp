@@ -57,6 +57,10 @@ async function seedStage(request: NextRequest) {
     const { data: o } = await admin.from("staff").select("id, display_name").eq("role_id", "owner").eq("is_active", true).limit(1).maybeSingle();
     return NextResponse.json(await createMainLpo(String(body.id), { id: String(o?.id), display_name: String(o?.display_name ?? "Owner") }));
   }
+  if (stage === "ready-reminders") {
+    const { readyToSendHourly } = await import("@/lib/ready-reminders");
+    return NextResponse.json({ told: await readyToSendHourly((body as { now?: number }).now ?? undefined) });
+  }
   if (stage === "lpo-nudge") {
     const { lpoApprovalNudges } = await import("@/lib/lpo-nudge");
     return NextResponse.json({ told: await lpoApprovalNudges({ force: true, now: (body as { now?: number }).now ?? undefined }) });

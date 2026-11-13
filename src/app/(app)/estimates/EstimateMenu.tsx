@@ -31,7 +31,8 @@ export function EstimateMenu({ id, number, status, neverSent, canManage }: { id:
   const [pending, start] = useTransition();
   if (!canManage) return null;
   const canDelete = status === "draft" && neverSent;
-  const canCancel = ["sent", "opened", "urgent_requested", "pending_owner", "expired", "declined"].includes(status);
+  // 13 November 2026 (Section 6): "Not going ahead" with a reason, also for one still being prepared (kept on record, never deleted).
+  const canCancel = ["draft", "sent", "opened", "urgent_requested", "pending_owner", "expired", "declined"].includes(status);
   const canExtend = ["expired", "sent", "opened"].includes(status);
   const close = () => setAnchor(null);
   const run = (fn: () => Promise<void>) => start(async () => { setError(null); await fn(); });
@@ -46,7 +47,7 @@ export function EstimateMenu({ id, number, status, neverSent, canManage }: { id:
           {canExtend ? <Item hook="extend" label={status === "expired" ? "Re-send / extend" : "Re-send (fresh validity)"} onClick={() => { close(); run(async () => { const r = await extendEstimate(id); if (r.error) setError(r.error); else setSend({ message: r.message ?? "", phone: r.phone ?? "", validUntil: r.validUntil ?? "" }); }); }} /> : null}
           {canManage ? <Item hook="send" label={neverSent ? "Send to customer…" : "Resend estimate…"} onClick={() => { close(); router.push(`/estimates/${id}?send=1`); }} /> : null}
           <Item hook="copy" label="Copy estimate" onClick={() => { close(); run(async () => { const r = await copyEstimate(id); if (r.error) setError(r.error); else router.push(`/estimates/${r.id}?message=${encodeURIComponent(`${r.number} copied from ${number}. The commission is not copied.`)}`); }); }} />
-          {canCancel ? <Item hook="cancel" label="Cancel…" red onClick={() => { close(); setReason(""); setDialog("cancel"); }} /> : null}
+          {canCancel ? <Item hook="cancel" label="Not going ahead…" red onClick={() => { close(); setReason(""); setDialog("cancel"); }} /> : null}
           {canDelete ? <Item hook="delete" label="Delete…" red onClick={() => { close(); setDialog("delete"); }} /> : null}
         </FloatingMenu>
       ) : null}
@@ -55,13 +56,13 @@ export function EstimateMenu({ id, number, status, neverSent, canManage }: { id:
       {dialog ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" onClick={() => setDialog(null)} data-estimate-dialog={dialog}>
           <div className="w-full max-w-md rounded-card bg-white p-5 flex flex-col gap-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-extrabold">{dialog === "delete" ? `Delete ${number}?` : `Cancel ${number}?`}</h2>
+            <h2 className="text-lg font-extrabold">{dialog === "delete" ? `Delete ${number}?` : `${number}: not going ahead?`}</h2>
             {dialog === "delete" ? (
               <p className="text-sm">It was never sent to the customer. It goes from the list for good.</p>
             ) : (
               <>
-                <p className="text-sm">The customer saw it, so it is kept under <b>Cancelled / expired</b>, never deleted. Their link says it was withdrawn.</p>
-                <ReasonChips name="cancel_reason" label="Why?" rows={1} options={["Replaced by a new estimate", "Customer not interested", "Prices changed", "Duplicate"]} onValue={setReason} placeholder="For example: replaced by E-00011" />
+                <p className="text-sm">It is kept under <b>Closed</b> with the reason, never deleted.{neverSent ? "" : " The customer's link says it was withdrawn."}</p>
+                <ReasonChips name="cancel_reason" label="Why?" rows={1} options={["Customer not interested", "Price too high", "Went elsewhere", "Replaced by a new estimate", "Duplicate"]} onValue={setReason} placeholder="For example: replaced by E-00011" />
               </>
             )}
             {error ? <p className="text-sm font-semibold text-red" data-estimate-error>{error}</p> : null}
@@ -79,7 +80,7 @@ export function EstimateMenu({ id, number, status, neverSent, canManage }: { id:
                 className="min-h-11 rounded-control bg-red-bar px-4 text-sm font-bold text-on-dark disabled:opacity-50"
                 data-estimate-confirm
               >
-                {dialog === "delete" ? "Delete" : "Cancel the estimate"}
+                {dialog === "delete" ? "Delete" : "Not going ahead"}
               </button>
             </div>
           </div>

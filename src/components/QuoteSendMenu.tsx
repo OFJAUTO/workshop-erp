@@ -18,6 +18,9 @@ export function QuoteSendMenu({ href, number }: { href: string; number: string }
           <button type="button" onClick={() => { setAnchor(null); router.push(`${href}?send=1`); }} className="block w-full min-h-11 px-3 text-left text-sm font-semibold hover:bg-canvas" data-quote-menu-send>
             Send or resend…
           </button>
+          <button type="button" onClick={() => { setAnchor(null); router.push(`${href}?decline=1#not-going-ahead`); }} className="block w-full min-h-11 px-3 text-left text-sm font-bold text-red hover:bg-canvas" data-quote-menu-not-going>
+            Not going ahead…
+          </button>
         </FloatingMenu>
       ) : null}
     </span>

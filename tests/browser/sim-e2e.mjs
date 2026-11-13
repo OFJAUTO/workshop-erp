@@ -690,7 +690,9 @@ await section("c", "declined, fee, gate-out", async () => {
     await go(page, `${base}/jobs/${jobId}/quote/${quotationId}`);
     await page.locator("[data-mark-declined] summary").click();
     await sleep(300);
-    await page.locator("[data-mark-declined]").getByRole("button", { name: "Mark as declined" }).click();
+    // 13 November 2026 (Section 6): "Not going ahead" always carries a reason.
+    await page.locator("[data-mark-declined] [name='reason']").fill("E2E: customer not interested");
+    await page.locator("[data-mark-declined]").getByRole("button", { name: "Not going ahead" }).click();
     await submitted(page);
     check("c2: the Declined card shows the ways forward — R5", (await page.locator("[data-declined-next]").count()) === 1);
     await page.locator("[data-add-charge] summary").click();

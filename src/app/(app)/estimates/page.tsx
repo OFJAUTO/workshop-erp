@@ -13,6 +13,8 @@ import { estimateMoneyMany } from "@/lib/estimate-money";
 import { EM_FILTERS } from "@/lib/estimate-money-rules";
 import { estimateMoneyReady } from "@/lib/schema-ready";
 import Link from "next/link";
+import { listLineFacts } from "@/lib/quote-list-data";
+import { readTab, readWho } from "@/lib/quote-list-rules";
 
 export const dynamic = "force-dynamic";
 
@@ -21,19 +23,23 @@ function olderThanDays(iso: string | null, days: number) {
   return !!iso && Date.now() - Date.parse(iso) > days * 86400000;
 }
 
-type Row = { id: string; number: string; version: number; status: QuoteStatus; cancel_reason: string | null; cancelled_at: string | null; total_aed: number; sent_at: string | null; opened_at: string | null; responded_at: string | null; valid_until: string | null; created_at: string; created_by: string | null; additional_to_id: string | null; carried_job_id: string | null; customer: { full_name: string; company_name: string | null } | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null; handed_back_at?: string | null; handed_back_by?: string | null; handback_kind?: HandbackKind | null; handback_summary?: string | null };
+type Row = { id: string; number: string; version: number; status: QuoteStatus; cancel_reason: string | null; cancelled_at: string | null; total_aed: number; sent_at: string | null; opened_at: string | null; responded_at: string | null; valid_until: string | null; created_at: string; updated_at: string | null; owner_approved_at: string | null; created_by: string | null; additional_to_id: string | null; carried_job_id: string | null; customer: { full_name: string; company_name: string | null } | null; vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null; handed_back_at?: string | null; handed_back_by?: string | null; handback_kind?: HandbackKind | null; handback_summary?: string | null };
 
 /**
  * Estimates before the car arrives. 1 November 2026 (E-00055): every advisor sees every estimate (their own first),
  * the advisor who STARTED one stays in charge whoever edits it, and the sections follow who it waits on.
  */
-export default async function EstimatesPage({ searchParams }: { searchParams: Promise<{ message?: string; money?: string }> }) {
+export default async function EstimatesPage({ searchParams }: { searchParams: Promise<{ message?: string; money?: string; tab?: string; who?: string; q?: string }> }) {
   const staff = await requirePermission("viewEstimates");
-  const { message, money: moneyFilter } = await searchParams;
+  const { message, money: moneyFilter, tab: tabParam, who: whoParam, q: qParam } = await searchParams;
+  const tab = readTab(tabParam);
+  const who = readWho(whoParam, staff.role_id);
+  // eslint-disable-next-line react-hooks/purity
+  const now = Date.now();
   const settings = await getSettings();
   const admin = createAdminClient();
   const ready = await handbackReady();
-  const { data } = await admin.from("quotations").select(`id, number, version, status, cancel_reason, cancelled_at, total_aed, sent_at, opened_at, responded_at, valid_until, created_at, created_by, additional_to_id, carried_job_id, customer:customers(full_name, company_name), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))${ready ? `, ${HANDBACK_SELECT}` : ""}`).eq("kind", "estimate").eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false });
+  const { data } = await admin.from("quotations").select(`id, number, version, status, cancel_reason, cancelled_at, total_aed, sent_at, opened_at, responded_at, valid_until, created_at, updated_at, owner_approved_at, created_by, additional_to_id, carried_job_id, customer:customers(full_name, company_name), vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin, make:vehicle_makes(name), model:vehicle_models(name))${ready ? `, ${HANDBACK_SELECT}` : ""}`).eq("kind", "estimate").eq("is_active", true).neq("status", "superseded").order("created_at", { ascending: false });
   const rows = (data ?? []) as unknown as Row[];
   // Section 1 (29 October 2026): every version of each estimate stays one tap away (old versions open read-only).
   const numbers = Array.from(new Set(rows.map((r) => r.number)));
@@ -55,8 +61,11 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
     const m = emMany.get(newestOfNumber.get(number) ?? "");
     return m ? { badge: m.badge.words, tone: m.badge.tone, words: m.paidWords, key: m.badge.key } : null;
   };
+  const facts = await listLineFacts(rows.map((r) => r.id));
   const list: QuoteListRow[] = rows.map((r) => {
     const lead = starters.get(r.number) ?? r.created_by;
+    const lf = facts.get(r.id) ?? { lineCount: 0, withDesk: 0 };
+    const hb = !!(r.handback_kind && handbackStands({ status: r.status, handed_back_at: r.handed_back_at }));
     return {
       id: r.id,
       number: r.number,
@@ -81,6 +90,9 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
       versionBase: "/estimates/",
       menu: <EstimateMenu id={r.id} number={r.number} status={r.status} neverSent={!r.sent_at} canManage={mayManage(lead)} />,
       money: moneyOf(r.number),
+      facts: { status: r.status, carried: !!r.carried_job_id, handback: hb, withDesk: lf.withDesk, lineCount: lf.lineCount, total: Number(r.total_aed) || 0, createdAt: r.created_at, sentAt: r.sent_at, respondedAt: r.responded_at, handedBackAt: r.handed_back_at ?? null, updatedAt: r.updated_at },
+      search: [r.vehicle?.vin, r.vehicle?.plate_number, r.vehicle?.plate_code, r.customer?.full_name, r.customer?.company_name],
+      ownerApprovedAt: r.owner_approved_at ?? (r.handback_kind ? (r.handed_back_at ?? null) : null),
     };
   });
   // The money filters (4 November 2026): Prepaid / Part paid / Proforma sent - unpaid, per estimate number.
@@ -109,7 +121,7 @@ export default async function EstimatesPage({ searchParams }: { searchParams: Pr
       ) : null}
       {rows.length === 0 ? <Empty title="No estimates yet" /> : null}
       {moneyFilter && shown.length === 0 && rows.length > 0 ? <Empty title="Nothing under this filter" /> : null}
-      <QuoteListSections rows={shown} me={staff.id} ownerName={owners?.[0]?.display_name ?? "the owner"} noun="estimate" acceptedWords="Accepted · waiting for the car" />
+      <QuoteListSections rows={shown} me={staff.id} ownerName={owners?.[0]?.display_name ?? "the owner"} noun="estimate" acceptedWords="Accepted · waiting for the car" tab={tab} who={who} q={qParam ?? ""} basePath="/estimates" now={now} keep={moneyFilter ? { money: moneyFilter } : {}} />
     </>
   );
 }

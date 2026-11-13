@@ -213,7 +213,8 @@
     "test:dead-links": "node --env-file=.env.test.local tests/browser/dead-links.mjs",
     "test:s3-tablets": "node --env-file=.env.test.local tests/browser/test-s3-tablets.mjs",
     "test:s4-fixes": "node --env-file=.env.test.local tests/browser/test-s4-fixes.mjs",
-    "test:s5-deskparts": "node --env-file=.env.test.local tests/browser/test-s5-deskparts.mjs"
+    "test:s5-deskparts": "node --env-file=.env.test.local tests/browser/test-s5-deskparts.mjs",
+    "test:s6-lists": "node --env-file=.env.test.local tests/browser/test-s6-lists.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

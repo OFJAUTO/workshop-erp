@@ -124,21 +124,21 @@ try {
   const mineC = await mk(C.id, "draft", [{ type: "labour", title: "E2E C OWN WORK", total: 700 }]);
   await mk(A.id, "draft", [{ type: "labour", title: "E2E A OTHER WORK", total: 700 }]);
   const advC = await browserForId(C.id, { viewport: { width: 800, height: 1280 } });
-  await go(advC.page, `${base}/estimates`);
+  await go(advC.page, `${base}/estimates?who=all`);
   check("C: another advisor sees the first advisor's estimates", (await advC.page.locator(`[data-estimate-row="${est1.number}"]`).count()) === 1 && (await advC.page.locator(`[data-estimate-row="${est2.number}"]`).count()) === 1);
-  const firstDraft = advC.page.locator('[data-estimates-section="draft"] [data-estimate-row]').first();
-  check("C: their own come first in a section", (await firstDraft.getAttribute("data-estimate-row")) === mineC.number && (await firstDraft.getAttribute("data-mine")) === "true");
+  // 13 November 2026 (Section 6): advisors open on Mine; All lists everyone's, oldest waiting first, each marked whose.
+  check("C: their own is marked as theirs", (await advC.page.locator(`[data-estimate-row="${mineC.number}"][data-mine="true"]`).count()) === 1);
   const otherRow = advC.page.locator(`[data-estimate-row="${est1.number}"]`);
   check("C: someone else's row says whose it is", (await otherRow.getAttribute("data-mine")) === "false" && (await text(otherRow.locator("[data-started-by]"))).includes(A.display_name));
   await otherRow.locator("[data-quote-list-open]").click();
   await advC.page.waitForURL((u) => u.pathname === `/estimates/${est1.id}`, { timeout: 30000 }).catch(() => {});
   check("C: the whole row opens it", new URL(advC.page.url()).pathname === `/estimates/${est1.id}`);
-  await go(advC.page, `${base}/estimates`);
+  await go(advC.page, `${base}/estimates?who=all`);
   await advC.page.screenshot({ path: shot("c1-other-advisor-list-800.png"), fullPage: true });
 
   /* ---------- D. the quotations list has the same sections ---------- */
   await go(advA.page, `${base}/quotes`);
-  check("D: the Quotations page opens with sections", (await advA.page.locator("[data-estimates-section], [data-estimates-closed]").count()) > 0 || (await advA.page.getByText("No quotations for the cars in the workshop").count()) === 1);
+  check("D: the Quotations page opens with the same tabs", (await advA.page.locator("[data-quote-tabs]").count()) > 0 || (await advA.page.getByText("No quotations for the cars in the workshop").count()) === 1);
   await advA.page.screenshot({ path: shot("d1-quotations-list.png") });
 
   /* ---------- E. the migration's backfill (inside a transaction that is rolled back) ---------- */

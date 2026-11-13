@@ -1006,10 +1006,12 @@ export async function declineQuotation(quotationId: string, formData: FormData) 
   if (!staff) redirect(`${back}?error=${encodeURIComponent("Only the job's advisor or the owner can mark it declined.")}`);
   if (!["sent", "opened", "expired"].includes(q.status)) redirect(`${back}?error=${encodeURIComponent("Only a sent quotation can be marked declined.")}`);
   const note = blankToNull(formData.get("reason"));
+  // 13 November 2026 (Section 6): "Not going ahead" always carries its reason.
+  if (!note || note.trim().length < 3) redirect(`${back}?decline=1&error=${encodeURIComponent("Write why the customer is not going ahead.")}#not-going-ahead`);
   const res = await applyCustomerResponse(q.id, { approve: false, name: staff.display_name, by: staff.id, via: "advisor", note });
   if (res.error) redirect(`${back}?error=${encodeURIComponent(res.error)}`);
   refresh(q.job_id, q.id);
-  redirect(`${back}?message=${encodeURIComponent("Marked as declined.")}`);
+  redirect(`${back}?message=${encodeURIComponent("Not going ahead: moved to Closed.")}`);
 }
 
 /** Back to editing after "Quotation complete". */

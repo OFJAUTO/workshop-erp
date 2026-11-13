@@ -224,12 +224,12 @@ await section("4-5 revise, declined, gate-out", async () => {
   check("4: ONE 'Revise → version 3' at the top next to Preview PDF (5 November 2026: no second one in the bottom bar), ONE resend in the header (13 Nov: no Send again in the bar)", (await page.locator("[data-revise-bar]").count()) === 1 && (await page.locator("[data-revise]").count()) === 1 && /Revise → version 3/.test((await page.locator("[data-revise]").textContent()) ?? "") && (await page.locator("button", { hasText: /Send again/ }).count()) === 0 && (await page.locator("[data-quote-send]").count()) === 1);
   check("4: the separate Revise box is gone", (await page.locator("button", { hasText: /^Start version/ }).count()) === 0);
   const det = page.locator("[data-mark-declined]");
-  check("4: 'Mark as declined' is a small link whose reason box only opens when tapped", (await det.count()) === 1 && !(await det.locator("textarea").isVisible()));
+  check("4: 'Mark as declined' is a small link whose reason box only opens when tapped", (await det.count()) === 1 && !(await det.locator("[name='reason']").isVisible()));
   const pad = await page.evaluate(() => parseInt(getComputedStyle(document.querySelector("main")).paddingBottom, 10));
   check("4: every page leaves room at the bottom for the fixed bar", pad >= 96, `padding-bottom ${pad}px`);
   await shot(page, "15-revise-in-bar");
   await det.locator("summary").click();
-  await det.locator("textarea[name='reason']").fill("E2e: customer said no");
+  await det.locator("[name='reason']").fill("E2e: customer said no");
   await det.locator("button[type='submit']").click();
   await afterSubmit(page);
   await until(async () => ((await page.locator("[data-declined-next]").count()) ? 1 : null), 30, 500);
