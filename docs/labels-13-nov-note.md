@@ -1,44 +1,62 @@
-# Labels (renamed) and the battery warranty label – 13 November 2026 (Section 10)
+# Section 2 – Labels: the gate-in 404 and the battery warranty label (13 November 2026, evening list)
 
-**Why the battery label page was blank** ("No stickers were asked for on this handover"):
-- Since the 18 October change (the technician receives parts on his own tablet), every handover saved an EMPTY label list.
-- The battery itself was recognised (its warranty was started), but the print page had nothing to print.
+## The gate-in 404: the cause
 
-**Live, read-only check:** battery handovers with no label (the empty list):
+The battery warranty label prints through the part handover's print page. That page let only the parts desk and the owner in, and answered everyone else with a bare **404**. Gate-in could open Labels, but every "battery warranty label" link failed.
 
-| Job | Battery brand | Fitted |
-|---|---|---|
-| J-01005 (2 batteries) | not entered | 12 Nov |
-| J-00317 | VARTA | 10 Nov |
-| J-00989 | not entered | 7 Nov |
-| J-00017 | not entered | 26 Oct |
-| J-00460 | not entered | 26 Oct |
+**Fixed:**
+- **Gate-in prints the battery warranty labels of a handover.** Only battery labels; part labels stay with the parts desk. Gate-in's print doesn't mark the handover's part labels as printed.
+- **Gate-in on Labels:** opens Labels (warranty labels and History) and prints warranty and service labels.
+- **The rename:** "Stickers" is now "Labels" everywhere:
+  - `/labels`, `/settings/labels`;
+  - `/print/labels/…`, `/print/warranty-label/…`, `/print/service-label/…`, `/print/label-test`;
+  - `/api/pdf/labels/…`.
+  - **Every old "stickers" address moves to the new one by itself.** Bookmarks and printed QR links keep working.
+- **A refused page never answers 404.** It says "You don't have access to this page. Ask the owner." This is now true on 15 pages that used to give a bare 404: the print pages, parts pages, QC, road test, supplier invoices and payments, pending charges.
 
-All of them print now with no data change: the label list is rebuilt from their battery warranty.
+## The dead-link check
 
-**Built (no database change):**
-- **Batteries:**
-  - Handing a battery to the technician always saves its warranty label, ready to print.
-  - The print page and its PDF share ONE label list (`src/lib/handover-labels.ts`) that rebuilds older handovers from their battery warranty.
-  - An empty print page offers "Print a battery warranty label" and the way back.
-- **One size for both large labels:** the battery warranty label uses the SAME size setting as the service label (50 × 100 mm), never the 50 × 25 part label.
-  - Printer setup shows the size per label type, each with a test print (part label, battery warranty label, service label).
-- **"Stickers" is now "Labels":**
-  - the menu, the page, the tabs (Part labels, Warranty labels, History, Printer setup), the buttons ("Print label") and the messages;
-  - the gate-in role gets Labels with Warranty labels and History only (assumption, as asked).
-- **The Warranty labels tab:**
-  - **Each label is its own box:** "Oil service – Print label", "PPF film – batch ___ – Print label", "Window tint – batch ___ – Print label". Batch is asked on PPF and tint only.
-  - **Only the labels that fit the car's work** (from its approved quotation lines: oil/service, PPF, tint, the owner's own types by their words) are offered; the rest sit behind "Other label (n)".
-  - **Battery rows** show the plate, the car and the battery brand.
+`tests/browser/dead-links.mjs` opens, for every role, every menu item and every link on those pages, one level deep:
+- **Roles:** owner, advisor, accounts, parts, workshop manager, technician, gate-in, QC, team leader.
+- **First run:** 256 pages. The only dead link was "Print today's labels" on Parts arrivals (404 when nothing was received that day). It now opens a plain page saying "No labels to print yet".
+- **After the fixes:** no 404 and no 500 anywhere.
 
-**Proof (TEST):**
-- `npm run test:s13-10` passes 8 of 8:
-  - the handover carries the battery label, and the print page shows it;
-  - an old handover with an empty list still prints;
-  - battery and service labels are the same size (not 50 × 25);
-  - Labels on the page and tabs;
-  - battery rows with plate, car and brand;
-  - a test print per label type;
-  - gate-in sees Warranty labels and History only.
-- Print previews side by side (same size): `docs/proof/2026-11-13-labels/s10-test-battery-1366.png` and `s10-test-service-1366.png`.
-- test-v: section 3 passes with the new wording. Section 2's part-sticker checks (40 × 30, "1 OF 2") have been stale since 5 November (50 × 25) and 9 November (the simple label). They are not from this change.
+## The battery warranty label (your real print: MAIN BATTERY, INSTALLED 12 NOV 2026)
+
+- **Pure black only:**
+  - the logo's greys print black (near-white becomes white);
+  - an uploaded logo is forced to black and white;
+  - the same applies to the service label's logo;
+  - the part label's logo was already pure black.
+- **"INSTALLED 12 NOV 2026"** and **"VALID UNTIL 12 NOV 2027"** are bold capitals inside the black band, as big as the band allows on one line. Under them: "12 MONTHS WARRANTY".
+- **The VIN is always on one line;** the text shrinks to fit.
+- **The OFJ logo is bigger** (11 mm high instead of 8 mm).
+- **No empty gap:** the parts sit together from the top, and the QR follows the dates.
+- **The QR is unchanged** (staff only).
+
+## Proof (TEST only)
+
+- `npm run test:s2-labels`: **13 of 13**, signed in as gate-in. It covers:
+  - the old address moves;
+  - the print links use the new addresses;
+  - battery and service labels print (no 404), battery labels only;
+  - black and white only (every colour on the label checked);
+  - the logo's fills only black or white;
+  - INSTALLED / VALID UNTIL in capitals;
+  - the VIN on one line;
+  - both date lines inside the band;
+  - the plain refusal.
+- Dead-link check: no dead links.
+- Layout checks clean for gate-in and parts at 800 × 1280 and 1440 × 900.
+- Screenshots: `docs/proof/2026-11-13-labels/`:
+  - `3-battery-label-print-preview.png` (the print preview, black and white);
+  - Labels for gate-in at 1280 and 800;
+  - the refusal page.
+
+## NEEDS OMAR: a real test print
+
+1. On the counter PC, open **Labels** (left menu) → **Warranty labels**.
+2. Pick a car with a battery and press its battery **Print** button. The label opens in a new tab.
+3. Press **Print**, and choose the **large label printer** (50 × 100 mm).
+4. Print one label. Send me a photo of it.
+   - Check that the dates are bold and readable, the VIN is on one line, and there's no grey.

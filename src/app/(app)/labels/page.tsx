@@ -10,7 +10,7 @@ import { warrantyTypesOf, writeExtraTypes } from "@/lib/sticker-types";
 import { stickerSettings } from "@/lib/stickers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatDate } from "@/lib/format";
-import { StickerSettingsBody } from "../settings/stickers/StickerSettingsBody";
+import { StickerSettingsBody } from "../settings/labels/StickerSettingsBody";
 import { saveWarrantyTypes } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -40,7 +40,7 @@ export default async function StickersPage({ searchParams }: { searchParams: Pro
   const q = (sp.q ?? "").trim();
   const settings = await getSettings();
   const ss = stickerSettings(settings);
-  const tabHref = (t: Tab) => `/stickers${t === "parts" ? "" : `?tab=${t}`}`;
+  const tabHref = (t: Tab) => `/labels${t === "parts" ? "" : `?tab=${t}`}`;
   return (
     <>
       <PageHeader title="Labels" subtitle={gateIn ? "Warranty labels and what was printed." : "Part labels, warranty labels, what was printed, and the printer setup."} />
@@ -78,10 +78,10 @@ async function PartStickers({ q, printer }: { q: string; printer: string }) {
   const parts = q ? await searchStickerParts(q) : await todaysArrivals();
   return (
     <Card className="flex flex-col gap-4" data-sticker-parts={q ? "search" : "today"}>
-      <form method="get" action="/stickers" className="flex flex-wrap gap-2">
+      <form method="get" action="/labels" className="flex flex-wrap gap-2">
         <input name="q" defaultValue={q} placeholder="Job number, plate, VIN or part name" className="min-h-12 min-w-0 flex-1 rounded-control border border-line-strong bg-white px-3 text-base" data-sticker-search data-spell="" autoComplete="off" />
         <Button type="submit">Find</Button>
-        {q ? <LinkButton href="/stickers" tone="secondary" data-sticker-today>Today&apos;s arrivals</LinkButton> : null}
+        {q ? <LinkButton href="/labels" tone="secondary" data-sticker-today>Today&apos;s arrivals</LinkButton> : null}
       </form>
       <SectionLabel right={`${parts.length}`}>{q ? `Parts for “${q}”` : "Today's arrivals"}</SectionLabel>
       {parts.length === 0 ? (
@@ -146,7 +146,7 @@ async function WarrantyStickers({ q, isOwner, stored }: { q: string; isOwner: bo
     return product ? ((we ?? []) as { job_id: string; product: string; roll_batch: string | null }[]).find((e) => e.job_id === jobId && e.product === product && e.roll_batch)?.roll_batch ?? "" : "";
   };
   const group = (c: { id: string }, t: { key: string; label: string; batch?: boolean }) => t.batch ? (
-    <form key={t.key} method="get" action={`/print/warranty-sticker/${c.id}`} target="_blank" className="flex min-h-12 flex-wrap items-center gap-2 rounded-control border border-line px-3 py-1.5" data-label-group={t.key}>
+    <form key={t.key} method="get" action={`/print/warranty-label/${c.id}`} target="_blank" className="flex min-h-12 flex-wrap items-center gap-2 rounded-control border border-line px-3 py-1.5" data-label-group={t.key}>
       <input type="hidden" name="type" value={t.key} />
       <span className="w-full text-sm font-bold">{t.label}</span>
       <label className="flex items-center gap-1.5 text-xs font-semibold text-muted">batch
@@ -157,13 +157,13 @@ async function WarrantyStickers({ q, isOwner, stored }: { q: string; isOwner: bo
   ) : (
     <div key={t.key} className="flex min-h-12 items-center gap-2 rounded-control border border-line px-3 py-1.5" data-label-group={t.key}>
       <span className="min-w-0 flex-1 text-sm font-bold">{t.label}</span>
-      <LinkButton href={`/print/warranty-sticker/${c.id}?type=${t.key}`} tone="secondary" target="_blank" data-warranty-print={t.key}>Print label</LinkButton>
+      <LinkButton href={`/print/warranty-label/${c.id}?type=${t.key}`} tone="secondary" target="_blank" data-warranty-print={t.key}>Print label</LinkButton>
     </div>
   );
   const serviceGroup = (c: { id: string }) => (
     <div key="service" className="flex min-h-12 items-center gap-2 rounded-control border border-line px-3 py-1.5" data-label-group="service">
       <span className="min-w-0 flex-1 text-sm font-bold">Oil service</span>
-      <LinkButton href={`/print/service-sticker/${c.id}?back=${encodeURIComponent("/stickers?tab=warranty")}`} tone="secondary" target="_blank" data-service-print={c.id}>Print label</LinkButton>
+      <LinkButton href={`/print/service-label/${c.id}?back=${encodeURIComponent("/labels?tab=warranty")}`} tone="secondary" target="_blank" data-service-print={c.id}>Print label</LinkButton>
     </div>
   );
   return (
@@ -179,7 +179,7 @@ async function WarrantyStickers({ q, isOwner, stored }: { q: string; isOwner: bo
               return (
                 <li key={b.id} className="flex min-h-12 flex-wrap items-center gap-3 py-2" data-battery-row={b.id}>
                   <span className="min-w-0 flex-1 text-sm"><b>{v ? formatPlate(v) : b.job?.job_number ?? ""}</b>{car ? ` · ${car}` : ""} · <span data-battery-brand>{[b.brand, b.model].filter(Boolean).join(" ") || "Battery (brand not entered)"}</span> · {b.job?.job_number ?? ""} · fitted {formatDate(b.installed_on)} · until {formatDate(b.warranty_until)}</span>
-                  {b.handover_id ? <LinkButton href={`/print/stickers/${b.handover_id}?reprint=1&back=${encodeURIComponent("/stickers?tab=warranty")}`} tone="secondary" target="_blank" data-battery-reprint={b.id}>Print label</LinkButton> : null}
+                  {b.handover_id ? <LinkButton href={`/print/labels/${b.handover_id}?reprint=1&back=${encodeURIComponent("/labels?tab=warranty")}`} tone="secondary" target="_blank" data-battery-reprint={b.id}>Print label</LinkButton> : null}
                 </li>
               );
             })}
@@ -188,7 +188,7 @@ async function WarrantyStickers({ q, isOwner, stored }: { q: string; isOwner: bo
       </Card>
       <Card className="flex flex-col gap-3" data-warranty-cars>
         <SectionLabel>Warranty labels by car</SectionLabel>
-        <form method="get" action="/stickers" className="flex flex-wrap gap-2">
+        <form method="get" action="/labels" className="flex flex-wrap gap-2">
           <input type="hidden" name="tab" value="warranty" />
           <input name="car" defaultValue={q} placeholder="Job number or plate (empty = cars in the workshop)" className="min-h-12 min-w-0 flex-1 rounded-control border border-line-strong bg-white px-3 text-base" data-warranty-car-search data-spell="" autoComplete="off" />
           <Button type="submit">Find</Button>

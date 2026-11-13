@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { refuse } from "@/lib/refusal";
 import { requireStaff } from "@/lib/auth";
 import { can, type RoleId } from "@/lib/roles";
 import { Card, Notice, PageHeader, SectionLabel } from "@/components/ui";
@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
 export default async function PurchaseReturnsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
-  if (!(can(role, "managePurchaseOrders") || role === "accounts" || role === "owner")) notFound();
+  if (!(can(role, "managePurchaseOrders") || role === "accounts" || role === "owner")) return refuse("no_permission");
   const { tab: rawTab } = await searchParams;
   const tab = RETURN_TABS.find((t) => t.key === rawTab) ?? RETURN_TABS[0];
   const ready = await purchaseReturnsReady();

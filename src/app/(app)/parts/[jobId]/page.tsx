@@ -1,4 +1,5 @@
 import { moveTargets, PREPARING_STATUSES, quoteTagWords } from "@/lib/part-quote";
+import { refuse } from "@/lib/refusal";
 import { sendChecksRecord, sendFactsFor } from "@/lib/send-check";
 import { receiptPropsFor } from "@/lib/receipts";
 import { partQuoteMap } from "@/lib/part-quote-data";
@@ -71,7 +72,7 @@ export const dynamic = "force-dynamic";
 export default async function PartsJobPage({ params, searchParams }: { params: Promise<{ jobId: string }>; searchParams: Promise<{ message?: string; error?: string; resent?: string; resend_error?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
-  if (!(can(role, "priceParts") || can(role, "editQuotes"))) notFound();
+  if (!(can(role, "priceParts") || can(role, "editQuotes"))) return refuse("no_permission");
   const { jobId } = await params;
   const { message, error, resent, resend_error: resendError } = await searchParams;
   const admin = createAdminClient();

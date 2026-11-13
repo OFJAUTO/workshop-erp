@@ -31,6 +31,7 @@ export async function GET(request: NextRequest) {
   const job = UUID.test(sp.get("job") ?? "") ? sp.get("job") : null;
   const po = UUID.test(sp.get("po") ?? "") ? sp.get("po") : null;
   const labels = await partLabelsFor({ jobId: job, poId: po, partIds: ids(sp.getAll("parts").join(",")), keys: keys(sp.get("keys")), today: sp.get("today") === "1" }, staff.id);
-  if (!labels.length) return new NextResponse("No received parts to label yet: labels appear once a delivery is recorded.", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } });
+  // 13 November 2026 (Section 2): never a 404 - nothing to print is said in plain words, with the way back.
+  if (!labels.length) return new NextResponse('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>No labels to print</title><body style="font-family:Arial,sans-serif;padding:24px"><h1 style="font-size:20px">No labels to print yet</h1><p>Labels appear once a delivery is recorded. Nothing was received for this choice.</p><p><a href="javascript:history.back()">Back</a></p></body>', { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } });
   return pdfResponse(await renderPartLabelsPdf(labels, size, { border: sp.get("border") === "1" }), `OFJ part labels ${labels[0].jobNumber}.pdf`);
 }

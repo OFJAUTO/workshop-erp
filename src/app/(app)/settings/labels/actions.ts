@@ -7,7 +7,7 @@ import { requirePermission } from "@/lib/auth";
 import { blankToNull } from "@/lib/format";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-const back = (msg: string, ok: boolean) => redirect(`/stickers?tab=printer&${ok ? "message" : "error"}=${encodeURIComponent(msg)}`);
+const back = (msg: string, ok: boolean) => redirect(`/labels?tab=printer&${ok ? "message" : "error"}=${encodeURIComponent(msg)}`);
 
 /** The Stickers tab: sizes, wording, defaults, warranty and service intervals, which part types get a sticker, required switches. */
 export async function saveStickerSettings(formData: FormData) {
@@ -51,7 +51,7 @@ export async function saveStickerSettings(formData: FormData) {
   updates.push({ key: "sticker_wording", value: { part: blankToNull(formData.get("w_part")) ?? "", battery: blankToNull(formData.get("w_battery")) ?? "Battery warranty", battery_valid: blankToNull(formData.get("w_battery_valid")) ?? "Valid for this vehicle only", service: blankToNull(formData.get("w_service")) ?? "Service", service_band: blankToNull(formData.get("w_service_band")) ?? "Next service, whichever comes first", service_scan: blankToNull(formData.get("w_service_scan")) ?? "Scan to book your next service on WhatsApp" } });
   for (const u of updates) await admin.from("settings").update({ value: u.value }).eq("key", u.key);
   await admin.from("audit_log").insert({ table_name: "settings", record_id: null, action: "update", new_data: { stickers: Object.fromEntries(updates.map((u) => [u.key, u.value])), by: staff.display_name } }).then(() => null, () => null);
-  revalidatePath("/stickers");
+  revalidatePath("/labels");
   back("Sticker settings saved. They apply to stickers printed from now on.", true);
 }
 
@@ -62,7 +62,7 @@ export async function uploadStickerLogo(formData: FormData) {
   const file = formData.get("logo");
   if (formData.get("reset") === "1") {
     await admin.from("settings").update({ value: "" }).eq("key", "sticker_logo_url");
-    revalidatePath("/stickers");
+    revalidatePath("/labels");
     back("Back to the standard logo.", true);
   }
   if (!(file instanceof File) || !file.size) back("Choose a logo file (SVG or PNG).", false);
@@ -73,8 +73,8 @@ export async function uploadStickerLogo(formData: FormData) {
   const ext = type === "image/svg+xml" ? "svg" : type === "image/png" ? "png" : "jpg";
   const path = `branding/sticker-logo-${Date.now()}.${ext}`;
   const { error } = await admin.storage.from("job-files").upload(path, Buffer.from(await f.arrayBuffer()), { contentType: type, upsert: true });
-  if (error) back(dbWords(error, "settings/stickers/actions"), false);
+  if (error) back(dbWords(error, "settings/labels/actions"), false);
   await admin.from("settings").update({ value: path }).eq("key", "sticker_logo_url");
-  revalidatePath("/stickers");
+  revalidatePath("/labels");
   back("Logo saved for the stickers.", true);
 }

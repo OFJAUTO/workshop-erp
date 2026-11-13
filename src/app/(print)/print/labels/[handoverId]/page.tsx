@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { refuse } from "@/lib/refusal";
 import { handoverLabelPlan } from "@/lib/handover-labels";
 import { BatterySticker, PartSticker, batteryLine, stickerPageCss } from "@/components/StickerArt";
 import { stickerPosition } from "@/lib/parts-list";
@@ -22,7 +23,9 @@ export const dynamic = "force-dynamic";
 export default async function HandoverStickersPage({ params, searchParams }: { params: Promise<{ handoverId: string }>; searchParams: Promise<{ back?: string; reprint?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
-  if (!(can(role, "managePurchaseOrders") || role === "owner")) notFound();
+  // 13 November 2026 (Section 2): gate-in prints the battery warranty labels of a handover (part labels stay with Parts).
+  const gateIn = role === "gate_in";
+  if (!(can(role, "managePurchaseOrders") || role === "owner" || gateIn)) return refuse("no_permission", { detail: "handover labels" });
   const { handoverId } = await params;
   const { back, reprint } = await searchParams;
   const admin = createAdminClient();
@@ -35,11 +38,12 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
   const vin = h.job?.vehicle?.vin ?? "";
   const date = formatDate(h.confirmed_at ?? h.created_at);
   // 13 November 2026 (Section 10): THE label list of the handover (rebuilt for those saved empty).
-  const plan = await handoverLabelPlan(handoverId, h.job_id, h.stickers, staff.id);
+  const fullPlan = await handoverLabelPlan(handoverId, h.job_id, h.stickers, staff.id);
+  const plan = gateIn ? fullPlan.filter(([, s]) => s.kind === "battery") : fullPlan;
   const { data: wmRows } = plan.length ? await admin.from("part_items").select("id, warranty_months, positions").in("id", plan.map(([id]) => id)) : { data: [] as { id: string; warranty_months: number | null; positions: string[] | null }[] };
   const partPositions = new Map((wmRows ?? []).map((r) => [r.id as string, ((r as { positions?: string[] | null }).positions ?? null)]));
   const partMonths = new Map((wmRows ?? []).map((r) => [r.id as string, (r.warranty_months as number | null) ?? null]));
-  const first = !h.stickers_printed_at;
+  const first = !h.stickers_printed_at && !gateIn;
   if (first) await admin.from("part_handovers").update({ stickers_printed_at: new Date().toISOString(), updated_by: staff.id }).eq("id", handoverId);
   else if (reprint !== "0") await admin.from("job_events").insert({ job_id: h.job_id, event_type: "sticker_reprint", note: `Stickers of the handover printed again by ${staff.display_name}`, created_by: staff.id });
   const stickers: React.ReactNode[] = [];
@@ -66,13 +70,13 @@ export default async function HandoverStickersPage({ params, searchParams }: { p
     <div>
       <style>{stickerPageCss(w, hh)}</style>
       {stickers.length === 0 ? (
-        <div className="bar"><span>No labels on this handover.</span><a href="/stickers?tab=warranty">Print a battery warranty label</a><a href={back || `/parts/handover/${h.job_id}`} style={{ marginLeft: "auto" }}>Back</a></div>
+        <div className="bar"><span>No labels on this handover.</span><a href="/labels?tab=warranty">Print a battery warranty label</a><a href={back || `/parts/handover/${h.job_id}`} style={{ marginLeft: "auto" }}>Back</a></div>
       ) : (
         <StickerSheet
           items={sheetItems}
           printer={battery ? ss.printerLarge : ss.printerPart}
           info={`${stickers.length} label${stickers.length === 1 ? "" : "s"} · ${h.job?.job_number ?? ""}${first ? "" : " · printed again"}`}
-          extra={<><a href={`/api/pdf/stickers/${handoverId}`}>Download PDF</a><a href={back || `/parts/handover/${h.job_id}`} style={{ marginLeft: "auto" }}>Back to the handover</a></>}
+          extra={<><a href={`/api/pdf/labels/${handoverId}`}>Download PDF</a><a href={back || `/parts/handover/${h.job_id}`} style={{ marginLeft: "auto" }}>Back to the handover</a></>}
         >
           {stickers}
         </StickerSheet>

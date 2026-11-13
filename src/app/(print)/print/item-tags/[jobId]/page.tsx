@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { refuse } from "@/lib/refusal";
 import { stickerPageCss } from "@/components/StickerArt";
 import { requireStaff } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
@@ -19,7 +20,7 @@ export const dynamic = "force-dynamic";
 export default async function ItemTagsPage({ params }: { params: Promise<{ jobId: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
-  if (!(can(role, "gateIn") || can(role, "viewJobs") || can(role, "priceParts"))) notFound();
+  if (!(can(role, "gateIn") || can(role, "viewJobs") || can(role, "priceParts"))) return refuse("no_permission");
   const { jobId } = await params;
   const admin = createAdminClient();
   const { data: job } = await admin.from("jobs").select("id, job_number, gated_in_at, job_kind, customer:customers(full_name, company_name)").eq("id", jobId).maybeSingle();

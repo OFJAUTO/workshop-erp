@@ -1,4 +1,5 @@
 import { VinCopy } from "@/components/VinCopy";
+import { refuse } from "@/lib/refusal";
 import { notFound } from "next/navigation";
 import { Badge, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -21,7 +22,7 @@ export default async function RoadTestPage({ params }: { params: Promise<{ jobId
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
   const { jobId } = await params;
-  if (!(can(role, "roadTest") || can(role, "approveInspections") || role === "service_advisor")) notFound();
+  if (!(can(role, "roadTest") || can(role, "approveInspections") || role === "service_advisor")) return refuse("no_permission");
   const supabase = await createClient();
   const [card, bundle, { data: test }, settings] = await Promise.all([
     loadJobCard(supabase, jobId),

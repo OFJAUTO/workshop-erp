@@ -1,7 +1,7 @@
 import Link from "next/link";
+import { refuse } from "@/lib/refusal";
 import { MessageSendButton } from "@/components/MessageSendButton";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
-import { notFound } from "next/navigation";
 import { ChargeLinesEditor } from "@/components/ChargeLinesEditor";
 import { CopyText } from "@/components/CopyText";
 import { RecordPaymentButton } from "@/components/RecordPaymentHost";
@@ -30,7 +30,7 @@ type Search = { open?: string; new?: string; customer?: string; cq?: string; sta
  */
 export default async function PendingChargesPage({ searchParams }: { searchParams: Promise<Search> }) {
   const staff = await requireStaff();
-  if (!["owner", "service_advisor", "accounts"].includes(staff.role_id)) notFound();
+  if (!["owner", "service_advisor", "accounts"].includes(staff.role_id)) return refuse("no_permission");
   const sp = await searchParams;
   const settings = await getSettings();
   const ready = await chargesReady();

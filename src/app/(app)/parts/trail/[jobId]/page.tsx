@@ -1,4 +1,5 @@
 import { CopyVin } from "@/components/CopyVin";
+import { refuse } from "@/lib/refusal";
 import { notFound } from "next/navigation";
 import { Badge, Card, Empty, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -19,7 +20,7 @@ export default async function PartsTrailPage({ params, searchParams }: { params:
   const { part: highlight } = await searchParams;
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
-  if (!(can(role, "viewPurchaseOrders") || can(role, "manageWork"))) notFound();
+  if (!(can(role, "viewPurchaseOrders") || can(role, "manageWork"))) return refuse("no_permission");
   const { jobId } = await params;
   const admin = createAdminClient();
   const [{ data: job }, { data: handovers }, { data: events }, { data: people }, { data: partRows }] = await Promise.all([
@@ -88,7 +89,7 @@ export default async function PartsTrailPage({ params, searchParams }: { params:
                 <span className="text-muted">from {nameOf.get(h.from_staff ?? "") ?? "Parts"} to {nameOf.get(h.to_staff ?? "") ?? "the technician"}{h.signed_for_by ? ` · signed for by ${nameOf.get(h.signed_for_by) ?? "the manager"}` : h.pin_used ? " · PIN" : ""}</span>
               </div>
               <span className="text-xs">{h.items.map((i) => `${i.description} × ${i.quantity}${i.not_received ? " (not received)" : ""}`).join(" · ")}</span>
-              {h.kind === "handover" && h.stickers && Object.keys(h.stickers as Record<string, unknown>).length ? <a href={`/print/stickers/${h.id}?back=${encodeURIComponent(`/parts/trail/${jobId}`)}`} target="_blank" rel="noreferrer" className="self-start text-xs font-bold underline underline-offset-4">Print the stickers again (new tab, logged)</a> : null}
+              {h.kind === "handover" && h.stickers && Object.keys(h.stickers as Record<string, unknown>).length ? <a href={`/print/labels/${h.id}?back=${encodeURIComponent(`/parts/trail/${jobId}`)}`} target="_blank" rel="noreferrer" className="self-start text-xs font-bold underline underline-offset-4">Print the stickers again (new tab, logged)</a> : null}
               {h.note ? <span className="text-xs text-muted">{h.note}</span> : null}
             </li>
           ))}

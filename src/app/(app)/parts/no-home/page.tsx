@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { refuse } from "@/lib/refusal";
 import { Badge, Button, Card, Empty, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -25,7 +25,7 @@ export const dynamic = "force-dynamic";
 export default async function PartsNoHomePage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
-  if (!(role === "owner" || can(role, "managePurchaseOrders") || can(role, "manageWork"))) notFound();
+  if (!(role === "owner" || can(role, "managePurchaseOrders") || can(role, "manageWork"))) return refuse("no_permission");
   const { message, error } = await searchParams;
   const [parts, awaited, { data: people }] = await Promise.all([partsWithNoHome(), creditNotesAwaited(), createAdminClient().from("staff").select("id, display_name")]);
   const poIds = Array.from(new Set(parts.map((p) => p.po_id).filter((x): x is string => !!x)));

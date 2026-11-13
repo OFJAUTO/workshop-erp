@@ -25,7 +25,7 @@ export async function StickerSettingsBody({ message, error }: { message?: string
         <form action={saveStickerSettings} className="xl:col-span-2 flex flex-col gap-4">
           <Card className="flex flex-col gap-4">
             <SectionLabel right={`${ss.partW} × ${ss.partH} mm`}>Part label</SectionLabel>
-            <a href="/print/sticker-test?kind=part" target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-fit items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-test-print="part">Test print: part label</a>
+            <a href="/print/label-test?kind=part" target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-fit items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-test-print="part">Test print: part label</a>
             <p className="text-xs text-muted">Logo on top, QR in the middle, date and the last 8 characters of the VIN underneath. Optional: the handover counter starts at 0, except for the part types below.</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <Field label="Width (mm)"><Input name="sticker_part_width_mm" defaultValue={String(ss.partW)} inputMode="decimal" required /></Field>
@@ -38,7 +38,7 @@ export async function StickerSettingsBody({ message, error }: { message?: string
           </Card>
           <Card className="flex flex-col gap-4">
             <SectionLabel right={`${ss.serviceW} × ${ss.serviceH} mm · same as the service label`}>Battery warranty label</SectionLabel>
-            <a href="/print/sticker-test?kind=battery" target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-fit items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-test-print="battery">Test print: battery warranty label</a>
+            <a href="/print/label-test?kind=battery" target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-fit items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-test-print="battery">Test print: battery warranty label</a>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {/* 13 November 2026 (Section 10): ONE size for the service and the battery warranty labels (never the part label's). */}
               <Field label="Warranty and service label width (mm)" hint="The service label and the battery warranty label share this size. Portrait, 50 × 100 mm by default."><Input name="sticker_service_w_mm" defaultValue={String(ss.serviceW)} inputMode="decimal" required data-large-w /></Field>
@@ -57,7 +57,7 @@ export async function StickerSettingsBody({ message, error }: { message?: string
           </Card>
           <Card className="flex flex-col gap-4">
             <SectionLabel right={`${ss.serviceW} × ${ss.serviceH} mm`}>Oil service label</SectionLabel>
-            <a href="/print/sticker-test?kind=service" target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-fit items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-test-print="service">Test print: service label</a>
+            <a href="/print/label-test?kind=service" target="_blank" rel="noreferrer" className="inline-flex min-h-11 w-fit items-center rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-test-print="service">Test print: service label</a>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <Field label="Next service after (months)"><Input name="service_interval_months" defaultValue={String(ss.intervalMonths)} inputMode="numeric" required /></Field>
               <Field label="Next service after (km)"><Input name="service_interval_km" defaultValue={String(ss.intervalKm)} inputMode="numeric" required /></Field>
@@ -99,10 +99,10 @@ export async function StickerSettingsBody({ message, error }: { message?: string
               <div style={{ zoom: scale }} className="border border-dashed border-line-strong self-start"><ServiceSticker w={ss.serviceW} h={ss.serviceH} logoUrl={logo} d={{ qr, plate: "DUBAI A 12345", scanLine: ss.wording.service_scan, servicedOn: "16 Oct 2026", mileage: "42,000 km", nextDate: "16 Oct 2027", nextMileage: "52,000 km", vin: "WDCYC7CFXHX266190", title: ss.wording.service, band: ss.wording.service_band, phone: ss.servicePhone ? ss.phone : null }} /></div>
             </div>
             <div className="flex flex-wrap gap-2">
-              <a href="/print/sticker-test?kind=part" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm">Print test part sticker (new tab)</a>
+              <a href="/print/label-test?kind=part" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm">Print test part sticker (new tab)</a>
               <a href="/api/pdf/part-labels?test=1" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm" data-test-label>Test label PDF (with its outline)</a>
-              <a href="/print/sticker-test?kind=battery" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm">Print test battery sticker (new tab)</a>
-              <a href="/print/sticker-test?kind=service" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm">Print test service sticker (new tab)</a>
+              <a href="/print/label-test?kind=battery" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm">Print test battery sticker (new tab)</a>
+              <a href="/print/label-test?kind=service" target="_blank" rel="noreferrer" className="inline-flex items-center justify-center gap-2 rounded-control font-bold whitespace-nowrap bg-white text-ink border border-line-strong hover:bg-canvas min-h-11 px-5 text-sm">Print test service sticker (new tab)</a>
             </div>
             <p className="text-xs text-muted">Printing uses the normal browser print dialog on a page sized exactly to the sticker, with a PDF download as the fallback. Tell me the printer model and I will set its paper size.</p>
           </Card>

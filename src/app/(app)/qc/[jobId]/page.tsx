@@ -1,4 +1,5 @@
 import { VinCopy } from "@/components/VinCopy";
+import { refuse } from "@/lib/refusal";
 import { getSettings } from "@/lib/settings";
 import { attachPostscanToQc } from "@/lib/scans";
 import { notFound } from "next/navigation";
@@ -24,7 +25,7 @@ export default async function QcPage({ params, searchParams }: { params: Promise
   const role = staff.role_id as RoleId;
   const { jobId } = await params;
   const { message, error } = await searchParams;
-  if (!(can(role, "doQc") || can(role, "viewWorkOrders"))) notFound();
+  if (!(can(role, "doQc") || can(role, "viewWorkOrders"))) return refuse("no_permission");
   const supabase = await createClient();
   const [card, work, { data: checks }] = await Promise.all([loadJobCard(supabase, jobId), loadWork(jobId), createAdminClient().from("qc_checks").select(QC_SELECT).eq("job_id", jobId).eq("is_active", true).order("round")]);
   if (!card) notFound();

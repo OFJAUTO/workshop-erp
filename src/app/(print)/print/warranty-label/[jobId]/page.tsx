@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { refuse } from "@/lib/refusal";
 import { notFound } from "next/navigation";
 import { BatterySticker, stickerPageCss } from "@/components/StickerArt";
 import { requireStaff } from "@/lib/auth";
@@ -20,7 +21,7 @@ export const dynamic = "force-dynamic";
  */
 export default async function WarrantyStickerPage({ params, searchParams }: { params: Promise<{ jobId: string }>; searchParams: Promise<{ type?: string; batch?: string; ref?: string; back?: string }> }) {
   const staff = await requireStaff();
-  if (!can(staff.role_id as RoleId, "printStickers")) notFound();
+  if (!can(staff.role_id as RoleId, "printStickers")) return refuse("no_permission");
   const { jobId } = await params;
   const sp = await searchParams;
   const admin = createAdminClient();
@@ -66,7 +67,7 @@ export default async function WarrantyStickerPage({ params, searchParams }: { pa
       <div className="bar">
         <span>{type.label} warranty sticker · {(job as { job_number: string }).job_number}{reprint ? " · printed again" : ""}</span>
         <PrintNow label={`Print on ${ss.printerLarge}`} />
-        <a href={sp.back || "/stickers?tab=warranty"} style={{ marginLeft: "auto" }}>Back</a>
+        <a href={sp.back || "/labels?tab=warranty"} style={{ marginLeft: "auto" }}>Back</a>
       </div>
       <div data-warranty-sticker={type.key}>
         <BatterySticker w={ss.batteryW} h={ss.batteryH} logoUrl={logo} d={{ qr, months: type.months, installed: formatDate(start), until: formatDate(until), vin, title: `${type.label} warranty`, valid: ss.wording.battery_valid, line: batch ? `BATCH ${batch}` : "" }} />

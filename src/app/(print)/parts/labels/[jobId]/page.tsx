@@ -61,7 +61,7 @@ export default async function PartLabelsPage({ params, searchParams }: { params:
       for (let n = 1; n <= count; n++) labels.push({ key: `${p.id}-${n}`, qr, name: p.description, index: n, count, date: null, pos: stickerPosition(p.positions, n, count) });
     }
   }
-  const backHref = back || (test === "1" ? "/settings/stickers" : `/parts/${jobId}`);
+  const backHref = back || (test === "1" ? "/settings/labels" : `/parts/${jobId}`);
   return (
     <div>
       <style>{stickerPageCss(ss.partW, ss.partH)}</style>

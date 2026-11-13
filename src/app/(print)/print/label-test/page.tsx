@@ -24,7 +24,7 @@ export default async function StickerTestPage({ searchParams }: { searchParams: 
   return (
     <div>
       <style>{stickerPageCss(w, h)}</style>
-      <div className="bar"><span>Test label · {kind} · {w} × {h} mm</span><PrintNow label={`Print on ${printer}`} /><a href="/stickers?tab=printer" style={{ marginLeft: "auto" }}>Back to Labels</a></div>
+      <div className="bar"><span>Test label · {kind} · {w} × {h} mm</span><PrintNow label={`Print on ${printer}`} /><a href="/labels?tab=printer" style={{ marginLeft: "auto" }}>Back to Labels</a></div>
       {kind === "part" ? <PartSticker w={ss.partW} h={ss.partH} logoUrl={logo} d={{ qr, jobNumber: "J-00123", name: "Front brake pads set", index: 1, count: 2, date: "16 Oct 2026" }} /> : null}
       {kind === "battery" ? <BatterySticker w={ss.batteryW} h={ss.batteryH} logoUrl={logo} d={{ qr, line: "Main battery · Varta AGM 95Ah", installed: "16 Oct 2026", until: "16 Oct 2028", months: 24, vin: "WDCYC7CFXHX266190", title: ss.wording.battery, valid: ss.wording.battery_valid }} /> : null}
       {kind === "service" ? <ServiceSticker w={ss.serviceW} h={ss.serviceH} logoUrl={logo} d={{ qr: waQr, servicedOn: "16 Oct 2026", mileage: "42,000 km", nextDate: "16 Oct 2027", nextMileage: "52,000 km", vin: "WDCYC7CFXHX266190", plate: "DUBAI A 12345", title: ss.wording.service, band: ss.wording.service_band, scanLine: ss.wording.service_scan, phone: ss.servicePhone ? ss.phone : null }} /> : null}

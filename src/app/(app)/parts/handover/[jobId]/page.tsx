@@ -1,4 +1,5 @@
 import { CopyVin } from "@/components/CopyVin";
+import { refuse } from "@/lib/refusal";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { notFound } from "next/navigation";
 import { Badge, Card, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
@@ -30,7 +31,7 @@ export const dynamic = "force-dynamic";
 export default async function HandoverPage({ params, searchParams }: { params: Promise<{ jobId: string }>; searchParams: Promise<{ message?: string; error?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
-  if (!(can(role, "managePurchaseOrders") || can(role, "manageWork"))) notFound();
+  if (!(can(role, "managePurchaseOrders") || can(role, "manageWork"))) return refuse("no_permission");
   const { jobId } = await params;
   const { message, error } = await searchParams;
   const admin = createAdminClient();

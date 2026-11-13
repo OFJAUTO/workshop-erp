@@ -177,8 +177,10 @@ export async function stickerLogoDataUrl(ss: StickerSettings): Promise<string> {
     }
   }
   try {
-    const svg = await readFile(path.join(process.cwd(), "public", "logo.svg"));
-    return `data:image/svg+xml;base64,${svg.toString("base64")}`;
+    // 13 November 2026 (Section 2): the label printer prints black only - the logo's greys become pure black (a
+    // near-white shape becomes white), so nothing prints as a faint grey.
+    const svg = (await readFile(path.join(process.cwd(), "public", "logo.svg"))).toString("utf8").replace(/rgb\(\s*([\d.]+)%\s*,\s*([\d.]+)%\s*,\s*([\d.]+)%\s*\)/g, (_m: string, r: string, g: string, b: string) => ((Number(r) + Number(g) + Number(b)) / 3 > 85 ? "rgb(100%, 100%, 100%)" : "rgb(0%, 0%, 0%)"));
+    return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`;
   } catch {
     return "/logo.svg";
   }

@@ -1,6 +1,6 @@
 import Link from "next/link";
+import { refuse } from "@/lib/refusal";
 import { PayFirstList } from "@/components/LpoAdvanceCard";
-import { notFound } from "next/navigation";
 import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { SupplierAmount } from "@/components/SupplierAmount";
 import { SupplierPayBox } from "@/components/SupplierPayBox";
@@ -25,7 +25,7 @@ const money = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 
 
 export default async function SupplierPaymentsPage({ searchParams }: { searchParams: Promise<{ supplier?: string; from?: string; to?: string }> }) {
   const staff = await requireStaff();
-  if (!can(staff.role_id as RoleId, "supplierPayments")) notFound();
+  if (!can(staff.role_id as RoleId, "supplierPayments")) return refuse("no_permission");
   const sp = await searchParams;
   const settings = await getSettings();
   const tab = await loadPaymentsTab({ from: sp.from ?? null, to: sp.to ?? null });

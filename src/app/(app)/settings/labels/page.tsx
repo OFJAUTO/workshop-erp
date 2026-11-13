@@ -4,5 +4,5 @@ import { redirect } from "next/navigation";
 export default async function StickersSettingsPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string }> }) {
   const sp = await searchParams;
   const q = new URLSearchParams({ tab: "printer", ...Object.fromEntries(Object.entries(sp).filter(([, v]) => !!v)) }).toString();
-  redirect(`/stickers?${q}#printer`);
+  redirect(`/labels?${q}#printer`);
 }

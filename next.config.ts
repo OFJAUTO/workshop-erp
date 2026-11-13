@@ -15,6 +15,18 @@ const nextConfig: NextConfig = {
   // The local production test server (npm run test:server) builds into its own folder, never the dev server's.
   ...(process.env.ERP_DIST_DIR ? { distDir: process.env.ERP_DIST_DIR } : {}),
   env: { NEXT_PUBLIC_APP_VERSION: APP_VERSION },
+  // 13 November 2026 (Section 2): "Stickers" became "Labels" - every old address still opens, moved to the new one.
+  async redirects() {
+    return [
+      { source: "/stickers", destination: "/labels", permanent: true },
+      { source: "/settings/stickers", destination: "/settings/labels", permanent: true },
+      { source: "/print/stickers/:id", destination: "/print/labels/:id", permanent: true },
+      { source: "/print/warranty-sticker/:id", destination: "/print/warranty-label/:id", permanent: true },
+      { source: "/print/service-sticker/:id", destination: "/print/service-label/:id", permanent: true },
+      { source: "/print/sticker-test", destination: "/print/label-test", permanent: true },
+      { source: "/api/pdf/stickers/:id", destination: "/api/pdf/labels/:id", permanent: true },
+    ];
+  },
   // A phone photo sent with a form (supplier "mark paid", film rolls, sticker settings) is usually 2-4 MB; the
   // default limit was 1 MB. Vercel's own ceiling is 4.5 MB, so large files go straight to storage instead.
   experimental: { serverActions: { bodySizeLimit: "4mb" } },

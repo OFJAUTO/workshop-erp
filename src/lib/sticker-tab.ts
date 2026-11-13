@@ -102,9 +102,9 @@ export async function stickerHistory(limit = 80): Promise<StickerHistoryRow[]> {
     if (l.kind === "part") out.push({ ...base, what: nameOf.get(l.ref_id ?? "") ?? "Part", reprint: l.ref_id ? `/api/pdf/part-labels?parts=${l.ref_id}` : null });
     else if (l.kind === "battery") {
       const b = bwOf.get(l.code);
-      out.push({ ...base, what: `Battery warranty${b?.brand ? ` · ${b.brand}` : ""}`, reprint: b?.handover_id ? `/print/stickers/${b.handover_id}?reprint=1` : null });
-    } else if (l.kind === "service") out.push({ ...base, what: "Oil service sticker", reprint: l.job_id ? `/print/service-sticker/${l.job_id}` : null });
-    else if (l.kind === "item" && l.ref_id && eventOf.has(l.ref_id)) out.push({ ...base, kind: "warranty", what: eventOf.get(l.ref_id)!.replace(/^Warranty sticker printed: /, ""), reprint: l.job_id ? `/print/warranty-sticker/${l.job_id}?ref=${l.ref_id}` : null });
+      out.push({ ...base, what: `Battery warranty${b?.brand ? ` · ${b.brand}` : ""}`, reprint: b?.handover_id ? `/print/labels/${b.handover_id}?reprint=1` : null });
+    } else if (l.kind === "service") out.push({ ...base, what: "Oil service sticker", reprint: l.job_id ? `/print/service-label/${l.job_id}` : null });
+    else if (l.kind === "item" && l.ref_id && eventOf.has(l.ref_id)) out.push({ ...base, kind: "warranty", what: eventOf.get(l.ref_id)!.replace(/^Warranty sticker printed: /, ""), reprint: l.job_id ? `/print/warranty-label/${l.job_id}?ref=${l.ref_id}` : null });
     else if (l.kind === "item" && l.ref_id) out.push({ ...base, what: nameOf.get(l.ref_id) ?? "Item tag", reprint: l.job_id ? `/print/item-tags/${l.job_id}` : null });
   }
   return out;

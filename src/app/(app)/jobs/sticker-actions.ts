@@ -38,6 +38,6 @@ export async function saveServiceSticker(jobId: string, formData: FormData) {
   await admin.from("vehicles").update({ next_service_date: next.next_date, next_service_mileage: next.next_mileage, updated_by: staff.id }).eq("id", job!.vehicle_id);
   revalidatePath(`/jobs/${jobId}`);
   const print = formData.get("print") === "1";
-  if (print) redirect(`/print/service-sticker/${jobId}?back=${encodeURIComponent(`/jobs/${jobId}`)}`);
+  if (print) redirect(`/print/service-label/${jobId}?back=${encodeURIComponent(`/jobs/${jobId}`)}`);
   redirect(`/jobs/${jobId}?message=${encodeURIComponent("Service sticker details saved.")}#service-sticker`);
 }

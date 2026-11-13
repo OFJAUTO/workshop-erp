@@ -126,7 +126,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/parts", label: "Parts", show: can(role, "priceParts"), badge: role === "parts" ? partsPending : undefined },
     { ...partsManagement, show: partsManagement.items.length > 0 },
     { href: "/parts/stock", label: "Stock", show: can(role, "manageStock") },
-    { href: "/stickers", label: "Labels", show: can(role, "printStickers") },
+    { href: "/labels", label: "Labels", show: can(role, "printStickers") },
     { href: "/qc", label: "Cars for QC", show: can(role, "doQc") },
     { href: "/wash", label: "Car wash", show: can(role, "washCars") },
     { href: "/workshop-load", label: "Workshop load", show: can(role, "manageWork") },

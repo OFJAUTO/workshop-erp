@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { refuse } from "@/lib/refusal";
 import { LinkButton, PageHeader } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { loadPricingRows } from "@/lib/parts-pricing";
@@ -19,7 +20,7 @@ export const dynamic = "force-dynamic";
 export default async function ImportPricesPage({ params }: { params: Promise<{ jobId: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
-  if (!can(role, "priceParts")) notFound();
+  if (!can(role, "priceParts")) return refuse("no_permission");
   const { jobId } = await params;
   const admin = createAdminClient();
   const settings = await getSettings();

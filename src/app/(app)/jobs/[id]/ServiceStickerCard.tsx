@@ -37,7 +37,7 @@ export function ServiceStickerCard({ jobId, data, canPrint, printedBy }: { jobId
                 const qs = new URLSearchParams();
                 for (const k of ["serviced_on", "mileage", "next_date", "next_mileage"]) qs.set(k, String(fd.get(k) ?? ""));
                 qs.set("back", `/jobs/${jobId}`);
-                window.open(`/print/service-sticker/${jobId}?${qs.toString()}`, "_blank", "noopener");
+                window.open(`/print/service-label/${jobId}?${qs.toString()}`, "_blank", "noopener");
                 form.requestSubmit();
               }}
             >

@@ -208,7 +208,9 @@
     "test:backorder": "node --env-file=.env.test.local tests/browser/test-backorder.mjs",
     "test:receipts": "node --env-file=.env.test.local tests/browser/test-receipts.mjs",
     "test:sendcheck": "node --env-file=.env.test.local tests/browser/test-sendcheck.mjs",
-    "test:s1-work": "node --env-file=.env.test.local tests/browser/test-s1-work.mjs"
+    "test:s1-work": "node --env-file=.env.test.local tests/browser/test-s1-work.mjs",
+    "test:s2-labels": "node --env-file=.env.test.local tests/browser/test-s2-labels.mjs",
+    "test:dead-links": "node --env-file=.env.test.local tests/browser/dead-links.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

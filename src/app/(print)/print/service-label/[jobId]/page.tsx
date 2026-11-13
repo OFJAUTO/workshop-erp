@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { refuse } from "@/lib/refusal";
 import { ServiceSticker, stickerPageCss } from "@/components/StickerArt";
 import { requireStaff } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
@@ -16,7 +17,7 @@ export const dynamic = "force-dynamic";
 export default async function ServiceStickerPage({ params, searchParams }: { params: Promise<{ jobId: string }>; searchParams: Promise<{ back?: string; serviced_on?: string; mileage?: string; next_date?: string; next_mileage?: string }> }) {
   const staff = await requireStaff();
   const role = staff.role_id as RoleId;
-  if (!(["owner", "gate_in", "parts", "service_advisor"].includes(role) || can(role, "manageWork"))) notFound();
+  if (!(["owner", "gate_in", "parts", "service_advisor"].includes(role) || can(role, "manageWork"))) return refuse("no_permission");
   const { jobId } = await params;
   const { back, serviced_on, mileage, next_date, next_mileage } = await searchParams;
   const admin = createAdminClient();
@@ -51,7 +52,7 @@ export default async function ServiceStickerPage({ params, searchParams }: { par
       <div className="bar">
         <span>Oil service sticker · {j.job_number}{first ? "" : " · printed again"}</span>
         <PrintNow label={`Print on ${ss.printerLarge}`} />
-        <a href={`/api/pdf/stickers/service-${jobId}`}>Download PDF</a>
+        <a href={`/api/pdf/labels/service-${jobId}`}>Download PDF</a>
         <a href={back || `/jobs/${jobId}`} style={{ marginLeft: "auto" }}>Back</a>
       </div>
       <ServiceSticker w={ss.serviceW} h={ss.serviceH} logoUrl={logo} d={{ qr, plate, scanLine: ss.wording.service_scan, servicedOn: formatDate(saved.serviced_on), mileage: saved.mileage ? `${saved.mileage.toLocaleString("en-GB")} ${unit}` : "", nextDate: formatDate(saved.next_date), nextMileage: saved.next_mileage ? `${saved.next_mileage.toLocaleString("en-GB")} ${unit}` : "", vin: j.vehicle?.vin ?? "", title: ss.wording.service, band: ss.wording.service_band, phone: ss.servicePhone ? ss.phone : null }} />

@@ -4,7 +4,7 @@ export const REFUSAL_WORDS: Record<string, { title: string; text: string; next?:
   booking_cancelled: { title: "This booking was cancelled", text: "It is no longer in the calendar.", next: "Open the calendar" },
   car_left: { title: "This car has left the workshop", text: "The visit is closed. Its history is on the car's page.", next: "Open the car's history" },
   no_customer_access: { title: "You don't have access to customer details", text: "Customer details are for the owner, the service advisors and accounts. The car's own pages are open to you." },
-  no_permission: { title: "You don't have access to this page", text: "Your role cannot open it. Ask the owner if you need it." },
+  no_permission: { title: "You don't have access to this page.", text: "Ask the owner." },
   not_on_car: { title: "This car is not one of yours", text: "It is not assigned to you or your team. Your own cars are under My jobs.", next: "My jobs" },
   estimate_gone: { title: "This estimate is no longer open", text: "It was deleted, or carried over to the car's job at gate-in.", next: "Open the car's history" },
 };

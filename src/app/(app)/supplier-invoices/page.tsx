@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { refuse } from "@/lib/refusal";
 import { LiveRefresh } from "@/components/LiveRefresh";
 import { LinkButton, PageHeader } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
@@ -14,7 +14,7 @@ import { SupplierInvoicesView, type SiSearch } from "./SupplierInvoicesView";
  */
 export default async function SupplierInvoicesPage({ searchParams }: { searchParams: Promise<SiSearch> }) {
   const staff = await requireStaff();
-  if (!["owner", "accounts", "parts"].includes(staff.role_id)) notFound();
+  if (!["owner", "accounts", "parts"].includes(staff.role_id)) return refuse("no_permission");
   const sp = await searchParams;
   // THE filters of the screen, so the file holds exactly what the screen shows.
   const params = new URLSearchParams(invoiceFilterParams(sp));
