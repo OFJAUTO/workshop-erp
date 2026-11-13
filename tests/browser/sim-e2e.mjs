@@ -4425,7 +4425,7 @@ await section("e8", "department tablets", async () => {
   await tp.locator("[data-tablet-department]").waitFor({ timeout: 20000 });
   check("t1: the department label on the tablet", (await tp.locator('[data-tablet-department="bodyshop"]').count()) === 1);
   const first = Number(await tp.locator("[data-tablet-people]").getAttribute("data-tablet-people"));
-  const bodyshopPeople = Number((await sql("select count(*)::int as n from public.staff where is_active and login_type in ('pin', 'both') and department_id in ('bodyshop', 'paint', 'ppf_tint', 'detailing')"))[0].n);
+  const bodyshopPeople = Number((await sql("select count(*)::int as n from public.staff where is_active and login_type in ('pin', 'both') and department_id in ('bodyshop', 'paint', 'ppf_tint', 'detailing') and role_id in ('technician', 'team_leader', 'qc_inspector', 'workshop_manager')"))[0].n);
   check(`t1: only the Bodyshop people at first (${first} of the bodyshop's ${bodyshopPeople})`, first === bodyshopPeople && (await tp.locator("[data-tablet-someone-else]").count()) === 1);
   await tp.screenshot({ path: `${proof}/e8-bodyshop-tablet-800.png` }).catch(() => null);
   await tp.locator("[data-tablet-someone-else]").click();

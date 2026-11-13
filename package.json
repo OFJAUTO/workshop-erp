@@ -210,7 +210,8 @@
     "test:sendcheck": "node --env-file=.env.test.local tests/browser/test-sendcheck.mjs",
     "test:s1-work": "node --env-file=.env.test.local tests/browser/test-s1-work.mjs",
     "test:s2-labels": "node --env-file=.env.test.local tests/browser/test-s2-labels.mjs",
-    "test:dead-links": "node --env-file=.env.test.local tests/browser/dead-links.mjs"
+    "test:dead-links": "node --env-file=.env.test.local tests/browser/dead-links.mjs",
+    "test:s3-tablets": "node --env-file=.env.test.local tests/browser/test-s3-tablets.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

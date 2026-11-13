@@ -1,4 +1,5 @@
 import { deviceDepartmentWords, onTabletDepartment } from "@/lib/device-department";
+import { onSharedTablet } from "@/lib/tablet-roles";
 import { placeWords } from "@/lib/teams";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -51,7 +52,8 @@ export default async function TabletPage() {
     : { data: [] as { path: string | null; signedUrl: string }[] };
   const urlByPath = new Map((signed.data ?? []).map((s) => [s.path, s.signedUrl]));
 
-  const scoped = device.kind === "personal" ? (rows ?? []).filter((r) => r.id === device.staff_id) : (rows ?? []);
+  // 13 November 2026 (Section 3): a shared tablet shows floor staff only - never an office login, not even behind "Someone else?".
+  const scoped = device.kind === "personal" ? (rows ?? []).filter((r) => r.id === device.staff_id) : (rows ?? []).filter((r) => onSharedTablet(String(r.role_id)));
   // A red dot on a photo: that person has something waiting.
   const { data: unreadRows } = await admin.from("notifications").select("staff_id").is("read_at", null).in("staff_id", scoped.map((r) => r.id));
   const unread = new Set((unreadRows ?? []).map((n) => n.staff_id as string));

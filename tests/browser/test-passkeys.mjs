@@ -55,7 +55,8 @@ const GATE = await person("e2e-pk-gate@ofj.test", "E2e Passkey Gate", "gate_in",
 const TECH = await person("e2e-pk-tech@ofj.test", "E2e Passkey Tech", "technician", { login_type: "pin", department_id: "mechanical" });
 const BSM = await person("e2e-pk-bodyshop@ofj.test", "E2e Passkey Bodyshop Manager", "workshop_manager", { team: "dismantle_refit" });
 const devToken = randomBytes(24).toString("hex");
-await sql("insert into public.devices (name, location, kind, token_hash) values ('E2e passkey tablet', 'workshop', 'shared', $1)", [createHash("sha256").update(devToken).digest("hex")]);
+// 13 November 2026 (Section 3): gate-in never signs in on a SHARED tablet, so the test device is gate-in's own personal one.
+await sql("insert into public.devices (name, location, kind, staff_id, token_hash) values ('E2e passkey tablet', 'workshop', 'personal', $2, $1)", [createHash("sha256").update(devToken).digest("hex"), GATE]);
 
 const browser = await chromium.launch({ executablePath: EDGE, headless: true });
 async function fresh(opts = {}) {

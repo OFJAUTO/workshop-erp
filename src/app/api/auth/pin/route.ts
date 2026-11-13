@@ -1,4 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { notifyRoles } from "@/lib/notifications";
+import { PIN_LOCK_MIN_MINUTES, SHARED_TABLET_REFUSAL, onSharedTablet } from "@/lib/tablet-roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { getCurrentDevice } from "@/lib/devices";
@@ -50,6 +52,12 @@ export async function POST(request: NextRequest) {
     await logSignIn({ staffId, method: "pin", ok: false, reason: "has a passkey: PIN sign-in is off" });
     return NextResponse.json({ error: "Your PIN no longer signs you in: use your passkey (the button below).", usePasskey: true }, { status: 403 });
   }
+  // 13 November 2026 (Section 3): an office login (accounts, advisor, gate-in, parts, owner) never signs in by PIN on a
+  // shared tablet - refused here on the server, whatever the screen sends.
+  if (device.kind !== "personal" && !onSharedTablet(String(staff.role_id))) {
+    await logSignIn({ staffId, method: "pin", ok: false, reason: "office login refused on a shared tablet" });
+    return NextResponse.json({ error: SHARED_TABLET_REFUSAL }, { status: 403 });
+  }
   if (device.kind === "personal" && device.staff_id !== staffId) {
     return NextResponse.json({ error: "This device is assigned to someone else." }, { status: 403 });
   }
@@ -77,7 +85,9 @@ export async function POST(request: NextRequest) {
     const attempts = (priv.pin_failed_attempts ?? 0) + 1;
     const maxAttempts = Number(settings.pin_max_attempts) || 5;
     if (attempts >= maxAttempts) {
-      const lockMinutes = Number(settings.pin_lock_minutes) || 5;
+      // 13 November 2026 (Section 3): at least 15 minutes, and the owner is told.
+      const lockMinutes = Math.max(PIN_LOCK_MIN_MINUTES, Number(settings.pin_lock_minutes) || 0);
+      await notifyRoles(["owner"], { type: "pin_locked", title: `PIN locked: ${staff.display_name}`, body: `${maxAttempts} wrong PINs on ${device.kind === "personal" ? "a personal device" : "a shared tablet"}${(device as { name?: string }).name ? ` (${(device as { name?: string }).name})` : ""}: the tile is locked for ${lockMinutes} minutes.` }).catch(() => null);
       await admin
         .from("staff_private")
         .update({
