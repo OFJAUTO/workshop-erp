@@ -1,7 +1,7 @@
 # Handover – overnight list of 13 November 2026 (ALL DONE; last update 13 Nov, 07:40 Dubai)
 
 **NEEDS OMAR (top first):**
-1. **Push refused.** Sections 12 to 15 are committed but not live. The auto-mode guard refused `git push` ("Out-of-Place Publication"). Reply **"push"**, or allow `git push` for this project, and they go live in one push (commits 337adfa, 8c92e45, 9b33b07, 7e29a49 and the test/handover commit after them).
+1. ~~Push refused~~ **Done 13 Nov:** the owner replied "push". Sections 12 to 15 are live as dpl_AcYDKhdTEnBP17jbzFy8cAwmLXfp (live check 33 of 33).
 2. **Apply the database changes** (one go, from your phone): turn auto mode off and reply **"apply"**. The list and the order are in `docs/waiting-for-apply.md` → "Waiting now" (8 items; backups `backups/2026-11-12T21-37-52` and `backups/2026-11-13T00-29-24`).
 3. **Before the apply, check the 9-person team move list** in `docs/team-levels-13-nov-note.md`. Five bodyshop labour rates change, because each person moves to their own team's rate.
 4. **Mathew chooses before go-live:**
