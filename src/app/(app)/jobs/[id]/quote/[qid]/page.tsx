@@ -1,4 +1,6 @@
 import { AddPartsHere, type OtherPart } from "@/components/AddPartsHere";
+import { FixIt } from "@/components/FixIt";
+import { remindToFix } from "@/app/(app)/jobs/fix-actions";
 import { Words } from "@/components/Words";
 import { partsToAddHere } from "@/lib/part-quote";
 import { partQuoteMap, partQuoteReady } from "@/lib/part-quote-data";
@@ -325,7 +327,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {q.status === "pending_owner" ? <div data-owner-waiting><Notice tone="info">Waiting for the owner: {q.owner_approval_reason}. The quotation cannot be sent until he approves.</Notice></div> : null}
+      {q.status === "pending_owner" ? <div data-owner-waiting>{staff.role_id === "owner" ? <Notice tone="info">Waiting for the owner: {q.owner_approval_reason}. The quotation cannot be sent until he approves.</Notice> : <FixIt hook="owner-approval" tone="amber" message={<>Waiting for the owner: {q.owner_approval_reason}. The quotation cannot be sent until he approves.</>} remind={{ label: "Remind the owner", action: remindToFix.bind(null, q.job_id ?? "", `approve ${q.number} (${q.owner_approval_reason ?? ""})`, "owner", `/jobs/${q.job_id}/quote/${q.id}`) }} />}</div> : null}
       {q.owner_approved_at && !approvalStands && q.status === "draft" ? <div data-owner-approval-stale><Notice tone="info">Changed since the owner approved it ({approvalNow.join("; ")}). Sending asks the owner again.</Notice></div> : null}
       {approvalStands && q.status === "draft" ? <div data-owner-approved><Notice tone="success">Approved by {approverName ?? "the owner"}, {formatDateTime(q.owner_approved_at)}. It can be sent.</Notice></div> : null}
       {q.status === "approved" ? await (async () => {

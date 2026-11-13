@@ -110,5 +110,8 @@ export async function saveWarrantyDetailsAction(jobId: string, formData: FormDat
   const saved = card ? await saveRows(jobId, card.rows, formData, staff, null) : 0;
   if (saved) await createAdminClient().from("job_events").insert({ job_id: jobId, event_type: "warranty_details", note: `Warranty details updated by ${staff.display_name}`, created_by: staff.id });
   refresh(jobId);
+  // 13 November 2026 (Section 4): saved from a warning elsewhere (the gate-out page) - back to that page.
+  const back = String(formData.get("back") ?? "");
+  if (/^\/jobs\/[0-9a-f-]{36}\/gate-out$/.test(back)) redirect(`${back}?message=${enc(saved ? "Warranty details saved." : "Nothing to save.")}`);
   redirect(`/bodyshop/${jobId}?message=${enc(saved ? "Warranty details saved." : "Nothing to save.")}#warranty`);
 }

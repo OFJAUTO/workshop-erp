@@ -9,7 +9,7 @@ import type { BalanceInfo } from "./GateOutForm";
 type Item = { id: string; label: string; collected: boolean };
 
 /** Loose items go home one by one: tick what leaves now, write who took it. The job closes when the last one goes. */
-export function CollectItemsForm({ action, items, canApproveRelease, balance, reasons = { keys: [], release: [] } }: { action: FormAction; items: Item[]; canApproveRelease: boolean; balance: BalanceInfo; /** One-tap reasons for releasing (Settings). */ reasons?: { keys: string[]; release: string[] } }) {
+export function CollectItemsForm({ action, items, canApproveRelease, balance, reasons = { keys: [], release: [] }, fixPay = null }: { /** 13 November 2026 (Section 4): "Record payment" or "Remind accounts" beside the block. */ fixPay?: React.ReactNode; action: FormAction; items: Item[]; canApproveRelease: boolean; balance: BalanceInfo; /** One-tap reasons for releasing (Settings). */ reasons?: { keys: string[]; release: string[] } }) {
   const left = items.filter((i) => !i.collected);
   const [ticked, setTicked] = useState<Record<string, boolean>>(Object.fromEntries(left.map((i) => [i.id, true])));
   const count = left.filter((i) => ticked[i.id]).length;
@@ -45,7 +45,10 @@ export function CollectItemsForm({ action, items, canApproveRelease, balance, re
                 </Field>
               </div>
             ) : (
-              <Notice tone="error">{blockedText} Only the owner or accounts can approve the release.</Notice>
+              <>
+                <Notice tone="error">{blockedText} Only the owner or accounts can approve the release.</Notice>
+                {fixPay ? <div data-gateout-fix-pay>{fixPay}</div> : null}
+              </>
             )
           ) : null}
           <SubmitButton size="lg" disabled={count === 0}>{count === left.length ? (left.length === items.length ? "All items collected, close the job" : "Last items collected, close the job") : `${count} item${count === 1 ? "" : "s"} collected, keep the rest`}</SubmitButton>

@@ -1,4 +1,8 @@
 import { DamageSection } from "@/components/DamageSection";
+import { RecordPaymentButton } from "@/components/RecordPaymentHost";
+import { FixIt } from "@/components/FixIt";
+import { WarrantyFixPanel } from "@/components/WarrantyFixPanel";
+import { remindToFix } from "../../fix-actions";
 import { loadCarDamage } from "@/lib/damage-data";
 import { VinCopy } from "@/components/VinCopy";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -83,6 +87,13 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
   // 13 November 2026 (Section 5): the warranty card must be complete before the car leaves (a warning, never a block).
   const warrantyGaps = bodyshop ? ((await (await import("@/lib/warranty-data")).warrantyCardOf(id, settings).catch(() => null))?.missing ?? []) : [];
   const kinds = bodyshop ? (await approvedKinds(id)).kinds : [];
+  // 13 November 2026 (Section 4): who may fix each warning here, and the fix (or "Remind …") beside it.
+  const mayWriteWarranty = !staff.viewingAs && (role === "owner" || can(role, "leadSection") || (role === "workshop_manager" && ["bodyshop", "paint", "ppf_tint", "detailing"].includes(staff.department_id ?? "")));
+  const mayPay = can(role, "recordPayments") && !staff.viewingAs;
+  const fixPay = mayPay
+    ? <RecordPaymentButton jobId={id} label="Record payment" />
+    : <FixIt hook="pay" tone="amber" message="Only accounts or the owner record the payment." remind={{ label: "Remind accounts", action: remindToFix.bind(null, id, "the payment before the car leaves", "accounts", `/jobs/${id}/invoice`) }} />;
+  const fixSignoff = <FixIt hook="signoff" tone="amber" message="The bodyshop sign-off is signed by the team leaders, or released by the owner." remind={{ label: "Remind the bodyshop manager", action: remindToFix.bind(null, id, "the bodyshop release sign-off", "bodyshop_manager", `/bodyshop/${id}`) }} />;
   // A server page: the date is read once.
   const today = dubaiDate();
   const finalCheck = bodyshop && (kinds.includes("ppf") || kinds.includes("coloured_ppf")) ? { defaultDate: addDaysIso(today, Math.min(14, Math.max(7, Number(settings.bodyshop_final_check_days) || 10))), min: addDaysIso(today, 7), max: addDaysIso(today, 14) } : null;
@@ -92,7 +103,19 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
       <PageHeader picture={<CarHeaderThumb vehicleId={job.vehicle_id} />} title={`Gate out · ${formatPlate(card.vehicle)}`} subtitle={<span className="flex flex-wrap items-center gap-2"><span>{vehicleTitle(card.vehicle)} · {job.job_number} · {declinedOut ? "Declined, car going out" : STATUS_LABELS[job.status]}</span>{!loose ? <VinCopy vin={card.vehicle.vin} /> : null}</span>} actions={<LinkButton href={`/jobs/${id}`} tone="secondary" size="lg">Job card</LinkButton>} />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {warrantyGaps.length ? <div data-warranty-incomplete><Notice tone="error">Warranty card incomplete: {warrantyGaps.join(", ")} missing. Fill it on the bodyshop page before the customer leaves.</Notice></div> : null}
+      {warrantyGaps.length ? (
+        <div data-warranty-incomplete>
+          {/* 13 November 2026 (Section 4, J-00991): the fix is here - "Enter details" opens the same fields as the bodyshop page. */}
+          <FixIt
+            hook="warranty"
+            message={<>Warranty card incomplete: {warrantyGaps.join(", ")} missing. Fill it before the customer leaves.</>}
+            fixLabel={mayWriteWarranty ? "Enter details" : undefined}
+            remind={mayWriteWarranty ? null : { label: "Remind the bodyshop manager", action: remindToFix.bind(null, id, `warranty card details (${warrantyGaps.join(", ")})`, "bodyshop_manager", `/jobs/${id}/gate-out`) }}
+          >
+            {mayWriteWarranty ? <WarrantyFixPanel jobId={id} back={`/jobs/${id}/gate-out`} /> : null}
+          </FixIt>
+        </div>
+      ) : null}
       {job.status !== "ready" && job.status !== "pending_payment" && job.status !== "in_delivery" ? <Notice tone="info">{loose ? "The items are" : "This car is"} not marked ready yet ({STATUS_LABELS[job.status]}). Gate-out is still allowed and will be logged.</Notice> : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -109,13 +132,15 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
             />
           ) : loose ? (
             <Card>
-              <CollectItemsForm action={collectItems.bind(null, id)} items={items.map((it) => ({ id: it.id, label: `${it.quantity > 1 ? `${it.quantity} × ` : ""}${it.item_type}${it.description ? ` · ${it.description}` : ""}`, collected: !!it.collected_at }))} canApproveRelease={role === "owner"} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
+              <CollectItemsForm fixPay={fixPay} action={collectItems.bind(null, id)} items={items.map((it) => ({ id: it.id, label: `${it.quantity > 1 ? `${it.quantity} × ` : ""}${it.item_type}${it.description ? ` · ${it.description}` : ""}`, collected: !!it.collected_at }))} canApproveRelease={role === "owner"} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
             </Card>
           ) : (
             <Card>
               {bankHold.length && gateInRole ? <div className="mb-3 rounded-control border-2 border-amber-bar bg-amber-soft p-3 text-sm font-semibold" data-gateout-bank-hold>Waiting for the bank to clear a payment: call accounts.</div> : null}
               {bankHold.length && !gateInRole ? <div className="mb-3 rounded-control border-2 border-amber-bar bg-amber-soft p-3 text-sm font-semibold" data-gateout-bank-hold>Waiting for the bank: {bankHold.map((w) => `${w.method === "cheque" ? "cheque" : "transfer"} ${w.number} (AED ${w.amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })})`).join(", ")} has not cleared. The car stays until accounts mark it cleared{role === "owner" ? " – or release it now with a reason (logged)" : ", unless the owner approves"}.</div> : null}
               <GateOutForm
+            fixPay={fixPay}
+            fixSignoff={fixSignoff}
             mileage={mileage}
             drivers={drivers}
             lastPin={lastPin} customer={card.customer ? { name: card.customer.full_name, phone: card.customer.phone } : null} contacts={contacts} recoveryCompanies={(settings.recovery_companies ?? []) as string[]} finalCheck={finalCheck} creditDays={creditDays} declinedOut={declinedOut} jobId={id} signoffLock={signoff && signoff.hasStages && !signoff.complete ? `Release sign-off still needed from ${signoff.waitingOn.map((k) => SIGNOFF_LABELS[k]).join(", ")}. The handover stays locked until all have signed on the bodyshop page.` : null} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={role === "owner"} ownerRelease={role === "owner" && !staff.viewingAs} noAmounts={gateInRole} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />

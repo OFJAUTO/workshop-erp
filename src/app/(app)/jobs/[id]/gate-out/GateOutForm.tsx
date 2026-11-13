@@ -46,7 +46,13 @@ export function GateOutForm({
   mileage = null,
   signoffLock = null,
   ownerRelease = false,
+  fixPay = null,
+  fixSignoff = null,
 }: {
+  /** 13 November 2026 (Section 4): the fix beside the balance warning ("Record payment", or "Remind accounts"). */
+  fixPay?: React.ReactNode;
+  /** 13 November 2026 (Section 4): the fix beside the missing sign-off for someone who may not release it ("Remind …"). */
+  fixSignoff?: React.ReactNode;
   /** 13 November 2026 (Section 5): the owner may release a bodyshop car without its sign-offs (recorded SKIPPED BY OWNER). */
   ownerRelease?: boolean;
   /** 13 November 2026 (Section 1e): the bodyshop release sign-off still missing - shown ONCE, at the button. */
@@ -310,7 +316,9 @@ export function GateOutForm({
             ) : (
               <Notice tone="error">{blockedText} Gate-out is blocked until it is paid, or the owner releases it.</Notice>
             )
-          ) : declinedFree ? (
+          ) : null}
+          {blocked && fixPay ? <div data-gateout-fix-pay>{fixPay}</div> : null}
+          {declinedFree ? (
             <div data-declined-free><Notice tone="info">Declined quotation, no charge: the car leaves free of charge. This is written on the job.</Notice></div>
           ) : onCredit ? (
             <div data-credit-release><Notice tone="info">Credit terms ({creditDays} days): {noAmounts ? "the balance" : <>the balance of AED {balance.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</>} is due within {creditDays} days. The car may leave; this is written on the job.</Notice></div>
@@ -339,6 +347,7 @@ export function GateOutForm({
 
           <div className="flex flex-col gap-1">
             {signoffLock ? <div data-signoff-lock><Notice tone="error">{signoffLock}</Notice></div> : null}
+            {signoffLock && !ownerRelease && fixSignoff ? <div data-gateout-fix-signoff>{fixSignoff}</div> : null}
             {signoffLock && ownerRelease ? (
               <div className="flex flex-col gap-2 rounded-control border border-line p-3" data-owner-release>
                 <label className="flex min-h-11 items-center gap-3 cursor-pointer">

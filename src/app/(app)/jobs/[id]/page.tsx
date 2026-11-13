@@ -1,4 +1,6 @@
 import { FlashNotice } from "@/components/FlashNotice";
+import { FixIt } from "@/components/FixIt";
+import { remindToFix } from "../fix-actions";
 import { approvalHeadline } from "@/lib/approval-headline";
 import { scopeFromRequests } from "@/lib/inspection-scope";
 import { NotCheckedList, ScopeChoice } from "@/components/InspectionScope";
@@ -623,6 +625,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           </>
         }
       />
+      {/* 13 November 2026 (Section 4): someone who may not set the advisor reminds the advisors. */}
+      {!inChargeName && !(role === "service_advisor" || role === "owner") && !staff.viewingAs && job.is_open ? <FixIt hook="advisor" message="Advisor in charge: not set – the car cannot be assigned until it is set." remind={{ label: "Remind the advisors", action: remindToFix.bind(null, id, "the advisor in charge", "advisor", `/jobs/${id}`) }} /> : null}
       {(role === "service_advisor" || role === "owner") && !staff.viewingAs && job.is_open ? (
         <div className="-mt-3 flex flex-wrap items-center gap-2 text-xs" data-advisor-control>
           {inChargeName ? <span className="font-semibold text-muted">Advisor in charge: {inChargeName}</span> : <span className="font-bold text-red" data-advisor-missing>Advisor in charge: not set – the car cannot be assigned until it is set</span>}
@@ -1151,8 +1155,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 <Button type="submit" disabled={!check.complete || (!job.first_approval_at && role !== "owner")}>
                   {job.assigned_to ? "Reassign" : "Assign"}
                 </Button>
-                {!check.complete ? <p className="text-xs text-amber-text font-semibold">Blocked until the gate-in media is complete.</p> : null}
-                {check.complete && !job.first_approval_at ? <p className="text-xs text-amber-text font-semibold">Blocked until the customer approves the job card.</p> : null}
+                {!check.complete ? <FixIt hook="assign-media" tone="amber" message="Blocked until the gate-in media is complete." link={{ href: `/jobs/${id}/media`, label: "Finish the gate-in photos" }} /> : null}
+                {check.complete && !job.first_approval_at ? <FixIt hook="assign-approval" tone="amber" message="Blocked until the customer approves the vehicle check-in." link={role === "owner" ? { href: `/jobs/${id}/gate-in`, label: "Send the check-in link" } : null} remind={role === "owner" ? null : { label: "Remind the advisor", action: remindToFix.bind(null, id, "the customer's approval of the vehicle check-in", "advisor", `/jobs/${id}/gate-in`) }} /> : null}
               </form>
             </Card>
           ) : waitingForAssignment ? (
