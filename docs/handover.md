@@ -1,3 +1,32 @@
+# Handover – evening list of 13 November 2026 (ALL DONE; last update 13 Nov, evening, Dubai)
+
+**NEEDS OMAR (top first):**
+1. **Apply one database change** (Section 5, parts desk "+ Add a part" on an estimate): turn auto mode off and reply **"apply"**. Details in `docs/waiting-for-apply.md` → "Waiting now"; backup `backups/2026-11-13T13-13-55`.
+2. **Mathew: Zoho sync page → the LPO-00076-2 bill (1260925425) → "Re-post with one line per part".** It stays at 921.90 and the payment stays applied. The other bills posted as one line get the same button. Side-by-side for him: `docs/zoho-bill-lines-for-mathew.md`.
+3. **Set the department on the 12 shared tablets** at Team → Tablets; **give KHADIJA a password** (she logs in by PIN only, which shared tablets now refuse for office roles).
+4. **A real test print of the new battery label:** a photo of it on the battery.
+5. **J-00317 front brake pad:** approve LPO-00083, or back-order it.
+6. **Tell the parts desk:** the supplier invoice number is compulsory at receiving. Mark the "invoice later" suppliers.
+7. **Still open from earlier:**
+   - Mathew's stock choice (A or B);
+   - merge the two Sparein records;
+   - relink the Patrol J-01007 lines;
+   - the Zoho rows to fix by hand (`docs/stock-zoho-13-nov-note.md`).
+
+**Done (8 of 8), each with its note in `docs/`:**
+- S1 work starts on approval (57c1581);
+- S2 labels (8552aae);
+- S3 shared tablets (6841c9d);
+- S4 every warning with its fix (7ea67db);
+- S5 desk "+ Add a part" on estimates (7ba83b3, waiting for the apply);
+- S6 estimate and quotation lists (0552846);
+- S7 Zoho bill lines (e60e121);
+- S8 profit on every invoice (a53b7a6).
+
+**End of batch:** unit tests all pass; security all pass; full layout 51/51; whole-job simulation 710/713, the 3 were out-of-date checks (the Labels rename and the plain refusal page), fixed and passing; passkeys 64/64 after 3 out-of-date steps were brought up to the 9 and 11 Nov rules; live check 33/33 on the final deploy. Older suites still out of date (listed, not caused by this batch): test-p, test-v, test-z, test-h, test-notify, test-supplier-invoices B, test-l (2).
+
+---
+
 # Handover – urgent list of 13 November 2026 (last update 13 Nov, afternoon, Dubai)
 
 **APPLIED 13 Nov afternoon:** all 11 database changes (backup `backups/2026-11-13T11-15-32`), live check 33 of 33. Nothing waits for apply. Back orders and the invoice number at receiving are switched on.

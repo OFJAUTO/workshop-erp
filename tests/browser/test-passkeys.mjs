@@ -57,6 +57,9 @@ const BSM = await person("e2e-pk-bodyshop@ofj.test", "E2e Passkey Bodyshop Manag
 const devToken = randomBytes(24).toString("hex");
 // 13 November 2026 (Section 3): gate-in never signs in on a SHARED tablet, so the test device is gate-in's own personal one.
 await sql("insert into public.devices (name, location, kind, staff_id, token_hash) values ('E2e passkey tablet', 'workshop', 'personal', $2, $1)", [createHash("sha256").update(devToken).digest("hex"), GATE]);
+// A shared floor tablet for the technician (a personal device signs in its own person only).
+const floorToken = randomBytes(24).toString("hex");
+await sql("insert into public.devices (name, location, kind, token_hash) values ('E2e passkey tablet', 'workshop', 'shared', $1)", [createHash("sha256").update(floorToken).digest("hex")]);
 
 const browser = await chromium.launch({ executablePath: EDGE, headless: true });
 async function fresh(opts = {}) {
@@ -104,6 +107,9 @@ const bells = async (staffId, type) => (await admin.from("notifications").select
 async function registerHere(page, name) {
   await page.locator("[data-passkey-name]").fill(name);
   await page.locator('[data-passkey-register="here"]').click();
+  // Since 9 November a PC (or a shared tablet) warns first; the second tap, "Save on this computer anyway", goes ahead.
+  await page.locator("[data-passkey-shared-warning], [data-passkey-setup-done], [data-passkey-error]").first().waitFor({ timeout: 15000 }).catch(() => null);
+  if (await page.locator("[data-passkey-shared-warning]").count()) await page.locator('[data-passkey-register="here"]').click();
   await page.locator("[data-passkey-setup-done], [data-passkey-error]").first().waitFor({ timeout: 30000 });
   return (await page.locator("[data-passkey-setup-done]").count()) > 0;
 }
@@ -170,7 +176,8 @@ try {
     check("D1 the password still works (backup) and goes straight in", !["/login", "/passkey/setup"].includes(new URL(A.page.url()).pathname), A.page.url());
     const ev = (await events(ADV))[0];
     check("D2 logged as 'Password (backup)'", ev?.method === "password_backup" && ev.ok, JSON.stringify(ev));
-    check("D3 the owner gets a bell: signed in with the password instead of a phone", (await bells(OWNER, "password_backup_sign_in")).some((b) => /E2e Passkey Advisor signed in with the password instead of a phone/.test(b.title)));
+    // 11 November 2026 (Section 14): no bell at once - the owner gets ONE evening summary of the password sign-ins.
+    check("D3 no bell at once: the password sign-in waits for the owner's evening summary", (await bells(OWNER, "password_backup_sign_in")).length === 0 && ev?.method === "password_backup");
   }
 
   if (run("E")) {
@@ -278,12 +285,14 @@ try {
     await Gp.ctx.clearCookies();
     await Gp.ctx.addCookies([{ name: "erp_device", value: devToken, domain: "localhost", path: "/" }]);
     await Gp.page.goto(`${base}/tablet`, { waitUntil: "load" });
-    await Gp.page.getByRole("button", { name: /E2e Passkey Gate/ }).click();
+    // 13 November 2026 (Section 3): the test tablet is gate-in's own (personal) device, which selects its person by itself.
+    const nameTile = Gp.page.getByRole("button", { name: /E2e Passkey Gate/ });
+    if (await nameTile.count()) await nameTile.click();
     check("H9 on the tablet, tapping the name shows the passkey button instead of the PIN pad", (await Gp.page.locator("[data-tablet-passkey] [data-passkey-signin-button]").count()) === 1);
     await shot(Gp.page, "08-tablet-passkey-390");
     await passkeyLogin(Gp.page, { tablet: true });
     check("H10 gate-in signs in on the tablet with the passkey", !["/tablet", "/login"].includes(new URL(Gp.page.url()).pathname) && (await cookieOf(Gp.ctx, "erp_login")) === "passkey", Gp.page.url());
-    const tech = await fetch(`${base}/api/auth/pin`, { method: "POST", headers: { "content-type": "application/json", cookie: `erp_device=${devToken}` }, body: JSON.stringify({ staffId: TECH, pin: "1234" }) });
+    const tech = await fetch(`${base}/api/auth/pin`, { method: "POST", headers: { "content-type": "application/json", cookie: `erp_device=${floorToken}` }, body: JSON.stringify({ staffId: TECH, pin: "1234" }) });
     check("H11 a technician's PIN works exactly as before", tech.status === 200, String(tech.status));
     await Gp.ctx.close();
   }

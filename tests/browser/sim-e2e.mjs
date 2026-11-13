@@ -3615,7 +3615,8 @@ await section("d5", "supplier payments tab", async () => {
   await go(pp, `${base}/parts`);
   check("t2: parts have no Supplier payments in the menu", (await pp.locator('[href="/supplier-payments"]').count()) === 0);
   const res = await pp.goto(`${base}/supplier-payments`);
-  check(`t2: the server refuses the page for parts (${res?.status()})`, res?.status() === 404);
+  // 13 November 2026 (Section 2): a refusal is the plain "You don't have access to this page. Ask the owner." page, never a 404.
+  check(`t2: the server refuses the page for parts (${res?.status()})`, res?.status() === 404 || /You don.t have access to this page/.test((await pp.textContent("body")) ?? ""));
   await pp.screenshot({ path: `${proof}/d5-refused-for-parts-1440.png` }).catch(() => null);
   const ex2 = await pp.request.get(`${base}/api/export/supplier-payments`);
   check(`t2: the server refuses the export for parts (${ex2.status()})`, ex2.status() === 403);
@@ -4647,7 +4648,8 @@ await section("e12", "the Stickers tab and the QR page", async () => {
   const pt = await browserFor("parts", { viewport: { width: 1440, height: 900 } });
   const pp = pt.page;
   await go(pp, `${base}/stickers?q=${encodeURIComponent(jn)}`);
-  check("s1: Stickers is in the parts desk's menu", (await pp.locator('a[href="/stickers"]').count()) >= 1);
+  // 13 November 2026 (Section 2): Stickers became Labels; the old address redirects.
+  check("s1: Labels is in the parts desk's menu", (await pp.locator('a[href="/labels"]').count()) >= 1);
   const row = pp.locator(`[data-sticker-part="${part.id}"]`);
   check("s1: the search finds the received part", (await row.count()) === 1);
   await pp.screenshot({ path: `${proof}/e12-stickers-parts-1440.png` }).catch(() => null);
@@ -4685,8 +4687,8 @@ await section("e12", "the Stickers tab and the QR page", async () => {
   await go(op, `${base}/stickers?tab=history`);
   check("s4: the history lists the warranty and the part sticker with Reprint", (await op.locator('[data-sticker-history-row="warranty"] [data-sticker-reprint]').count()) >= 1 && (await op.locator(`[data-sticker-reprint="${code}"]`).count()) === 1);
   await go(op, `${base}/settings/stickers`);
-  await op.waitForURL(/\/stickers/, { timeout: 15000 }).catch(() => null);
-  check("s4: Settings > Stickers opens the printer setup on the Stickers tab", /\/stickers\?/.test(op.url()) && (await op.locator('input[name="sticker_part_width_mm"]').count()) === 1);
+  await op.waitForURL(/\/labels/, { timeout: 15000 }).catch(() => null);
+  check("s4: Settings > Stickers opens the printer setup on the Labels tab", /\/labels\?/.test(op.url()) && (await op.locator('input[name="sticker_part_width_mm"]').count()) === 1);
   await ow.browser.close();
   // s5. An advisor has the tab; the warranty tab is battery first.
   const ad = await browserFor("service_advisor", { viewport: { width: 800, height: 1280 } });
