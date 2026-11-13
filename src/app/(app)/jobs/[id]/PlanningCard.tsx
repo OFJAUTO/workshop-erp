@@ -88,9 +88,9 @@ export function PlanningCard({ jobId, job, status, plan, role, mySide, viewingAs
               <StaffPicker mode="tick" people={people.filter((p) => p.side === side)} sides={[side]} />
             </div>
             {plan.missing.length ? (
-              <label className="flex items-start gap-2 text-sm">
-                <input type="checkbox" name="force" className="mt-1 h-5 w-5 accent-ink" />
-                <span><span className="font-semibold">Start with available parts.</span> Missing: {plan.missing.map((p) => `${p.description}${positionsWords(p.positions) ? ` · ${positionsWords(p.positions)}` : ""}${p.expected_date ?? p.delivery_date ? ` (${p.expected_date ?? p.delivery_date})` : ""}`).join(", ")}.</span>
+              <label className="flex items-start gap-2 text-sm" data-start-with-available>
+                <input type="hidden" name="force" value="on" />
+                <span><span className="font-semibold">Work starts now; the parts follow.</span> Each job line shows READY TO START or WAITING FOR PART on the technician&apos;s screen. Still coming: {plan.missing.map((p) => `${p.description}${positionsWords(p.positions) ? ` · ${positionsWords(p.positions)}` : ""}${p.expected_date ?? p.delivery_date ? ` (${p.expected_date ?? p.delivery_date})` : ""}`).join(", ")}.</span>
               </label>
             ) : null}
             <div><Button type="submit" size="lg" data-release={side}>{side === "bodyshop" ? "Release to bodyshop" : "Release to workshop"}</Button></div>

@@ -119,13 +119,14 @@ async function releaseChecks(jobId: string, formData: FormData, side: Side, staf
     if (mine && mine !== side) return fail(`Only ${side === "bodyshop" ? "the bodyshop manager" : "the workshop manager"} releases ${words} side of this car.`);
   }
   const start = String(formData.get("start_date") ?? "").trim();
-  const force = formData.get("force") === "on";
+  // 13 November 2026 (Section 1): parts and work run side by side - missing parts never hold the release.
+  const plan0 = plan;
+  const force = formData.get("force") === "on" || plan0.missing.length > 0;
   if (!/^\d{4}-\d{2}-\d{2}$/.test(start)) return fail("Pick the start day.");
   // 9 November 2026: the promised date is required at the release; a change of an existing one needs its reason.
   const promise = readPromise(formData, job.promised_at, dubaiDate());
   if (promise.error) return fail(promise.error);
   if (promise.value!.date < start) return fail("The promised date is before the start day.");
-  if (!job.plan_parts_done_at && staff.role_id !== "owner") return fail("Parts have not planned the parts yet. Remind Parts, or the owner can release anyway.");
   if (plan.missing.length && !force) return fail(`${plan.missing.length} part${plan.missing.length === 1 ? " is" : "s are"} not here yet (${plan.missing.map((p) => `${p.description}${p.expected_date ?? p.delivery_date ? ` · ${p.expected_date ?? p.delivery_date}` : ""}`).join(", ")}). Tick "Start with available parts" to release anyway.`);
   // Each line only by its own team (1 November 2026): a coding line by the electricians, paint by the painters.
   const picked = await checkPickable(formData.getAll("technician").map(String), [side], plan.teams.map((t) => t.key));

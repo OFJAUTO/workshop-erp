@@ -648,6 +648,13 @@ async function runHousekeeping(): Promise<Record<string, number>> {
     } catch {
       report.standIn = 0;
     }
+    // 13 November 2026 (Section 1): an LPO waiting for approval nudges accounts every 30 minutes.
+    try {
+      const { lpoApprovalNudges } = await import("@/lib/lpo-nudge");
+      report.lpoNudges = await lpoApprovalNudges({ force: true });
+    } catch {
+      report.lpoNudges = -1;
+    }
     // 13 November 2026 (back orders): a back-ordered part that arrived, and a follow-up visit that is done.
     try {
       const { noticeBackOrderArrivals } = await import("@/lib/back-orders");

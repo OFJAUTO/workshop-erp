@@ -1,4 +1,6 @@
 import { FlashNotice } from "@/components/FlashNotice";
+import { approvalHeadline } from "@/lib/approval-headline";
+import { scopeFromRequests } from "@/lib/inspection-scope";
 import { NotCheckedList, ScopeChoice } from "@/components/InspectionScope";
 import { loadScopeState } from "@/lib/inspection-scope-data";
 import { ApprovalsHere } from "@/components/ApprovalsHere";
@@ -364,6 +366,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     // 5 November 2026 (J-00985): parts changed after the customer's approval hold the dots open and show the change line.
     loadPartsChanges(id),
   ]);
+  // 13 November 2026 (Section 1, J-01002): THE headline - a decline the customer later reversed by approving never shows.
+  const approvedParts = ((stepRows ?? []) as { is_active: boolean; order_status: string; received_qty: number | string | null; issue_status: string }[]).filter((p) => p.is_active && (p.order_status !== "none" || p.issue_status !== "none"));
+  const partsHere = approvedParts.filter((p) => p.order_status === "received" || Number(p.received_qty) > 0 || p.issue_status === "confirmed").length;
+  const partsHereWords = ["in_work", "pending_qc"].includes(job.status) && approvedParts.length && partsHere < approvedParts.length ? `Work active · Parts: ${partsHere} of ${approvedParts.length} here` : null;
+  const headline = await approvalHeadline(id, (stepJob?.declined_out_at as string | null | undefined) ?? null);
   // 5 November 2026 (J-00970): what the customer declined, as the same grouped section the invoice shows.
   const declinedItems = cleanDeclined(((declinedRows ?? []) as { title: string; severity: string }[]).map((r) => ({ title: r.title, severity: r.severity as "Replace now" | "Replace" | "Advisory" })));
   const stepCtx = { pastQuote: PAST_QUOTE.includes(String(job.status)), approvedIds: partsChanges?.approvedIds ?? null };
@@ -407,7 +414,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     pendingWord: bankWait.length && bankWait.every((r) => r.method === "transfer") ? "Transfer" : "Cheque",
     needsInvoice: !!bal?.needsInvoice,
     creditDays: Number(creditCust?.credit_terms_days) || 0,
-    declinedOut: !!stepJob?.declined_out_at,
+    declinedOut: headline.kind === "declined",
     waitingHours: Number(settings.payment_waiting_hours) || 24,
     reported: waitingReport ? { by: firstName(waitingReport.reporter) } : null,
     advance: jobMoney && !jobMoney.live ? { paid: jobMoney.paid, left: jobMoney.balance } : null,
@@ -538,6 +545,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const scopeState = await early.scope;
   const { data: scopeInsp } = await early.scopeInsp;
   const scopeStarted = !!scopeInsp && scopeInsp.status !== "not_started";
+  // 13 November 2026 (Section 1): a finished inspection with no type takes it from the customer's request when that is
+  // clear ("FULL INSPECTION"); otherwise the "not set" box is hidden (nothing left to choose).
+  const scopeFinished = !!scopeInsp && ["submitted", "approved"].includes(String(scopeInsp.status));
+  const shownScope = scopeState.scope ?? (scopeFinished ? scopeFromRequests(requests.map((r) => r.text)) : null);
+  const hideScope = !scopeState.scope && scopeFinished && !shownScope;
   return (
     <>
       {/* Section 10: inbound_scans is live and the net is 20 s, so a scan report appears on the job card by itself. */}
@@ -546,7 +558,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       {/* 11 November 2026 (Section 4): what waits for the owner on this car, at the top (quotations show theirs on their own page). */}
       <ApprovalsHere staff={staff} jobId={id} highlight={approval ?? null} kinds={["fee", "free_charge", "comeback", "overpayment", "discount", "inspection_change", "stock_reversal", "void", "inspection_type"]} />
       {/* 11 November 2026 (Section 10): the inspection type (picked before it can start) and the items not checked. */}
-      {scopeState.ready && job.is_open && !loose ? <ScopeChoice jobId={id} scope={scopeState.scope} request={scopeState.request} started={scopeStarted} canChoose={!staff.viewingAs && (role === "owner" || can(role, "editQuotes"))} checked={scopeState.checked} pending={scopeState.pending} /> : null}
+      {scopeState.ready && job.is_open && !loose && !hideScope ? <ScopeChoice jobId={id} scope={shownScope} request={scopeState.request} started={scopeStarted} canChoose={!staff.viewingAs && (role === "owner" || can(role, "editQuotes"))} checked={scopeState.checked} pending={scopeState.pending} /> : null}
       {scopeState.ready ? <NotCheckedList jobId={id} items={scopeState.notChecked} canResolve={!staff.viewingAs && (role === "owner" || can(role, "editQuotes"))} canReopen={false} /> : null}
       <PageHeader
         picture={<CarHeaderThumb vehicleId={job.vehicle_id} />}
@@ -718,7 +730,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <div className="xl:col-span-2 flex flex-col gap-4">
           <Card className="flex flex-col gap-3">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="text-lg font-extrabold" data-job-status>{stepJob?.declined_out_at ? "Declined, car going out" : continuesId ? "Waiting for part - car not here" : STATUS_LABELS[job.status]}</span>
+              <span className="text-lg font-extrabold" data-job-status>{headline.kind === "declined" ? headline.words : continuesId ? "Waiting for part - car not here" : STATUS_LABELS[job.status]}</span>
+              {headline.kind === "part" ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-extrabold text-amber-text" data-approved-part>{headline.words}</span> : null}
+              {partsHereWords ? <span className="rounded-full border border-line-strong px-2 py-0.5 text-xs font-bold" data-parts-here>{partsHereWords}</span> : null}
               <span className="text-sm text-muted">
                 {job.promised_at ? `Promised ${formatPromised(job.promised_at)}` : "No promised date yet"}
                 {card.assignee ? ` · ${card.assignee.display_name}` : " · Not assigned"}

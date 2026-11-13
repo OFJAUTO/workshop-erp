@@ -494,7 +494,7 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
     const start = page.locator("input[name=start_date]");
     if ((await start.count()) && !(await start.inputValue())) await start.fill(today);
     const force = page.locator("input[name='force']");
-    if (await force.count()) await force.check();
+    if ((await force.count()) && (await force.getAttribute("type")) === "checkbox") await force.check();
     await page.getByRole("button", { name: "Release to workshop" }).click();
     await submitted(page);
     await shot(page, "a15-release-actor");
@@ -648,7 +648,7 @@ await section("b", "stock parts + cash", async () => {
     const start = page.locator("input[name=start_date]");
     if ((await start.count()) && !(await start.inputValue())) await start.fill(today);
     const force = page.locator("input[name='force']");
-    if (await force.count()) await force.check();
+    if ((await force.count()) && (await force.getAttribute("type")) === "checkbox") await force.check();
     await page.getByRole("button", { name: "Release to workshop" }).click();
     await submitted(page);
     await shot(page, "b3-release-actor");
@@ -857,7 +857,7 @@ await section("f", "mixed mechanical + bodyshop line", async () => {
     const start = page.locator("input[name=start_date]");
     if ((await start.count()) && !(await start.inputValue())) await start.fill(today);
     const force = page.locator("input[name='force']");
-    if (await force.count()) await force.check();
+    if ((await force.count()) && (await force.getAttribute("type")) === "checkbox") await force.check();
     await page.getByRole("button", { name: "Release to workshop" }).click();
     await submitted(page);
     await browser.close();

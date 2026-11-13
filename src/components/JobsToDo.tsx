@@ -2,8 +2,8 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { tickJobLine } from "@/app/(app)/jobs/todo-actions";
-import { SIDE_WORDS, handoverWords, type JobsToDo as Data, type TodoJob, type TodoPart } from "@/lib/jobs-to-do";
+import { startAnywayAction, tickJobLine } from "@/app/(app)/jobs/todo-actions";
+import { SIDE_WORDS, handoverWords, readinessOf, type JobsToDo as Data, type TodoJob, type TodoPart } from "@/lib/jobs-to-do";
 
 /**
  * JOBS TO DO (11 November 2026, Section 9): THE list of what to do on a car - the workshop tablet, the bodyshop page and
@@ -14,7 +14,7 @@ import { SIDE_WORDS, handoverWords, type JobsToDo as Data, type TodoJob, type To
 const PART_WORDS: Record<TodoPart["state"], string> = { here: "Here", arriving: "Arriving", not_ordered: "Not ordered" };
 const PART_TONE: Record<TodoPart["state"], string> = { here: "border-green bg-green-soft text-green-text", arriving: "border-amber-bar bg-amber-soft text-amber-text", not_ordered: "border-red-bar bg-white text-red" };
 
-export function JobsToDo({ jobId, data, canTick = false, print = false, showCheck = false }: { jobId: string; data: Data & { requests: string[]; managerNote: string | null; ready: boolean }; canTick?: boolean; print?: boolean; /** Advisors and managers: a department only guessed reads "check". */ showCheck?: boolean }) {
+export function JobsToDo({ jobId, data, canTick = false, print = false, showCheck = false, canStartAnyway = false }: { jobId: string; data: Data & { requests: string[]; managerNote: string | null; ready: boolean }; canTick?: boolean; print?: boolean; /** Advisors and managers: a department only guessed reads "check". */ showCheck?: boolean; /** The workshop or bodyshop manager: "Start anyway" on a line waiting for a part. */ canStartAnyway?: boolean }) {
   const router = useRouter();
   const [busy, start] = useTransition();
   const [local, setLocal] = useState<Record<string, boolean>>({});
@@ -46,6 +46,17 @@ export function JobsToDo({ jobId, data, canTick = false, print = false, showChec
         {j.isNew ? <span className="shrink-0 rounded-full bg-ink px-2 py-0.5 text-xs font-bold text-on-dark" data-todo-new>NEW</span> : null}
         {showCheck && j.guessed ? <span className="shrink-0 rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text" data-todo-check title="The department was guessed from the work type: check it on the job card">check</span> : null}
       </div>
+      {(() => {
+        const r = readinessOf({ ...j, done: doneOf(j) });
+        if (r.kind === "done") return null;
+        const tone = r.kind === "ready" ? "border-green bg-green-soft text-green-text" : r.kind === "anyway" ? "border-ink bg-white text-ink" : "border-amber-bar bg-amber-soft text-amber-text";
+        return (
+          <div className="ml-14 flex flex-wrap items-center gap-2">
+            <span className={`rounded-control border px-2 py-0.5 text-xs font-extrabold ${tone}`} data-todo-ready={r.kind}>{r.words}</span>
+            {canStartAnyway && r.kind === "waiting" && !print ? <button type="button" disabled={busy} onClick={() => start(async () => { const x = await startAnywayAction(jobId, j.lineId); if (x.error) setError(x.error); else router.refresh(); })} className="min-h-11 rounded-control border border-ink bg-white px-3 text-xs font-bold" data-todo-start-anyway={j.lineId}>Start anyway (dismantle and prepare)</button> : null}
+          </div>
+        );
+      })()}
       {j.parts.length ? (
         <ul className="ml-14 flex flex-wrap gap-1.5">
           {j.parts.map((p) => <li key={p.id} className={`rounded-full border px-2 py-0.5 text-xs font-bold ${PART_TONE[p.state]}`} data-todo-part={p.state}>{p.name.toUpperCase()}{p.positions?.length ? ` (${p.positions.join(", ")})` : ""} · {PART_WORDS[p.state]}{p.when ? ` ${p.when}` : ""}</li>)}

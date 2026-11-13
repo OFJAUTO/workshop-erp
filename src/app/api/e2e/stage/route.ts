@@ -50,6 +50,17 @@ async function seedStage(request: NextRequest) {
   const stage = body.stage ?? "inspection";
   const admin = createAdminClient();
   // 13 November 2026: the receipt reminders run on a chosen Dubai day (the test moves the date forward).
+  // 13 November 2026 (Section 1): the LPO nudge on demand (a chosen "now").
+  // 13 November 2026 (Section 1): raise the main LPO of a test job through THE server rule (createMainLpo).
+  if (stage === "lpo-create" && body.id) {
+    const { createMainLpo } = await import("@/lib/lpo");
+    const { data: o } = await admin.from("staff").select("id, display_name").eq("role_id", "owner").eq("is_active", true).limit(1).maybeSingle();
+    return NextResponse.json(await createMainLpo(String(body.id), { id: String(o?.id), display_name: String(o?.display_name ?? "Owner") }));
+  }
+  if (stage === "lpo-nudge") {
+    const { lpoApprovalNudges } = await import("@/lib/lpo-nudge");
+    return NextResponse.json({ told: await lpoApprovalNudges({ force: true, now: (body as { now?: number }).now ?? undefined }) });
+  }
   if (stage === "receipt-reminders") {
     const { receiptReminders } = await import("@/lib/receipts");
     return NextResponse.json({ told: await receiptReminders((body as { today?: string }).today ?? undefined) });

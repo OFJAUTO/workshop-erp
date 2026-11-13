@@ -11,7 +11,23 @@ export const SIDE_WORDS: Record<Side, string> = { workshop: "Workshop", bodyshop
 
 export type TodoLine = TeamLine & { id: string; title: string; position: number; positions?: string[] | null; parent_line_id?: string | null; team?: string | null; customer_approved?: boolean | null; isNew?: boolean };
 export type TodoPart = { id: string; name: string; lineId: string | null; positions?: string[] | null; state: "here" | "arriving" | "not_ordered"; when?: string | null };
-export type TodoJob = { lineId: string; n: number; title: string; positions: string[] | null; side: Side; guessed: boolean; done: boolean; isNew: boolean; parts: TodoPart[] };
+export type TodoJob = { lineId: string; n: number; title: string; positions: string[] | null; side: Side; guessed: boolean; done: boolean; isNew: boolean; parts: TodoPart[]; /** 13 November 2026: the manager allowed dismantling and preparation before the parts are here. */ startAnyway?: { by: string; at: string } | null };
+
+/**
+ * READY TO START or WAITING FOR PART (13 November 2026, Section 1): parts and work run side by side, so each job line
+ * says whether it can start now. A line with no parts, or with every part here, is ready; otherwise the first missing
+ * part and its expected day. "Start anyway" (the manager) lets dismantling and preparation begin.
+ */
+export function readinessOf(j: Pick<TodoJob, "parts" | "startAnyway" | "done">): { kind: "ready" | "waiting" | "anyway" | "done"; words: string } {
+  if (j.done) return { kind: "done", words: "DONE" };
+  const missing = j.parts.filter((p) => p.state !== "here");
+  if (!missing.length) return { kind: "ready", words: "READY TO START" };
+  const first = missing[0];
+  const more = missing.length > 1 ? ` (+${missing.length - 1} more)` : "";
+  const waiting = `WAITING FOR PART: ${first.name.toUpperCase()}${first.when ? `, ${first.when}` : first.state === "not_ordered" ? ", not ordered yet" : ""}${more}`;
+  if (j.startAnyway) return { kind: "anyway", words: `START ANYWAY (dismantle and prepare) · ${waiting}` };
+  return { kind: "waiting", words: waiting };
+}
 export type JobsToDo = {
   mine: TodoJob[];
   others: TodoJob[];

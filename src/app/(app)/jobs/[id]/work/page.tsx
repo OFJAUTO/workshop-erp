@@ -23,6 +23,8 @@ import { loadJobTechnicians } from "@/lib/job-technicians";
 import { confirmWorkComplete, decideAdditionalWork, decidePause, sendWorkBack, setTimeBudget } from "../../work-actions";
 import { BudgetTimer } from "@/app/(app)/my-jobs/[id]/WorkPanel";
 import { BackOrderSection } from "@/components/BackOrderSection";
+import { JobsToDo } from "@/components/JobsToDo";
+import { loadJobsToDo, viewerSideOf } from "@/lib/jobs-to-do-data";
 import { bodyshopOnCar, pickablePeople, workSidesOf } from "@/lib/staff-picker";
 
 export const dynamic = "force-dynamic";
@@ -74,6 +76,7 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
   const blockers = [...(unhanded.length ? [`${unhanded.length} part${unhanded.length === 1 ? "" : "s"} not handed to the technician`] : []), ...(pending.length ? ["additional work waiting for your decision"] : [])];
   const inPlanning = ["approved", "waiting_parts"].includes(job.status);
   const inspBundle = await loadInspection(id);
+  const todo = await loadJobsToDo(id, viewerSideOf(staff.department_id ?? null, staff.role_id)).catch(() => null);
   const inspectionTasks = inspBundle && hasLabourChargesLine(work.lines) ? tasksFromInspection(inspBundle.items) : [];
   const dangers = inspBundle ? inspectionDangerous(inspBundle) : [];
 
@@ -135,6 +138,8 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
             </Card>
           ) : null}
 
+          {/* 13 November 2026 (Section 1): each job line READY TO START or WAITING FOR PART; the manager can start anyway. */}
+          {todo ? <JobsToDo jobId={id} data={todo} canStartAnyway={canEdit && ["in_work", "approved", "waiting_parts"].includes(job.status)} showCheck /> : null}
           <Card className="flex flex-col gap-3">
             <SectionLabel right={`${work.hoursQuoted.toFixed(1)} h charged`}>Approved work</SectionLabel>
             {work.lines.length === 0 ? <p className="text-sm text-muted">No work lines yet.</p> : null}

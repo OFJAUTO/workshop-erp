@@ -26,3 +26,20 @@ export async function tickJobLine(jobId: string, lineId: string, done: boolean):
   revalidatePath(`/bodyshop/${jobId}`);
   return { ok: true };
 }
+
+/** "Start anyway" (13 November 2026, Section 1): the workshop or bodyshop manager lets a job line start (dismantling and
+ * preparation) before its parts are here. Kept in the job's history; the technician sees it on the line. */
+export async function startAnywayAction(jobId: string, lineId: string): Promise<{ ok?: boolean; error?: string }> {
+  const staff = await requireStaff();
+  if (staff.viewingAs) return { error: "View as is read-only." };
+  if (!["owner", "workshop_manager"].includes(staff.role_id)) return { error: "Only the workshop or bodyshop manager allows a start before the parts are here." };
+  const admin = createAdminClient();
+  const { data: line } = await admin.from("quotation_lines").select("id, title").eq("id", lineId).maybeSingle();
+  if (!line) return { error: "That job is no longer on the quotation." };
+  const { error } = await admin.from("job_events").insert({ job_id: jobId, event_type: "start_anyway", from_stage: `line:${lineId}`, note: `Start anyway (dismantle and prepare): ${String(line.title).toUpperCase()} · allowed by ${staff.display_name}`, created_by: staff.id });
+  if (error) return { error: "Couldn't save – try again." };
+  revalidatePath(`/my-jobs/${jobId}`);
+  revalidatePath(`/jobs/${jobId}/work`);
+  revalidatePath(`/bodyshop/${jobId}`);
+  return { ok: true };
+}

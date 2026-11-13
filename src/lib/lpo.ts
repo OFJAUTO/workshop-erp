@@ -161,6 +161,15 @@ export async function createMainLpo(jobId: string, by: Actor, opts: { /** "Resen
   // Part 4 (4 November 2026): a HELD job ("Order parts now" before the car arrives) is booked, not open —
   // its LPO is raised exactly like any other and gate-in opens the job itself.
   if (!job || (!job.is_open && job.status !== "booked")) return { error: "This job is closed." };
+  // 13 November 2026 (Section 1): the customer declined everything - no LPO, unless a quotation was approved after it.
+  {
+    const { data: d } = await admin.from("jobs").select("declined_out_at").eq("id", jobId).maybeSingle();
+    const declinedAt = (d?.declined_out_at as string | null | undefined) ?? null;
+    if (declinedAt) {
+      const { approvedAfterDecline } = await import("./approval-headline");
+      if (!(await approvedAfterDecline(jobId, declinedAt))) return { error: "The customer declined all work on this car: no LPO can be raised." };
+    }
+  }
   const { toOrder: allToOrder, main } = await loadJobLpos(jobId);
   if (main && main.status === "pending_approval") return { error: `${main.number} is already waiting for approval.` };
   const toOrder = opts.partIds ? allToOrder.filter((p) => opts.partIds!.includes(p.id)) : allToOrder;

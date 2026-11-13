@@ -25,6 +25,8 @@ export async function GET() {
   // Every signed-in screen polls here, so a background job that stopped is noticed even when both jobs stopped
   // (at most once a minute per server, after the answer has gone). Done tasks clear their notices the same way.
   after(() => checkLateJobs().catch(() => null));
+  // 13 November 2026 (Section 1): an LPO waiting for approval nudges accounts every 30 minutes.
+  after(() => import("@/lib/lpo-nudge").then((m) => m.lpoApprovalNudges()).catch(() => 0));
   after(() => clearDoneNoticesSoon());
   const supabase = await clientFor(staff);
   const archived = await bellColumnsReady();

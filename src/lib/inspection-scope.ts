@@ -86,3 +86,11 @@ export function scopeStatusWords(scope: string | null | undefined, checked: numb
 
 /** "Car now runs: 6 items still to check". */
 export const nowRunsWords = (n: number) => `Car now runs: ${n} item${n === 1 ? "" : "s"} still to check`;
+
+/** The inspection type read from the customer's request when it is clear (13 November 2026); null when it is not. */
+export function scopeFromRequests(texts: string[]): string | null {
+  const t = texts.join(" ").toLowerCase();
+  if (/pre[\s-]?purchase/.test(t)) return "pre_purchase";
+  if (/\bfull\s+(car\s+)?(inspection|check)\b|\bcomplete\s+(inspection|check)\b/.test(t)) return "full";
+  return null;
+}

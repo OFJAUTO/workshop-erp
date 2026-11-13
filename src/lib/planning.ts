@@ -147,7 +147,9 @@ export async function loadPlanning(job: JobRow, settings: Settings): Promise<Pla
   const live = { ...liveBase, pendingLpo: !!pendingMain };
   const partsSorted = !missing.length || partsPlanned(live);
   const waitingOn: PlanningOn | null = !active ? null : planningOnOf(job, live, sides);
-  const releaseNow = partsSorted ? sides.filter((s) => !sideReleased(job, s)) : [];
+  // 13 November 2026 (Section 1): parts and work run side by side - the car can be released to the workshop the moment
+  // the customer approves; each job line says READY TO START or WAITING FOR PART on the technician's screen.
+  const releaseNow = sides.filter((s) => !sideReleased(job, s));
   const toOrderLpos = (lpos?.suppliers ?? []).filter((s) => s.po.status === "approved");
   const partsLine = !missing.length
     ? parts.length ? "Every part is here" : "No parts needed"

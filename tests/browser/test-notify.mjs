@@ -293,7 +293,7 @@ try {
     if ((await start.count()) && !(await start.inputValue())) await start.fill(new Date().toISOString().slice(0, 10));
     // Parts still on order: the manager starts with the available parts.
     const force = page.locator("input[name='force']");
-    if (await force.count()) await force.check();
+    if ((await force.count()) && (await force.getAttribute("type")) === "checkbox") await force.check();
     await page.getByRole("button", { name: "Release to workshop" }).click();
     await submitted(page);
     await browser.close();

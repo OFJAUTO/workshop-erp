@@ -270,10 +270,11 @@ export type PlanningOn = "parts" | "workshop" | "bodyshop" | "both_sides" | "adv
  * to release (the workshop manager, the bodyshop manager, or both on a mixed car), then the advisor.
  */
 export function planningOnOf(job: { department?: string | null; plan_released_at: string | null; plan_bodyshop_released_at?: string | null; plan_date_confirmed_at: string | null }, live: PartsLive, sides?: Side[]): PlanningOn | null {
-  if (!partsPlanned(live)) return "parts";
+  // 13 November 2026 (Section 1): the release no longer waits for Parts - the manager is asked first, Parts work alongside.
   const waiting = sidesToRelease(job, sides);
   if (waiting.length === 2) return "both_sides";
   if (waiting.length === 1) return waiting[0] === "bodyshop" ? "bodyshop" : "workshop";
+  if (!partsPlanned(live)) return "parts";
   if (!job.plan_date_confirmed_at) return "advisor";
   return null;
 }

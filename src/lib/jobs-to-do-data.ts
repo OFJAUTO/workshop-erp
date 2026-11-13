@@ -64,6 +64,9 @@ export async function loadJobsToDo(jobId: string, viewerSide: Side): Promise<(Jo
     const state: TodoPart["state"] = here ? "here" : p.order_status && p.order_status !== "none" ? "arriving" : "not_ordered";
     return { id: p.id, name: p.description, lineId: home ?? null, positions: p.positions, state, when: state === "arriving" ? p.delivery_date : null };
   });
+  // 13 November 2026 (Section 1): "Start anyway" per job line, kept in the job's history (event start_anyway, from_stage line:<id>).
+  const { data: anyway } = await admin.from("job_events").select("from_stage, created_at, created_by").eq("job_id", jobId).eq("event_type", "start_anyway");
+  const anywayOf = new Map(((anyway ?? []) as { from_stage: string | null; created_at: string; created_by: string | null }[]).filter((e) => e.from_stage?.startsWith("line:")).map((e) => [String(e.from_stage).slice(5), { by: e.created_by ?? "", at: e.created_at }]));
   const built = buildJobsToDo({
     lines: lines as unknown as TodoLine[],
     parts: todoParts,
@@ -73,6 +76,7 @@ export async function loadJobsToDo(jobId: string, viewerSide: Side): Promise<(Jo
     department: (job.department as string | null) ?? null,
     viewerSide,
   });
+  for (const j of [...built.mine, ...built.others]) j.startAnyway = anywayOf.get(j.lineId) ?? null;
   return { ...built, requests: ((reqs ?? []) as { text: string }[]).map((r) => r.text), managerNote: [job.assignment_note, job.plan_release_note].filter(Boolean).join(" · ") || null, ready };
 }
 
