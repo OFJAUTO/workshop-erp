@@ -1,4 +1,5 @@
 import { latheV2Ready } from "@/lib/lathe";
+import { sendCheckForPo } from "@/lib/send-check";
 import { receivedCountWords } from "@/lib/receipt-rules";
 import { receiptPropsFor } from "@/lib/receipts";
 import { ReceiptsCard } from "@/components/ReceiptsCard";
@@ -146,6 +147,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   // Approve each supplier separately (8 November 2026): while the request waits, only the suppliers still waiting are
   // listed under "Parts by supplier"; the approved ones are their own LPO cards above.
   const pendingMain = isMain && po.status === "pending_approval";
+  const sentCheck = po.status === "pending_approval" ? await sendCheckForPo(po.id, lines.map((l) => l.part_item_id).filter((x): x is string => !!x)).catch(() => null) : null;
   // Send for owner approval (10 November 2026, Section 4).
   const reviews = await loadReviews([po.id]);
   const reviewEntries = (await reviewLog(reviews)).map((e) => { const r = reviews.find((x) => x.id === e.id)!; return { ...e, status: r.status, auto: r.auto }; });
@@ -276,6 +278,14 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {/* 13 November 2026: what the parts desk saw in "check before you send" (the approver sees the same flags). */}
+      {sentCheck ? (
+        <Card className={`flex flex-col gap-1 ${sentCheck.flags.length ? "!border-red-bar border-2" : ""}`} data-sent-check data-sent-check-flags={sentCheck.flags.length}>
+          <SectionLabel>Checked before sending</SectionLabel>
+          <p className="text-sm">{sentCheck.by ?? "The parts desk"} confirmed {formatDateTime(sentCheck.at)}{sentCheck.flags.length ? ` with ${sentCheck.flags.length} highlighted line${sentCheck.flags.length === 1 ? "" : "s"}:` : ": nothing was highlighted."}</p>
+          {sentCheck.flags.map((fl) => <p key={fl.key} className="text-sm text-red"><b>{fl.name.toUpperCase()}</b> · {fl.flags.join(" · ")}</p>)}
+        </Card>
+      ) : null}
       {/* C1, 1 November 2026: a VAT-registered supplier without a TRN - its bill cannot go to Zoho until it is typed. */}
       {!isMain && bundle.supplier && supplierNeedsTrn({ name: po.supplier_name, trn: bundle.supplier.trn, vat_registered: bundle.supplier.vat_registered }) ? (
         <div data-no-trn>

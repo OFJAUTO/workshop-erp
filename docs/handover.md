@@ -1,10 +1,16 @@
 # Handover – urgent list of 13 November 2026 (last update 13 Nov, Dubai)
 
-**URGENT 1 – Back order (J-00317): built, tested on TEST (38 of 38), pushed.** Note: `docs/back-order-13-nov-note.md`.
+**URGENT 1 – Back order (J-00317): built, tested on TEST (38 of 38), committed (279a347), push refused.** Note: `docs/back-order-13-nov-note.md`.
 - NEEDS OMAR: reply **"apply"** – the back-order migration is FIRST on `docs/waiting-for-apply.md` (backup `backups/2026-11-13T04-57-14`). Until then the back-order choice does not show.
 - J-00317 is already at Pending QC (your override 08:37). Blockers: TRANSMISSION MOUNT (LPO-00058-2, 08 Jan 2027) and FRONT BRAKE PAD (LPO-00083 waits for your approval).
 
-**URGENT 2 – Supplier invoice number at receiving:** coded, being tested next. **URGENT 3 – Check before you send:** queued.
+**URGENT 2 – Supplier invoice number at receiving: built, tested on TEST (28 of 28).** Note: `docs/receipts-invoice-number-13-nov-note.md`. Waits for the apply (0b on the list).
+
+**URGENT 3 – Check before you send: built, tested on TEST (13 of 13).** Note: `docs/check-before-send-13-nov-note.md`. Works without the apply; the apply (0c) adds the log and the approver box.
+
+**PUSH REFUSED** (auto-mode guard, "Out-of-Place Publication"): reply **"push"** to put all three live. Then **"apply"**: items 0, 0b, 0c first on `docs/waiting-for-apply.md`.
+
+Old failing checks not caused by this work (listed, not fixed): test-p 1 and 2 (the old "Returns and leftovers (n)" words and the accounts tile markup), test-v 2 (sticker 40x30, it is 50x25 since 5 Nov), test-z S1/S2 (technician bell, pasted payment link), test-supplier-invoices B (expects one waiting row; the TEST copy holds 9 real ones).
 
 ---
 

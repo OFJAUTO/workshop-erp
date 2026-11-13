@@ -10,7 +10,7 @@
 import fs, { mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson, sendLpo, confirmMoney, pressRecord } from "./pw-lib.mjs";
+import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson, sendLpo, confirmMoney, pressRecord, typeReceiptNumber, confirmCheck, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots/sim";
@@ -95,6 +95,7 @@ async function priceAllParts(jobId, partsId, availValue, pathKey) {
   const done = page.locator("[data-pricing-done], button:has-text('Pricing done')").first();
   if (await done.count()) {
     await done.click();
+    await confirmCheckIfShown(page);
     // The send is a server step: wait for its answer (the bar's "sent" line), never a fixed pause.
     await page.locator("[data-pricing-sent], [data-pricing-locked]").first().waitFor({ timeout: 30000 }).catch(() => null);
     await sleep(1000);
@@ -436,7 +437,7 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
     // Press Ordered on the desk card itself.
     while (await b.page.locator("[data-lpo-ordered]").count()) {
       const before = b.page.url();
-      await b.page.locator("[data-lpo-ordered]").first().click();
+      await b.page.locator("[data-lpo-ordered]").first().click(); await confirmCheckIfShown(b.page);
       await b.page.waitForURL((u) => u.toString() !== before, { timeout: 25000 }).catch(() => null);
       await sleep(800);
       await go(b.page, `${base}/parts`);
@@ -454,10 +455,11 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
     await go(page, `${base}/parts/${jobId}`);
     await page.locator("[data-mark-received]").click();
     await sleep(500);
-    // 4 November 2026: receiving never asks for the invoice - accounts collect the paper and scan it.
-    check("a14: no invoice box at receiving; the note says accounts take it over", (await page.locator("[data-supplier-invoice-box]").count()) === 0 && (await page.locator("[data-receive-invoice-note]").count()) === 1);
+    // 13 November 2026: receiving asks for the supplier's invoice NUMBER only (accounts still scan and check the figures).
+    check("a14: the receipt asks the invoice number, never the full invoice box", (await page.locator("[data-supplier-invoice-box]").count()) === 0 && (await page.locator("[data-receipt-number]").count()) === 1);
     await shot(page, "a14-receive-actor");
-    await page.locator("[data-no-stickers]").click();
+    await typeReceiptNumber(page);
+    await page.locator("[data-no-stickers]").click(); await confirmCheckIfShown(page);
     await sleep(2500);
     // Accounts enter the invoice from the Waiting-for-invoice row (scan & enter), so the money side stays whole.
     {
@@ -1183,7 +1185,7 @@ await section("j", "parts changed after approval → resend for approval", async
   {
     const { browser, page } = await browserForId(partsId, { viewport: { width: 1500, height: 1300 } });
     await go(page, `${base}/parts/${jobId}`);
-    if (await page.locator("[data-lpo-ordered]").count()) { const before = page.url(); await page.locator("[data-lpo-ordered]").first().click(); await page.waitForURL((u) => u.toString() !== before, { timeout: 25000 }).catch(() => null); }
+    if (await page.locator("[data-lpo-ordered]").count()) { const before = page.url(); await page.locator("[data-lpo-ordered]").first().click(); await confirmCheckIfShown(page); await page.waitForURL((u) => u.toString() !== before, { timeout: 25000 }).catch(() => null); }
     // j2. Cancel it with the supplier (the J-00985 situation: the approved part is replaced).
     await go(page, `${base}/parts/${jobId}`);
     const row = page.locator("[data-row-key]").filter({ has: page.locator("[data-part-name]", { hasText: /front brake pads/i }) }).first();
@@ -1249,13 +1251,14 @@ await section("j", "parts changed after approval → resend for approval", async
     const { browser, page } = await browserForId(partsId, { viewport: { width: 1500, height: 1300 } });
     await go(page, `${base}/parts/${jobId}`);
     await shot(page, "j6-new-lpo");
-    if (await page.locator("[data-lpo-ordered]").count()) { const before = page.url(); await page.locator("[data-lpo-ordered]").first().click(); await page.waitForURL((u) => u.toString() !== before, { timeout: 25000 }).catch(() => null); }
+    if (await page.locator("[data-lpo-ordered]").count()) { const before = page.url(); await page.locator("[data-lpo-ordered]").first().click(); await confirmCheckIfShown(page); await page.waitForURL((u) => u.toString() !== before, { timeout: 25000 }).catch(() => null); }
     await go(page, `${base}/parts/${jobId}`);
     const s6 = await states(page);
     check(`j6: ordered - LPO done, not green yet (${bar(s6)})`, s6.lpo === "done" && s6.received !== "done", bar(s6));
     await page.locator("[data-mark-received]").click();
     await sleep(500);
-    await page.locator("[data-no-stickers]").click().catch(() => null);
+    await typeReceiptNumber(page);
+    await page.locator("[data-no-stickers]").click().catch(() => null); await confirmCheckIfShown(page);
     await until(async () => (await sql("select 1 as x from public.part_items where job_id = $1 and description = 'E2E FRONT BRAKE PAD' and order_status = 'received'", [jobId]))[0], 30, 500);
     await go(page, `${base}/parts/${jobId}`);
     const s7 = await states(page);
@@ -2283,11 +2286,11 @@ await section("w", "send LPO for selected parts + repeated part numbers", async 
   // w2. Tick 3: two from A, one from B. The preview shows two supplier blocks with incl.-VAT amounts.
   for (const n of ["E2E AIR FILTER W", "E2E OIL FILTER W", "E2E BRAKE DISC W"]) await page.locator(`[data-lpo-pick="${ids[n]}"]`).check();
   await page.locator("[data-send-lpo-selected]").click();
-  await page.locator("[data-lpo-preview]").waitFor({ timeout: 10000 });
-  const blocks = await page.locator("[data-lpo-preview-supplier]").count();
+  await page.locator("[data-check-send]").waitFor({ timeout: 10000 });
+  const blocks = await page.locator("[data-check-group]").count();
   check(`w2: the preview shows the 2 suppliers (${blocks})`, blocks === 2);
   await page.screenshot({ path: `${shots}/w2-lpo-select-preview.png` });
-  await page.locator("[data-lpo-preview-confirm]").click();
+  await confirmCheck(page);
   await page.locator("[data-lpo-selected-done], [data-lpo-selected-error]").first().waitFor({ timeout: 60000 });
   const said = ((await page.locator("[data-lpo-selected-done]").textContent().catch(() => "")) ?? "");
   check(`w2b: sent, the answer next to the button ("${said.slice(0, 120)}")`, /3 parts sent for approval/.test(said) && /stay/.test(said));

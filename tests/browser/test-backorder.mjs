@@ -6,7 +6,7 @@
 //   node --env-file=.env.test.local tests/browser/test-backorder.mjs
 import fs from "node:fs";
 import path from "node:path";
-import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, go, makeChecks, sleep, sql, submitted } from "./pw-lib.mjs";
+import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, go, makeChecks, sleep, sql, submitted, typeReceiptNumber, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const OUT = "docs/proof/2026-11-13-back-order";
@@ -204,7 +204,8 @@ try {
     const { browser, page } = await browserFor("parts", { viewport: { width: 1440, height: 1100 } });
     await go(page, `${base}/parts/${FJ}`);
     await page.locator("[data-mark-received]").first().click();
-    await page.locator("[data-no-stickers]").first().click();
+    await typeReceiptNumber(page);
+    await page.locator("[data-no-stickers]").first().click(); await confirmCheckIfShown(page);
     await sleep(2500);
     await browser.close();
   }

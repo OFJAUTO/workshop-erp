@@ -3,7 +3,7 @@
 //       Parts only mark "Ready for handover" (instant notification, 2-hour reminder), nothing blocks
 //       starting work, receiving is required before "Job finished".
 //   node --env-file=.env.test.local tests/browser/test-z.mjs
-import { api, base, browserFor, browserForId, cleanupDb, freeTech, go, makeChecks, setPin, sleep, sql, submitted, pressRecord, sendLpo } from "./pw-lib.mjs";
+import { api, base, browserFor, browserForId, cleanupDb, freeTech, go, makeChecks, setPin, sleep, sql, submitted, pressRecord, sendLpo, typeReceiptNumber, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 20 * 60 * 1000).unref();
@@ -213,7 +213,7 @@ if (want("S3")) {
   check("S3: a pending LPO card is white with a black border", (await pp.locator("[data-supplier-lpo][data-ordered='0']").count()) === 1 && /border-ink bg-white/.test((await pp.locator("[data-supplier-lpo]").getAttribute("class")) ?? ""));
   check("S3: the step bar shows LPO for vendor as the current step", (await pp.locator("[data-step='lpo'][data-state='current']").count()) === 1);
   await shot(pp, "s3-lpo-pending");
-  await pp.locator("[data-lpo-ordered]").click();
+  await pp.locator("[data-lpo-ordered]").click(); await confirmCheckIfShown(pp);
   await until(async () => ((await sql("select status from public.purchase_orders where id = $1", [sup.id]))[0]?.status === "ordered" ? 1 : null), 30, 400);
   await go(pp, `${base}/parts/${jobId}`);
   check("S3: the ordered card turns light green with Ordered ✓", (await pp.locator("[data-supplier-lpo][data-ordered='1']").count()) === 1 && /Ordered ✓/.test((await pp.locator("[data-lpo-state]").textContent()) ?? "") && /border-green bg-green-soft/.test((await pp.locator("[data-supplier-lpo]").getAttribute("class")) ?? ""));
@@ -229,7 +229,8 @@ if (want("S3")) {
   await pp.locator("[data-invoice-date]").fill("2026-10-18");
   await pp.locator("[data-invoice-amount]").fill("105");
   await shot(pp, "s3-receive-panel");
-  await pp.locator("[data-no-stickers]").click();
+  await typeReceiptNumber(pp);
+  await pp.locator("[data-no-stickers]").click(); await confirmCheckIfShown(pp);
   const rec = await until(async () => ((await sql("select count(*)::int as n from public.part_items where job_id = $1 and order_status = 'received'", [jobId]))[0]?.n ?? 0) > 0 ? 1 : null, 30, 400);
   check("S3: the ticked parts are received", !!rec);
   const inv = await until(async () => { const r = (await sql("select supplier_invoice_number, supplier_invoice_date::text as supplier_invoice_date, supplier_invoice_amount, supplier_invoice_status from public.purchase_orders where id = $1", [sup.id]))[0]; return r?.supplier_invoice_number ? r : null; }, 30, 400);

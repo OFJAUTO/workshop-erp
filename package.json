@@ -206,7 +206,8 @@
     "test:s13-14": "node --env-file=.env.test.local tests/browser/test-s13-14-pcv-injectors.mjs",
     "test:s13-15": "node --env-file=.env.test.local tests/browser/test-s13-15-standin.mjs",
     "test:backorder": "node --env-file=.env.test.local tests/browser/test-backorder.mjs",
-    "test:receipts": "node --env-file=.env.test.local tests/browser/test-receipts.mjs"
+    "test:receipts": "node --env-file=.env.test.local tests/browser/test-receipts.mjs",
+    "test:sendcheck": "node --env-file=.env.test.local tests/browser/test-sendcheck.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

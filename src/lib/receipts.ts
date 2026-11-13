@@ -43,8 +43,9 @@ export async function lposWithNumber(supplierId: string | null, supplierName: st
   if (!number.trim()) return [];
   const admin = createAdminClient();
   const out = new Set<string>();
-  const compact = number.replace(/[^A-Za-z0-9]/g, "");
-  const like = `%${compact.slice(-6)}%`;
+  // Narrow by the last run of digits ("INV-E2E-1002" -> 1002), then compare as people type them (sameNumber).
+  const digits = (number.match(/[0-9]+/g) ?? []).pop() ?? number.trim();
+  const like = `%${digits}%`;
   const [{ data: pos }, { data: recs }] = await Promise.all([
     supplierId
       ? admin.from("purchase_orders").select("id, number, supplier_invoice_number").eq("supplier_id", supplierId).ilike("supplier_invoice_number", like).eq("is_active", true)

@@ -20,7 +20,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { execSync } from "node:child_process";
-import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, cookieHeader, go, here, makeChecks, projectRoot, sleep, sql, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const SHOTS = path.join(here, "shots", "s10-pricing");
@@ -87,7 +87,7 @@ try {
     check("A2: one part priced: '1 of 2 priced'", !!(await until(async () => ((await progressOf(page)) === "1/2" ? 1 : null), 30, 400)), await progressOf(page));
     await shot(page, "a-bar-1-of-2-1440");
     // The tap with a part not priced: listed instead of sent.
-    await page.locator("[data-pricing-done]").click();
+    await page.locator("[data-pricing-done]").click(); await confirmCheckIfShown(page);
     await sleep(400);
     const list = page.locator("[data-pricing-open-list]");
     const listText = flat(await list.textContent().catch(() => ""));
@@ -119,7 +119,7 @@ try {
     const w1 = await waitingRow(p2, jobId);
     check("A8: Parts' Waiting on you says 'all parts priced – send to the advisor'", /all parts priced – send to the advisor/.test(w1), w1);
     // The send: ONE notification, the answer in the bar.
-    await page.locator("[data-pricing-done]").click();
+    await page.locator("[data-pricing-done]").click(); await confirmCheckIfShown(page);
     const done = await until(async () => (await sql("select parts_pricing_done_at from public.jobs where id = $1", [jobId]))[0]?.parts_pricing_done_at ? 1 : null, 40, 500);
     check("A9: sent: the job records it", !!done);
     const n1 = await until(async () => { const r = await sql("select title, body from public.notifications where staff_id = $1 and type = 'parts_priced' and job_id = $2 order by id desc", [adv.id, jobId]); return r.length > saidBefore ? r : null; }, 30, 500);
@@ -140,7 +140,7 @@ try {
     check("A14: a quantity changed while editing does not tell the advisor on its own", (await advisorNotes(adv.id, "type = 'parts_priced' and job_id = $2", jobId)) === saidBefore + 1);
     check("A15: the bar now offers 'Send updated prices'", /Send updated prices/.test(flat(await page.locator("[data-pricing-done]").textContent())));
     await sleep(1500);
-    await page.locator("[data-pricing-done]").click();
+    await page.locator("[data-pricing-done]").click(); await confirmCheckIfShown(page);
     const n2 = await until(async () => { const r = await sql("select title, body from public.notifications where staff_id = $1 and type = 'parts_priced' and job_id = $2 order by id desc", [adv.id, jobId]); return r.length > saidBefore + 1 ? r : null; }, 40, 500);
     check(`A16: ONE 'Prices updated on ${jobNumber}' with the change folded in ('Technician asked 2, Parts changed to 4')`, !!n2 && n2.length === saidBefore + 2 && n2[0].title === `Prices updated on ${jobNumber}` && /Changes: .*asked 2, Parts changed to 4/i.test(n2[0].body ?? ""), JSON.stringify(n2?.[0]));
     // A new part request after the send opens the pricing again: back on the list.
@@ -174,7 +174,7 @@ try {
     await priceRow(page.locator(`[data-row-key="${L2}"]`), { pn: "E2E-FILTER-S10", net: "53" });
     check("B3: two priced: '2 of 3 priced'", !!(await until(async () => ((await progressOf(page)) === "2/3" ? 1 : null), 40, 500)), await progressOf(page));
     check("B4: the advisor heard nothing per line", (await advisorNotes(job.gated_in_by, "type = 'estimate_parts_priced' and href like $2", `%${EST}%`)) === 0);
-    await page.locator("[data-pricing-done]").click();
+    await page.locator("[data-pricing-done]").click(); await confirmCheckIfShown(page);
     await sleep(400);
     const listText = flat(await page.locator("[data-pricing-open-list]").textContent().catch(() => ""));
     check("B5: the drain plug is listed instead of sending", /1 part not priced yet/.test(listText) && /DRAIN PLUG/.test(listText), listText);
@@ -183,7 +183,7 @@ try {
     const oldTab = await page.context().newPage();
     await go(oldTab, `${base}/parts/estimate/${EST}`);
     await until(async () => ((await oldTab.locator("[data-pricing-bar]").count()) ? 1 : null), 30, 500);
-    await page.locator("[data-pricing-send-anyway]").click();
+    await page.locator("[data-pricing-send-anyway]").click(); await confirmCheckIfShown(page);
     const n1 = await until(async () => { const r = await sql("select title, body from public.notifications where staff_id = $1 and type = 'estimate_parts_priced' and href like $2 order by id desc", [job.gated_in_by, `%${EST}%`]); return r.length ? r : null; }, 40, 500);
     check("B6: ONE notification 'Parts priced on E-E2E-S10: 2 of 3', naming the plug", !!n1 && n1.length === 1 && n1[0].title === "Parts priced on E-E2E-S10: 2 of 3" && /Not priced yet: DRAIN PLUG/.test(n1[0].body ?? ""), JSON.stringify(n1));
     const stamp = (await sql("select parts_priced_at from public.quotations where id = $1", [EST]))[0];
@@ -192,9 +192,9 @@ try {
     await shot(page, "b-estimate-sent-1440");
     check("B7b: the answer shows in the bar next to the button", /Parts priced on E-E2E-S10: 2 of 3 – sent to /.test(flat(await page.locator("[data-pricing-sent]").textContent().catch(() => ""))));
     // The old tab presses the button again: nothing more goes to the advisor, and it says so next to the button.
-    await oldTab.locator("[data-pricing-done]").click();
+    await oldTab.locator("[data-pricing-done]").click(); await confirmCheckIfShown(oldTab);
     await sleep(400);
-    if (await oldTab.locator("[data-pricing-send-anyway]").count()) await oldTab.locator("[data-pricing-send-anyway]").click();
+    if (await oldTab.locator("[data-pricing-send-anyway]").count()) await oldTab.locator("[data-pricing-send-anyway]").click(); await confirmCheckIfShown(oldTab);
     const again = await until(async () => ((await oldTab.locator("[data-pricing-sent]").count()) ? flat(await oldTab.locator("[data-pricing-sent]").textContent()) : null), 30, 500);
     const stillOne = await sql("select count(*)::int as n from public.notifications where staff_id = $1 and type = 'estimate_parts_priced' and href like $2", [job.gated_in_by, `%${EST}%`]);
     check("B7c: a second send with nothing changed sends nothing more ('Already sent … Nothing changed since.')", /Already sent to the advisor/.test(again ?? "") && stillOne[0]?.n === 1, `${again} · ${JSON.stringify(stillOne)}`);
@@ -213,7 +213,7 @@ try {
     await priceRow(page.locator(`[data-row-key="${L3}"]`), { pn: "E2E-PLUG-S10", net: "26.88" });
     await priceRow(page.locator(`[data-row-key="${L4}"]`), { pn: "E2E-WASHER-S10", net: "6" });
     check("B10: all four priced and the bar offers 'Send updated prices'", !!(await until(async () => ((await progressOf(page)) === "4/4" ? 1 : null), 40, 500)) && /Send updated prices/.test(flat(await page.locator("[data-pricing-done]").textContent())), `${await progressOf(page)} · ${flat(await page.locator("[data-pricing-done]").textContent().catch(() => ""))}`);
-    await page.locator("[data-pricing-done]").click();
+    await page.locator("[data-pricing-done]").click(); await confirmCheckIfShown(page);
     const n2 = await until(async () => { const r = await sql("select title from public.notifications where staff_id = $1 and type = 'estimate_parts_priced' and href like $2 order by id desc", [job.gated_in_by, `%${EST}%`]); return r.length > 1 ? r : null; }, 40, 500);
     check("B11: ONE more: 'Prices updated on E-E2E-S10'", !!n2 && n2.length === 2 && n2[0].title === "Prices updated on E-E2E-S10", JSON.stringify(n2));
     await go(page, `${base}/parts`);
@@ -241,7 +241,7 @@ try {
     check("C2: after 'Price is right ✓' it stays '1 of 1 priced' (no part number, type or availability asked)", !!(await until(async () => ((await progressOf(page)) === "1/1" ? 1 : null), 30, 400)), await progressOf(page));
     await sleep(1500);
     const lastId = (await sql("select coalesce(max(id), 0)::bigint::text as id from public.notifications"))[0]?.id ?? "0";
-    await page.locator("[data-pricing-done]").click();
+    await page.locator("[data-pricing-done]").click(); await confirmCheckIfShown(page);
     const n = await until(async () => { const r = await sql("select title from public.notifications where staff_id = $1 and type = 'estimate_parts_priced' and href like $2 and id > $3::bigint order by id desc", [job.gated_in_by, `%${EST}%`, lastId]); return r.length ? r : null; }, 40, 500);
     check("C3: the send says 'All parts priced on E-E2E-S10' (never 'Not priced yet' for a checked price)", !!n && n[0].title === "All parts priced on E-E2E-S10", JSON.stringify(n));
     await browser.close();

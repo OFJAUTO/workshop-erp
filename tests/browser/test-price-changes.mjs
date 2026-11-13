@@ -8,7 +8,7 @@
 // Run: node --env-file=.env.test.local tests/browser/test-price-changes.mjs   (test server on 3102)
 import path from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql, typeReceiptNumber, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const dir = path.join(here, "shots", "price-changes");
@@ -55,7 +55,8 @@ try {
   await parts.page.locator("[data-mark-received]").click();
   check("A: receiving never asks for the invoice any more", (await parts.page.locator("[data-supplier-invoice-box]").count()) === 0);
   await parts.page.locator("[data-receive-confirm]").screenshot({ path: shot("a1-receive-no-invoice.png") });
-  await parts.page.locator("[data-no-stickers]").click();
+  await typeReceiptNumber(parts.page);
+  await parts.page.locator("[data-no-stickers]").click(); await confirmCheckIfShown(parts.page);
   await until(async () => (await sql("select supplier_invoice_status from public.purchase_orders where id = $1 and supplier_invoice_status = 'to_follow'", [poA.id]))[0]);
   const accA = await open(acc.id);
   await go(accA.page, `${base}/supplier-invoices?open=${encodeURIComponent(`follow:${poA.id}`)}`);
@@ -92,7 +93,8 @@ try {
   /* ---------- B. Above the limit: the owner's OK first (accounts enter the invoice since 4 November) ---------- */
   const poB = await mkPo("LPO-E2EPC-2", [{ name: "E2E GEARBOX MOUNT", qty: 1, unit: 1000 }]);
   await go(parts.page, `${base}/parts/orders/${poB.id}`);
-  await parts.page.locator("[data-record-delivery]").click();
+  await typeReceiptNumber(parts.page);
+  await parts.page.locator("[data-record-delivery]").click(); await confirmCheckIfShown(parts.page);
   await until(async () => (await sql("select status from public.purchase_orders where id = $1 and status = 'received'", [poB.id]))[0]);
   const accInv = async (poId, number, lineId, price) => {
     const a = await open(acc.id);
@@ -128,7 +130,8 @@ try {
   /* ---------- C. A price down: accepted at once ---------- */
   const poC = await mkPo("LPO-E2EPC-3", [{ name: "E2E CABIN FILTER", qty: 1, unit: 300 }]);
   await go(parts.page, `${base}/parts/orders/${poC.id}`);
-  await parts.page.locator("[data-record-delivery]").click();
+  await typeReceiptNumber(parts.page);
+  await parts.page.locator("[data-record-delivery]").click(); await confirmCheckIfShown(parts.page);
   await until(async () => (await sql("select status from public.purchase_orders where id = $1 and status = 'received'", [poC.id]))[0]);
   await accInv(poC.id, "INV-9002", poC.lines[0].lineId, 280);
   const lineC = await until(async () => (await sql("select invoice_unit_cost::float as inv, invoice_check from public.purchase_order_lines where id = $1 and invoice_unit_cost is not null", [poC.lines[0].lineId]))[0]);

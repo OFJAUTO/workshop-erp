@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright-core";
-import { api, base, browserFor, browserForId, cleanupDb, go, here, loginCookies, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, browserForId, cleanupDb, go, here, loginCookies, makeChecks, sleep, sql, typeReceiptNumber, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const mupdf = await import("mupdf");
 const { check, summary } = makeChecks();
@@ -96,9 +96,10 @@ const tB = new Date().toISOString();
   await go(page, `${base}/parts/${jobId}`);
   await page.locator("[data-mark-received]").click();
   await sleep(400);
-  check("B1: the receiving panel has NO invoice box, only the accounts note", (await page.locator("[data-supplier-invoice-box]").count()) === 0 && /accounts collect and scan it/i.test((await page.locator("[data-receive-invoice-note]").textContent()) ?? ""));
+  check("B1: the receiving panel has NO full invoice box, only the invoice number (13 Nov)", (await page.locator("[data-supplier-invoice-box]").count()) === 0 && (await page.locator("[data-receipt-number]").count()) === 1);
   await page.screenshot({ path: path.join(dir, "b1-receive-panel.png"), clip: (await page.locator("[data-receive-confirm]").boundingBox()) ?? undefined });
-  await page.locator("[data-no-stickers]").click();
+  await typeReceiptNumber(page);
+  await page.locator("[data-no-stickers]").click(); await confirmCheckIfShown(page);
   const done = await until(async () => (/received/i.test((await page.locator("[data-receive-panel] [role=alert]").textContent().catch(() => "")) ?? "") ? 1 : null));
   check("B2: the save says the invoice goes to accounts", !!done && /invoice goes to accounts/i.test((await page.locator("[data-receive-panel] [role=alert]").textContent()) ?? ""));
   const [{ supplier_invoice_status: st }] = await sql("select supplier_invoice_status from public.purchase_orders where id = $1", [po.id]);

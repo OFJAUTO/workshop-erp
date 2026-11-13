@@ -5,7 +5,7 @@
 // seeing "OFJ Automotive: genuine part"; the oil service and battery stickers in portrait with the WhatsApp booking
 // QR and the warranty months chosen on the battery line; Settings > Stickers with sizes and printers.
 //   node --env-file=.env.test.local tests/browser/test-v.mjs
-import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, submitted, confirmMoney } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, submitted, confirmMoney, typeReceiptNumber, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 12 * 60 * 1000).unref();
@@ -75,7 +75,9 @@ await section("2 part sticker", async () => {
   // The new flow: tick (on by default), Mark received, then Print stickers opens the sticker page in a new tab.
   await page.locator("[data-mark-received]").click();
   await page.locator("[data-receive-confirm]").waitFor({ timeout: 15000 });
-  const [labels] = await Promise.all([page.waitForEvent("popup"), page.locator("[data-print-stickers]").click()]);
+  await typeReceiptNumber(page);
+  await page.locator("[data-print-stickers]").click();
+  const [labels] = await Promise.all([page.waitForEvent("popup"), confirmCheckIfShown(page)]);
   await labels.waitForURL(/\/parts\/labels\//, { timeout: 20000 }).catch(() => null);
   check("2: Print stickers opens the sticker page at once with auto print", /\/parts\/labels\/.*parts=.*auto=1/.test(labels.url()), labels.url().slice(-120));
   await sleep(800);

@@ -1,12 +1,13 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
 import { previewBySupplier, type SelectRow } from "@/lib/lpo-select";
 import { addSupplierMoney, supplierMoney, supplierMoneyText } from "@/lib/supplier-money";
 import { reloadIfStale } from "@/lib/app-version";
+import { CheckBeforeSend } from "@/components/CheckBeforeSend";
+import { logSendCheckAction } from "../send-check-actions";
 
 const aed = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -16,7 +17,7 @@ const aed = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2,
  * red). Before sending, the preview shows each supplier's parts and the amount incl. VAT; the rest stay "Approved – to
  * order" for a later LPO.
  */
-export function LpoSelect({ rows, vatSupplierNames, pendingNumber, send }: { rows: SelectRow[]; vatSupplierNames: string[]; pendingNumber: string | null; send: (ids: string[]) => Promise<{ error?: string; message?: string }> }) {
+export function LpoSelect({ rows, vatSupplierNames, pendingNumber, send, jobId = null, checks = null }: { rows: SelectRow[]; vatSupplierNames: string[]; pendingNumber: string | null; send: (ids: string[]) => Promise<{ error?: string; message?: string }>; jobId?: string | null; /** 13 November 2026: per part, its part number, delivery and what looks wrong (CHECK BEFORE YOU SEND). */ checks?: Record<string, { partNumber: string | null; delivery: string | null; flags: string[] }> | null }) {
   const router = useRouter();
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [preview, setPreview] = useState(false);
@@ -30,9 +31,14 @@ export function LpoSelect({ rows, vatSupplierNames, pendingNumber, send }: { row
   const total = addSupplierMoney(blocks.map((b) => moneyOf(b.supplier, b.net)));
   const toggle = (id: string) => setTicked((t) => { const n = new Set(t); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const n = blocks.reduce((a, b) => a + b.parts.length, 0);
-  const go = () =>
+  const deliveryOf = (ids: string[]) => {
+    const ds = ids.map((id) => checks?.[id]?.delivery).filter((d): d is string => !!d);
+    return ds.length ? Array.from(new Set(ds)).join(" · ") : null;
+  };
+  const go = (flags: { key: string; name: string; flags: string[] }[]) =>
     start(async () => {
       try {
+        await logSendCheckAction("lpo_approval", { jobId, partIds: Array.from(ticked) }, flags).catch(() => null);
         const r = await send(Array.from(ticked));
         setAnswer(r);
         if (!r.error) { setTicked(new Set()); setPreview(false); router.refresh(); }
@@ -71,32 +77,17 @@ export function LpoSelect({ rows, vatSupplierNames, pendingNumber, send }: { row
       </div>
       {answer?.error ? <p className="text-sm font-semibold text-red" role="alert" data-lpo-selected-error>{answer.error}</p> : null}
       {answer?.message ? <p className="text-sm font-semibold text-green-text" data-lpo-selected-done>{answer.message}</p> : null}
-      {preview && typeof document !== "undefined"
-        ? createPortal(
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onClick={() => !busy && setPreview(false)}>
-              <div role="dialog" aria-modal="true" className="flex w-full max-w-lg max-h-[calc(100dvh-2rem)] flex-col gap-3 overflow-y-auto rounded-card bg-white p-5" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => { if (e.key === "Escape" && !busy) setPreview(false); }} data-lpo-preview>
-                <span className="text-lg font-extrabold">{pendingNumber ? `Add ${n} part${n === 1 ? "" : "s"} to ${pendingNumber}?` : `Send ${n} part${n === 1 ? "" : "s"} for approval?`}</span>
-                {blocks.map((b) => (
-                  <div key={b.supplier} className="flex flex-col gap-1 rounded-card border border-line p-3" data-lpo-preview-supplier={b.supplier}>
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <span className="text-sm font-extrabold">{b.supplier}</span>
-                      <span className="text-sm font-bold" data-lpo-preview-amount>{supplierMoneyText(moneyOf(b.supplier, b.net))}</span>
-                    </div>
-                    {b.parts.map((p) => <span key={p.id} className="text-xs uppercase">{p.name} × {p.quantity} · AED {aed(p.net)}</span>)}
-                  </div>
-                ))}
-                <p className="text-sm font-bold" data-lpo-preview-total>Total {supplierMoneyText(total)}</p>
-                {rows.length - n > 0 ? <p className="text-xs text-muted">{rows.length - n} other line{rows.length - n === 1 ? "" : "s"} stay{rows.length - n === 1 ? "s" : ""} as they are for a later LPO.</p> : null}
-                {answer?.error ? <p className="text-sm font-semibold text-red" role="alert">{answer.error}</p> : null}
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" size="md" tone="secondary" onClick={() => setPreview(false)} disabled={busy} data-lpo-preview-cancel autoFocus>Go back</Button>
-                  <Button type="button" size="md" onClick={go} disabled={busy} data-lpo-preview-confirm>{busy ? "Sending…" : pendingNumber ? "Add to the LPO" : "Send for approval"}</Button>
-                </div>
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
+      <CheckBeforeSend
+        open={preview}
+        title={pendingNumber ? `Add ${n} part${n === 1 ? "" : "s"} to ${pendingNumber}?` : `Send ${n} part${n === 1 ? "" : "s"} for approval?`}
+        groups={blocks.map((b) => ({ title: b.supplier, amount: supplierMoneyText(moneyOf(b.supplier, b.net)), delivery: deliveryOf(b.parts.map((p) => p.id)), lines: b.parts.map((p) => ({ key: p.id, name: p.name, partNumber: checks?.[p.id]?.partNumber ?? null, qty: p.quantity, price: p.quantity ? Math.round((p.net / p.quantity) * 100) / 100 : null, flags: checks?.[p.id]?.flags ?? [] })) }))}
+        total={supplierMoneyText(total)}
+        extra={rows.length - n > 0 ? <p className="text-xs text-muted">{rows.length - n} other line{rows.length - n === 1 ? "" : "s"} stay{rows.length - n === 1 ? "s" : ""} as they are for a later LPO.</p> : null}
+        busy={busy}
+        error={answer?.error ?? null}
+        onBack={() => setPreview(false)}
+        onSend={(flags) => go(flags)}
+      />
     </div>
   );
 }

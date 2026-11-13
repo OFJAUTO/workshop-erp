@@ -7,7 +7,7 @@
 // Run against `npx next dev -p 3100`:  node --env-file=.env.test.local tests/browser/test-h.mjs
 import fs from "node:fs";
 import path from "node:path";
-import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, projectRoot, sleep, sql, pressYes, sendLpo } from "./pw-lib.mjs";
+import { api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, projectRoot, sleep, sql, pressYes, sendLpo, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 20 * 60 * 1000).unref();
@@ -101,9 +101,9 @@ await section("A pricing table and PDF import", async () => {
   const btn = page.locator("[data-pricing-bar] [data-pricing-done]");
   check("6: the bar offers Pricing done – send to advisor", (await btn.count()) === 1 && /Pricing done – send to advisor/.test((await btn.textContent()) ?? ""), await page.locator("[data-pricing-bar]").textContent());
   const sendNow = async () => {
-    await page.locator("[data-pricing-bar] [data-pricing-done]").click();
+    await page.locator("[data-pricing-bar] [data-pricing-done]").click(); await confirmCheckIfShown(page);
     await sleep(500);
-    if (await page.locator("[data-pricing-send-anyway]").count()) { console.log("   (rows still open: " + (await page.locator("[data-pricing-open-list]").textContent()) + ")"); await page.locator("[data-pricing-send-anyway]").click(); }
+    if (await page.locator("[data-pricing-send-anyway]").count()) { console.log("   (rows still open: " + (await page.locator("[data-pricing-open-list]").textContent()) + ")"); await page.locator("[data-pricing-send-anyway]").click(); await confirmCheckIfShown(page); }
   };
   await sendNow();
   await until(async () => ((await page.locator("[data-pricing-locked]").count()) ? 1 : null), 40, 500);
@@ -244,7 +244,7 @@ await section("C LPO flow", async () => {
   await go(page, `${base}/parts/${jobId}`);
   const cardSel = `[data-supplier-lpo='${sub.number}']`;
   check("17: the Parts page shows one card per supplier LPO with Copy, PDF and Ordered", (await page.locator(cardSel).count()) === 1 && (await page.locator(`${cardSel} [data-lpo-copy]`).count()) === 1 && (await page.locator(`${cardSel} [data-lpo-pdf]`).count()) === 1 && (await page.locator(`${cardSel} [data-lpo-ordered]`).count()) === 1);
-  await page.locator(`${cardSel} [data-lpo-ordered]`).click();
+  await page.locator(`${cardSel} [data-lpo-ordered]`).click(); await confirmCheckIfShown(page);
   await afterSubmit(page);
   const d3 = await dubaiPlus(3);
   const ordered = (await sql("select p.order_status, p.expected_date::text as expected, po.status as po_status, j.plan_parts_done_at, j.plan_parts_ready_date::text as ready from public.part_items p join public.purchase_orders po on po.id = p.po_id join public.jobs j on j.id = p.job_id where p.id = $1", [PA]))[0];

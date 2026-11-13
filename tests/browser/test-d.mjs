@@ -4,7 +4,7 @@
 // the "Show only unpriced" filter, the bottom bar, the advisor's notification and the quotation, and "Pricing done"
 // goes straight through when every part is priced or marked not available. Run against `npx next dev -p 3100`:
 //   node --env-file=.env.test.local tests/browser/test-d.mjs
-import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, go, makeChecks, sleep, sql, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const until = async (fn, tries = 40, gap = 500) => { for (let i = 0; i < tries; i++) { const v = await fn(); if (v) return v; await sleep(gap); } return null; };
@@ -337,7 +337,7 @@ await section("U3 one part state", async () => {
   // Section 10 (3 November 2026): "Pricing done – send to advisor" with one unfinished row sends nothing: the open
   // line is listed right above the button (Go to, Send what you have) and the row goes red.
   const sentBefore = (await sql("select count(*)::int as n from public.notifications where job_id = $1 and type = 'parts_priced'", [jobId]))[0]?.n ?? 0;
-  await page.locator("[data-pricing-done]").click();
+  await page.locator("[data-pricing-done]").click(); await confirmCheckIfShown(page);
   await sleep(400);
   const list1 = ((await page.locator("[data-pricing-open-list]").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ");
   check("U3/12: the bar lists the part and the missing piece instead of sending: 1 part not priced yet · E2E DISC · net price is 0", /1 part not priced yet/.test(list1) && /E2E DISC/i.test(list1) && /net price is 0/.test(list1), list1);
@@ -355,7 +355,7 @@ await section("U3 one part state", async () => {
   await agree("every part priced or not available", { priced: 4, na: 1, nf: 0 });
   check("U3: the bar says 5 of 5 priced, 1 not available", /5 of 5 priced/.test((await page.locator("[data-pricing-progress]").textContent()) ?? "") && /1 not available/.test(await barText()), await barText());
   check("U3: no list and no 'Send what you have' when nothing is open", (await page.locator("[data-pricing-send-anyway]").count()) === 0);
-  await page.locator("[data-pricing-done]").click();
+  await page.locator("[data-pricing-done]").click(); await confirmCheckIfShown(page);
   const job = await until(async () => (await sql("select parts_pricing_done_at from public.jobs where id = $1", [jobId]))[0]?.parts_pricing_done_at ? 1 : null, 40, 500);
   check("U3: the job records pricing done", !!job);
   const sentWords = await until(async () => ((await page.locator("[data-pricing-sent]").count()) ? (await page.locator("[data-pricing-sent]").textContent()) : null), 30, 500);

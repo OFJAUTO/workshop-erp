@@ -19,6 +19,17 @@ Apply this one first, ahead of the 8 below. A live backup was taken first: `back
 |---|---|---|---|
 | 0 | `supabase/migrations/20261216090000_back_orders.sql` | Adds the server-only `back_orders` table, one row per part fitted on a later visit: the part, the line that charges it, the labour hours moved, the money that moves, who pays when, the follow-up job, the status, who decided. It has RLS on, no policies, no grants to the login role, and audit, stamp and no-delete triggers. It also adds `jobs.continues_job_id`, the follow-up job's link to the first visit, readable by the login role. Until it is applied, the "Back order - fit on a later visit" choice does not show, and Work complete still blocks as it does now. | 1 table + 1 column |
 
+### SECOND and THIRD: invoice number at receiving, and check before you send (13 November 2026)
+
+Backup taken first: `backups/2026-11-13T06-50-12` (129 tables, 281,784 rows).
+
+| # | What | What it does on live | Size |
+|---|---|---|---|
+| 0b | `supabase/migrations/20261216100000_part_receipts.sql` | Adds two server-only tables (RLS on, no policies, no grants to the login role, audit/stamp/no-delete triggers): `part_receipts`, one row per delivery received (what, when, who, the supplier's invoice number or "INVOICE DUE BY", reminders, retake requests, number corrections), and `receipt_files` (delivery paper and invoice photos; a retake adds a file and marks the old one replaced, nothing deleted). It also adds `suppliers.invoice_later_allowed` and `invoice_later_days` (1 to 5). From the apply, every receipt needs the supplier's invoice number (or "Invoice comes later" for a marked supplier), and the old daily "invoice missing" reminder stops: older receipts are only listed. | 2 tables + 2 columns |
+| 0c | `supabase/migrations/20261216110000_send_checks.sql` | Adds the server-only table `send_checks`: each "check before you send" confirmation (who, when, which lines were highlighted). The window itself works without it; the apply adds the log and the approver's "Checked before sending" box. | 1 table |
+
+**From your phone:** turn auto mode off and reply **"apply"**. I run 0, 0b and 0c first (backup, run, record, live check), then the 8 below.
+
 ### Then the 8 from the overnight list
 
 These come from the overnight list of 13 November 2026. A live backup was taken first: `backups/2026-11-12T21-37-52` (129 tables, 279,959 rows). Apply them in this order:

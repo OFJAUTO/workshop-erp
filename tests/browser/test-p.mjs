@@ -4,7 +4,7 @@
 // the price memory (C6), and real stock: a stock order through approval, ordered and received onto the shelf with the
 // averaged cost, the low-stock reminder from the hourly job, the monthly count (C7).
 //   node --env-file=.env.test.local tests/browser/test-p.mjs
-import { api, base, browserFor, cleanupDb, confirmMoney, cookieHeader, go, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, confirmMoney, cookieHeader, go, makeChecks, sleep, sql, typeReceiptNumber, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 15 * 60 * 1000).unref();
@@ -110,14 +110,15 @@ await section("2 stock order", async () => {
   await ob.close();
   const { browser: pb, page: pp } = await browserFor("parts", { viewport: { width: 1366, height: 1400 } });
   await go(pp, `${base}/parts/orders/${stockPoId}`);
-  await pp.locator("[data-lpo-ordered]").click();
+  await pp.locator("[data-lpo-ordered]").click(); await confirmCheckIfShown(pp);
   await afterSubmit(pp);
   check("2: Parts mark it ordered", (await sql("select status from public.purchase_orders where id = $1", [stockPoId]))[0]?.status === "ordered");
   await go(pp, `${base}/parts/orders/${stockPoId}`);
   // 4 November 2026: receiving never asks for the invoice (accounts collect the paper and scan it).
-  check("2: the delivery form has NO invoice box; the note says accounts take it over", (await pp.locator("[data-receive-form] [data-supplier-invoice-box]").count()) === 0 && (await pp.locator("[data-receive-form] [data-receive-invoice-note]").count()) === 1);
+  check("2: the delivery form has NO full invoice box, only the invoice number (13 Nov)", (await pp.locator("[data-receive-form] [data-supplier-invoice-box]").count()) === 0 && (await pp.locator("[data-receive-form] [data-receipt-number]").count()) === 1);
   const lineId = (await sql("select id from public.purchase_order_lines where po_id = $1", [stockPoId]))[0]?.id;
-  await pp.locator("[data-record-delivery]").click();
+  await typeReceiptNumber(pp);
+  await pp.locator("[data-record-delivery]").click(); await confirmCheckIfShown(pp);
   await afterSubmit(pp);
   const after = (await sql("select i.quantity::float as quantity, i.unit_cost::float as cost, i.low_notified_at, (select count(*)::int from public.stock_movements m where m.stock_item_id = i.id and m.kind = 'in' and m.po_id = $2) as moves from public.stock_items i where i.id = $1", [itemId, stockPoId]))[0];
   check("2: the delivery lands on the shelf with the cost averaged in", after?.quantity === 12 && after?.cost === 10 && after?.moves === 1, JSON.stringify(after));

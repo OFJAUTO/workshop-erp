@@ -3,7 +3,7 @@
 // quotation sent and approved → planning → parts handover → work finished → work confirmed → QC →
 // wash → proforma → payment and tax invoice → gate-out. Run against `npx next dev -p 3100`:
 //   node --env-file=.env.test.local tests/browser/test-notify.mjs
-import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson, pressRecord, sendLpo } from "./pw-lib.mjs";
+import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson, pressRecord, sendLpo, confirmCheckIfShown } from "./pw-lib.mjs";
 
 /** Ticks a technician; one already on a car asks "Assign anyway?" first (depends on the live workshop). */
 async function tickTech(page, box) {
@@ -184,7 +184,7 @@ try {
     // "Pricing done – send to advisor" at the bottom of the car's parts page.
     const saidWhilePricing = await sql("select count(*)::int as n from public.notifications where id > $1 and job_id = $2 and staff_id = $3 and type = 'parts_priced'", [m, jobId, advisorId]);
     check("6: nothing to the advisor per part while Parts price", (saidWhilePricing[0]?.n ?? 0) === 0, JSON.stringify(saidWhilePricing));
-    await page.locator("[data-pricing-done]").click();
+    await page.locator("[data-pricing-done]").click(); await confirmCheckIfShown(page);
     // The send stamps the job, then writes the one notification: wait for the last step.
     let one = [];
     for (let i = 0; i < 40; i++) {
@@ -274,7 +274,7 @@ try {
         await go(page, `${base}/parts/${jobId}`);
         while (await page.locator("[data-lpo-ordered]").count()) {
           const before = page.url();
-          await page.locator("[data-lpo-ordered]").first().click();
+          await page.locator("[data-lpo-ordered]").first().click(); await confirmCheckIfShown(page);
           await page.waitForURL((u) => u.toString() !== before, { timeout: 25000 }).catch(() => null);
           await sleep(800);
         }

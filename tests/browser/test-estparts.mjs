@@ -17,7 +17,7 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 import { execSync } from "node:child_process";
-import { base, browserFor, browserForId, chooseInspectionFee, cleanupDb, go, here, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";
+import { base, browserFor, browserForId, chooseInspectionFee, cleanupDb, go, here, makeChecks, projectRoot, sleep, sql, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const SHOTS = path.join(here, "shots", "estparts");
@@ -114,7 +114,7 @@ try {
   const priced = await until(async () => { const l = await lineOf("Front brake pads e2e"); return Number(l?.unit_cost) === 450 && l?.availability === "to_order" && l?.supplier_text ? l : null; });
   check("B the parts desk's price is on the line: cost 450, supplier, part number, genuine, next day", !!priced && /E2e Supplier/i.test(priced.supplier_text) && priced.part_number === "A0004209305" && priced.availability === "to_order" && Number(priced.delivery_days) === 1 && !priced.priced_by_advisor, JSON.stringify(priced));
   check("B nobody is told per line: no 'Parts priced' notification yet", !(await sql("select title from public.notifications where staff_id = $1 and type = 'estimate_parts_priced' and href = $2", [advisor.id, `/estimates/${est.id}`]))[0]);
-  await pp.locator("[data-pricing-done]").click();
+  await pp.locator("[data-pricing-done]").click(); await confirmCheckIfShown(pp);
   const told = await until(async () => (await sql("select title from public.notifications where staff_id = $1 and type = 'estimate_parts_priced' and href = $2", [advisor.id, `/estimates/${est.id}`]))[0]);
   check(`B the advisor (${advisor.display_name}) is told ONCE: "${told?.title ?? "?"}"`, !!told && /^All parts priced on E-/.test(told.title));
   await pp.screenshot({ path: path.join(SHOTS, "B-parts-desk-priced-1440.png") });

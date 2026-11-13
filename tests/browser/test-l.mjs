@@ -6,7 +6,7 @@
 // with an optional charge invoiced before gate-out, or a free gate-out.
 // Run against `npx next dev -p 3100`:  node --env-file=.env.test.local tests/browser/test-l.mjs
 import path from "node:path";
-import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, projectRoot, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, cookieHeader, go, makeChecks, projectRoot, sleep, sql, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 setTimeout(() => { console.log("TIMEOUT: stopping"); cleanupDb(); process.exit(2); }, 18 * 60 * 1000).unref();
@@ -85,10 +85,10 @@ await section("1 our stock part after sending", async () => {
   const perPart = await sql("select count(*)::int as n from public.notifications where job_id = $1 and type in ('quote_revised_by_parts', 'parts_priced')", [jobId]);
   check("3: nothing per part while the pricing waits for its send", (perPart[0]?.n ?? 0) === 0, JSON.stringify(perPart));
   await sleep(1500);
-  await page.locator("[data-pricing-done]").click();
+  await page.locator("[data-pricing-done]").click(); await confirmCheckIfShown(page);
   await sleep(500);
   // The stage seed's front brake pads have no supplier: the bar lists them; "Send what you have" sends the rest.
-  if (await page.locator("[data-pricing-send-anyway]").count()) await page.locator("[data-pricing-send-anyway]").click();
+  if (await page.locator("[data-pricing-send-anyway]").count()) await page.locator("[data-pricing-send-anyway]").click(); await confirmCheckIfShown(page);
   const note = await until(async () => (await sql("select title, href from public.notifications where job_id = $1 and type = 'parts_priced' order by created_at desc limit 1", [jobId]))[0] ?? null, 30, 500);
   check("3: the advisor gets ONE 'Parts priced on J-xxx' that opens the revised quotation to send (one tap)", /priced on J-/.test(note?.title ?? "") && /send=1/.test(note?.href ?? ""), JSON.stringify(note));
   await browser.close();

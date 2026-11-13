@@ -21,6 +21,10 @@ begin
   if to_regclass('public.upload_pending') is not null then
     delete from public.upload_pending where job_id = any(job_ids) or inspection_id in (select id from public.inspections where job_id = any(job_ids)) or device_id in (select id from public.devices where name ilike 'E2e %') or staff_id in (select id from public.staff where display_name ilike 'E2e %');
   end if;
+  -- Check before you send (13 November 2026): the confirmations logged on the test cars and LPOs.
+  if to_regclass('public.send_checks') is not null then
+    delete from public.send_checks where job_id = any(job_ids) or po_id in (select id from public.purchase_orders where job_id = any(job_ids) or number like 'LPO-E2E-%' or supplier_name ilike 'e2e %') or part_ids && (select coalesce(array_agg(id), '{}') from public.part_items where job_id = any(job_ids));
+  end if;
   -- Receipts (13 November 2026): the test LPOs' receipts and their files.
   if to_regclass('public.part_receipts') is not null then
     delete from public.receipt_files where receipt_id in (select id from public.part_receipts where job_id = any(job_ids) or po_id in (select id from public.purchase_orders where job_id = any(job_ids) or number like 'LPO-E2E-%' or supplier_name ilike 'e2e %'));

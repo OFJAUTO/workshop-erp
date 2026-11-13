@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useRef, useState, useTransition } from "react";
 import { positionsWords } from "@/lib/parts-list";
 import { realPartNumber } from "@/lib/parts-rows";
 import { PositionsLine } from "@/components/PositionsLine";
@@ -10,6 +10,9 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { perUnitMark, qtyWithUnit, unitOf } from "@/lib/part-units";
 import { SupplierAmount } from "@/components/SupplierAmount";
 import { supplierMoney, supplierMoneyText } from "@/lib/supplier-money";
+import { CheckBeforeSend } from "@/components/CheckBeforeSend";
+import { flagsOf } from "@/lib/send-check-rules";
+import { logSendCheckAction } from "./send-check-actions";
 
 export type SupplierLpoLine = { id: string; part_item_id: string; description: string; positions?: string[] | null; part_number: string | null; quantity: number; /** The part's unit (pieces, litres, sets): "× 8 L", the price per litre. */ unit?: string | null; unit_cost: number; expected_date: string | null; received_qty: number };
 /** A line whose part was given its ending (3 November 2026): cancelled (off the LPO), or returned / kept in stock (still on it). */
@@ -23,7 +26,10 @@ export type SupplierLpo = { id: string; number: string; supplier_name: string; s
  * on file ("Email not set up yet" until the owner connects it). Ordered: one tap, the arrival dates follow from the
  * availability entered at pricing; a part's date can be changed with a tap when the supplier says otherwise.
  */
-export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEmail, supplierEmail = null, emailReady = false, jobId = null }: { po: SupplierLpo; vin: string | null; canManage: boolean; onOrdered: (formData: FormData) => void | Promise<void>; onSetDate: (partId: string, formData: FormData) => void | Promise<void>; onEmail?: () => Promise<{ error?: string; message?: string }>; supplierEmail?: string | null; emailReady?: boolean; jobId?: string | null }) {
+export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEmail, supplierEmail = null, emailReady = false, jobId = null, checks = null }: { /** 13 November 2026: per part, what looks wrong (from the server; else the card's own checks). */ checks?: Record<string, { flags: string[] }> | null; po: SupplierLpo; vin: string | null; canManage: boolean; onOrdered: (formData: FormData) => void | Promise<void>; onSetDate: (partId: string, formData: FormData) => void | Promise<void>; onEmail?: () => Promise<{ error?: string; message?: string }>; supplierEmail?: string | null; emailReady?: boolean; jobId?: string | null }) {
+  const [checkOpen, setCheckOpen] = useState(false);
+  const orderedForm = useRef<HTMLFormElement>(null);
+  const localFlags = useMemo(() => flagsOf(po.lines.map((l) => ({ key: l.part_item_id || l.id, name: l.description, partNumber: l.part_number, qty: l.quantity, price: l.unit_cost }))), [po.lines]);
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [emailResult, setEmailResult] = useState<{ error?: string; message?: string } | null>(null);
@@ -128,8 +134,18 @@ export function SupplierLpoCard({ po, vin, canManage, onOrdered, onSetDate, onEm
             </Button>
           ) : null}
           {canManage && !ordered && !cancelledPo ? (
-            <form action={onOrdered}>
-              <Button type="submit" size="md" data-lpo-ordered>Ordered</Button>
+            <form action={onOrdered} ref={orderedForm}>
+              {/* 13 November 2026: CHECK BEFORE YOU SEND - the order goes to the supplier only after the summary. */}
+              <Button type="button" size="md" onClick={() => setCheckOpen(true)} data-lpo-ordered>Ordered</Button>
+              <CheckBeforeSend
+                open={checkOpen}
+                title={`Order ${po.number} from ${po.supplier_name}?`}
+                groups={[{ title: po.supplier_name, amount: supplierMoneyText(supplierMoney(po.total_cost_aed, { chargesVat: po.chargesVat })), delivery: Array.from(new Set(po.lines.map((l) => l.expected_date).filter((d): d is string => !!d))).map((d) => formatDate(d)).join(" · ") || null, lines: po.lines.map((l) => ({ key: l.part_item_id || l.id, name: l.description, partNumber: l.part_number, qty: l.quantity, price: l.unit_cost, flags: checks?.[l.part_item_id]?.flags ?? localFlags[l.part_item_id || l.id] ?? [] })) }]}
+                total={supplierMoneyText(supplierMoney(po.total_cost_aed, { chargesVat: po.chargesVat }))}
+                onBack={() => setCheckOpen(false)}
+                onSend={(flags) => { void logSendCheckAction("lpo_supplier", { jobId, poId: po.id, partIds: po.lines.map((l) => l.part_item_id).filter(Boolean) }, flags).catch(() => null).finally(() => { setCheckOpen(false); orderedForm.current?.requestSubmit(); }); }}
+                sendLabel="YES, ALL CORRECT - ORDER"
+              />
             </form>
           ) : null}
         </div>

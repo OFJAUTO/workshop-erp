@@ -1,8 +1,10 @@
 "use client";
+import { flagsOf } from "@/lib/send-check-rules";
+import { logSendCheckAction } from "../send-check-actions";
 
 import { movePartToQuote } from "@/app/(app)/quotes/part-quote-actions";
 import { SupplierAmount } from "@/components/SupplierAmount";
-import { addSupplierMoney, supplierMoney } from "@/lib/supplier-money";
+import { addSupplierMoney, supplierMoney, supplierMoneyText } from "@/lib/supplier-money";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { PositionsLine } from "@/components/PositionsLine";
@@ -167,9 +169,27 @@ const stateOf = (r: TableRow, values = r.values): RowState => rowState(values, {
  * the order the page opened with and their height never changes; nothing redraws while someone is typing. The
  * counter at the top, the "Show only unpriced" filter and the bar at the bottom all read the same row states.
  */
-export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], lastImport = null, pricingDoneAt = null, onPricingDone = null, showBar = false, showCost = false, removeReasons = [], pricingLocked = false, onReopen = null, reopenedAt = null, tyreBrands = [], tyreModels = {}, tyreSizes = { front: "", rear: "" }, extraCosts = [], vatSupplierNames, estimate = null, unitsReady = false, pricingMode = null, editingWords = null, refLabel = "" }: { /** Supplier charges (courier, freight): internal costs counted in "Our cost", per supplier. */ extraCosts?: { supplier: string; amount: number }[]; /** Supplier amounts with VAT (5 November 2026): the names of the suppliers that charge VAT by THE rule (registered with a TRN), worked out by the page. */ vatSupplierNames: string[]; /** The tyre details window: brands and models from Settings, the car's sizes from the inspection. */ tyreBrands?: string[]; tyreModels?: Record<string, string[]>; tyreSizes?: { front: string; rear: string }; jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; /** The owner's parts pool for the picker. */ catalogue?: CatalogueRow[]; /** The last price import still in force, for "Undo last import". */ lastImport?: { id: string; count: number; at: string } | null; pricingDoneAt?: string | null; /** "Pricing done – send to advisor" (section 10): the send, answered in the bar. */ onPricingDone?: SendAction | null; showBar?: boolean; /** The cost bar and line totals: Parts, advisors and the owner only - never anything a customer sees. */ showCost?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[]; /** Pricing done: every row is read-only until Edit. */ pricingLocked?: boolean; onReopen?: Action | null; /** Edit pressed after Pricing done: the bar offers "Send updated prices". */ reopenedAt?: string | null; /** Estimate mode (3 November 2026): the same rows price an estimate's own part lines (no job yet). */ estimate?: EstimateDesk | null; /** The unit choice (pieces, litres, sets) once the database keeps it (migration 20261203160000). */ unitsReady?: boolean; /** The bar's state when the page knows it better (an estimate): open, editing or sent. */ pricingMode?: "open" | "editing" | "sent" | null; editingWords?: string | null; /** "J-00970" / "E-00058". */ refLabel?: string }) {
+export function PartsTable({ jobId, rows: initialRows, suppliers: initialSuppliers, types, canPrice, car, vin, openingLine, catalogue = [], lastImport = null, pricingDoneAt = null, onPricingDone = null, showBar = false, showCost = false, removeReasons = [], pricingLocked = false, onReopen = null, reopenedAt = null, tyreBrands = [], tyreModels = {}, tyreSizes = { front: "", rear: "" }, extraCosts = [], vatSupplierNames, estimate = null, unitsReady = false, pricingMode = null, editingWords = null, refLabel = "", sendFacts = null }: { /** 13 November 2026 (CHECK BEFORE YOU SEND): per part, what the quote said and the last price paid. */ sendFacts?: Record<string, { lastPrice: number | null; quotedQty: number | null; quotedCost: number | null; quotedSell: number | null }> | null; /** Supplier charges (courier, freight): internal costs counted in "Our cost", per supplier. */ extraCosts?: { supplier: string; amount: number }[]; /** Supplier amounts with VAT (5 November 2026): the names of the suppliers that charge VAT by THE rule (registered with a TRN), worked out by the page. */ vatSupplierNames: string[]; /** The tyre details window: brands and models from Settings, the car's sizes from the inspection. */ tyreBrands?: string[]; tyreModels?: Record<string, string[]>; tyreSizes?: { front: string; rear: string }; jobId: string; rows: TableRow[]; suppliers: SupplierOption[]; types: string[]; canPrice: boolean; car: string; vin: string | null; openingLine: string; /** The owner's parts pool for the picker. */ catalogue?: CatalogueRow[]; /** The last price import still in force, for "Undo last import". */ lastImport?: { id: string; count: number; at: string } | null; pricingDoneAt?: string | null; /** "Pricing done – send to advisor" (section 10): the send, answered in the bar. */ onPricingDone?: SendAction | null; showBar?: boolean; /** The cost bar and line totals: Parts, advisors and the owner only - never anything a customer sees. */ showCost?: boolean; /** One-tap reasons for "Remove: not needed" (Settings). */ removeReasons?: readonly string[]; /** Pricing done: every row is read-only until Edit. */ pricingLocked?: boolean; onReopen?: Action | null; /** Edit pressed after Pricing done: the bar offers "Send updated prices". */ reopenedAt?: string | null; /** Estimate mode (3 November 2026): the same rows price an estimate's own part lines (no job yet). */ estimate?: EstimateDesk | null; /** The unit choice (pieces, litres, sets) once the database keeps it (migration 20261203160000). */ unitsReady?: boolean; /** The bar's state when the page knows it better (an estimate): open, editing or sent. */ pricingMode?: "open" | "editing" | "sent" | null; editingWords?: string | null; /** "J-00970" / "E-00058". */ refLabel?: string }) {
   const router = useRouter();
   const [rows, setRows] = useState<TableRow[]>(initialRows);
+  // 13 November 2026: CHECK BEFORE YOU SEND - the priced parts grouped by supplier, with what looks wrong.
+  const pricingCheck = () => {
+    const priced = rows.filter((r) => stateOf(r) === "priced");
+    const lines = priced.map((r) => {
+      const fact = r.partId ? sendFacts?.[r.partId] : undefined;
+      return { key: r.key, name: r.name, partNumber: r.values.part_number || null, noNumberTicked: (r.values.part_number || "").trim().toUpperCase() === "NO NUMBER", qty: Number(r.values.qty) || 1, price: r.values.cost_aed ? Number(r.values.cost_aed) : null, supplier: r.values.supplier || null, lastPrice: fact?.lastPrice ?? null, quotedQty: fact?.quotedQty ?? null, quotedCost: fact?.quotedCost ?? null, quotedSell: fact?.quotedSell ?? null };
+    });
+    const flags = flagsOf(lines);
+    const vatSet = new Set(vatSupplierNames.map((n) => n.trim().toLowerCase()));
+    const bySupplier = new Map<string, typeof lines>();
+    for (const l of lines) bySupplier.set(l.supplier || "No supplier", [...(bySupplier.get(l.supplier || "No supplier") ?? []), l]);
+    const groups = Array.from(bySupplier.entries()).map(([supplier, ls]) => {
+      const money = supplierMoney(ls.reduce((a, l) => a + (l.price ?? 0) * l.qty, 0), { chargesVat: vatSet.has(supplier.trim().toLowerCase()) });
+      const days = Array.from(new Set(priced.filter((r) => (r.values.supplier || "No supplier") === supplier).map((r) => r.values.availability === "in_stock" ? "In stock" : r.values.days ? `${r.values.days} day${r.values.days === "1" ? "" : "s"}` : r.values.availability).filter(Boolean)));
+      return { title: supplier, amount: supplierMoneyText(money), delivery: days.join(" · ") || null, money, lines: ls.map((l) => ({ key: l.key, name: l.name, partNumber: l.partNumber, qty: l.qty, price: l.price, flags: flags[l.key] ?? [] })) };
+    });
+    return { groups, total: groups.length ? supplierMoneyText(addSupplierMoney(groups.map((g) => g.money))) : null, log: (fl: { key: string; name: string; flags: string[] }[]) => logSendCheckAction("prices", { jobId: estimate ? null : jobId, partIds: priced.map((r) => r.partId).filter((x): x is string => !!x) }, fl) };
+  };
   const [suppliers, setSuppliers] = useState<SupplierOption[]>(initialSuppliers);
   // "+ Add a part the technician did not list": the categorised picker.
   const [adding, setAdding] = useState(false);
@@ -497,6 +517,7 @@ export function PartsTable({ jobId, rows: initialRows, suppliers: initialSupplie
           extra={costLine}
           editingWords={editingWords ?? (reopenedAt && pricingDoneAt ? "Editing: the advisor sees the old prices until you press Send updated prices" : null)}
           refLabel={refLabel}
+          check={pricingCheck()}
         />
       ) : null}
       {showCost && !(showBar && onPricingDone) ? (

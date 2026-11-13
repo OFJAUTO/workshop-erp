@@ -8,7 +8,7 @@
 // Run: node --env-file=.env.test.local tests/browser/test-supplier-invoices.mjs   (test server on 3102)
 import path from "node:path";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql } from "./pw-lib.mjs";
+import { api, base, browserForId, cleanupDb, go, here, makeChecks, sleep, sql, typeReceiptNumber, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const dir = path.join(here, "shots", "supplier-invoices");
@@ -60,7 +60,8 @@ try {
   if (ticked > 1) for (const id of [poC.partId, poD.partId]) if ((await parts.page.locator(`[data-receive-row="${id}"] button[aria-pressed='true']`).count())) await parts.page.locator(`[data-receive-row="${id}"] button`).click();
   await parts.page.screenshot({ path: shot("a0-parts-receive-no-invoice-box.png") });
   await parts.page.locator("[data-mark-received]").click();
-  await parts.page.locator("[data-no-stickers]").click().catch(() => {});
+  await typeReceiptNumber(parts.page);
+  await parts.page.locator("[data-no-stickers]").click().catch(() => {}); await confirmCheckIfShown(parts.page);
   const follow = await until(async () => (await sql("select id from public.purchase_orders where id = $1 and supplier_invoice_status = 'to_follow'", [poA.id]))[0]);
   check("A: receiving never asks for the invoice – the LPO waits for accounts (to follow)", !!follow);
   const collect = await until(async () => (await sql("select body from public.notifications where staff_id = $1 and body like '%collect the supplier%' and body like '%E2E SPARE HUB%' order by created_at desc limit 1", [acc.id]))[0]);

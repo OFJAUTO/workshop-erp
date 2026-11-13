@@ -7,7 +7,7 @@
 // X, and the daily reminder goes to ACCOUNTS once, not twice.
 //   node --env-file=.env.test.local tests/browser/test-supplierinvoice.mjs
 import { writeFileSync } from "node:fs";
-import { api, base, browserFor, cleanupDb, makeChecks, sql } from "./pw-lib.mjs";
+import { api, base, browserFor, cleanupDb, makeChecks, sql, typeReceiptNumber, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
 const shots = "C:/Users/user/Desktop/workshop ERP/tests/browser/shots";
@@ -46,9 +46,10 @@ await page.locator(`[data-receive-row="${partB.id}"] button`).click(); // untick
 await page.locator("[data-mark-received]").click();
 await page.waitForTimeout(400);
 check("NO supplier-invoice box in the receiving panel", (await page.locator("[data-receive-confirm] [data-supplier-invoice-box]").count()) === 0);
-check("the panel says the paper goes to accounts", /accounts collect and scan/i.test((await page.locator("[data-receive-invoice-note]").textContent().catch(() => "")) ?? ""));
+check("the panel asks the supplier invoice number (13 Nov)", (await page.locator("[data-receipt-number]").count()) === 1);
 await page.screenshot({ path: `${shots}/supplier-invoice-box.png`, fullPage: true });
-await page.locator("[data-no-stickers]").click();
+await typeReceiptNumber(page);
+await page.locator("[data-no-stickers]").click(); await confirmCheckIfShown(page);
 await page.waitForTimeout(2500);
 check("the delivery saves with no invoice asked", /received/i.test((await page.locator('[data-receive-panel] [role="alert"]').textContent().catch(() => "")) ?? ""));
 check("part A is received", (await sql("select order_status from public.part_items where id = $1", [partA.id]))[0].order_status === "received");
@@ -133,7 +134,8 @@ await page.goto(`${base}/parts/${jobId}`, { waitUntil: "load" });
 await page.waitForTimeout(1500);
 await page.locator("[data-mark-received]").click();
 await page.waitForTimeout(400);
-await page.locator("[data-no-stickers]").click();
+await typeReceiptNumber(page);
+await page.locator("[data-no-stickers]").click(); await confirmCheckIfShown(page);
 let followed = false;
 for (let i = 0; i < 40 && !followed; i++) {
   followed = (await sql("select supplier_invoice_status from public.purchase_orders where id = $1", [po2.id]))[0]?.supplier_invoice_status === "to_follow" && (await sql("select order_status from public.part_items where id = $1", [partB.id]))[0]?.order_status === "received";
@@ -145,7 +147,9 @@ check("the delivery records with the invoice to follow by itself", followed, ((a
 const cron = async () => (await fetch(`${base}/api/cron/housekeeping`, { headers: { authorization: `Bearer ${process.env.CRON_SECRET}` } })).json();
 await cron();
 const bells = await sql("select count(*)::int as n from public.notifications n join public.staff s on s.id = n.staff_id where n.type = 'supplier_invoice_missing' and n.title = $1 and s.role_id = 'accounts'", [`Invoice missing · ${po2.number}`]);
-check("ACCOUNTS get the daily 'Invoice missing' reminder", (bells[0]?.n ?? 0) >= 1);
+// 13 November 2026: the invoice number is typed at receiving, so the old daily "Invoice missing" bell stops; only an
+// "Invoice comes later" receipt is reminded (day 3, day 5, overdue: test-receipts).
+check("receipts carry the number: no old daily 'Invoice missing' bell", (bells[0]?.n ?? 0) === 0);
 const partsBells = await sql("select count(*)::int as n from public.notifications n join public.staff s on s.id = n.staff_id where n.type = 'supplier_invoice_missing' and n.title = $1 and s.role_id = 'parts'", [`Invoice missing · ${po2.number}`]);
 check("Parts get NO daily reminder", (partsBells[0]?.n ?? 0) === 0);
 await cron();

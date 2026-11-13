@@ -1,4 +1,5 @@
 "use client";
+import { CheckBeforeSend, type CheckGroup } from "./CheckBeforeSend";
 
 import { useActionState, useEffect, useRef, useState } from "react";
 import { formatDateTime } from "@/lib/format";
@@ -21,7 +22,9 @@ type Action = (formData: FormData) => void | Promise<void>;
  *   sent     sent and nothing changed since: green, with Edit (jobs) and Back to the parts desk; lines left open by
  *            "Send what you have" are named, with how to finish them
  */
-export function PricingDoneBar({ progress, mode, sentAt = null, action, onReopen = null, rowSelector, onAttempt, extra = null, backHref = "/parts", editingWords = null, refLabel }: {
+export function PricingDoneBar({ progress, mode, sentAt = null, action, onReopen = null, rowSelector, onAttempt, extra = null, backHref = "/parts", editingWords = null, refLabel, check = null }: {
+  /** 13 November 2026: CHECK BEFORE YOU SEND - the prices going to the advisor, shown and checked first. */
+  check?: { groups: CheckGroup[]; total?: string | null; log: (flags: { key: string; name: string; flags: string[] }[]) => Promise<void> } | null;
   progress: PricingProgress;
   mode: "open" | "editing" | "sent";
   sentAt?: string | null;
@@ -41,6 +44,8 @@ export function PricingDoneBar({ progress, mode, sentAt = null, action, onReopen
   refLabel: string;
 }) {
   const [state, formAction] = useActionState(action, {} as FormState);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [checkForce, setCheckForce] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false);
   // After Go to the list folds into one slim line (the row it jumped to must not sit behind it).
   const [jumping, setJumping] = useState(false);
@@ -107,7 +112,18 @@ export function PricingDoneBar({ progress, mode, sentAt = null, action, onReopen
 
   return (
     <div ref={barRef} className="fixed bottom-0 left-0 right-0 nav:left-60 z-40 border-t border-line bg-white px-4 py-2.5" data-pricing-bar data-pricing-mode={mode}>
-      <form action={formAction} className="mx-auto flex max-w-6xl flex-col gap-2">
+      <form action={formAction} ref={formRef} className="mx-auto flex max-w-6xl flex-col gap-2">
+        {check ? <input type="hidden" name="force" defaultValue="" data-pricing-force /> : null}
+        {check ? (
+          <CheckBeforeSend
+            open={checkForce !== null}
+            title={`Send these prices to the advisor (${refLabel})?`}
+            groups={check.groups}
+            total={check.total ?? null}
+            onBack={() => setCheckForce(null)}
+            onSend={(flags) => { const f = checkForce ?? ""; void check.log(flags).catch(() => null).finally(() => { const box = formRef.current?.querySelector<HTMLInputElement>("[data-pricing-force]"); if (box) box.value = f; setCheckForce(null); formRef.current?.requestSubmit(); }); }}
+          />
+        ) : null}
         {showList ? (
           // The answer to the tap, right above the button: the lines still open (never sent while they are).
           <div className="flex max-h-[45vh] flex-col gap-2 overflow-y-auto rounded-card border-2 border-red-bar bg-white p-3" data-pricing-open-list role="dialog" aria-label={openLinesWords(progress)}>
@@ -129,7 +145,7 @@ export function PricingDoneBar({ progress, mode, sentAt = null, action, onReopen
             </ul>
             <div className="flex flex-wrap items-center gap-2">
               {open.length > 1 ? <button type="button" onClick={goNext} className="min-h-11 rounded-control border border-line-strong bg-white px-4 text-sm font-bold" data-pricing-go-next>Go to next</button> : null}
-              <button type="submit" name="force" value="1" className="min-h-11 rounded-control border border-ink bg-white px-4 text-sm font-bold" data-pricing-send-anyway>Send what you have</button>
+              <button type={check ? "button" : "submit"} name={check ? undefined : "force"} value="1" onClick={check ? () => setCheckForce("1") : undefined} className="min-h-11 rounded-control border border-ink bg-white px-4 text-sm font-bold" data-pricing-send-anyway>Send what you have</button>
               <span className="text-xs text-muted">The advisor gets the priced parts now; the rest stay on your To price list until they are priced.</span>
             </div>
           </div>
@@ -175,7 +191,7 @@ export function PricingDoneBar({ progress, mode, sentAt = null, action, onReopen
                   {big}
                 </button>
               ) : (
-                <button type="submit" name="force" value="" disabled={!progress.count} className="min-h-12 w-full rounded-control bg-ink px-6 text-base font-extrabold text-on-dark disabled:opacity-40 sm:w-auto" title={`${refLabel}: send every price to the advisor`} data-pricing-done>
+                <button type={check ? "button" : "submit"} name={check ? undefined : "force"} value="" onClick={check ? () => setCheckForce("") : undefined} disabled={!progress.count} className="min-h-12 w-full rounded-control bg-ink px-6 text-base font-extrabold text-on-dark disabled:opacity-40 sm:w-auto" title={`${refLabel}: send every price to the advisor`} data-pricing-done>
                   {big}
                 </button>
               )}

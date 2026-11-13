@@ -203,11 +203,48 @@ export async function sendLpo(page, { partIds = null } = {}) {
   if (partIds) for (const id of partIds) await page.locator(`[data-lpo-pick="${id}"]`).check();
   else await page.locator("[data-lpo-select-all]").click();
   await page.locator("[data-send-lpo-selected]").click();
-  await page.locator("[data-lpo-preview]").waitFor({ timeout: 10000 });
-  await page.locator("[data-lpo-preview-confirm]").click();
+  await confirmCheck(page);
   const out = page.locator("[data-lpo-selected-done], [data-lpo-selected-error]").first();
   await out.waitFor({ timeout: 60000 }).catch(() => null);
   const text = ((await out.textContent().catch(() => "")) ?? "").trim();
   const isError = (await page.locator("[data-lpo-selected-error]").count()) > 0;
   return isError ? { error: text } : { message: text };
+}
+
+/**
+ * 13 November 2026: every receipt needs the supplier's invoice number. Types a fresh one where the receipt box shows
+ * (and answers "Same invoice as LPO-…?" with yes); does nothing on a screen without the box.
+ */
+let receiptSeq = 0;
+export async function typeReceiptNumber(page, number = null) {
+  const box = page.locator("[data-receipt-number]:visible").first();
+  if (!(await box.count())) return;
+  if (await box.inputValue()) return;
+  await box.fill(number ?? `INV-E2E-${Date.now() % 1000000}-${++receiptSeq}`);
+  await box.blur();
+  await sleep(700);
+  const same = page.locator("[data-receipt-same] input");
+  if (await same.count()) await same.check();
+}
+
+/** 13 November 2026: the parts desk's "check before you send" window - tick "I checked…" when lines are highlighted, then YES. */
+export async function confirmCheck(page) {
+  await page.locator("[data-check-send]").waitFor({ timeout: 15000 });
+  const tick = page.locator("[data-check-tick] input");
+  if (await tick.count()) await tick.check();
+  await page.locator("[data-check-yes]").click();
+}
+
+/** The "check before you send" window when it shows (a few seconds): tick if lines are highlighted, then YES. */
+export async function confirmCheckIfShown(page, ms = 5000) {
+  const w = page.locator("[data-check-send]");
+  try {
+    await w.waitFor({ timeout: ms });
+  } catch {
+    return false;
+  }
+  const tick = page.locator("[data-check-tick] input");
+  if (await tick.count()) await tick.check();
+  await page.locator("[data-check-yes]").click();
+  return true;
 }
