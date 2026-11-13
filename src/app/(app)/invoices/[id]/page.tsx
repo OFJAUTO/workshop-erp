@@ -5,6 +5,8 @@ import { signJobFiles } from "@/lib/work-data";
 import { PositionsLine } from "@/components/PositionsLine";
 import { Badge, Button, Card, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
+import { InvoiceProfitBox } from "@/components/InvoiceProfitBox";
+import { invoiceProfitFor, mayViewJobProfit } from "@/lib/invoice-profit";
 import { detailsWithoutHours, formatDate, formatDateTime, hoursQty } from "@/lib/format";
 import { METHOD_LABELS, PAYMENT_STATE_LABELS, creditsOnDocs, invoiceBalance, loadInvoice, nextDocumentNumber } from "@/lib/invoice-data";
 import { methodsFor } from "@/lib/money-steps";
@@ -66,6 +68,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   const payable = isTax || (invoice.kind === "proforma" && !invoice.converted_to);
   const rounding = Math.round((invoice.taxable_aed - (invoice.subtotal_aed - invoice.discount_aed - (invoice.warranty_credit_aed || 0))) * 100) / 100;
   const bankCharges = bankFeesOf(settings);
+  // 13 November 2026 (Section 8): the profit box - owner, accounts and the job's own advisor only, decided here.
+  const profitBox = isTax && (await mayViewJobProfit(staff, invoice.job_id)) ? await invoiceProfitFor(invoice.id, settings) : null;
 
   // The card slips and transfer proofs, signed for one hour.
 
@@ -107,6 +111,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
         </Card>
       ) : null}
 
+      {profitBox ? <InvoiceProfitBox m={profitBox} /> : null}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-4">
           {payable ? (

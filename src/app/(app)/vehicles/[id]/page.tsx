@@ -6,6 +6,10 @@ import { ppfJobsOfCar } from "@/lib/recheck";
 import { CarThumb } from "@/components/CarThumb";
 import { Badge, Button, Card, DescriptionList, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
+import { getSettings } from "@/lib/settings";
+import { ProfitTag } from "@/components/InvoiceProfitBox";
+import { profitByJob, visibleProfitJobs } from "@/lib/invoice-profit";
+import { maySeeLifetimeProfit } from "@/lib/invoice-profit-rules";
 import { formatDateTime } from "@/lib/format";
 import { can, type RoleId } from "@/lib/roles";
 import { STATUS_LABELS, type JobStatus } from "@/lib/jobs";
@@ -66,6 +70,11 @@ export default async function VehiclePage({
     supabase.from("jobs").select("id, job_number, status, gated_in_at, gated_out_at, is_open").eq("vehicle_id", id).order("gated_in_at", { ascending: false }),
   ]);
   const visits = (visitRows ?? []) as { id: string; job_number: string; status: JobStatus; gated_in_at: string; gated_out_at: string | null; is_open: boolean }[];
+  // 13 November 2026 (Section 8): each visit's profit (THE calculation), for the owner, accounts and the job's own
+  // advisor; the car's lifetime profit for the owner and accounts only. Decided here, on the server.
+  const profitJobs = await visibleProfitJobs(staff, visits.map((j) => j.id));
+  const visitProfit = profitJobs.size ? await profitByJob(Array.from(profitJobs), await getSettings()) : new Map<string, { profit: number; revenue: number; provisional: boolean; invoices: number }>();
+  const lifetime = maySeeLifetimeProfit(staff.role_id) && visitProfit.size ? Array.from(visitProfit.values()).reduce((a, p) => ({ profit: a.profit + p.profit, revenue: a.revenue + p.revenue, provisional: a.provisional || p.provisional }), { profit: 0, revenue: 0, provisional: false }) : null;
   // Section 1 (29 October 2026): each visit's quotations, every one reachable (owner and advisors).
   const visitQuotes = role === "owner" || role === "service_advisor" ? await loadQuoteHistory(visits.map((j) => j.id)) : new Map();
   // 30 October 2026: every estimate of the car with its versions (additional ones and what was carried over to a job), in the same list as a job's quotations.
@@ -157,6 +166,7 @@ export default async function VehiclePage({
 
           <Card className="flex flex-col gap-3">
             <SectionLabel right={`${visits.length}`}>Visits</SectionLabel>
+            {lifetime ? <p className="flex flex-wrap items-center gap-2 text-sm font-semibold" data-lifetime-profit>Lifetime on this car: <ProfitTag profit={Math.round(lifetime.profit * 100) / 100} revenue={lifetime.revenue} provisional={lifetime.provisional} hook="lifetime" /> <span className="text-xs text-muted">from {visitProfit.size} invoiced visit{visitProfit.size === 1 ? "" : "s"}</span></p> : null}
             {visits.length === 0 ? (
               <p className="text-sm text-muted">No job cards yet.</p>
             ) : (
@@ -176,6 +186,7 @@ export default async function VehiclePage({
                         <span className="text-sm text-muted">{STATUS_LABELS[j.status]}</span>
                       </span>
                     )}
+                    {visitProfit.get(j.id) ? <ProfitTag profit={visitProfit.get(j.id)!.profit} revenue={visitProfit.get(j.id)!.revenue} provisional={visitProfit.get(j.id)!.provisional} /> : null}
                     <QuotePicker items={pickItems(j.id, visitQuotes.get(j.id) ?? [])} />
                   </li>
                 ))}

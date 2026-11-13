@@ -1,5 +1,8 @@
 import { goodwillThisYear } from "@/lib/comp-data";
 import { getSettings as getSettingsForGoodwill } from "@/lib/settings";
+import { ProfitTag } from "@/components/InvoiceProfitBox";
+import { profitByJob } from "@/lib/invoice-profit";
+import { maySeeLifetimeProfit } from "@/lib/invoice-profit-rules";
 import Link from "next/link";
 import { Badge, Button, Card, DescriptionList, Empty, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
@@ -32,6 +35,14 @@ export default async function CustomerPage({
   const { message, error, receive: receiveParam, job: receiveJob, replace: replaceId } = await searchParams;
   const receiveFlag = (j?: string, r?: string, p?: string) => p === "1" || !!j || !!r;
   const canEdit = can(staff.role_id as RoleId, "editCustomers");
+  // 13 November 2026 (Section 8): the customer's total profit, every visit of every car - owner and accounts only (THE
+  // calculation, decided here on the server).
+  let lifetimeProfit: { profit: number; revenue: number; provisional: boolean; jobs: number } | null = null;
+  if (maySeeLifetimeProfit(staff.role_id)) {
+    const { data: custJobs } = await createAdminClient().from("jobs").select("id").eq("customer_id", id);
+    const byJob = await profitByJob(((custJobs ?? []) as { id: string }[]).map((j) => j.id), await getSettingsForGoodwill());
+    if (byJob.size) lifetimeProfit = Array.from(byJob.values()).reduce<{ profit: number; revenue: number; provisional: boolean; jobs: number }>((a, p) => ({ profit: a.profit + p.profit, revenue: a.revenue + p.revenue, provisional: a.provisional || p.provisional, jobs: a.jobs + 1 }), { profit: 0, revenue: 0, provisional: false, jobs: 0 });
+  }
 
   const supabase = await createClient();
   const [{ data: cData }, { data: contactsData }, { data: carsData }] = await Promise.all([
@@ -123,6 +134,13 @@ export default async function CustomerPage({
           </Card>
         ) : null;
       })() : null}
+      {lifetimeProfit ? (
+        <Card className="flex flex-wrap items-center gap-2" data-customer-lifetime-profit>
+          <SectionLabel>Profit from this customer · internal</SectionLabel>
+          <ProfitTag profit={Math.round(lifetimeProfit.profit * 100) / 100} revenue={lifetimeProfit.revenue} provisional={lifetimeProfit.provisional} hook="customer" />
+          <span className="text-xs text-muted">{lifetimeProfit.jobs} invoiced visit{lifetimeProfit.jobs === 1 ? "" : "s"}, every car</span>
+        </Card>
+      ) : null}
       {seesMoney && (owing.length || credit.length) ? (
         <Card id="money" className="flex flex-col gap-2" data-customer-money>
           <SectionLabel right={creditTotal > 0 ? `Credit AED ${creditTotal.toLocaleString("en-GB", { minimumFractionDigits: 2 })} (not allocated)` : undefined}>Money</SectionLabel>

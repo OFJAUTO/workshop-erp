@@ -14,6 +14,8 @@ import { notFound } from "next/navigation";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Textarea } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
+import { InvoiceProfitBox } from "@/components/InvoiceProfitBox";
+import { invoiceProfitFor, mayViewJobProfit } from "@/lib/invoice-profit";
 import { detailsWithoutHours, formatDateTime, formatDayTime, hoursQty } from "@/lib/format";
 import { INVOICE_LINE_SELECT, INVOICE_SELECT, METHOD_LABELS, PAYMENT_SELECT, buildInvoiceDraft, creditsOnDocs, invoiceBalance, nextDocumentNumber, toInvoice, toInvoiceLine, toPayment, type PaymentRow } from "@/lib/invoice-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
@@ -155,6 +157,8 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const links = live ? await paymentLinksOf(live.id) : [];
   const payLink = currentPaymentLink(links);
   const nextTax = proforma && !taxInvoice ? await nextDocumentNumber("tax_invoice", settings) : null;
+  // 13 November 2026 (Section 8): the profit of the tax invoice - owner, accounts and the job's own advisor only.
+  const profitBox = taxInvoice && (await mayViewJobProfit(staff, id)) ? await invoiceProfitFor(taxInvoice.id, settings) : null;
   // Section 12: deposits (no invoice yet) are people's work too - without them in this lookup a cash
   // deposit used to fall back to a provider name on screen.
   const everyPayment = [...payments, ...depositRows];
@@ -291,6 +295,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
       {sp.message ? <Notice tone="success">{sp.message}</Notice> : null}
       {sp.error ? <Notice tone="error">{sp.error}</Notice> : null}
       {draft.lines.length === 0 && !live ? <Notice tone="error">No approved quotation on this job and no inspection fee due. Nothing to invoice.</Notice> : null}
+      {profitBox ? <InvoiceProfitBox m={profitBox} /> : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-3" data-money-steps>
