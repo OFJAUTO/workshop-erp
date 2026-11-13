@@ -1,4 +1,4 @@
-# Handover – overnight list of 13 November 2026 (all 15 sections built; last update 13 Nov, 05:15 Dubai)
+# Handover – overnight list of 13 November 2026 (ALL DONE; last update 13 Nov, 07:40 Dubai)
 
 **NEEDS OMAR (top first):**
 1. **Push refused.** Sections 12 to 15 are committed but not live. The auto-mode guard refused `git push` ("Out-of-Place Publication"). Reply **"push"**, or allow `git push` for this project, and they go live in one push (commits 337adfa, 8c92e45, 9b33b07, 7e29a49 and the test/handover commit after them).
@@ -31,6 +31,33 @@
   - S14 PCV and fuel injectors (9b33b07).
   - S15 approvals stand-in (7e29a49).
 - One note per section: `docs/*-13-nov-note.md`. Proof: `docs/proof/2026-11-13-*`.
+
+**End-of-batch checks (TEST):**
+- Full layout check: 174 pages, 1,566 page views and 252 pop-ups. It found 59 problems (mostly amounts split across two lines on phones). All are fixed, and the failed pages were re-checked clean (commit 36b8f78).
+- Security: all passed.
+- Unit tests: all passed.
+- Whole-job simulation: 713 of 713.
+- Live read-only check: 33 of 33.
+
+**Timing (Dubai):**
+- S1 00:55–01:28.
+- S2 –01:40.
+- S3 –02:04.
+- S4 –02:17.
+- S5 –02:35.
+- S6 –02:46.
+- S7 –03:21.
+- S8 –03:31.
+- S9 –03:40.
+- S10 –03:55.
+- S11 –04:20.
+- S12 –04:32.
+- S13 –04:49.
+- S14 –04:59.
+- S15 –05:08.
+- End checks 05:10–07:35: full layout 12 min, fixes and re-checks about 30 min, simulation about 85 min.
+- Builds: about 3 min each, 12 builds.
+- Deploy waits: none (pushes after S11 refused).
 
 **WAITING FOR APPLY (8):**
 1. Stock-use migration.
