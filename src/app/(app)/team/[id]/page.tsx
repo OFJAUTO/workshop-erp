@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
+import { placeWords, roleTitleOf } from "@/lib/teams";
 import { Avatar, Badge, Button, Card, ChoiceButtons, DescriptionList, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
-import { DEPARTMENT_LABELS, ROLE_LABELS, type DepartmentId, type RoleId } from "@/lib/roles";
+import { ROLE_LABELS, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { DeviceRow, StaffPrivateRow, StaffRow } from "@/lib/types";
 import { createSetupLink, resetPin, setLoginType, setStaffActive, updateStaff, uploadStaffPhoto } from "../actions";
@@ -67,8 +68,8 @@ export default async function StaffDetailPage({
         title={staff.full_name}
         subtitle={
           <span className="flex flex-wrap gap-1.5 items-center">
-            {ROLE_LABELS[staff.role_id as RoleId]}
-            {staff.department_id ? ` · ${DEPARTMENT_LABELS[staff.department_id as DepartmentId]}` : ""}
+            {roleTitleOf({ ...staff, team: (staff as { team?: string | null }).team ?? null }, ROLE_LABELS[staff.role_id as RoleId])}
+            {placeWords({ ...staff, team: (staff as { team?: string | null }).team ?? null }) ? ` · ${placeWords({ ...staff, team: (staff as { team?: string | null }).team ?? null })}` : ""}
             {!staff.is_active ? <Badge tone="red">Disabled</Badge> : null}
           </span>
         }

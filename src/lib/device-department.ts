@@ -21,8 +21,12 @@ export function sideOfPerson(departmentId: string | null | undefined): "workshop
 }
 
 /** Is this person one of the tablet's own department (shown first; the rest behind "Someone else?")? */
-export function onTabletDepartment(tablet: string | null | undefined, personDepartment: string | null | undefined): boolean {
+export function onTabletDepartment(tablet: string | null | undefined, personDepartment: string | null | undefined, team?: string | null): boolean {
   if (!isDeviceDepartment(tablet) || tablet === "both") return true;
+  // 13 November 2026 (Section 12): a Bodyshop tablet includes EVERY bodyshop team - judged by the team when it is set.
+  const t = team ?? "";
+  if (["dismantle_refit", "ppf", "painting", "detailing_cleaning"].includes(t)) return tablet === "bodyshop";
+  if (["technicians", "electricians", "helpers"].includes(t)) return tablet === "workshop";
   return sideOfPerson(personDepartment) === tablet;
 }
 

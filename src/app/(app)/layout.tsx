@@ -1,4 +1,5 @@
 import { deviceDepartmentWords } from "@/lib/device-department";
+import { roleTitleOf } from "@/lib/teams";
 import { mayOpenHr } from "@/lib/hr-rules";
 import { approvalsCount } from "@/lib/approvals";
 import { Suspense } from "react";
@@ -177,7 +178,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         searchCustomers={can(role, "viewCustomers")}
         search={role !== "gate_in"}
         nav={nav}
-        user={{ id: staff.id, name: staff.display_name, role: ROLE_LABELS[role], photoUrl }}
+        user={{ id: staff.id, name: staff.display_name, role: roleTitleOf({ role_id: role, department_id: staff.department_id, team: staff.team }, ROLE_LABELS[role]), photoUrl }}
         sounds={{ tone: String(settings.notification_tone || "marimba"), ownerTone: String(settings.notification_tone_owner || "chord"), remindMinutes: Number(settings.notification_remind_minutes) || 2 }}
         viewingAs={staff.viewingAs}
         actingAs={staff.actingAs}

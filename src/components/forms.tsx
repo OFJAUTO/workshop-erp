@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useRef } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { initialFormState, type FormState } from "@/lib/form-state";
 import { Button, Notice } from "./ui";
@@ -53,20 +53,24 @@ export function ActionForm({
   initialValues = {},
   className = "flex flex-col gap-5",
   id,
+  clearErrorOnChange = false,
   children,
 }: {
   action: FormAction;
   initialValues?: Record<string, string>;
   className?: string;
+  /** 13 November 2026 (Section 12): the red message goes as soon as the person changes something (e.g. picks the role it asked for). */
+  clearErrorOnChange?: boolean;
   /** Lets a button elsewhere on the page (a fixed bar) submit this form. */
   id?: string;
   children: (values: Record<string, string>, state: FormState) => React.ReactNode;
 }) {
   const [state, formAction] = useActionState(action, initialFormState);
   const values = { ...initialValues, ...(state.values ?? {}) };
+  const [dismissed, setDismissed] = useState<FormState | null>(null);
   return (
-    <form id={id} action={formAction} className={className}>
-      {state.error ? <Notice tone="error">{state.error}</Notice> : null}
+    <form id={id} action={formAction} className={className} onChange={clearErrorOnChange ? () => { if (state.error && dismissed !== state) setDismissed(state); } : undefined}>
+      {state.error && dismissed !== state ? <Notice tone="error">{state.error}</Notice> : null}
       {state.success ? <Notice tone="success">{state.success}</Notice> : null}
       {children(values, state)}
     </form>

@@ -1,4 +1,5 @@
 "use server";
+import { storedDepartmentOf, teamProblem } from "@/lib/teams";
 import { dbWords, dbDetail } from "@/lib/app-errors";
 
 import { randomBytes } from "node:crypto";
@@ -49,6 +50,16 @@ function firstIssue(result: { success: false; error: z.ZodError }) {
 }
 
 function parseStaff(formData: FormData) {
+  // 13 November 2026 (Section 12): the department is worked out from the two levels (Department, then Team), never
+  // typed; a team from another department is refused in words, Office keeps no team.
+  const level = String(formData.get("department_level") ?? "");
+  const team = String(formData.get("team") ?? "").trim();
+  if (level === "mechanical" || level === "bodyshop" || level === "office") {
+    const problem = teamProblem(level, team || null);
+    if (problem) return { success: false as const, error: new z.ZodError([{ code: "custom", path: ["team"], message: problem, input: team }]) };
+    formData.set("department_id", storedDepartmentOf(level, team || null));
+    if (level === "office") formData.set("team", "");
+  }
   return staffSchema.safeParse({
     full_name: formData.get("full_name"),
     display_name: formData.get("display_name"),

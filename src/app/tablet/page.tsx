@@ -1,11 +1,11 @@
 import { deviceDepartmentWords, onTabletDepartment } from "@/lib/device-department";
+import { placeWords } from "@/lib/teams";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { PublicShell } from "@/components/Shell";
 import { Card } from "@/components/ui";
 import { getCurrentDevice } from "@/lib/devices";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { DEPARTMENT_LABELS, type DepartmentId } from "@/lib/roles";
 import { PinLogin, type TabletPerson } from "./PinLogin";
 import { passkeyPerson } from "@/lib/passkey-rules";
 import { passkeyCounts, passkeyRollout, passkeyRp, passkeysReady } from "@/lib/passkey-server";
@@ -68,13 +68,13 @@ export default async function TabletPage() {
   const clocked = new Set([...((ws ?? []) as { technician_id: string }[]).map((x) => x.technician_id), ...((bc ?? []) as { staff_id: string }[]).map((x) => x.staff_id)]);
   const people: TabletPerson[] = scoped.map((r) => ({
     clockedIn: clocked.has(r.id),
-    mine: onTabletDepartment(device.department ?? null, r.department_id as string | null),
+    mine: onTabletDepartment(device.department ?? null, r.department_id as string | null, r.team as string | null),
     unread: unread.has(r.id),
     passkey: (phones.get(r.id) ?? 0) > 0,
     id: r.id,
     display_name: r.display_name,
     full_name: r.full_name,
-    department: r.department_id ? DEPARTMENT_LABELS[r.department_id as DepartmentId] : null,
+    department: placeWords({ role_id: r.role_id as string, department_id: r.department_id as string | null, team: r.team as string | null }) || null,
     photoUrl: r.photo_path ? (urlByPath.get(r.photo_path) ?? null) : null,
   }));
 

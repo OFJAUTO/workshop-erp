@@ -1,7 +1,8 @@
 import Link from "next/link";
+import { placeWords, roleTitleOf } from "@/lib/teams";
 import { Avatar, Badge, Card, Empty, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
-import { DEPARTMENT_LABELS, ROLE_LABELS, type DepartmentId, type RoleId } from "@/lib/roles";
+import { ROLE_LABELS, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { StaffRow } from "@/lib/types";
 import { startActAs, startViewAs } from "./view-as-actions";
@@ -14,7 +15,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
   const supabase = await createClient();
   let query = supabase
     .from("staff")
-    .select("id, full_name, display_name, role_id, department_id, employee_number, login_type, is_head_accountant, photo_path, colour, is_active, disabled_at, created_at, updated_at")
+    .select("id, full_name, display_name, role_id, department_id, team, employee_number, login_type, is_head_accountant, photo_path, colour, is_active, disabled_at, created_at, updated_at")
     .order("is_active", { ascending: false })
     .order("role_id")
     .order("display_name");
@@ -26,9 +27,12 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
   const signed = paths.length ? await supabase.storage.from("staff-photos").createSignedUrls(paths, 3600) : { data: [] };
   const urlByPath = new Map((signed.data ?? []).map((s) => [s.path, s.signedUrl]));
 
+  // 13 November 2026 (Section 12): the bodyshop manager is his own group (never "Workshop manager").
   const roleOrder = Object.keys(ROLE_LABELS) as RoleId[];
-  const grouped = roleOrder
-    .map((role) => ({ role, people: rows.filter((r) => r.role_id === role) }))
+  const titleOf = (r: StaffRow) => roleTitleOf(r, ROLE_LABELS[r.role_id as RoleId] ?? r.role_id);
+  const titles = roleOrder.flatMap((role) => (role === "workshop_manager" ? [ROLE_LABELS[role], "Bodyshop manager"] : [ROLE_LABELS[role]]));
+  const grouped = titles
+    .map((title) => ({ role: title, people: rows.filter((r) => titleOf(r) === title) }))
     .filter((g) => g.people.length > 0);
 
   return (
@@ -54,7 +58,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
       ) : (
         grouped.map((g) => (
           <section key={g.role} className="flex flex-col gap-3">
-            <SectionLabel right={`${g.people.length}`}>{ROLE_LABELS[g.role]}</SectionLabel>
+            <SectionLabel right={`${g.people.length}`}>{g.role}</SectionLabel>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
               {g.people.map((p) => (
                 <div key={p.id} className="flex flex-col gap-2">
@@ -65,7 +69,7 @@ export default async function TeamPage({ searchParams }: { searchParams: Promise
                       <span className="font-bold text-base break-words">{p.full_name}</span>
                       <span className="text-sm text-muted truncate">
                         {p.display_name}
-                        {p.department_id ? ` · ${DEPARTMENT_LABELS[p.department_id as DepartmentId]}` : ""}
+                        {placeWords(p) ? ` · ${placeWords(p)}` : ""}
                         {p.employee_number ? ` · #${p.employee_number}` : ""}
                       </span>
                       <span className="flex flex-wrap gap-1.5">
