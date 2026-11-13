@@ -239,6 +239,11 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
         </View>
       ) : null}
       {body}
+      {(bundle.onOrder ?? []).map((w) => (
+        <View key={w} style={{ marginTop: px(8) }} wrap={false}>
+          <Text style={{ fontSize: px(9.5), fontWeight: 700 }}>{w}</Text>
+        </View>
+      ))}
       {bundle.declined.length ? (
         <View style={{ marginTop: px(8) }} wrap={false}>
           <Text style={{ fontSize: px(9.5), fontWeight: 700, color: "#5F6368" }}>{declinedSummary(bundle.declined.length, "page 2")}</Text>

@@ -1,4 +1,5 @@
 import { moveTargets, PREPARING_STATUSES, quoteTagWords } from "@/lib/part-quote";
+import { receiptPropsFor } from "@/lib/receipts";
 import { partQuoteMap } from "@/lib/part-quote-data";
 import { addSupplierMoney, supplierMoney, supplierMoneyText } from "@/lib/supplier-money";
 import { LatheTicketForm } from "@/components/Lathe";
@@ -137,6 +138,8 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const types = ((settings.part_types ?? []) as string[]).map((t) => t.toLowerCase());
   const canPrice = can(role, "priceParts") && !staff.viewingAs && job.is_open;
   const canOrder = can(role, "managePurchaseOrders") && !staff.viewingAs && job.is_open;
+  // 13 November 2026 (back orders): a part ordered for a car that is not here (a follow-up job, a held estimate job) is received too.
+  const canReceive = can(role, "managePurchaseOrders") && !staff.viewingAs && (job.is_open || job.status === "booked");
   const urls = await signPaths(PARTS_BUCKET, parts.map((p) => p.diagram_path).filter((x): x is string => !!x));
   const suppliers: SupplierOption[] = (supplierRows ?? []).map((s) => ({ id: s.id as string, name: s.name as string, discount: Number(s.default_discount_percent) || 0, byType: (s.discount_by_type as Record<string, number> | null) ?? {} }));
   // A server page: rendered once per request, today's date (Dubai) is read once.
@@ -317,6 +320,8 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
   const dep = await depositState(jobId);
   const toReceive = parts.filter((p) => live(p) && ["ordered", "partly_received"].includes(String(p.order_status)));
   const receivedParts = parts.filter((p) => live(p) && String(p.order_status) === "received");
+  // 13 November 2026: the supplier's invoice number at every receipt (per LPO: the supplier and its "invoice later" rule).
+  const receiptSuppliers = await receiptPropsFor(toReceive.map((p) => (rawById.get(p.id)?.po_id as string | null) ?? "").filter(Boolean)).catch(() => null);
   // The LPO lines whose part was given its ending, and the supplier LPOs left with no line (3 November 2026).
   const cancelledLpos = await cancelledSupplierLpos(jobId);
   const endedByPo = await endedLinesOf([...lpos.suppliers.map((s) => s.po.id), ...(lpos.main ? [lpos.main.id] : []), ...cancelledLpos.map((c) => c.id)]);
@@ -462,7 +467,7 @@ export default async function PartsJobPage({ params, searchParams }: { params: P
         <Card id="received" className="flex flex-col gap-2" data-received-card>
           <SectionLabel right={steps.find((s) => s.key === "received")?.detail ?? undefined}>Parts received</SectionLabel>
           {toReceive.length ? <p className="text-xs text-muted">Tick what arrived, press Mark received and choose the stickers. The supplier&apos;s invoice goes to accounts (keep the paper at the desk). A wrong or damaged part: use the LPO page.</p> : null}
-          <ReceivePanel jobId={jobId} canAct={!!canOrder} action={receiveTicked.bind(null, jobId)} rows={toReceive.map((p) => ({ id: p.id, description: p.description, positions: p.positions ?? null, qty: Number(p.confirmed_quantity ?? p.quantity) || 1, supplier: p.supplier ?? null, state: orderLabel(p), poId: (rawById.get(p.id)?.po_id as string | null) ?? null }))} received={receivedParts.map((p) => { const poId = (rawById.get(p.id)?.po_id as string | null) ?? null; const po = poId ? lpos.suppliers.find((s) => s.po.id === poId)?.po : null; return { id: p.id, description: p.description, positions: p.positions ?? null, qty: Number(p.confirmed_quantity ?? p.quantity) || 1, invoiceWithAccounts: !!po && po.supplier_invoice_status !== "received" }; })} />
+          <ReceivePanel jobId={jobId} canAct={!!canReceive} receiptSuppliers={receiptSuppliers} action={receiveTicked.bind(null, jobId)} rows={toReceive.map((p) => ({ id: p.id, description: p.description, positions: p.positions ?? null, qty: Number(p.confirmed_quantity ?? p.quantity) || 1, supplier: p.supplier ?? null, state: orderLabel(p), poId: (rawById.get(p.id)?.po_id as string | null) ?? null }))} received={receivedParts.map((p) => { const poId = (rawById.get(p.id)?.po_id as string | null) ?? null; const po = poId ? lpos.suppliers.find((s) => s.po.id === poId)?.po : null; return { id: p.id, description: p.description, positions: p.positions ?? null, qty: Number(p.confirmed_quantity ?? p.quantity) || 1, invoiceWithAccounts: !!po && po.supplier_invoice_status !== "received" }; })} />
         </Card>
       ) : null}
 

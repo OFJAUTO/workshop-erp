@@ -2,6 +2,7 @@
 
 import { realRequests } from "@/lib/line-teams";
 import { bookedJobOf } from "@/lib/bodyshop";
+import { followUpOfVehicle } from "@/lib/back-orders";
 
 import { randomBytes } from "node:crypto";
 import { redirect } from "next/navigation";
@@ -175,7 +176,11 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const makeName = (vehicle.make as unknown as { name: string } | null)?.name ?? null;
   const feeNow = new Date().toISOString();
   let feeFields: Record<string, unknown> = {};
-  if (recheck) {
+  // 13 November 2026 (back orders): the car is back for a part fitted on a later visit - its follow-up job opens (no fee).
+  const followUp = recheck ? null : await followUpOfVehicle(vehicleId).catch(() => null);
+  if (followUp) {
+    feeFields = { inspection_fee_choice: "none", no_fee_reason: "other", no_fee_note: `Back-order visit: continues ${followUp.continues ?? "an earlier job"}`, inspection_type: "quick", inspection_fee_aed: 0, inspection_fee_due: false, fee_set_by: staff.id, fee_set_at: feeNow };
+  } else if (recheck) {
     feeFields = { inspection_fee_choice: "none", no_fee_reason: "warranty", inspection_type: "full", inspection_fee_aed: 0, fee_set_by: staff.id, fee_set_at: feeNow };
   } else if (staff.role_id === "service_advisor" || staff.role_id === "owner") {
     const fee = feeInputFrom((k) => String(formData.get(k) ?? ""));
@@ -277,7 +282,7 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   // Section 4 (21 October): the gate-in person becomes the car's advisor in charge (advisors and the
   // owner); a booked bodyshop job keeps the estimate's advisor. Changeable any time on the job card.
   const advisorInCharge = ["service_advisor", "owner"].includes(staff.role_id) ? staff.id : null;
-  const jobFields = { ...(recheckOf ? { job_kind: "recheck", recheck_of: recheckOf.id } : {}), vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: comebackJob ? "high" : d.priority, department: booked || recheckOf ? "bodyshop" : d.department, gated_in_by: staff.id, estimate_id: estimate?.id ?? null, comeback_of: recheckOf ? null : comebackJob?.id ?? null, ...feeFields, ...(booked ? {} : { advisor_id: advisorInCharge }) };
+  const jobFields = { ...(recheckOf ? { job_kind: "recheck", recheck_of: recheckOf.id } : {}), vehicle_id: vehicleId, customer_id: vehicle.customer_id, priority: comebackJob ? "high" : d.priority, ...(followUp ? {} : { department: booked || recheckOf ? "bodyshop" : d.department }), gated_in_by: staff.id, estimate_id: estimate?.id ?? null, comeback_of: recheckOf ? null : comebackJob?.id ?? null, ...feeFields, ...(booked ? {} : { advisor_id: advisorInCharge }) };
   const nowIso = new Date().toISOString();
   // The job to open: a bodyshop booking, or the HELD job "Order parts now" made for a carried estimate.
   const reuse = booked ?? (heldJob && !recheckOf ? { id: heldJob.id } : null);

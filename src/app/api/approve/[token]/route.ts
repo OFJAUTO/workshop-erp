@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { isQuickJob } from "@/lib/inspection-fee";
+import { backOrdersReady } from "@/lib/back-orders";
 import { jobAdvisorIds, notifyManagers, notifyStaff } from "@/lib/notifications";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { agreeChargesOnApproval } from "@/lib/charges";
@@ -52,13 +53,20 @@ export async function POST(request: NextRequest, context: { params: Promise<{ to
   const update: Record<string, unknown> = { first_approval_at: job?.first_approval_at ?? now };
   // 30 October 2026: a quick job (no fee, no full inspection) skips the Inspection stage: straight to the quotation.
   const quick = !!job && isQuickJob(job);
-  const nextStatus = quick ? "pending_quote" : "pending_inspection";
+  // Dormant until the back-order migration is applied (the column does not exist before it).
+  const followUp = (await backOrdersReady()) ? !!(await admin.from("jobs").select("continues_job_id").eq("id", req.job_id).maybeSingle()).data?.continues_job_id : false;
+  const nextStatus = followUp ? "waiting_parts" : quick ? "pending_quote" : "pending_inspection";
   if (job?.status === "pending_approval") {
     update.status = nextStatus;
-    update.stage = quick ? "quote" : "inspection";
+    update.stage = followUp ? "parts" : quick ? "quote" : "inspection";
     update.stage_entered_at = now;
   }
   await admin.from("jobs").update(update).eq("id", req.job_id);
+  // A back-order visit: the work is approved already; with the part here, Parts are done and the manager plans the fitting.
+  if (followUp && job?.status === "pending_approval") {
+    const { finishPartsPlanning } = await import("@/lib/lpo");
+    await finishPartsPlanning(req.job_id, null).catch(() => null);
+  }
   // 1 November 2026 (B2): the charges listed on the check-in (recovery, fuel, other) are agreed with it, kept in its snapshot.
   await agreeChargesOnApproval(req.job_id, req.id, await getSettings()).catch(() => 0);
   await admin.from("job_events").insert({

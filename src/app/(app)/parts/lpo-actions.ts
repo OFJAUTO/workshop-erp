@@ -1,4 +1,5 @@
 "use server";
+import { after } from "next/server";
 import { dbWords } from "@/lib/app-errors";
 
 import { warnOwnerIfDepositShort } from "@/lib/deposits";
@@ -224,17 +225,27 @@ export async function emailSupplierLpo(poId: string): Promise<{ error?: string; 
  * anything is received, so a refusal never leaves half the work done.
  */
 export async function receiveTicked(jobId: string, formData: FormData): Promise<{ error?: string; ok?: boolean; message?: string }> {
+  // 13 November 2026 (back orders): once the answer is out, a back-ordered part received tells its advisor to book the customer.
+  after(() => import("@/lib/back-orders").then((m) => m.noticeBackOrderArrivals()).catch(() => 0));
   const staff = await requirePermission("managePurchaseOrders");
   if (staff.viewingAs) return { error: "Viewing only." };
   const ids = formData.getAll("part").map(String).filter(Boolean);
   if (!ids.length) return { error: "Tick at least one part." };
   const admin = createAdminClient();
-  const { data: poRows } = await admin.from("part_items").select("po_id").in("id", ids).not("po_id", "is", null);
+  const { data: poRows } = await admin.from("part_items").select("id, po_id, po_line_id, description, quantity, confirmed_quantity, received_qty").in("id", ids).not("po_id", "is", null);
   const poIds = Array.from(new Set((poRows ?? []).map((r) => r.po_id as string)));
+  // 13 November 2026: the supplier's invoice number is compulsory at every receipt (see src/lib/receipts.ts).
+  const { checkReceipt, receiptInputFrom, saveReceipts } = await import("@/lib/receipts");
+  const receiptIn = receiptInputFrom(formData);
+  const receiptOk = await checkReceipt(receiptIn, poIds);
+  if (receiptOk.error) return { error: receiptOk.error };
   for (const id of ids) {
     const r = await receivePartInFull(id, { id: staff.id, display_name: staff.display_name });
     if (r.error) return { error: r.error };
   }
+  const perPo = poIds.map((poId) => ({ poId, jobId, lines: ((poRows ?? []) as { id: string; po_id: string; po_line_id: string | null; description: string; quantity: number | string; confirmed_quantity: number | string | null; received_qty: number | string | null }[]).filter((p) => p.po_id === poId).map((p) => ({ line_id: p.po_line_id, part_item_id: p.id, description: p.description, qty: Math.max(0, (Number(p.confirmed_quantity ?? p.quantity) || 1) - (Number(p.received_qty) || 0)) || Number(p.confirmed_quantity ?? p.quantity) || 1 })) }));
+  await saveReceipts(receiptIn, receiptOk, perPo, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+  const receiptWord = receiptOk.supplier ? (receiptIn.later ? ` INVOICE DUE BY ${receiptOk.due ?? ""}: the parts desk and accounts are reminded until the number is typed.` : ` Invoice ${receiptIn.number} recorded.`) : "";
   /*
    * 4 November 2026: receiving no longer asks for the invoice. The parts desk's angled photos misread amounts,
    * so the supplier's paper stays with Parts and ACCOUNTS collect, scan and enter it (owner + accounts only).
@@ -264,5 +275,5 @@ export async function receiveTicked(jobId: string, formData: FormData): Promise<
   revalidatePath(`/parts/${jobId}`);
   revalidatePath("/parts");
   revalidatePath(`/jobs/${jobId}`);
-  return { ok: true, message: `${ids.length} part${ids.length === 1 ? "" : "s"} received.${invoiceWord}` };
+  return { ok: true, message: `${ids.length} part${ids.length === 1 ? "" : "s"} received.${receiptWord}${invoiceWord}` };
 }

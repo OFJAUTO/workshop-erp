@@ -1,4 +1,5 @@
 "use client";
+import { ReceiptInvoiceFields, type ReceiptSupplier } from "@/components/ReceiptInvoiceFields";
 
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { ReasonChips } from "@/components/ReasonChips";
@@ -28,10 +29,10 @@ export function LinePrices({ lines, word }: { lines: Pick<Line, "id" | "descript
 }
 
 /** Receiving: a quantity per line, partial allowed, wrong or damaged flagged for return. The invoice is NEVER entered here (4 November 2026: accounts collect the paper and scan it). */
-export function ReceiveForm({ lines, action, invoiceOpen = false }: { lines: Line[]; action: (formData: FormData) => void; /** The LPO's invoice is still to come: the note under the form says accounts take it over. */ invoiceOpen?: boolean }) {
+export function ReceiveForm({ lines, action, invoiceOpen = false, receipt = null }: { lines: Line[]; action: (formData: FormData) => void; /** The LPO's invoice is still to come: the note under the form says accounts take it over. */ invoiceOpen?: boolean; /** 13 November 2026: the supplier's invoice number at every receipt (null until the database update). */ receipt?: { supplier: ReceiptSupplier; poId: string; dueOn: string | null } | null }) {
   const [flags, setFlags] = useState<Record<string, string>>({});
   return (
-    <form action={action} className="flex flex-col gap-3" data-receive-form>
+    <form action={action} className="flex flex-col gap-3" data-receive-form id="receive">
       <ul className="divide-y divide-line">
         {lines.map((l) => {
           const left = Math.max(0, l.quantity - l.received_qty);
@@ -58,7 +59,7 @@ export function ReceiveForm({ lines, action, invoiceOpen = false }: { lines: Lin
           );
         })}
       </ul>
-      {invoiceOpen ? <p className="text-xs text-muted" data-receive-invoice-note>The supplier&apos;s invoice is NOT entered here: keep the paper at the desk – accounts collect and scan it (they are told the moment you save).</p> : null}
+      {receipt ? <ReceiptInvoiceFields supplier={receipt.supplier} poIds={[receipt.poId]} dueOn={receipt.dueOn} /> : invoiceOpen ? <p className="text-xs text-muted" data-receive-invoice-note>The supplier&apos;s invoice is NOT entered here: keep the paper at the desk – accounts collect and scan it (they are told the moment you save).</p> : null}
       <div><Button type="submit" size="md" data-record-delivery>Record the delivery</Button></div>
     </form>
   );

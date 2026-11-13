@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { dbWords } from "@/lib/app-errors";
 import { newLabelCode } from "@/lib/parts-data";
 import "server-only";
@@ -319,6 +320,12 @@ export async function finishPartsPlanning(jobId: string, by: Actor | null, opts:
  * the advisor hear.
  */
 export async function receivePartInFull(partId: string, by: Actor): Promise<{ error?: string; complete?: boolean }> {
+  // 13 November 2026 (back orders): once the answer is out, a back-ordered part received tells its advisor to book the customer.
+  try {
+    after(() => import("@/lib/back-orders").then((m) => m.noticeBackOrderArrivals()).catch(() => 0));
+  } catch {
+    /* outside a request (a script): the hourly job tells the advisor */
+  }
   const admin = createAdminClient();
   const { data: p } = await admin.from("part_items").select("id, job_id, description, po_id, order_status, quantity, confirmed_quantity, received_qty, label_code").eq("id", partId).maybeSingle();
   if (!p) return { error: "Part not found." };

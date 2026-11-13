@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { SupplierInvoiceLater } from "@/components/SupplierInvoiceLater";
+import { supplierInvoiceLaterAction } from "../receipt-actions";
+import { receiptsReady } from "@/lib/receipts";
 import { supplierMergeReady, suppliersSharingTrn } from "@/lib/supplier-merge";
 import { advancesBySupplier } from "@/lib/supplier-payments";
 import { advanceWords } from "@/lib/supplier-payment-rules";
@@ -65,7 +68,8 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
   const [settings, contactOn, invoiceRead, mergeOn] = await Promise.all([getSettings(), supplierContactReady(), loadSupplierInvoices({ strict: true }).catch(() => null), supplierMergeReady()]);
   const invoiceRows = invoiceRead?.rows ?? [];
   const types = ((settings.part_types ?? []) as string[]).map((t) => t.toLowerCase());
-  const { data } = await admin.from("suppliers").select(`id, name, trn, vat_registered, phone, email, address, payment_terms, notes, is_active, default_discount_percent, discount_by_type${contactOn ? ", contact_name" : ""}${mergeOn ? ", also_known_as, merged_into" : ""}`).order("name");
+  const laterOn = await receiptsReady();
+  const { data } = await admin.from("suppliers").select(`id, name, trn, vat_registered, phone, email, address, payment_terms, notes, is_active, default_discount_percent, discount_by_type${contactOn ? ", contact_name" : ""}${mergeOn ? ", also_known_as, merged_into" : ""}${laterOn ? ", invoice_later_allowed, invoice_later_days" : ""}`).order("name");
   const all = (data ?? []) as unknown as Supplier[];
   // THE unpaid figure (the Supplier invoices tab's), keyed by the supplier's id.
   const advanceOf = await advancesBySupplier();
@@ -171,6 +175,7 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
                   <span className="font-extrabold">{s.name}</span>
                   {((s as { also_known_as?: string[] }).also_known_as ?? []).length ? <span className="text-xs text-muted" data-also-known-as>also known as {((s as { also_known_as?: string[] }).also_known_as ?? []).join(", ")}</span> : null}
                   {!s.is_active ? <Badge tone="neutral">Inactive</Badge> : null}
+                  {(s as { invoice_later_allowed?: boolean }).invoice_later_allowed ? <span data-invoice-later-badge><Badge tone="neutral">Invoice later allowed ({Number((s as { invoice_later_days?: number }).invoice_later_days) || 5} days)</Badge></span> : null}
                   {supplierNeedsTrn(s) ? <span data-no-trn><Badge tone="red">{NO_TRN_WORDS}</Badge></span> : !supplierChargesVat(s) ? <span data-no-vat><Badge tone="neutral">{NO_VAT_WORDS}</Badge></span> : null}
                   <span className="text-sm text-muted">{[s.trn ? `TRN ${s.trn}` : null, s.contact_name, s.phone, s.payment_terms, s.default_discount_percent ? `${s.default_discount_percent}% discount` : null].filter(Boolean).join(" · ") || "No details yet"}</span>
                   <span className="ml-auto text-xs font-bold text-muted underline underline-offset-4">Edit</span>
@@ -183,6 +188,7 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
                   <input type="hidden" name="active" value={s.is_active ? "no" : "yes"} />
                   <Button type="submit" tone="ghost" size="md">{s.is_active ? "Take off the list" : "Put back on the list"}</Button>
                 </form>
+                {laterOn && (staff.role_id === "owner" || staff.role_id === "accounts") && !staff.viewingAs ? <SupplierInvoiceLater allowed={!!(s as { invoice_later_allowed?: boolean }).invoice_later_allowed} days={Number((s as { invoice_later_days?: number }).invoice_later_days) || 5} action={supplierInvoiceLaterAction.bind(null, s.id)} /> : null}
               </details>
               {seesAccounts && (advanceOf.get(s.id) ?? advanceOf.get(s.name.toUpperCase())) ? <span className="inline-flex min-h-11 w-fit items-center rounded-card border border-green bg-green-soft px-3 py-1 text-xs font-bold text-green-text" data-supplier-advance>{advanceWords(s.name, advanceOf.get(s.id) ?? advanceOf.get(s.name.toUpperCase()) ?? 0)}</span> : null}
               {(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase())) ? <Link href="/parts/returns?tab=credit" className="inline-flex min-h-11 w-fit items-center rounded-card border border-amber-bar bg-amber-soft px-3 py-1 text-xs font-bold text-amber-text" data-supplier-credit-expected={(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase()))!.amount.toFixed(2)}>Credit expected from {s.name} AED {(expectedOf.get(s.id) ?? expectedOf.get(s.name.toUpperCase()))!.amount.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · not in the balance yet</Link> : null}

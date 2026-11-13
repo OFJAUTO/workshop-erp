@@ -177,6 +177,7 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
         )}
         {tintOutsidePackage && tintWords ? <TintCard words={tintWords} /> : null}
         {!isProformaBoilerplate(invoice.notes) && splitDeclinedNotes(invoice.notes).rest ? <p className="whitespace-pre-line rounded-lg border border-[#D4D4D8] px-4 py-3 text-sm" data-invoice-note>{splitDeclinedNotes(invoice.notes).rest}</p> : null}
+        {(bundle.onOrder ?? []).map((w) => <p key={w} className="rounded-lg border border-[#18181B] px-4 py-3 text-sm font-bold" data-on-order>{w}</p>)}
         {bundle.declined.length ? (
           <>
             <p className="text-sm font-semibold text-[#5F6368]" data-declined-summary>{declinedSummary(bundle.declined.length, "below")}</p>

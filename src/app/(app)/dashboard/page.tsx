@@ -1,4 +1,5 @@
 import { scopeReady } from "@/lib/inspection-scope-data";
+import { InvoicesNotReceivedCount } from "@/components/InvoicesNotReceivedCard";
 import { scopeLabel } from "@/lib/inspection-scope";
 import { loadSideProgress } from "@/lib/jobs-to-do-data";
 import { ApprovalsTile } from "@/components/ApprovalsTile";
@@ -37,6 +38,7 @@ import { DashboardCars, type DashRow } from "./DashboardCars";
 import { ProfitPanel } from "./ProfitPanel";
 import { DepositsWaiting } from "./DepositsWaiting";
 import { WaitingPanel, type ExtraWaiting } from "@/components/WaitingPanel";
+import { BackOrdersCard } from "@/components/BackOrdersCard";
 import { HomeHeader } from "@/components/HomeHeader";
 import { workSidesForJobs } from "@/lib/staff-picker";
 import { loadQuoteHistory } from "@/lib/quote-history-data";
@@ -221,6 +223,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
       <WaitingPanel staff={staff} extra={role === "service_advisor" || role === "owner" ? [...moneyWaiting, ...finalChecks, ...(role === "owner" ? (await Promise.all([lpoApprovalsWaiting("owner"), zohoWaitingExtra()])).flat() : [])] : []} />
 
+      {role === "owner" || role === "service_advisor" ? <BackOrdersCard /> : null}
+      {role === "owner" ? <InvoicesNotReceivedCount /> : null}
       {role === "owner" ? <AutoApproveBanner /> : null}
       {role === "owner" ? <ApprovalsTile /> : null}
       {role === "owner" ? <OutWithBalance settings={settings} /> : null}

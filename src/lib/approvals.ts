@@ -10,7 +10,7 @@ import { schemaReady } from "@/lib/schema-ready";
  * Approve and Refuse go through ONE dispatcher (src/app/(app)/approvals/actions.ts) to each kind's own decision, so
  * the rules of each decision stay where they are.
  */
-export const APPROVAL_KINDS = ["quote", "revision", "commission", "lpo", "discount", "fee", "price", "free_charge", "inspection_change", "stock_reversal", "comeback", "overpayment", "void", "lathe_void", "inspection_type", "part_change"] as const;
+export const APPROVAL_KINDS = ["quote", "revision", "commission", "lpo", "discount", "fee", "price", "free_charge", "inspection_change", "stock_reversal", "comeback", "overpayment", "void", "lathe_void", "inspection_type", "part_change", "back_order"] as const;
 export type ApprovalKind = (typeof APPROVAL_KINDS)[number];
 
 export const KIND_WORDS: Record<ApprovalKind, string> = {
@@ -30,6 +30,7 @@ export const KIND_WORDS: Record<ApprovalKind, string> = {
   lathe_void: "Void a lathe bill",
   inspection_type: "Inspection type downgrade",
   part_change: "Part supplier or price change",
+  back_order: "Back order - fit on a later visit",
 };
 
 export type ApprovalItem = {
@@ -190,6 +191,13 @@ export async function loadApprovals(scope: Scope = {}): Promise<ApprovalItem[]> 
       if (r.job_id && !jobWords.has(String(r.job_id))) for (const j of ((await admin.from("jobs").select("id, job_number").eq("id", String(r.job_id))).data ?? []) as R[]) jobWords.set(String(j.id), String(j.job_number));
       const keep = r.price_choice === "keep";
       push({ kind: "part_change", id: String(r.id), title: `Part change · ${jw(r.job_id)}`, what: `${String(r.words)}${keep ? " · keep the customer's price" : r.price_choice === "revise" ? " · then revise the quotation" : ""}`, askedBy: nm(r.created_by), askedAt: (r.created_at as string) ?? null, money: keep && Number(r.absorb_aed) > 0 ? `we absorb ${aed(r.absorb_aed)}` : null, href: `/parts/${r.job_id}`, jobId: String(r.job_id), quotationId: null, poId: null });
+    }
+  }
+  // 13 November 2026 (URGENT, J-00317): a part fitted on a later visit, asked by an advisor or "pays when fitted".
+  {
+    const { backOrderApprovals } = await import("./back-orders");
+    for (const b of await backOrderApprovals().catch(() => [])) {
+      push({ kind: "back_order", id: b.id, title: `Back order · ${b.part} · ${b.jobNumber}`, what: `Fit on a later visit (a follow-up job continues ${b.jobNumber})${b.hours > 0 ? `, ${b.hours.toFixed(1)} h of labour moves with it` : ""}. Reason: ${b.reason}${b.payMode === "when_fitted" ? ". The customer pays when it is fitted (not now)" : ". The customer pays for the part now"}`, askedBy: b.askedBy, askedAt: b.askedAt, money: null, href: `/jobs/${b.jobId}#back-orders`, jobId: b.jobId, quotationId: null, poId: null, approveLabel: "Approve the back order", refuseLabel: "Keep it on this visit" });
     }
   }
   for (const extra of await moreApprovals(scope)) out.push(extra);

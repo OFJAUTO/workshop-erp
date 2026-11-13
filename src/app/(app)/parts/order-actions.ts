@@ -1,4 +1,5 @@
 "use server";
+import { after as afterResponse } from "next/server";
 
 import { supplierMoney } from "@/lib/supplier-money";
 import { supplierChargesVat } from "@/lib/supplier-rules";
@@ -265,6 +266,8 @@ export async function markOrdered(poId: string, formData: FormData) {
 
 /** Receiving: tick each line with the quantity received; partial deliveries allowed; wrong or damaged parts flagged for return. */
 export async function receivePurchaseOrder(poId: string, formData: FormData) {
+  // 13 November 2026 (back orders): once the answer is out, a back-ordered part received tells its advisor to book the customer.
+  afterResponse(() => import("@/lib/back-orders").then((m) => m.noticeBackOrderArrivals()).catch(() => 0));
   const staff = await requirePermission("managePurchaseOrders");
   const back = `/parts/orders/${poId}`;
   const admin = createAdminClient();
@@ -273,6 +276,13 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
   const po = toPo(raw as Record<string, unknown>);
   if (!["ordered", "partly_received"].includes(po.status)) redirect(`${back}?error=${encodeURIComponent("This order is not out for delivery.")}`);
   const lines = ((lineRows ?? []) as Record<string, unknown>[]).map(toPoLine);
+  // 13 November 2026: the supplier's invoice number is compulsory at every receipt (or "Invoice comes later" for a
+  // supplier marked so, with the delivery paper's photo or "No paper came"). Checked BEFORE anything is received.
+  const { checkReceipt, receiptInputFrom, saveReceipts } = await import("@/lib/receipts");
+  const receiptIn = receiptInputFrom(formData);
+  const receiptOk = await checkReceipt(receiptIn, [poId]);
+  if (receiptOk.error) redirect(`${back}?error=${encodeURIComponent(receiptOk.error)}#receive`);
+  const receiptLines: { line_id: string; part_item_id: string | null; description: string; qty: number }[] = [];
   let received = 0;
   const now = new Date().toISOString();
   for (const l of lines) {
@@ -292,8 +302,11 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
       await recordStockMovement(l.stock_item_id, { kind: "in", quantity: qty, unitCost: l.unit_cost, poId, note: `Delivery on ${po.number}` }, staff);
     }
     received++;
+    receiptLines.push({ line_id: l.id, part_item_id: l.part_item_id ?? null, description: l.description, qty: round2(Math.min(qty, l.quantity - l.received_qty)) });
   }
   if (!received) redirect(`${back}?error=${encodeURIComponent("Enter the quantity received on at least one line.")}`);
+  await saveReceipts(receiptIn, receiptOk, [{ poId, jobId: po.job_id ?? null, lines: receiptLines }], { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+  const receiptWords = receiptOk.supplier ? (receiptIn.later ? ` INVOICE DUE BY ${receiptOk.due ?? ""}: the parts desk and accounts are reminded until the number is typed.` : ` Invoice ${receiptIn.number} recorded.`) : "";
   const { data: after } = await admin.from("purchase_order_lines").select("quantity, received_qty").eq("po_id", poId).eq("is_active", true);
   const allIn = (after ?? []).every((l) => Number(l.received_qty) + 0.005 >= Number(l.quantity));
   await admin.from("purchase_orders").update({ status: allIn ? "received" : "partly_received", received_at: allIn ? now : null, updated_by: staff.id }).eq("id", poId);
@@ -313,6 +326,7 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
     });
     invoiceWords = " The invoice goes to accounts: keep the supplier's paper at the desk.";
   }
+  invoiceWords = receiptWords + invoiceWords;
   if (!po.job_id) {
     refresh(null, poId);
     redirect(`${back}?message=${encodeURIComponent(`${allIn ? "Received in full: the items are on the shelf." : "Partial delivery recorded: the items are on the shelf."}${invoiceWords}`)}`);

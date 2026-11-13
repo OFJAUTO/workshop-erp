@@ -1,4 +1,6 @@
 import { latheV2Ready } from "@/lib/lathe";
+import { ReceiptsCard } from "@/components/ReceiptsCard";
+import { loadReceipts } from "@/lib/receipts";
 import { SupplierAmount } from "@/components/SupplierAmount";
 import { rowMoney } from "@/lib/supplier-money";
 import Link from "next/link";
@@ -67,7 +69,7 @@ export async function SupplierInvoicesView({ sp: spIn, staff, place }: { sp: SiS
     <>
       {!read ? <Notice tone="error">Couldn&apos;t read the supplier invoices just now: reload the page.</Notice> : null}
       {outcome && !open ? <Notice tone={outcome.tone}>{outcome.text}</Notice> : null}
-      {open ? <OpenInvoice row={open} acts={acts} seesPay={seesPay} queryOn={queryOn} place={place} outcome={outcome} /> : null}
+      {open ? <OpenInvoice row={open} acts={acts} seesPay={seesPay} queryOn={queryOn} place={place} outcome={outcome} role={staff.role_id} viewingAs={!!staff.viewingAs} /> : null}
 
       <Card className="flex flex-col gap-3" data-si-filters>
         <form method="get" action={`/${place}`} className="flex flex-wrap items-end gap-2">
@@ -151,7 +153,9 @@ function InvoiceCard({ r, href, open }: { r: InvoiceRow; href: string; open: boo
 }
 
 /** One invoice opened: the scan or photo (zoomable) next to the parts it covers, per car, with Checked and Query. */
-async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome }: { row: InvoiceRow; acts: boolean; seesPay: boolean; queryOn: boolean; place: SiPlace; outcome: { tone: "success" | "error"; text: string } | null }) {
+async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, viewingAs }: { row: InvoiceRow; acts: boolean; seesPay: boolean; queryOn: boolean; place: SiPlace; outcome: { tone: "success" | "error"; text: string } | null; role: string; viewingAs: boolean }) {
+  // 13 November 2026: the number the parts desk typed at receiving pre-fills the card; accounts still scan and check.
+  const typedNumber = row.shares.length === 1 ? ((await loadReceipts([row.shares[0].poId]).catch(() => [])).find((r) => r.number)?.number ?? null) : null;
   const admin = createAdminClient();
   const poIds = row.shares.map((s) => s.poId);
   const vatOn = await invoiceVatReady();
@@ -254,8 +258,10 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome }: { ro
       {/* 13 November 2026 (Section 4): a row still waiting for its invoice - pay the supplier in advance from here. */}
       {row.status === "waiting" && row.shares.length === 1 ? <LpoAdvanceByPoId poId={row.shares[0].poId} role={acts ? "accounts" : "viewer"} viewingAs={!acts} /> : null}
       {/* 4 November 2026: a row still waiting for its invoice - accounts scan the paper and enter it right here. */}
+      {row.shares.length ? <ReceiptsCard poIds={row.shares.map((s) => s.poId)} role={role} viewingAs={viewingAs} bare /> : null}
       {acts && row.status === "waiting" && row.shares.length === 1 ? (
         <ScanEnterInvoice
+          typedNumber={typedNumber}
           poId={row.shares[0].poId}
           rowKey={row.key}
           jobId={row.shares[0].jobId}

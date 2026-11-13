@@ -561,7 +561,16 @@ async function runHousekeeping(): Promise<Record<string, number>> {
 
   // 24. Supplier invoices still missing ("to follow"): Parts are reminded once a day per LPO until the
   // number and the date are entered. Accounts see the same LPOs on their Waiting list all along.
-  {
+  // 13 November 2026: once receipts exist the invoice number is typed at receiving, "Invoice comes later" receipts are
+  // reminded on day 3, day 5 and every day while overdue (parts desk and accounts), and older LPOs are never reminded.
+  const { receiptsReady: rcReady, receiptReminders } = await import("@/lib/receipts");
+  if (await rcReady()) {
+    try {
+      report.invoiceDueReminders = await receiptReminders();
+    } catch {
+      report.invoiceDueReminders = -1;
+    }
+  } else {
     let told = 0;
     const dayAgo = new Date(Date.now() - 20 * 3600000).toISOString();
     const { data: missing } = await admin.from("purchase_orders").select("id, number, supplier_name, job_id, received_at, invoice_reminder_at").eq("supplier_invoice_status", "to_follow").eq("is_active", true).neq("status", "cancelled");
@@ -638,6 +647,13 @@ async function runHousekeeping(): Promise<Record<string, number>> {
       report.standIn = (await standInHourly()) ? 1 : 0;
     } catch {
       report.standIn = 0;
+    }
+    // 13 November 2026 (back orders): a back-ordered part that arrived, and a follow-up visit that is done.
+    try {
+      const { noticeBackOrderArrivals } = await import("@/lib/back-orders");
+      report.backOrdersArrived = await noticeBackOrderArrivals();
+    } catch {
+      report.backOrdersArrived = -1;
     }
   } catch {
     report.autoApprove = -1;

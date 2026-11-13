@@ -42,6 +42,8 @@ import { daysBetween, dubaiDay } from "@/lib/warranty";
 import { STAGE_BOX_CARD, STAGE_BOX_TITLE, stageStates, type StageBoxState } from "@/lib/stage-style";
 import { washStateNow } from "@/lib/wash-state";
 import { PartsSteps } from "@/components/PartsSteps";
+import { BackOrderSection } from "@/components/BackOrderSection";
+import { backOrdersReady } from "@/lib/back-orders";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { PAST_QUOTE, partsSteps, stepPartOf, noPartsNeeded } from "@/lib/parts-steps";
 import { loadPartsChanges } from "@/lib/parts-changes-data";
@@ -165,7 +167,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const [card, settings, site] = await Promise.all([loadJobCard(supabase, id), getSettings(), getSiteUrl()]);
   if (!card) return refuseRecord("job", id);
   // A bodyshop quotation before the car arrives has no gate-in yet: its page is the bodyshop one.
-  if (card.job.status === "booked") redirect(`/bodyshop/${id}`);
+  // 13 November 2026 (back orders): a follow-up job (a part fitted on a later visit) is not a bodyshop booking: it stays here.
+  const continuesId = card.job.status === "booked" && (await backOrdersReady()) ? (((await createAdminClient().from("jobs").select("continues_job_id").eq("id", id).maybeSingle()).data?.continues_job_id as string | null | undefined) ?? null) : null;
+  if (card.job.status === "booked" && !continuesId) redirect(`/bodyshop/${id}`);
   const { job, vehicle, customer, customerPublic, vip, gateIn, requests, media, mediaUrls, events, approvals, gateOut } = card;
   // 11 November 2026 (Section 16, speed): the reads further down that need only the job start now, together; each is
   // still awaited where it was used (they ran one after another: about 45 round trips in a row on the job card).
@@ -714,7 +718,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <div className="xl:col-span-2 flex flex-col gap-4">
           <Card className="flex flex-col gap-3">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="text-lg font-extrabold" data-job-status>{stepJob?.declined_out_at ? "Declined, car going out" : STATUS_LABELS[job.status]}</span>
+              <span className="text-lg font-extrabold" data-job-status>{stepJob?.declined_out_at ? "Declined, car going out" : continuesId ? "Waiting for part - car not here" : STATUS_LABELS[job.status]}</span>
               <span className="text-sm text-muted">
                 {job.promised_at ? `Promised ${formatPromised(job.promised_at)}` : "No promised date yet"}
                 {card.assignee ? ` · ${card.assignee.display_name}` : " · Not assigned"}
@@ -805,6 +809,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </section>
       </div>
 
+      {/* 13 November 2026 (URGENT, J-00317): a part that cannot come for this visit is fitted on a later one. */}
+      <BackOrderSection jobId={id} role={role} viewingAs={!!staff.viewingAs} isOpen={job.is_open} card withCandidates={["in_work", "pending_qc", "pending_wash", "ready", "pending_payment"].includes(job.status)} />
       {declinedItems.length ? <DeclinedWorkSection items={declinedItems} title="Recommended work declined by the customer" /> : null}
       {chargesOn && jobCharges && (chargeItemsList.length || mayAddCharges) ? (
         <ChargesCard items={chargeItemsList} costs={jobCharges.costs} costReady={jobCharges.costReady} canAdd={mayAddCharges} canCost={chargesOn && !staff.viewingAs} approved={!!job.first_approval_at} onAdd={addJobChargesAction.bind(null, id)} onDecide={(lineId: string) => decideFreeChargeAction.bind(null, id, lineId)} onSaveCost={(lineId: string) => saveQuoteChargeCostAction.bind(null, id, lineId)} isOwner={role === "owner" && !staff.viewingAs} seesTripPrices={role === "owner" || role === "accounts"} jobId={id} files={chargeFiles} recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]} providers={(settings.recovery_companies ?? []) as string[]} quoteHref={(quotationId: string) => `/jobs/${id}/quote/${quotationId}`} mayOpenQuote={seesQuote} message={chargeMessage ?? null} error={chargeError ?? null} />

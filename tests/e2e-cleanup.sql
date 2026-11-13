@@ -21,6 +21,15 @@ begin
   if to_regclass('public.upload_pending') is not null then
     delete from public.upload_pending where job_id = any(job_ids) or inspection_id in (select id from public.inspections where job_id = any(job_ids)) or device_id in (select id from public.devices where name ilike 'E2e %') or staff_id in (select id from public.staff where display_name ilike 'E2e %');
   end if;
+  -- Receipts (13 November 2026): the test LPOs' receipts and their files.
+  if to_regclass('public.part_receipts') is not null then
+    delete from public.receipt_files where receipt_id in (select id from public.part_receipts where job_id = any(job_ids) or po_id in (select id from public.purchase_orders where job_id = any(job_ids) or number like 'LPO-E2E-%' or supplier_name ilike 'e2e %'));
+    delete from public.part_receipts where job_id = any(job_ids) or po_id in (select id from public.purchase_orders where job_id = any(job_ids) or number like 'LPO-E2E-%' or supplier_name ilike 'e2e %');
+  end if;
+  -- Back orders (13 November 2026): a test car's part fitted on a later visit (this visit and the follow-up job).
+  if to_regclass('public.back_orders') is not null then
+    delete from public.back_orders where job_id = any(job_ids) or follow_job_id = any(job_ids);
+  end if;
   -- Pending charges and early charges (1 November 2026): the lines, the entries, their job-less proformas and tax invoices.
   if to_regclass('public.charge_lines') is not null then
     delete from public.charge_lines where job_id = any(job_ids) or entry_id in (select id from public.charge_entries where customer_id = any(cust_ids) or job_id = any(job_ids));

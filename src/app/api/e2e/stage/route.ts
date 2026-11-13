@@ -49,6 +49,11 @@ async function seedStage(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as { stage?: string; id?: string; pin?: string; /** A deposit in AED set on the draft before the customer approves. */ deposit?: number; /** A name for the labour line, given while the quotation is still a draft. */ labourTitle?: string; /** How the customer is expected to pay (set on the draft, before approval locks it). */ method?: string };
   const stage = body.stage ?? "inspection";
   const admin = createAdminClient();
+  // 13 November 2026: the receipt reminders run on a chosen Dubai day (the test moves the date forward).
+  if (stage === "receipt-reminders") {
+    const { receiptReminders } = await import("@/lib/receipts");
+    return NextResponse.json({ told: await receiptReminders((body as { today?: string }).today ?? undefined) });
+  }
   // Two side doors for the tests: the work order lines of a job, and an open QC round with its items.
   if (stage === "worklines" && body.id) {
     const { data: o } = await admin.from("staff").select("id").eq("role_id", "owner").limit(1).maybeSingle();

@@ -20,6 +20,7 @@ import { DECLINED_MARKER, cleanDeclined, splitDeclinedNotes, type DeclinedDocIte
 import { cleanUnit, type PartUnit } from "./part-units";
 import { customerMileage } from "./mileage";
 import { realPartNumber } from "./parts-rows";
+import { lineMovesMany, onOrderLines, type LineMove } from "./back-orders";
 
 export type InvoiceKind = "tax_invoice" | "proforma" | "credit_note";
 export type LabourMode = "itemised" | "combined";
@@ -215,6 +216,8 @@ export type InvoiceBundle = {
    * (page 2 of the PDF, "listed below" on the page) - from the declined_work rows, else read out of
    * an old invoice's note. The note itself is shown with the block taken out. */
   declined: DeclinedDocItem[];
+  /** 13 November 2026 (back orders): "TRANSMISSION MOUNT ON ORDER - TO BE FITTED ON ARRIVAL (EXPECTED 08 JAN 2027)". */
+  onOrder: string[];
   /** Money from the estimate (4 November 2026, read only once the migration is applied): the estimate the
    *  document was issued from, the bill-to block and the proforma's valid-until day. */
   estimate?: { id: string; number: string } | null;
@@ -294,6 +297,7 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
     billTo,
     validUntil,
     declined,
+    onOrder: invoice.job_id && !invoice.deposit_for_quotation_id && invoice.kind !== "credit_note" ? await onOrderLines(invoice.job_id).catch(() => []) : [],
     lines: await attachInvoiceUnits(((lines ?? []) as Record<string, unknown>[]).map(toInvoiceLine)),
     payments: ((payments ?? []) as Record<string, unknown>[]).map(toPayment),
     customer: (customer as InvoiceBundle["customer"]) ?? null,
@@ -373,8 +377,10 @@ export type DraftInputs = {
   lines: QuoteLine[];
   parts: DraftPart[];
   charges: ChargeLineRow[];
+  /** 13 November 2026 (back orders): approved lines moved to a follow-up job - a part line whole, a labour line by hours. */
+  moves?: LineMove[];
 };
-const emptyDraftInputs = (): DraftInputs => ({ job: null, quotes: [], lines: [], parts: [], charges: [] });
+const emptyDraftInputs = (): DraftInputs => ({ job: null, quotes: [], lines: [], parts: [], charges: [], moves: [] });
 
 /**
  * The draft's inputs for many jobs in a handful of reads (3 November 2026): the money list measures every job's approved
@@ -387,13 +393,14 @@ export async function loadDraftInputs(jobIds: string[]): Promise<Map<string, Dra
   if (!ids.length) return out;
   type JobRaw = { id: string; inspection_fee_due: boolean | null; inspection_fee_aed?: number | string | null; comeback_free: boolean | null };
   const safe = <T,>(p: Promise<T[]>) => p.catch(() => [] as T[]);
-  const [jobs, quotesByJob, partRows, chargesByJob] = await Promise.all([
+  const [jobs, quotesByJob, partRows, chargesByJob, movesByJob] = await Promise.all([
     safe(pageAllIn<JobRaw>(ids, (piece, a, b) => admin.from("jobs").select("id, inspection_fee_due, inspection_fee_aed, comeback_free").in("id", piece).order("id").range(a, b) as unknown as PromiseLike<{ data: JobRaw[] | null; error: { message: string } | null }>)),
     approvedQuotationsMany(ids),
     // 3 November 2026 (section 7): a part given its ending (cancelled, returned, kept in stock) is off the job but its
     // approved line may still be on the bill until the customer approves a revision - the line's cost is then 0.
     safe(pageAllIn<Record<string, unknown>>(ids, (piece, a, b) => admin.from("part_items").select(PART_SELECT + ", final_cost_aed, label_code, return_status, replacement_part_id, disposition_at").in("job_id", piece).or("is_active.eq.true,disposition_at.not.is.null").order("id").range(a, b) as unknown as PromiseLike<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>)),
     chargesToInvoiceMany(ids),
+    lineMovesMany(ids).catch(() => new Map<string, LineMove[]>()),
   ]);
   const quoteIds = Array.from(quotesByJob.values()).flat().map((q) => q.id);
   const lineRows = await safe(pageAllIn<Record<string, unknown>>(quoteIds, (piece, a, b) => admin.from("quotation_lines").select(LINE_SELECT).in("quotation_id", piece).eq("is_active", true).order("position").order("id").range(a, b)));
@@ -421,6 +428,10 @@ export async function loadDraftInputs(jobIds: string[]): Promise<Map<string, Dra
     const d = out.get(jobId);
     if (d) d.charges = cs;
   }
+  for (const [jobId, ms] of movesByJob) {
+    const d = out.get(jobId);
+    if (d) d.moves = ms;
+  }
   return out;
 }
 
@@ -444,7 +455,21 @@ export function draftFrom(inp: DraftInputs, settings: Settings): InvoiceDraft {
     // 3 November 2026 (section 7, the owner's rule): a line leaves the bill only through a revised quotation the customer
     // approved - never because its part went back to the supplier (that used to drop the line silently and change the
     // customer's approved price). Its cost is the part's own: 0 once the part was given its ending.
-    const qLines = inp.lines.filter((l) => l.quotation_id === q.id && !isHidden(l) && !isUnchosen(l));
+    const fullLines = inp.lines.filter((l) => l.quotation_id === q.id && !isHidden(l) && !isUnchosen(l));
+    // 13 November 2026 (back orders): a part fitted on a later visit leaves this bill whole; the shared labour line keeps
+    // only the hours done now. The quotation's total drops by exactly what the follow-up job charges, so the two jobs
+    // together are the customer's approval to the fils.
+    const moves = (inp.moves ?? []).filter((m) => m.quotationId === q.id);
+    const qLines = moves.length
+      ? fullLines.filter((l) => !moves.some((m) => m.whole && m.lineId === l.id)).map((l) => {
+          const m = moves.find((x) => !x.whole && x.lineId === l.id);
+          if (!m || l.line_type !== "labour") return l;
+          const hours = Math.round(((l.hours ?? 0) - m.hours) * 100) / 100;
+          const moved = { ...l, hours };
+          return { ...moved, line_total: lineTotal(moved) };
+        }).filter((l) => !(l.line_type === "labour" && (l.hours ?? 0) <= 0 && moves.some((m) => !m.whole && m.lineId === l.id)))
+      : fullLines;
+    const movedTotal = round2(moves.reduce((a, m) => a + m.movedTotal, 0));
     // The labour discount as the quotation had it (our own labour lines; older quotations: labour and services).
     const { base, discount: d } = labourDiscountOf(qLines, { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, discount_kind: q.discount_kind, discount_value: q.discount_value, discount_scope: q.discount_scope });
     if (d > 0 && !discountLabel) discountLabel = discountLabelOf({ discount_kind: q.discount_kind, discount_value: q.discount_value, discount_percent: Number(q.discount_percent) || 0, discount_scope: q.discount_scope }, { hasPackage: qLines.some((l) => !!l.package_key) });
@@ -452,10 +477,17 @@ export function draftFrom(inp: DraftInputs, settings: Settings): InvoiceDraft {
     discountBase += base;
     for (const l of qLines) lines.push(draftLineOf(l, partOf(l.part_item_id)));
     // The quotation's own total, rounded when the advisor rounded it on sending.
-    const net = round2(qLines.reduce((a, l) => a + lineTotal(l), 0) - d);
     const rounded = q.rounded_total_aed;
-    if (rounded !== null && rounded !== undefined) anyRounded = true;
-    quotedTotal += rounded ?? round2(net + round2(net * (vatPercent / 100)));
+    if (moves.length) {
+      const full = labourDiscountOf(fullLines, { discount_percent: Number(q.discount_percent) || 0, vat_percent: Number(q.vat_percent) || 5, discount_kind: q.discount_kind, discount_value: q.discount_value, discount_scope: q.discount_scope });
+      const fullNet = round2(fullLines.reduce((a, l) => a + lineTotal(l), 0) - full.discount);
+      anyRounded = true;
+      quotedTotal += round2((rounded ?? round2(fullNet + round2(fullNet * (vatPercent / 100)))) - movedTotal);
+    } else {
+      const net = round2(qLines.reduce((a, l) => a + lineTotal(l), 0) - d);
+      if (rounded !== null && rounded !== undefined) anyRounded = true;
+      quotedTotal += rounded ?? round2(net + round2(net * (vatPercent / 100)));
+    }
   }
   const out = lines;
   if (job?.inspection_fee_due && !qs.length) {

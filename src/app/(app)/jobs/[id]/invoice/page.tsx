@@ -200,6 +200,13 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   const parts = shownLines.filter((l) => l.section === "parts");
   const liveRounding = live ? Math.round((live.taxable_aed - (live.subtotal_aed - live.discount_aed - (live.warranty_credit_aed || 0))) * 100) / 100 : 0;
   const here = `/jobs/${id}/invoice`;
+  // 13 November 2026 (back orders): a follow-up job waiting for its part (the car is not here) takes the customer's
+  // advance on its advance proforma, so "Customer pays for the part now" can be recorded before the car comes back.
+  const advanceDoc = !job.is_open && job.status === "booked" && mayPay
+    ? (((await createAdminClient().from("invoices").select("id, number, total_aed").eq("job_id", id).eq("kind", "proforma").eq("status", "issued").eq("is_active", true).is("converted_to", null).not("deposit_for_quotation_id", "is", null).limit(1)).data ?? [])[0] as { id: string; number: string; total_aed: number | string } | undefined) ?? null
+    : null;
+  const advancePaid = advanceDoc ? (((await createAdminClient().from("payments").select("amount_aed, status").eq("invoice_id", advanceDoc.id).eq("is_active", true)).data ?? []) as { amount_aed: number | string; status: string }[]).filter((p) => p.status !== "void" && p.status !== "bounced").reduce((a, p) => a + (Number(p.amount_aed) || 0), 0) : 0;
+  const advanceDue = advanceDoc ? Math.max(0, Math.round(((Number(advanceDoc.total_aed) || 0) - advancePaid) * 100) / 100) : 0;
   const unpaid = !!live && (bal?.balance ?? 0) > 0.005;
   const payNowOn = !!payLink && !payLink.paid_at && unpaid;
 
@@ -329,6 +336,14 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
               </div>
             ) : null}
             {(() => {
+              if (advanceDoc && advanceDue > 0) {
+                return (
+                  <div className="flex flex-col gap-2" data-advance-record>
+                    <p className="text-sm font-semibold">The car is not here yet (a part on back order). The customer pays for the part now: AED {m(advanceDue)} on {advanceDoc.number}.</p>
+                    <PaymentForm invoiceId={advanceDoc.id} jobId={null} proofJobId={id} spentKeys={spentKeys} balance={advanceDue} action={recordPayment} returnTo={here} charges={bankCharges} methods={methodsFor(role)} expected={null} invoiceNumber={advanceDoc.number} isProforma nextTaxNumber={null} isOwner={role === "owner"} pendingBank={null} />
+                  </div>
+                );
+              }
               if (!job.is_open) {
                 return live && unpaid && (mayPay || viewPay) ? (
                   <div className="flex flex-col gap-2" data-late-record>

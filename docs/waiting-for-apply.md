@@ -11,6 +11,16 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
+### FIRST: back orders (URGENT, J-00317, 13 November 2026)
+
+Apply this one first, ahead of the 8 below. A live backup was taken first: `backups/2026-11-13T04-57-14` (129 tables, 280,605 rows).
+
+| # | What | What it does on live | Size |
+|---|---|---|---|
+| 0 | `supabase/migrations/20261216090000_back_orders.sql` | Adds the server-only `back_orders` table, one row per part fitted on a later visit: the part, the line that charges it, the labour hours moved, the money that moves, who pays when, the follow-up job, the status, who decided. It has RLS on, no policies, no grants to the login role, and audit, stamp and no-delete triggers. It also adds `jobs.continues_job_id`, the follow-up job's link to the first visit, readable by the login role. Until it is applied, the "Back order - fit on a later visit" choice does not show, and Work complete still blocks as it does now. | 1 table + 1 column |
+
+### Then the 8 from the overnight list
+
 These come from the overnight list of 13 November 2026. A live backup was taken first: `backups/2026-11-12T21-37-52` (129 tables, 279,959 rows). Apply them in this order:
 
 | # | What | What it does on live | Size |

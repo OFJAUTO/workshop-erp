@@ -1,4 +1,7 @@
 import { latheV2Ready } from "@/lib/lathe";
+import { receivedCountWords } from "@/lib/receipt-rules";
+import { receiptPropsFor } from "@/lib/receipts";
+import { ReceiptsCard } from "@/components/ReceiptsCard";
 import { ApprovalsHere } from "@/components/ApprovalsHere";
 import { countsAsPaid } from "@/lib/bank-status";
 import { OwnerReviewCard, SendForOwner } from "./OwnerReviewCard";
@@ -130,6 +133,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   if (!invoiceFiles.length && !po.supplier_invoice_path && po.job_id) payMissing.push("the scan or photo");
   const today = todayIso();
   const typeOf = (partId: string) => { const p = bundle.parts.find((x) => x.id === partId); return p ? partTypeText(p) : null; };
+  const receiptProps = await receiptPropsFor([po.id]).catch(() => null);
   const formLines = lines.map((l) => ({ id: l.id, description: l.description, part_number: l.part_number, quantity: l.quantity, received_qty: l.received_qty, unit_cost: l.unit_cost, flag: l.flag, invoice_check: l.invoice_check }));
   const v = job?.vehicle;
   const site = await getSiteUrl();
@@ -489,10 +493,12 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           ) : null}
           {(po.status === "ordered" || po.status === "partly_received") && canManage ? (
             <Card className="flex flex-col gap-2 border-ink">
-              <SectionLabel>Receive the delivery</SectionLabel>
-              <ReceiveForm lines={formLines} action={receivePurchaseOrder.bind(null, po.id)} invoiceOpen={po.supplier_invoice_status !== "received"} />
+              <SectionLabel right={<span data-received-count>{receivedCountWords(formLines)}</span>}>Receive the delivery</SectionLabel>
+              <ReceiveForm lines={formLines} action={receivePurchaseOrder.bind(null, po.id)} invoiceOpen={po.supplier_invoice_status !== "received"} receipt={receiptProps?.[po.id] ? { ...receiptProps[po.id], poId: po.id } : null} />
             </Card>
           ) : null}
+          {/* 13 November 2026: every receipt, its invoice number and files (accounts fix what the parts desk captured). */}
+          <ReceiptsCard poIds={[po.id]} role={role} viewingAs={!!staff.viewingAs} />
           {/* Supplier invoices are scanned and entered by the owner and accounts ONLY (4 November 2026). */}
           {!isMain && po.status === "received" && po.supplier_invoice_status !== "received" ? (
             <Card className={`flex flex-col gap-2 ${po.supplier_invoice_status === "to_follow" ? "!border-amber-bar" : ""}`}>

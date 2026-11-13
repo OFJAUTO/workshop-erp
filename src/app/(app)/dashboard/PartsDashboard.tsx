@@ -1,4 +1,6 @@
 import { CarCard } from "@/components/CarCard";
+import { InvoicesNotReceivedCard } from "@/components/InvoicesNotReceivedCard";
+import { BackOrdersCard } from "@/components/BackOrdersCard";
 import { boardSearchHit, makeChips } from "@/lib/car-board";
 import { thumbsFor } from "@/lib/media-urls";
 import Link from "next/link";
@@ -117,6 +119,8 @@ export async function PartsDashboard({ staff, sp = {} }: { staff: CurrentStaff; 
     <>
       <HomeHeader staff={staff} />
       <WaitingPanel staff={staff} extra={await partsWaitingExtra()} />
+      <BackOrdersCard hrefOf="parts" />
+      <InvoicesNotReceivedCard role="parts" />
       <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-7 gap-3" data-parts-tiles>
         {tiles.map((t) => (
           <Link key={t.key} href={tile === t.key ? hrefOf({ tile: null }) : hrefOf({ tile: t.key })} className={`flex min-h-20 flex-col justify-center rounded-card border-2 px-4 py-3 ${tile === t.key ? "border-ink bg-chip" : t.count ? "border-ink bg-white" : "border-line bg-white"}`} data-parts-tile={t.key} aria-current={tile === t.key ? "page" : undefined}>

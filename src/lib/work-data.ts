@@ -164,8 +164,12 @@ export async function ensureWorkLines(jobId: string, by: string | null): Promise
   };
   const allowance = new Map((svcRows ?? []).map((s) => [s.id as string, s.time_allowance_hours === null ? null : Number(s.time_allowance_hours)]));
   // The technician's budget: labour hours as quoted; a fixed-price service brings its time allowance times the quantity.
-  const hoursFor = (l: QuoteLine): number | null => (l.line_type === "labour" ? l.hours : l.line_type === "package" && l.service_id && allowance.get(l.service_id) ? Math.round(Number(allowance.get(l.service_id)) * (l.quantity || 1) * 10) / 10 : null);
-  const wanted = ((lines ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => !isHidden(l) && !isUnchosen(l) && (l.line_type === "labour" || l.line_type === "package" || (l.line_type === "other" && !hasCostFloor(l))));
+  // 13 November 2026 (back orders): hours moved to a follow-up job are not this visit's budget; a line moved whole is off it.
+  const { lineMovesMany } = await import("./back-orders");
+  const moves = (await lineMovesMany([jobId]).catch(() => new Map())).get(jobId) ?? [];
+  const movedHours = (id: string) => moves.filter((m: { lineId: string; whole: boolean; hours: number }) => !m.whole && m.lineId === id).reduce((a: number, m: { hours: number }) => a + m.hours, 0);
+  const hoursFor = (l: QuoteLine): number | null => (l.line_type === "labour" ? (l.hours === null ? null : Math.round(((l.hours ?? 0) - movedHours(l.id)) * 10) / 10) : l.line_type === "package" && l.service_id && allowance.get(l.service_id) ? Math.round(Number(allowance.get(l.service_id)) * (l.quantity || 1) * 10) / 10 : null);
+  const wanted = ((lines ?? []) as Record<string, unknown>[]).map(toLine).filter((l) => !isHidden(l) && !isUnchosen(l) && (l.line_type === "labour" || l.line_type === "package" || (l.line_type === "other" && !hasCostFloor(l)))).filter((l) => !(l.line_type === "labour" && movedHours(l.id) > 0 && (hoursFor(l) ?? 0) <= 0));
   // Retiring looks at every approved line (a bodyshop line's old work line stays); only new rows follow the side.
   const wantedIds = new Set(wanted.map((l) => l.id));
   const all = (existing ?? []) as { id: string; quotation_line_id: string | null; position: number; title: string; hours_quoted: number | string | null; status: string; is_active: boolean }[];

@@ -4,6 +4,7 @@ import { PositionsLine } from "@/components/PositionsLine";
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
+import { ReceiptInvoiceFields, type ReceiptSupplier } from "@/components/ReceiptInvoiceFields";
 
 export type ReceiveRow = { id: string; description: string; positions?: string[] | null; qty: number; supplier: string | null; state: string | null; poId: string | null };
 export type ReceivedRow = { id: string; description: string; positions?: string[] | null; qty: number; /** The LPO's invoice is not entered yet: accounts collect and scan it (4 November 2026). */ invoiceWithAccounts?: boolean };
@@ -15,7 +16,7 @@ type Action = (formData: FormData) => Promise<{ error?: string; ok?: boolean; me
  * Since 4 November 2026 receiving never asks for the invoice: the supplier's paper goes to ACCOUNTS, who
  * collect it from Parts, scan it and enter it (the received lines read "invoice with accounts" until then).
  */
-export function ReceivePanel({ jobId, rows, received, canAct, action }: { jobId: string; rows: ReceiveRow[]; received: ReceivedRow[]; canAct: boolean; action: Action }) {
+export function ReceivePanel({ jobId, rows, received, canAct, action, receiptSuppliers = null }: { jobId: string; rows: ReceiveRow[]; received: ReceivedRow[]; canAct: boolean; action: Action; /** 13 November 2026: per LPO, the supplier and its "invoice later" rule (null until the database update). */ receiptSuppliers?: Record<string, { supplier: ReceiptSupplier; dueOn: string | null }> | null }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [unticked, setUnticked] = useState<Set<string>>(new Set());
@@ -84,7 +85,12 @@ export function ReceivePanel({ jobId, rows, received, canAct, action }: { jobId:
                   );
                 })}
               </ul>
-              <p className="text-xs text-muted" data-receive-invoice-note>The supplier&apos;s invoice is NOT entered here: keep the paper at the desk – accounts collect and scan it (they are told the moment you save).</p>
+              {receiptSuppliers && ticked.some((r) => r.poId && receiptSuppliers[r.poId]) ? (() => {
+                const first = ticked.find((r) => r.poId && receiptSuppliers[r.poId])!;
+                const s = receiptSuppliers[first.poId!];
+                const pos = Array.from(new Set(ticked.map((r) => r.poId).filter((x): x is string => !!x)));
+                return <ReceiptInvoiceFields key={pos.join(",")} supplier={s.supplier} poIds={pos} dueOn={s.dueOn} />;
+              })() : <p className="text-xs text-muted" data-receive-invoice-note>The supplier&apos;s invoice is NOT entered here: keep the paper at the desk – accounts collect and scan it (they are told the moment you save).</p>}
               <div className="flex flex-wrap gap-2">
                 <Button type="button" size="lg" disabled={pending} onClick={() => submit(true)} data-print-stickers>{pending ? "Saving…" : "Print stickers"}</Button>
                 <Button type="button" tone="secondary" size="lg" disabled={pending} onClick={() => submit(false)} data-no-stickers>No stickers</Button>

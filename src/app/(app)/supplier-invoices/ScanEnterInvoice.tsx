@@ -13,7 +13,7 @@ import { readInvoiceScanAction } from "./scan-actions";
  * date and the figures, check or correct them (a remark when the paper differs from the LPO), and save.
  * Then Mark checked sends the bill to Zoho as always.
  */
-export function ScanEnterInvoice({ poId, rowKey, jobId, poTotal, lines = [], action, lpoDate = null, noCarUploads = false }: { poId: string; rowKey: string; jobId: string | null; poTotal: number | null; lpoDate?: string | null; noCarUploads?: boolean; /** The LPO's lines, so the invoice's own price per line can be typed with it. */ lines?: { id: string; description: string; unit_cost: number }[]; action: (formData: FormData) => void }) {
+export function ScanEnterInvoice({ poId, rowKey, jobId, poTotal, lines = [], action, lpoDate = null, noCarUploads = false, typedNumber = null }: { /** 13 November 2026: the number the parts desk typed at receiving. */ typedNumber?: string | null; poId: string; rowKey: string; jobId: string | null; poTotal: number | null; lpoDate?: string | null; noCarUploads?: boolean; /** The LPO's lines, so the invoice's own price per line can be typed with it. */ lines?: { id: string; description: string; unit_cost: number }[]; action: (formData: FormData) => void }) {
   void rowKey;
   const [facts, setFacts] = useState<(InvoiceFacts & { key: number; source: string; file: string }) | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,7 +37,7 @@ export function ScanEnterInvoice({ poId, rowKey, jobId, poTotal, lines = [], act
     <form action={action} className="flex flex-col gap-2 rounded-card border-2 border-ink bg-white p-3" data-si-enter>
       <span className="text-sm font-extrabold uppercase tracking-[0.08em]">Scan &amp; enter the invoice</span>
       <p className="text-xs text-muted">Collect the supplier&apos;s paper from Parts, press <b>Scan document</b> below (it straightens and cleans the pages into one PDF), then <b>Read the scan</b> to pre-fill the figures. Check every figure against the paper before saving.</p>
-      <SupplierInvoiceBox jobId={jobId} poId={poId} poTotal={poTotal} lpoDate={lpoDate} noCarUploads={noCarUploads} canFollow={false} prefill={facts ? { key: facts.key, number: facts.number ?? "", date: facts.date ?? "", amount: facts.beforeVat !== null ? String(facts.beforeVat) : "" } : null} />
+      <SupplierInvoiceBox jobId={jobId} poId={poId} poTotal={poTotal} lpoDate={lpoDate} noCarUploads={noCarUploads} canFollow={false} prefill={facts ? { key: facts.key, number: facts.number ?? typedNumber ?? "", date: facts.date ?? "", amount: facts.beforeVat !== null ? String(facts.beforeVat) : "" } : typedNumber ? { key: 1, number: typedNumber, date: "", amount: "" } : null} />
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" tone="secondary" size="md" disabled={reading} onClick={read} data-si-read-scan>{reading ? "Reading…" : "Read the scan"}</Button>
         {error ? <span className="text-xs font-semibold text-red" data-si-read-error>{error}</span> : null}

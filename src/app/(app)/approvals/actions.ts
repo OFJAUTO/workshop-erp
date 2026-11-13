@@ -173,6 +173,13 @@ async function decideCore(kind: ApprovalKind, id: string, decision: "approve" | 
       answer = r.error ? { error: r.error } : { ok: true, message: r.words ?? "Done." };
       break;
     }
+    case "back_order": {
+      // 13 November 2026 (URGENT, J-00317): a part fitted on a later visit.
+      const { decideBackOrder } = await import("@/lib/back-orders");
+      const r = await decideBackOrder(id, yes, note, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+      answer = r.error ? { error: r.error } : { ok: true, message: r.words ?? "Done." };
+      break;
+    }
     default:
       answer = await runMoreDecision(kind, id, yes, note, staff);
   }

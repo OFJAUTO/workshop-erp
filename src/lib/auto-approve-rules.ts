@@ -21,6 +21,7 @@ export const AUTO_TYPES: AutoType[] = [
   { key: "quote_discount", group: "Quotations and estimates", label: "Discount above the advisor's limit", preTicked: false, figure: "the discount (AED)" },
   { key: "quote_roundoff", group: "Quotations and estimates", label: "Round-off down above the limit", preTicked: false, figure: "the round-off (AED)" },
   { key: "quote_total", group: "Quotations and estimates", label: "Total above the approval amount", preTicked: false, figure: "the quotation total (AED)" },
+  { key: "back_order", group: "Back orders", label: "Back order - fit a part on a later visit (customer pays for it now)", preTicked: false, figure: "the part and labour moved (AED)" },
 ];
 
 /** The other approval types in the ERP: they always come to the owner (each decides through its own owner-only step). */

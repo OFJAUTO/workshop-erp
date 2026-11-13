@@ -22,6 +22,7 @@ import { TechniciansCard } from "../TechniciansCard";
 import { loadJobTechnicians } from "@/lib/job-technicians";
 import { confirmWorkComplete, decideAdditionalWork, decidePause, sendWorkBack, setTimeBudget } from "../../work-actions";
 import { BudgetTimer } from "@/app/(app)/my-jobs/[id]/WorkPanel";
+import { BackOrderSection } from "@/components/BackOrderSection";
 import { bodyshopOnCar, pickablePeople, workSidesOf } from "@/lib/staff-picker";
 
 export const dynamic = "force-dynamic";
@@ -115,7 +116,13 @@ export default async function WorkOrderPage({ params, searchParams }: { params: 
             <Card className={`flex flex-col gap-3 ${job.work_done_at ? "border-green" : "border-line"}`}>
               <SectionLabel>{job.work_done_at ? `Job finished ${formatDateTime(job.work_done_at)}: confirm it` : "Work complete"}</SectionLabel>
               {job.work_done_at ? <p className="text-sm">The technician{techs.length > 1 ? "s say" : " says"} all work on this car is done. Check the car, then confirm, or send it back with a note the technician sees on top.</p> : <p className="text-sm text-muted">The technician presses Job finished on the tablet; you confirm here. You can also confirm now if you checked the car yourself.</p>}
-              {blockers.length ? <p className="text-sm text-red font-semibold">Not possible yet: {blockers.join("; ")}.</p> : null}
+              {blockers.length ? <p className="text-sm text-red font-semibold" data-work-blockers>Not possible yet: {blockers.join("; ")}.</p> : null}
+              {unhanded.length ? (
+                <div className="flex flex-col gap-2 border-t border-line pt-3">
+                  <p className="text-sm font-semibold">Parts not handed over: still coming for this visit, or back order?</p>
+                  <BackOrderSection jobId={id} role={role} viewingAs={!!staff.viewingAs} isOpen={job.is_open} />
+                </div>
+              ) : null}
               {noClock && !blockers.length ? <p className="text-sm font-semibold text-amber-text" data-no-clock>No time has been clocked on this car (0 h 00 min). The technicians never pressed Start work, so the labour cost will read zero. Send it to QC anyway, or send it back so the time is clocked.</p> : null}
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
                 <form action={confirmWorkComplete.bind(null, id)} className="sm:flex-1"><Button type="submit" size="lg" className="w-full" disabled={blockers.length > 0}>{noClock ? "Send to QC anyway (0 min clocked)" : "Confirmed, send to QC"}</Button></form>
