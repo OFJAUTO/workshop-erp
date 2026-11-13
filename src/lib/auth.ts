@@ -1,4 +1,5 @@
 import "server-only";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
@@ -27,7 +28,7 @@ const STAFF_COLUMNS = "id, full_name, display_name, role_id, department_id, team
  * With "Act as", the screens behave for that person and changes go through; the display name
  * carried into every log reads "Omar, on behalf of <name>", and the database trigger still records the owner.
  */
-export const getCurrentStaff = cache(async (): Promise<CurrentStaff | null> => {
+const getCurrentStaffCached = cache(async (): Promise<CurrentStaff | null> => {
   const supabase = await createClient();
   const {
     data: { user },
@@ -56,6 +57,17 @@ export const getCurrentStaff = cache(async (): Promise<CurrentStaff | null> => {
   }
   return real;
 });
+
+/**
+ * The approvals stand-in (13 November 2026, Section 15): while THE one decision door runs a decision for the owner's
+ * stand-in, every check inside it sees the stand-in as the owner, named "<name> on behalf of the owner". Set only by
+ * decideApprovalAction after its own checks (type ticked, within the limit, not their own request, between the dates).
+ */
+export const ownerStandIn = new AsyncLocalStorage<CurrentStaff>();
+
+export async function getCurrentStaff(): Promise<CurrentStaff | null> {
+  return ownerStandIn.getStore() ?? getCurrentStaffCached();
+}
 
 /** Use at the top of any page that needs a login. Sends strangers to the login page. */
 export async function requireStaff(): Promise<CurrentStaff> {

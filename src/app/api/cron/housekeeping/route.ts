@@ -632,6 +632,13 @@ async function runHousekeeping(): Promise<Record<string, number>> {
   //     itself once its end date has passed.
   try {
     report.autoApprove = (await autoApproveHourly()) ? 1 : 0;
+    // 13 November 2026 (Section 15): the approvals stand-in's waiting bell and the owner's evening summary.
+    try {
+      const { standInHourly } = await import("@/lib/standin");
+      report.standIn = (await standInHourly()) ? 1 : 0;
+    } catch {
+      report.standIn = 0;
+    }
   } catch {
     report.autoApprove = -1;
   }

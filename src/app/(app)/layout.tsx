@@ -2,6 +2,7 @@ import { deviceDepartmentWords } from "@/lib/device-department";
 import { roleTitleOf } from "@/lib/teams";
 import { mayOpenHr } from "@/lib/hr-rules";
 import { approvalsCount } from "@/lib/approvals";
+import { standInFor, standInItems } from "@/lib/standin";
 import { Suspense } from "react";
 import { chargesReady } from "@/lib/charges";
 import type { Metadata } from "next";
@@ -102,11 +103,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const pkReady = await passkeysReady();
   const tabletDevice = await getCurrentDevice().catch(() => null);
   // 11 November 2026 (Section 4): the owner's Approvals with its count.
-  const approvalsWaiting = role === "owner" ? await approvalsCount().catch(() => 0) : 0;
+  // 13 November 2026 (Section 15): the owner's approvals stand-in sees Approvals too, counting what they may decide.
+  const standIn = role !== "owner" && !staff.viewingAs ? await standInFor(staff).catch(() => null) : null;
+  const approvalsWaiting = role === "owner" ? await approvalsCount().catch(() => 0) : standIn ? (await standInItems(standIn, staff).catch(() => [])).length : 0;
   const entries: ((NavItem | typeof partsManagement) & { show: boolean })[] = [
     { href: "/home", label: "Home", show: role !== "gate_in" && role !== "technician" && role !== "qc_inspector" && role !== "team_leader" },
     { href: "/dashboard", label: "Dashboard", show: can(role, "viewDashboard") },
-    { href: "/approvals", label: "Approvals", show: role === "owner", badge: approvalsWaiting || undefined },
+    { href: "/approvals", label: "Approvals", show: role === "owner" || !!standIn, badge: approvalsWaiting || undefined },
     { href: "/calendar", label: "Calendar", show: can(role, "viewCalendar") && role !== "accounts" && role !== "parts" },
     { href: "/parts/arrivals", label: "Parts arrivals", show: role === "parts" || role === "owner" },
     { href: "/assign", label: "To assign", show: can(role, "assignJobs") },

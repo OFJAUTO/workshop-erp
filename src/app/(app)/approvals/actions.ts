@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireStaff } from "@/lib/auth";
+import { ownerStandIn, requireStaff } from "@/lib/auth";
+import { dubaiToday, logStandInDecision, standInFor } from "@/lib/standin";
+import { onBehalfName, standInMay } from "@/lib/standin-rules";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadApprovals, type ApprovalKind } from "@/lib/approvals";
 import { clearVoidRequest, decideOverpayment, voidPayment } from "@/lib/payments";
@@ -56,8 +58,24 @@ const fd = (o: Record<string, string>) => {
  * answer comes back to the box. A refusal always needs a reason.
  */
 export async function decideApprovalAction(kind: ApprovalKind, id: string, decision: "approve" | "refuse", reason: string, seen: string | null = null): Promise<ApprovalAnswer> {
-  const staff = await requireStaff();
-  if (staff.viewingAs) return { error: "View as is read-only – use Act as to decide." };
+  const real = await requireStaff();
+  if (real.viewingAs) return { error: "View as is read-only – use Act as to decide." };
+  if (real.role_id === "owner") return decideCore(kind, id, decision, reason, seen, real);
+  // 13 November 2026 (Section 15): the owner's stand-in decides through this same door, for the types he sent them,
+  // within their limits, never their own request; inside, every check sees "<name> on behalf of the owner".
+  const s = await standInFor(real);
+  if (!s) return { error: "Only the owner decides this." };
+  const item = (await loadApprovals()).find((i) => i.key === `${kind}:${id}`);
+  if (!item) return { error: "Already decided, or no longer waiting." };
+  const may = standInMay(s, item, real, dubaiToday());
+  if (!may.ok) return { error: may.why };
+  const asOwner = { ...real, role_id: "owner", display_name: onBehalfName(real.display_name) } as typeof real;
+  const answer = await ownerStandIn.run(asOwner, () => decideCore(kind, id, decision, reason, seen, asOwner));
+  if (answer?.ok) await logStandInDecision(asOwner.display_name, item, decision === "approve" ? "approved" : "refused").catch(() => null);
+  return answer;
+}
+
+async function decideCore(kind: ApprovalKind, id: string, decision: "approve" | "refuse", reason: string, seen: string | null, staff: Awaited<ReturnType<typeof requireStaff>>): Promise<ApprovalAnswer> {
   const note = reason.trim().slice(0, 500);
   if (decision === "refuse" && note.length < 3) return { error: "Write why you refuse (a few words): the person who asked sees it." };
   const yes = decision === "approve";

@@ -127,6 +127,8 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "quote_complete", label: "A quotation is complete and ready to send", locked: true },
   { type: "dangerous_found", label: "A technician marked a finding as dangerous", locked: true },
   { type: "auto_approved_summary", label: "Auto-approved today (one evening summary while you are away)", locked: true },
+  { type: "approval_standin", label: "Approvals go to a stand-in (the team notice, and the stand-in's waiting requests)", locked: true },
+  { type: "approval_standin_summary", label: "What your stand-in approved today (one evening summary)", locked: true },
   { type: "uploads_late", label: "Inspection photos or videos have not arrived from a tablet after 15 minutes", locked: true },
   { type: "big_job", label: "A technician flagged a big job", locked: true },
   { type: "estimate_hours", label: "The technician's estimated hours need the manager's agreement", locked: true },
