@@ -178,6 +178,15 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
                       ) : null}
                     </div>
                   ) : null}
+                  {/* 13 November 2026 (Section 7): a bill posted with the old single summary line re-posts in place with one
+                      line per part (same total; a payment applied to it stays applied). */}
+                  {maySync && !differs && r.kind === "bill" && r.status === "synced" && !(r.zoho_result as { lines?: number } | null)?.lines ? (
+                    <form action={retryZohoRow.bind(null, r.id)} className="flex flex-wrap items-center gap-2" data-zoho-relayout-form>
+                      <input type="hidden" name="recheck" value="1" />
+                      <span className="text-xs text-muted">Posted as one summary line.</span>
+                      <Button type="submit" tone="secondary" size="md" data-zoho-relayout>Re-post with one line per part</Button>
+                    </form>
+                  ) : null}
                   {r.last_error && r.status !== "synced" ? (
                     <p className="text-sm text-red font-semibold" data-zoho-reason>
                       <Words text={r.last_error} />

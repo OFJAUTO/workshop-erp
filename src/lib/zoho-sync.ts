@@ -1,4 +1,7 @@
 import "server-only";
+import { billLines, sameLayout } from "./zoho-bill-lines";
+import { realPartNumber } from "./parts-rows";
+import { formatPlate } from "./types";
 import { DEFAULT_UNDO_MINUTES, heldForUndo } from "./money-undo";
 import { countsAsPaid, isBankMethod, zohoPayDay } from "./bank-status";
 import { bankPostingReady } from "./schema-ready";
@@ -1490,7 +1493,7 @@ async function syncCreditNoteRow(org: string, accounts: Resolved, invoiceId: str
 
 /* ----------------------------------------------------------- bills ----------------------------------------------------------- */
 
-type ZohoBill = { bill_id: string; bill_number: string; status: string; sub_total: number; tax_total: number; total: number; balance: number; vendor_id?: string; documents?: unknown[] };
+type ZohoBill = { bill_id: string; bill_number: string; status: string; sub_total: number; tax_total: number; total: number; balance: number; vendor_id?: string; documents?: unknown[]; line_items?: { name?: string; rate?: number; quantity?: number }[] };
 
 async function zohoBillById(org: string, id: string): Promise<ZohoBill | null> {
   try {
@@ -1570,7 +1573,7 @@ async function vendorVatRegistered(org: string, po: PoRow, v: { vendorId: string
 }
 
 export type BillErpFigures = {
-  lines: { description: string; quantity: number; unit: number; lpoUnit: number; check: string | null }[];
+  lines: { description: string; partNumber: string | null; listPrice: number | null; discountPercent: number | null; quantity: number; unit: number; lpoUnit: number; check: string | null }[];
   charges: { description: string; amount: number }[];
   chargesSum: number;
   linesTotal: number;
@@ -1596,7 +1599,7 @@ export async function billErpFigures(po: PoRow): Promise<BillErpFigures> {
   const admin = createAdminClient();
   const vatCol = (await schemaReady("purchase_orders", "supplier_invoice_vat_aed")) ? ", supplier_invoice_vat_aed" : "";
   const [{ data: lineRows }, { data: chargeRows }, { data: poStatusRow }, { data: supRow }] = await Promise.all([
-    admin.from("purchase_order_lines").select("description, quantity, received_qty, unit_cost, invoice_unit_cost, invoice_check").eq("po_id", po.id),
+    admin.from("purchase_order_lines").select("description, part_number, list_price, discount_percent, quantity, received_qty, unit_cost, invoice_unit_cost, invoice_check, position").eq("po_id", po.id).order("position"),
     admin.from("supplier_charges").select("description, amount_aed").eq("po_id", po.id).eq("is_active", true).is("removed_at", null),
     admin.from("purchase_orders").select("status" + vatCol).eq("id", po.id).maybeSingle(),
     po.supplier_id ? admin.from("suppliers").select("vat_registered").eq("id", po.supplier_id).maybeSingle() : Promise.resolve({ data: null }),
@@ -1604,6 +1607,9 @@ export async function billErpFigures(po: PoRow): Promise<BillErpFigures> {
   const fullyReceived = ((poStatusRow as { status?: string } | null)?.status ?? "") !== "partly_received";
   const lines = (lineRows ?? []).map((l) => ({
     description: String(l.description ?? ""),
+    partNumber: realPartNumber(l.part_number as string | null),
+    listPrice: l.list_price != null ? Number(l.list_price) : null,
+    discountPercent: l.discount_percent != null ? Number(l.discount_percent) : null,
     quantity: l.received_qty != null ? Number(l.received_qty) || 0 : fullyReceived ? Number(l.quantity) || 0 : 0,
     unit: Number(l.invoice_unit_cost ?? l.unit_cost) || 0,
     lpoUnit: Number(l.unit_cost) || 0,
@@ -1648,6 +1654,20 @@ function billPartsAccount(po: PoRow, accounts: Resolved, purchases: Record<Purch
   return purchases.parts;
 }
 
+/** The job number and the plate for a supplier bill's lines (a stock order has none). */
+async function billRefOf(po: PoRow): Promise<{ lpo: string; job: string | null; plate: string | null }> {
+  if (!po.job_id) return { lpo: po.number, job: null, plate: null };
+  const admin = createAdminClient();
+  const { data: j } = await admin.from("jobs").select("job_number, vehicle_id").eq("id", po.job_id).maybeSingle();
+  const job = j as { job_number: string; vehicle_id: string | null } | null;
+  let plate: string | null = null;
+  if (job?.vehicle_id) {
+    const { data: v } = await admin.from("vehicles").select("kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, variant").eq("id", job.vehicle_id).maybeSingle();
+    if (v) plate = formatPlate(v as never);
+  }
+  return { lpo: po.number, job: job?.job_number ?? null, plate };
+}
+
 async function syncBillRow(org: string, accounts: Resolved, poId: string): Promise<HandlerOut> {
   const admin = createAdminClient();
   const po = await poForZoho(poId);
@@ -1673,16 +1693,17 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
     ].join("\n"),
     2000,
   );
-  const line_items: Record<string, unknown>[] = [];
-  if (partsRate > 0.005 || lines.length) {
-    line_items.push({ name: cut(`${po.kind === "stock" ? "Stock purchase" : "Parts"} per ${po.number} – ${lines.length} item${lines.length === 1 ? "" : "s"}`, 100), rate: partsRate, quantity: 1, account_id: billPartsAccount(po, accounts, purchases), ...(taxed ? { tax_id: accounts.taxId } : {}) });
-  }
-  for (const c of charges) line_items.push({ name: cut(c.description, 100), rate: c.amount, quantity: 1, account_id: purchases.courier, ...(taxed ? { tax_id: accounts.taxId } : {}) });
+  // 13 November 2026 (Section 7): ONE LINE PER PART (name, part number, quantity, unit cost before VAT, the LPO, job
+  // and plate), each on its own account; a discount or round-off on the paper is its own line (THE rule: zoho-bill-lines).
+  const ref = await billRefOf(po);
+  const built = billLines({ lines, charges, expectedNet, expectedVat, taxed, ref, accounts: { parts: billPartsAccount(po, accounts, purchases), courier: purchases.courier }, taxId: accounts.taxId ?? null });
+  const line_items = built.items as unknown as Record<string, unknown>[];
   if (!line_items.length) throw new ZohoError(`${po.number} has nothing to bill (no lines and no charges).`);
+  void partsRate;
   // Zoho works out 5% per line; the fils between that and the VAT printed on the supplier's paper ride as the bill's
   // adjustment, so the bill's TOTAL is the paper's to the fils (THE check below still names a VAT that differs).
-  const zohoVat = taxed ? roundHalfUp(line_items.reduce((a, l) => a + roundHalfUp(Number(l.rate) * 0.05), 0)) : 0;
-  const vatAdjust = roundHalfUp(expectedVat - zohoVat);
+  const zohoVat = built.zohoVat;
+  const vatAdjust = built.adjustment;
   const adjustment = Math.abs(vatAdjust) > 0.004 && Math.abs(vatAdjust) <= 1 ? { adjustment: vatAdjust, adjustment_description: "VAT rounding as printed on the supplier's invoice" } : {};
   if (Math.abs(vatAdjust) > 1) throw new ZohoError(`${po.number}: the VAT typed from the supplier's invoice (${expectedVat.toFixed(2)}) is more than AED 1 away from 5% of ${expectedNet.toFixed(2)} (${zohoVat.toFixed(2)}): check the VAT on the LPO page.`);
 
@@ -1715,12 +1736,17 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   }
   // One corrective pass on OUR bill (posted before the fils rule, or edited since): the same lines again, unless money
   // was already paid against it in Zoho (then it is the accountant's, in plain words).
-  if (!matches(z)) {
-    if (z.balance + 0.004 < z.total) throw new ZohoError(`Zoho differs: ${billDiffWords(z, expectedNet, expectedVat, expectedGross)}. The bill ${po.supplier_invoice_number} (${po.number}) is already part paid in Zoho: correct it there by hand, then press "Done by hand".`);
+  // A bill posted with the old single summary line is re-posted in place with one line per part (same total: a payment
+  // already applied to it stays applied).
+  const relayout = matches(z) && !sameLayout(z.line_items, built.items);
+  const paidBefore = round2(z.total - z.balance);
+  if (!matches(z) || relayout) {
+    if (!relayout && z.balance + 0.004 < z.total) throw new ZohoError(`Zoho differs: ${billDiffWords(z, expectedNet, expectedVat, expectedGross)}. The bill ${po.supplier_invoice_number} (${po.number}) is already part paid in Zoho: correct it there by hand, then press "Done by hand".`);
     await zohoFetch(`/bills/${z.bill_id}`, { org, method: "PUT", body: { vendor_id: vendorId, bill_number: po.supplier_invoice_number, date: po.supplier_invoice_date, reference_number: po.number, line_items, notes, is_inclusive_tax: false, tax_treatment: taxed ? "vat_registered" : "vat_not_registered", adjustment: (adjustment as { adjustment?: number }).adjustment ?? 0, adjustment_description: (adjustment as { adjustment_description?: string }).adjustment_description ?? "" } });
     z = (await zohoBillById(org, z.bill_id)) ?? z;
   }
   if (!matches(z)) throw new ZohoError(`Zoho differs: ${billDiffWords(z, expectedNet, expectedVat, expectedGross)} (the bill ${po.supplier_invoice_number}, ${po.number}).`);
+  if (relayout && round2(z.total - z.balance) + 0.004 < paidBefore) throw new ZohoError(`The bill ${po.supplier_invoice_number} (${po.number}) was re-posted with one line per part, but Zoho now shows AED ${round2(z.total - z.balance).toFixed(2)} paid instead of ${paidBefore.toFixed(2)}: re-apply the payment in Zoho, then press "Done by hand".`);
   // The VAT standing: the bill must carry what it was posted with (a re-run never re-judges history by today's
   // switch); a new bill, what the supplier's switch says now.
   const postedTaxed = po.zoho_bill_taxed ?? taxed;
@@ -1763,6 +1789,9 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
       zoho: { net: z.sub_total, vat: z.tax_total, total: z.total, balance: z.balance },
       erp: { net: expectedNet, vat: expectedVat, total: expectedGross, charges: chargesSum },
       ...(Math.abs(vatAdjust) > 0.004 ? { vat_adjustment: vatAdjust } : {}),
+      lines: built.items.length,
+      ...(built.roundOff ? { round_off: built.roundOff } : {}),
+      ...(relayout ? { relaid: "re-posted with one line per part (total unchanged)" } : {}),
       attached,
       ...(attachNote ? { note: attachNote } : {}),
       ...(flagged.length ? { price_flags: flagged.length } : {}),
