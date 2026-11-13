@@ -1,3 +1,4 @@
+import { Words } from "@/components/Words";
 import { notFound } from "next/navigation";
 import { PageHeader, Card, Empty } from "@/components/ui";
 import { ApprovalBox } from "@/components/ApprovalBox";
@@ -52,7 +53,7 @@ export default async function ApprovalsPage() {
           <span className="text-xs font-extrabold uppercase tracking-[0.08em] text-muted">Decided by the stand-in · {sLog.length}</span>
           {sLog.map((r, i) => (
             <span key={`${r.at}-${i}`} className="text-sm" data-standin-row>
-              <b>{r.decision === "approved" ? "Approved" : "Refused"}</b> · {r.title}{r.money ? ` · ${r.money}` : ""} · {r.by} · {formatDateTime(r.at)}
+              <b>{r.decision === "approved" ? "Approved" : "Refused"}</b> · <Words text={`${r.title}${r.money ? ` · ${r.money}` : ""} · ${r.by} · ${formatDateTime(r.at)}`} />
             </span>
           ))}
         </Card>
@@ -66,7 +67,7 @@ export default async function ApprovalsPage() {
               <span className="font-semibold">{r.jobNumber ?? "Estimate"}</span>
               <span className="text-xs text-muted">{formatDateTime(r.at)} · cost {aed(r.cost)}</span>
             </span>
-            <span className="text-xs">{r.note}</span>
+            <Words className="text-xs" text={r.note} />
           </a>
         ))}
       </Card>}

@@ -184,7 +184,7 @@ export function Field({
         {optional ? <span className="text-muted font-medium"> (optional)</span> : null}
       </span>
       {children}
-      {hint && !error ? <span className="text-xs text-muted">{hint}</span> : null}
+      {hint && !error ? <Words className="text-xs text-muted" text={hint} /> : null}
       {error ? <span className="text-xs text-red font-semibold">{error}</span> : null}
     </label>
   );

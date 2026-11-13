@@ -1,4 +1,5 @@
 "use client";
+import { Words } from "@/components/Words";
 
 import type { QuoteLock } from "@/lib/quote-lock";
 import { guessJobForPart } from "@/lib/jobs-to-do";
@@ -1291,7 +1292,7 @@ export function QuoteEditor({
           {l.line_type === "labour" ? (
             /* Three separate things, each labelled: the hours quoted to the customer, our internal estimate (Est. h, profit
                viewers only), and the hourly rate in AED/h. The estimate label never sits on the rate box. */
-            <span className="inline-flex shrink-0 flex-wrap items-center gap-2" data-labour-boxes>
+            <span className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-2" data-labour-boxes>
               <label className="inline-flex items-center gap-1 whitespace-nowrap" title="The hours quoted to the customer">
                 <span className="text-xs font-semibold text-muted">Hours</span>
                 {/* The shared input style is full width, so each of the three boxes carries its own width. */}
@@ -2094,7 +2095,7 @@ export function QuoteEditor({
                     <Fragment key={p.key}>
                       <dt className="text-muted" data-profit-line={p.key}>
                         − {p.key === "bank" ? "Bank fee (excl. VAT)" : p.label}
-                        {p.key === "bank" ? <span className="block text-xs" data-bank-fee-label>{liveRate}%{liveFixed > 0 ? " + AED " + liveFixed.toFixed(2) : ""} of the total with VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""}</span> : p.detail ? <span className="block text-xs" data-profit-detail={p.key}>{p.detail}</span> : null}
+                        {p.key === "bank" ? <span className="block text-xs" data-bank-fee-label>{liveRate}%{liveFixed > 0 ? " + AED " + liveFixed.toFixed(2) : ""} of the total with VAT, estimated{expectedMethod === "not_sure" ? ", card rate" : ""}</span> : p.detail ? <Words className="block text-xs" text={p.detail} data-profit-detail={p.key} /> : null}
                         {p.key === "labour" && totals.labourCostBasis === "estimate" && (totals.estimateTotalSuspect || totals.estimateSuspectLineIds.length) ? <span className="block font-semibold text-amber-text" title="An Est. h box holds a figure that is not hours; the quoted hours are used for that line until it is fixed" data-estimate-cost-warning>Est. h flagged, quoted hours used</span> : null}
                         {p.key === "labour" && settings.installerHistory && totals.installerHours > 0 ? <span className="block text-xs" data-installer-history>This model before: about {hoursText(settings.installerHistory.avgHours)} over {settings.installerHistory.jobs} job{settings.installerHistory.jobs === 1 ? "" : "s"}</span> : null}
                       </dt>

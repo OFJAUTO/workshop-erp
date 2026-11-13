@@ -109,7 +109,7 @@ export default async function RecoveryPage({ searchParams }: { searchParams: Pro
           <Button type="submit" tone="secondary" size="md">Show</Button>
         </form>
         {monthTotals.size === 0 ? <p className="text-sm text-muted">No trips this month.</p> : (
-          <div className="overflow-x-auto -mx-1 px-1"><table className="w-full text-sm">
+          <div className="overflow-x-auto -mx-1 px-1" data-scroll-ok><table className="w-full text-sm">
             <thead><tr className="text-left text-xs font-bold uppercase tracking-[0.06em] text-muted"><th className="py-1 pr-3">Driver or company</th><th className="py-1 pr-3 text-right">Trips</th><th className="py-1 pr-3 text-right">Total</th><th className="py-1 pr-3 text-right">Average</th><th className="py-1 text-right">Month&apos;s payment</th></tr></thead>
             <tbody className="divide-y divide-line">
               {Array.from(monthTotals.entries()).sort((a, b) => b[1].total - a[1].total).map(([w, s]) => {

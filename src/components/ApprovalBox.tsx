@@ -39,7 +39,7 @@ export function ApprovalBox({ item, highlight = false, link = false, extra = nul
         <Words className="font-extrabold" text={item.title} data-approval-title="" />
         {item.money ? <span className="ml-auto font-extrabold" data-approval-money>{item.money}</span> : null}
       </div>
-      {item.what ? <p className="text-sm" data-approval-what>{item.what}</p> : null}
+      {item.what ? <p className="text-sm" data-approval-what><Words text={item.what} /></p> : null}
       <p className="text-xs text-muted">{item.askedBy ? `Asked by ${item.askedBy}` : "Asked"}{item.askedAt ? ` · ${when(item.askedAt)}` : ""}</p>
       {extra}
       {done ? (

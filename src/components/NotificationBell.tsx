@@ -1,4 +1,5 @@
 "use client";
+import { Words } from "./Words";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SQUARE_BUTTON, squareTone } from "./ui";
@@ -317,7 +318,7 @@ export function NotificationBell({ staffId, tone = "marimba", ownerTone = "chord
                   <span className="flex items-start gap-2">
                     <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${n.read_at ? "bg-transparent" : LOUD_TYPES.has(n.type) ? "bg-ink" : "bg-red-bar"}`} />
                     <span className="flex flex-col gap-0.5 min-w-0">
-                      <span className="text-sm font-semibold leading-snug">{n.title}</span>
+                      <Words className="text-sm font-semibold leading-snug" text={n.title} />
                       {n.body ? <span className="text-xs text-muted">{n.body}</span> : null}
                       <span className="text-xs text-faint">{timeAgo(n.created_at)}</span>
                     </span>

@@ -27,7 +27,7 @@ export function ProfitPanel({ live, target, data }: { live: boolean; target: num
   return (
     <Card className={`flex flex-col gap-2.5 border text-ink ${cls}`} data-profit-panel data-target-box>
       <span className="text-2xl sm:text-3xl font-extrabold" data-month-headline>
-        {monthName} so far: {fmt(Math.max(0, data.monthProfit))} profit
+        {monthName} so far: <span className="whitespace-nowrap">{fmt(Math.max(0, data.monthProfit))}</span> profit
       </span>
       <div className="flex flex-col gap-1" data-target-bar>
         <div className={`h-2.5 w-full max-w-xl overflow-hidden rounded-full ${card.empty ? "bg-chip" : "bg-white/70"}`}>

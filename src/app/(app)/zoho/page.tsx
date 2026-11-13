@@ -156,7 +156,7 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
                   <div className="flex flex-wrap items-center gap-2">
                     {maySync && r.status === "pending" ? <input type="checkbox" className="h-5 w-5 accent-ink" aria-label={`Select ${kindWord(r.kind)} ${name}`} data-zoho-tick={r.id} data-kind={r.kind} data-day={dubaiDayOf(r.enqueued_at)} /> : null}
                     <Badge tone="outline">{kindWord(r.kind)}</Badge>
-                    <span className="font-bold">{name}</span>
+                    <Words className="min-w-0 font-bold" text={name} />
                     <span className="flex-1" />
                     {r.status === "synced" ? (differs ? <Badge tone="red">Posted · differs</Badge> : <Badge tone="green">Posted ✓</Badge>) : r.status === "failed" ? <Badge tone="red">Failed</Badge> : <Badge tone="amber">Waiting</Badge>}
                     {maySync && r.status === "pending" ? <SyncThisButton id={r.id} /> : null}

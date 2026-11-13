@@ -25,7 +25,7 @@ export default async function MonthlyReportPage({ searchParams }: { searchParams
   const stat = (label: string, value: string, note?: string | null) => (
     <Card className="flex flex-col gap-0.5">
       <span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{label}</span>
-      <span className="text-2xl font-extrabold">{value}</span>
+      <span className="whitespace-nowrap text-2xl font-extrabold">{value}</span>
       {note ? <span className="text-xs text-muted">{note}</span> : null}
     </Card>
   );

@@ -148,7 +148,7 @@ async function WarrantyStickers({ q, isOwner, stored }: { q: string; isOwner: bo
   const group = (c: { id: string }, t: { key: string; label: string; batch?: boolean }) => t.batch ? (
     <form key={t.key} method="get" action={`/print/warranty-sticker/${c.id}`} target="_blank" className="flex min-h-12 flex-wrap items-center gap-2 rounded-control border border-line px-3 py-1.5" data-label-group={t.key}>
       <input type="hidden" name="type" value={t.key} />
-      <span className="min-w-0 flex-1 text-sm font-bold">{t.label}</span>
+      <span className="w-full text-sm font-bold">{t.label}</span>
       <label className="flex items-center gap-1.5 text-xs font-semibold text-muted">batch
         <input name="batch" required placeholder="___" defaultValue={batchOf(c.id, t.key, t.label)} className="min-h-11 w-24 rounded-control border border-line-strong bg-white px-2 text-sm uppercase text-ink" data-warranty-batch={t.key} autoComplete="off" />
       </label>

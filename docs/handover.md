@@ -1,3 +1,49 @@
+# Handover – overnight list of 13 November 2026 (all 15 sections built; last update 13 Nov, 05:15 Dubai)
+
+**NEEDS OMAR (top first):**
+1. **Push refused.** Sections 12 to 15 are committed but not live. The auto-mode guard refused `git push` ("Out-of-Place Publication"). Reply **"push"**, or allow `git push` for this project, and they go live in one push (commits 337adfa, 8c92e45, 9b33b07, 7e29a49 and the test/handover commit after them).
+2. **Apply the database changes** (one go, from your phone): turn auto mode off and reply **"apply"**. The list and the order are in `docs/waiting-for-apply.md` → "Waiting now" (8 items; backups `backups/2026-11-12T21-37-52` and `backups/2026-11-13T00-29-24`).
+3. **Before the apply, check the 9-person team move list** in `docs/team-levels-13-nov-note.md`. Five bodyshop labour rates change, because each person moves to their own team's rate.
+4. **Mathew chooses before go-live:**
+   - A) Zoho also tracks every stock item.
+   - B) ERP only, and Zoho holds the value (built, recommended).
+5. **Mathew merges the two Sparein records** (expected: one supplier, two unpaid invoices, AED 1,197.00).
+6. **NISSAN PATROL J-01007:** relink the 5 re-added lines with "This replaces…". The list is in `docs/part-change-13-nov-note.md`.
+7. **Zoho rows to fix by hand** (bill 9275779 waits for the apply; the 1-fils and part-paid rows): see `docs/stock-zoho-13-nov-note.md`.
+
+**Done (15 of 15):**
+- **Live:**
+  - S1 screen sweep (d1dd53c).
+  - S5 gate-out (dca0f9b).
+  - S6 advance proforma (cacc8bd).
+  - S7 estimate paid → parts desk (f102884).
+  - S9 Zoho tab (5e5657a).
+  - S10 Labels + battery label (e34f6d7).
+  - S11 warranty details (63bb3bd).
+- **Live, part waiting for the apply:**
+  - S2 stock to Zoho (c6587ec).
+  - S3 change part in place (8fb0a60).
+  - S4 LPO advance (dbb93b3).
+  - S8 supplier merge (ee92155).
+- **Committed, push refused:**
+  - S12 team form (337adfa).
+  - S13 HR list and person page (8c92e45).
+  - S14 PCV and fuel injectors (9b33b07).
+  - S15 approvals stand-in (7e29a49).
+- One note per section: `docs/*-13-nov-note.md`. Proof: `docs/proof/2026-11-13-*`.
+
+**WAITING FOR APPLY (8):**
+1. Stock-use migration.
+2. Stock-value mapping data fix.
+3. part_changes.
+4. lpo_advance.
+5. supplier_merge.
+6. Team moves (data).
+7. HR "Other document".
+8. PCV and injectors.
+
+---
+
 # Handover – 12 November 2026, 16:05 Dubai (upload_pending applied)
 
 **Applied on live:** `20261214090000_upload_pending.sql` (backup `backups/2026-11-12T12-02-42`). Switched on by itself: "4 files still uploading from Mech 3" on the report and the job card, the customer's report held back while files are still on a tablet, and the advisor's bell after 15 minutes. Live check 33/33.

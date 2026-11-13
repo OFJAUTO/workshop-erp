@@ -1,3 +1,4 @@
+import { Words } from "@/components/Words";
 import { SupplierAmount } from "@/components/SupplierAmount";
 import { advanceWords } from "@/lib/supplier-payment-rules";
 import { moneyFrom } from "@/lib/supplier-money";
@@ -73,7 +74,7 @@ export function LinesTab({ rows }: { rows: PartLineRow[] }) {
             <Dot on={r.dots.invoiced} label="Invoiced" />
           </div>
           <div className="grid grid-cols-1 gap-x-4 gap-y-1 text-sm sm:grid-cols-3" data-pa-money>
-            <span data-pa-cost={r.cost.toFixed(2)}>Cost <b className="whitespace-nowrap">{money(r.cost)}</b> <span className="text-xs text-muted">{r.unitCost !== null && r.qty !== 1 ? `${money(r.unitCost)} each · ` : ""}{r.costFrom}</span></span>
+            <span data-pa-cost={r.cost.toFixed(2)}>Cost <b className="whitespace-nowrap">{money(r.cost)}</b> <Words className="text-xs text-muted" text={`${r.unitCost !== null && r.qty !== 1 ? `${money(r.unitCost)} each · ` : ""}${r.costFrom}`} /></span>
             <span data-pa-selling={r.selling === null ? "" : r.selling.toFixed(2)}>Selling <b className="whitespace-nowrap">{money(r.selling)}</b> <span className="text-xs text-muted">{r.sellingDoc ? <>{r.sellingFrom === "quotation" ? "approved " : ""}<span className="whitespace-nowrap">{r.sellingDoc}</span></> : "not on a quotation"}{r.notCharged ? ` · ${r.notCharged}` : ""}</span></span>
             <span className={r.margin !== null && r.margin < 0 ? "font-bold text-red" : ""} data-pa-margin={r.margin === null ? "" : r.margin.toFixed(2)}>Margin <b className="whitespace-nowrap">{money(r.margin)}</b>{r.marginPct !== null ? <span className="text-xs text-muted"> {r.marginPct}%</span> : null}</span>
           </div>

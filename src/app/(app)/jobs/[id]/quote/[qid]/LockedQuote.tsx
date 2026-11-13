@@ -67,7 +67,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
           <Card className="flex flex-col gap-2">
             <SectionLabel right={`${parts.length}`}>Parts</SectionLabel>
             {parts.length === 0 ? <p className="text-sm text-muted">No parts on this quotation.</p> : (
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto" data-scroll-ok>
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-xs font-bold uppercase tracking-[0.06em] text-muted">

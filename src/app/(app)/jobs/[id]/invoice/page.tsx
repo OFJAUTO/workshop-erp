@@ -299,7 +299,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
           </Card>
 
           <Card className="flex flex-col gap-2" data-money-summary>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3" data-money-figures>
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-3" data-money-figures>
               <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Total incl. VAT</span><span className="text-xl sm:text-2xl font-extrabold whitespace-nowrap">AED {m(totalDue)}</span></div>
               {depRequested ? (
                 <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Deposit</span><span className="text-xl sm:text-2xl font-extrabold whitespace-nowrap">AED {m(dep.received)}<span className="text-sm font-semibold text-muted"> of {m(dep.required)}</span></span></div>

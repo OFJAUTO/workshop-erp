@@ -338,7 +338,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
       })() : null}
       {carry ? (
         <div className="flex flex-col gap-2 rounded-control border-2 border-red-bar bg-red-soft p-4" data-carry-mismatch>
-          <p className="text-sm font-bold text-red">{carry.words}</p>
+          <p className="text-sm font-bold text-red"><Words text={carry.words} /></p>
           {!staff.viewingAs ? (
             <div className="flex flex-wrap gap-2">
               {carry.missing ? <form action={addMissingEstimateLines.bind(null, q.id)}><Button type="submit" size="md" data-carry-add>Add the missing lines from the estimate</Button></form> : null}

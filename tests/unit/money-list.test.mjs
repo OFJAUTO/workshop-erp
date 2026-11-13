@@ -47,7 +47,7 @@ check("a car that left owing says so (amber), not a green 'Released'", leftOwing
 check("a car that left paid in full stays 'Released' (green)", row({ key: "J-12", isOpen: false, jobStatus: "closed", taxInvoice: doc("INV-3", "tax_invoice", { total_aed: 100 }), total: 100, paid: 100, balance: 0 }).state.chip.text === "Released");
 check("Proformas / Tax invoices follow the documents", keysOf("proforma") === "J-3" && keysOf("tax") === ["J-4", "J-5", "J-6"].sort().join(","));
 check("All = every row", rows.every((r) => inFilter("", r)));
-check("thirteen chips (3 November: Auth code missing), All first", MONEY_FILTERS.length === 13 && MONEY_FILTERS.some((f) => f.key === "auth_missing") && MONEY_FILTERS[0].key === "" && MONEY_FILTERS.some((f) => f.key === "today") && MONEY_FILTERS.some((f) => f.key === "tax_today"));
+check("fourteen chips (3 November: Auth code missing; 13 November: Proformas waiting for payment), All first", MONEY_FILTERS.length === 14 && MONEY_FILTERS.some((f) => f.key === "proforma_waiting") && MONEY_FILTERS.some((f) => f.key === "auth_missing") && MONEY_FILTERS[0].key === "" && MONEY_FILTERS.some((f) => f.key === "today") && MONEY_FILTERS.some((f) => f.key === "tax_today"));
 
 // 4.2 every tile equals the sum of the list behind it; the counts match.
 const t = moneyTilesOf(rows);

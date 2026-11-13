@@ -121,7 +121,7 @@ export function CommissionLine({ quotationId, commission, people, isOwner, net, 
       {editing ? fields : null}
       {set && commission.status === "pending" && isOwner && !editing ? (
         <div className="col-span-2 flex flex-wrap items-center gap-2 rounded-control border border-amber-bar bg-amber-soft p-2" data-commission-decide>
-          <span className="text-xs font-semibold">Commission for {commission.to}, {aed(amount)}: your call.</span>
+          <span className="text-xs font-semibold">Commission for {commission.to}, <span className="whitespace-nowrap">{aed(amount)}</span>: your call.</span>
           <Button type="button" size="md" disabled={pending} onClick={() => decide("approve")} data-commission-approve>Approve</Button>
           <Button type="button" tone="secondary" size="md" onClick={() => { setEditing(true); setWho(commission.to ?? ""); setKind(commission.kind ?? "aed"); setValue(commission.value === null ? "" : String(commission.value)); }} data-commission-change>Change amount</Button>
           {declining ? (
