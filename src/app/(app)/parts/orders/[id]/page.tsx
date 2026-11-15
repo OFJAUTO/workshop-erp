@@ -13,7 +13,7 @@ import { invoicesCheck } from "@/lib/lpo-invoice-rules";
 import Link from "next/link";
 import { SupplierPayBox } from "@/components/SupplierPayBox";
 import { LpoAdvanceCard } from "@/components/LpoAdvanceCard";
-import { advancesOf, openInvoicesOf, paymentsOnPo, supplierPaymentsReadyNow } from "@/lib/supplier-payments";
+import { advancesOf, openInvoicesOf, paymentsOnPo, proofsByInvoiceKey, supplierPaymentsReadyNow } from "@/lib/supplier-payments";
 import { SupplierPaymentHistory } from "@/components/SupplierPaymentHistory";
 import { CopyVin } from "@/components/CopyVin";
 import { JobAdvisorTag } from "@/components/JobAdvisorTag";
@@ -129,7 +129,9 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const zmap = readZohoMap(settings);
   const paidFromWords = SUPPLIER_PAY_METHODS.map((m) => `${m.label}: ${zmap.paidFromBy?.[m.key] || zmap.paidFrom || "not mapped yet"}`).join(" · ");
   const paidMethodLabel = SUPPLIER_PAY_METHODS.find((m) => m.key === po.supplier_paid_method)?.label ?? "Bank transfer";
-  const proofUrl = po.supplier_paid_proof_path ? (await signJobFiles([po.supplier_paid_proof_path]))[po.supplier_paid_proof_path] : null;
+  // 15 November 2026 (Section 3): THE proof source - the LPO's own proof, else the proof of the payment that paid it.
+  const proofPath = po.supplier_paid_proof_path ?? (await proofsByInvoiceKey([po.id])).get(po.id) ?? null;
+  const proofUrl = proofPath ? (await signJobFiles([proofPath]))[proofPath] : null;
   const paidByName = po.supplier_paid_by ? ((await admin.from("staff").select("display_name").eq("id", po.supplier_paid_by).maybeSingle()).data?.display_name ?? null) : null;
   const payMissing: string[] = [];
   if (po.supplier_invoice_status !== "received" || !po.supplier_invoice_number) payMissing.push("the invoice number");
@@ -587,9 +589,9 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 {!staff.viewingAs && (role === "owner" || po.supplier_paid_by === staff.id) ? <UndoButton at={po.supplier_paid_at} minutes={undoMinutes} done="Payment to the supplier recorded" action={undoSupplierPaid.bind(null, po.id)} /> : null}
                 <div className="flex flex-wrap items-center gap-2" data-paid-line>
                   <p className="text-sm font-semibold">Paid to {po.supplier_name} · {paidMethodLabel} · {formatDateTime(po.supplier_paid_at)}{po.supplier_paid_reference ? ` · ${po.supplier_paid_reference}` : ""}{paidByName ? ` · by ${paidByName}` : ""}</p>
-                  {po.supplier_paid_proof_path ? (
+                  {proofPath ? (
                     <span className="inline-flex items-center gap-2 rounded-control border border-line bg-chip px-2 py-1.5" data-paid-proof>
-                      <SlipTile url={proofUrl} path={po.supplier_paid_proof_path} label={`Proof of payment · ${po.number}`} hook={`lpo-proof-${po.id}`} />
+                      <SlipTile url={proofUrl} path={proofPath} label={`Proof of payment · ${po.number}`} hook={`lpo-proof-${po.id}`} />
                       <span className="text-xs font-bold uppercase tracking-[0.06em]">Proof of payment</span>
                     </span>
                   ) : (

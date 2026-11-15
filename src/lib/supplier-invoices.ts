@@ -1,5 +1,5 @@
 import "server-only";
-import { paidOnPos } from "./supplier-payments";
+import { paidOnPos, proofsByInvoiceKey } from "./supplier-payments";
 import { logAppError } from "./app-errors";
 import { formatDateTime } from "./format";
 import { notifyRoles } from "./notifications";
@@ -127,6 +127,9 @@ async function readSupplierInvoices(opts: { jobId?: string; poIds?: string[] }):
     }
     pos.push(...more);
   }
+  // 15 November 2026 (Section 3): THE proof source - a proof on a payment covers every invoice and LPO it paid.
+  const proofs = await proofsByInvoiceKey(Array.from(new Set(pos.map((x) => x.id))));
+  for (const x of pos) if (x.invoice_id !== "waiting") x.proof_path = proofs.get(payKeyOf(x.id, x.invoice_id ?? null)) ?? x.proof_path ?? null;
   const partNames = new Map<string, string[]>();
   for (const l of lines) partNames.set(l.po_id, [...(partNames.get(l.po_id) ?? []), l.description]);
   const today = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);

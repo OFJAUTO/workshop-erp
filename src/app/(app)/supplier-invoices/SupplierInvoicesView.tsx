@@ -164,16 +164,20 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, 
   const poIds = row.shares.map((s) => s.poId);
   const vatOn = await invoiceVatReady();
   const [{ data: files }, { data: pos }, { data: lines }] = await Promise.all([
-    admin.from("job_files").select("id, storage_path, content_type, caption").eq("kind", "supplier_invoice").in("ref_id", poIds).is("removed_at", null).order("created_at"),
-    admin.from("purchase_orders").select("id, supplier_invoice_path, supplier_invoice_amount, supplier_paid_at, supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path, supplier_paid_by" + (vatOn ? ", supplier_invoice_vat_aed" : "")).in("id", poIds),
+    admin.from("job_files").select("id, storage_path, content_type, caption, created_at").eq("kind", "supplier_invoice").in("ref_id", poIds).is("removed_at", null).order("created_at"),
+    admin.from("purchase_orders").select("id, supplier_invoice_path, supplier_invoice_at, supplier_invoice_amount, supplier_paid_at, supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path, supplier_paid_by" + (vatOn ? ", supplier_invoice_vat_aed" : "")).in("id", poIds),
     admin.from("purchase_order_lines").select("id, po_id, description, quantity, received_qty, unit_cost, invoice_unit_cost, invoice_check").in("po_id", poIds).eq("is_active", true).order("position"),
   ]);
-  type PaidPo = { id: string; supplier_invoice_path: string | null; supplier_invoice_amount: number | null; supplier_paid_at: string | null; supplier_paid_method: string | null; supplier_paid_reference: string | null; supplier_paid_proof_path: string | null; supplier_paid_by: string | null; supplier_invoice_vat_aed?: number | null };
+  type PaidPo = { id: string; supplier_invoice_path: string | null; supplier_invoice_at?: string | null; supplier_invoice_amount: number | null; supplier_paid_at: string | null; supplier_paid_method: string | null; supplier_paid_reference: string | null; supplier_paid_proof_path: string | null; supplier_paid_by: string | null; supplier_invoice_vat_aed?: number | null };
   // The select string is built (the vat column is ready-gated), so the result loses its type: cast it.
   const poRows = (pos ?? []) as unknown as PaidPo[];
   // Fix 4 (4 November 2026): the proof of payment shows next to "Open the invoice (PDF)", signed like the scans.
-  const paths = Array.from(new Set([...((files ?? []) as { storage_path: string }[]).map((f) => f.storage_path), ...poRows.map((p) => p.supplier_invoice_path).filter((x): x is string => !!x), ...poRows.map((p) => p.supplier_paid_proof_path).filter((x): x is string => !!x)]));
-  const urls = await signJobFiles(seesPay ? paths : paths.filter((p) => !poRows.some((x) => x.supplier_paid_proof_path === p)));
+  const paths = Array.from(new Set([...((files ?? []) as { storage_path: string }[]).map((f) => f.storage_path), ...poRows.map((p) => p.supplier_invoice_path).filter((x): x is string => !!x), ...poRows.map((p) => p.supplier_paid_proof_path).filter((x): x is string => !!x), ...row.shares.map((x) => x.proofPath).filter((x): x is string => !!x)]));
+  const proofPaths = new Set([...poRows.map((p) => p.supplier_paid_proof_path), ...row.shares.map((x) => x.proofPath)].filter((x): x is string => !!x));
+  // 15 November 2026 (Section 3): each "Open the invoice (PDF)" button names its file ("file 2 of 3") and when it was uploaded.
+  const uploadedAt = new Map<string, string>([...poRows.filter((p) => p.supplier_invoice_path).map((p) => [p.supplier_invoice_path as string, String(p.supplier_invoice_at ?? "")] as [string, string]), ...((files ?? []) as { storage_path: string; created_at: string }[]).map((f) => [f.storage_path, f.created_at] as [string, string])]);
+  const invoiceFilePaths = paths.filter((x) => !proofPaths.has(x));
+  const urls = await signJobFiles(seesPay ? paths : paths.filter((p) => !proofPaths.has(p)));
   const kinds = new Map(((files ?? []) as { storage_path: string; content_type: string | null }[]).map((f) => [f.storage_path, f.content_type ?? ""]));
   const isPdf = (p: string) => /pdf/i.test(kinds.get(p) ?? "") || /\.pdf$/i.test(p);
   // Paid LPO by LPO: each LPO of the invoice with its own payment (a split invoice can be partly paid).
@@ -199,8 +203,8 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, 
       {row.query ? <Notice tone="error">Queried with Parts: {row.query}</Notice> : null}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
         <div className="flex flex-col gap-2 lg:col-span-2" data-si-files>
-          {paths.length ? paths.map((p) => (urls[p] ? (isPdf(p) ? (
-            <a key={p} href={urls[p]} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control border border-line-strong px-3 text-sm font-bold" data-si-pdf>Open the invoice (PDF)</a>
+          {invoiceFilePaths.length ? invoiceFilePaths.map((p, fileNo) => (urls[p] ? (isPdf(p) ? (
+            <a key={p} href={urls[p]} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center rounded-control border border-line-strong px-3 text-sm font-bold" data-si-pdf={fileNo + 1}>Open the invoice (PDF){invoiceFilePaths.length > 1 ? ` · file ${fileNo + 1} of ${invoiceFilePaths.length}` : ""}{uploadedAt.get(p) ? ` · uploaded ${formatDateTime(uploadedAt.get(p) as string)}` : ""}</a>
           ) : (
             <ViewerThumb key={p} src={urls[p]} label={`Invoice ${row.number ?? ""} · ${row.supplier}`} className="block overflow-hidden rounded-control border border-line" data-si-image>
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -236,15 +240,19 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, 
             <ul className="flex flex-col gap-1.5 text-sm" data-si-paid-lines>
               {row.shares.map((s) => {
                 const p = payOf.get(s.poId);
-                if (!p?.supplier_paid_at) return <li key={s.poId} className="font-semibold" data-si-share-unpaid={s.poId}>{s.poNumber}: not paid yet · AED {money(s.amount)} before VAT</li>;
-                const by = p.supplier_paid_by ? payerOf.get(p.supplier_paid_by) : null;
+                // 15 November 2026 (Section 3): paid and proof come from THE share (a further invoice on an LPO included).
+                const paidAt = s.invoiceId ? s.paidAt : p?.supplier_paid_at ?? s.paidAt;
+                const shareKey = `${s.poId}${s.invoiceId ? `~${s.invoiceId}` : ""}`;
+                if (!paidAt) return <li key={shareKey} className="font-semibold" data-si-share-unpaid={s.poId}>{s.poNumber}: not paid yet · AED {money(s.amount)} before VAT</li>;
+                const by = !s.invoiceId && p?.supplier_paid_by ? payerOf.get(p.supplier_paid_by) : null;
+                const proof = s.proofPath;
                 return (
-                  <li key={s.poId} className="flex flex-col gap-1" data-si-share-paid={s.poId}>
-                    <span className="font-semibold text-green-text">{s.poNumber}: paid to supplier {formatDateTime(p.supplier_paid_at)}{p.supplier_paid_method ? ` · ${p.supplier_paid_method}` : ""}{p.supplier_paid_reference ? ` · ref ${p.supplier_paid_reference}` : ""}{by ? ` · by ${by}` : ""}</span>
+                  <li key={shareKey} className="flex flex-col gap-1" data-si-share-paid={s.poId}>
+                    <span className="font-semibold text-green-text">{s.poNumber}{s.invoiceId ? ` (invoice ${row.number ?? ""})` : ""}: paid to supplier {formatDateTime(paidAt)}{!s.invoiceId && p?.supplier_paid_method ? ` · ${p.supplier_paid_method}` : ""}{!s.invoiceId && p?.supplier_paid_reference ? ` · ref ${p.supplier_paid_reference}` : ""}{by ? ` · by ${by}` : ""}</span>
                     {/* Fix 4 (4 November 2026): the PROOF OF PAYMENT, right where the invoice is checked. */}
-                    {p.supplier_paid_proof_path ? (
+                    {proof ? (
                       <span className="inline-flex items-center gap-2 self-start rounded-control border border-line bg-chip px-2 py-1.5" data-si-proof={s.poId}>
-                        <SlipTile url={urls[p.supplier_paid_proof_path] ?? null} path={p.supplier_paid_proof_path} label={`Proof of payment · ${s.poNumber}`} hook={`si-proof-${s.poId}`} />
+                        <SlipTile url={urls[proof] ?? null} path={proof} label={`Proof of payment · ${s.poNumber}`} hook={`si-proof-${s.poId}`} />
                         <span className="text-xs font-bold uppercase tracking-[0.06em]">Proof of payment</span>
                       </span>
                     ) : (

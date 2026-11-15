@@ -361,3 +361,31 @@ export async function doublePayFor(poIds: string[], paying: Set<string>): Promis
   }
   return null;
 }
+
+/**
+ * THE "has proof of payment" source (15 November 2026, Section 3): per invoice key (the LPO, or "<LPO>~<further invoice>"),
+ * the proof file that paid it. A proof attached to a recorded payment covers EVERY invoice and LPO that payment paid; an
+ * LPO's own "Paid to supplier" proof covers that LPO. Used by the list tag, the "Paid without proof" filter, the opened
+ * invoice and Parts accounts.
+ */
+export async function proofsByInvoiceKey(poIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!poIds.length) return out;
+  const admin = createAdminClient();
+  const own = await pageAllIn<{ id: string; supplier_paid_proof_path: string | null }>(poIds, (chunk, a, b) => admin.from("purchase_orders").select("id, supplier_paid_proof_path").in("id", chunk).not("supplier_paid_proof_path", "is", null).order("id").range(a, b).abortSignal(fresh()) as unknown as PromiseLike<{ data: { id: string; supplier_paid_proof_path: string | null }[] | null; error: { message: string } | null }>);
+  for (const p of own) if (p.supplier_paid_proof_path) out.set(p.id, p.supplier_paid_proof_path);
+  if (!(await supplierPaymentsReadyNow())) return out;
+  const invCol = (await schemaReady("supplier_payment_lines", "lpo_invoice_id")) ? ", lpo_invoice_id" : "";
+  const lines = await pageAllIn<{ po_id: string; payment_id: string; lpo_invoice_id?: string | null }>(poIds, (chunk, a, b) => admin.from("supplier_payment_lines").select("po_id, payment_id" + invCol).in("po_id", chunk).eq("is_active", true).order("id").range(a, b).abortSignal(fresh()) as unknown as PromiseLike<{ data: { po_id: string; payment_id: string; lpo_invoice_id?: string | null }[] | null; error: { message: string } | null }>);
+  const payIds = Array.from(new Set(lines.map((l) => l.payment_id)));
+  if (!payIds.length) return out;
+  const pays = await pageAllIn<{ id: string; status: string; proof_path: string | null }>(payIds, (chunk, a, b) => admin.from("supplier_payments").select("id, status, proof_path").in("id", chunk).order("id").range(a, b).abortSignal(fresh()) as unknown as PromiseLike<{ data: { id: string; status: string; proof_path: string | null }[] | null; error: { message: string } | null }>);
+  const proofOf = new Map(pays.filter((p) => p.status === "recorded" && p.proof_path).map((p) => [p.id, p.proof_path as string]));
+  for (const l of lines) {
+    const proof = proofOf.get(l.payment_id);
+    if (!proof) continue;
+    const key = payKeyOf(l.po_id, l.lpo_invoice_id ?? null);
+    if (!out.has(key)) out.set(key, proof);
+  }
+  return out;
+}
