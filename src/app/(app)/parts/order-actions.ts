@@ -611,6 +611,8 @@ export async function markSupplierPaid(poId: string, formData: FormData) {
   if (missing.length) redirect(`${back}?error=${encodeURIComponent(`Cannot mark paid: enter ${missing.join(", ")} first. No payment without the full invoice on file.`)}`);
   const paperwork = await (await import("@/lib/receipts")).paperworkBlockFor([poId]);
   if (paperwork) redirect(`${back}?error=${encodeURIComponent(`Cannot mark paid: ${paperwork}`)}`);
+  const twicePaid = await (await import("@/lib/supplier-payments")).doublePayFor([poId], new Set([poId]));
+  if (twicePaid) redirect(`${back}?error=${encodeURIComponent(`Cannot mark paid: ${twicePaid}`)}`);
   const reference = blankToNull(formData.get("reference"));
   // How it was paid (bank transfer unless chosen otherwise) — the Zoho payment uses this method and its mapped account.
   const methodRaw = String(formData.get("method") ?? "transfer");

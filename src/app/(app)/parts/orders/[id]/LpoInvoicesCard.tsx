@@ -5,7 +5,7 @@ import { ActionForm } from "@/components/forms";
 import { JobFileUpload } from "@/components/JobFileUpload";
 import { Badge, Button, Card, Input, SectionLabel } from "@/components/ui";
 import { newUuid } from "@/lib/uuid";
-import { addLpoInvoiceAction, checkLpoInvoiceAction, editLpoInvoiceAction, notOnFirstAction, splitLpoInvoiceAction } from "@/app/(app)/parts/lpo-invoice-actions";
+import { addLpoInvoiceAction, checkLpoInvoiceAction, editLpoInvoiceAction, moveInvoiceLineAction, notOnFirstAction, splitLpoInvoiceAction } from "@/app/(app)/parts/lpo-invoice-actions";
 
 export type LpoInvCoverage = { lineId: string; description: string; qty: number; onFirst: number; onOthers: number; waiting: number };
 export type LpoInvExtra = { id: string; number: string; date: string; amount: number; vat: number | null; gross: number; lines: { lineId: string; description: string; qty: number }[]; checked: boolean; paid: boolean; query: string | null; inZoho: boolean };
@@ -18,13 +18,19 @@ const qtyText = (n: number) => String(Math.round(n * 1000) / 1000);
  * each invoice with the lines it covers, each line still waiting marked, and for accounts: Add another invoice, Split
  * this invoice, Check and Edit. Every answer shows inside this card.
  */
-export function LpoInvoicesCard({ poId, jobId, canPay, ready, summary, coverage, first, extras, paid, today }: { poId: string; jobId: string | null; canPay: boolean; ready: boolean; summary: string; coverage: LpoInvCoverage[]; first: { number: string | null; amount: number | null; vat: number | null }; extras: LpoInvExtra[]; paid: boolean; today: string }) {
+export function LpoInvoicesCard({ poId, jobId, canPay, ready, summary, coverage, first, extras, paid, today, check = null, prices = {} }: { poId: string; jobId: string | null; canPay: boolean; ready: boolean; summary: string; coverage: LpoInvCoverage[]; first: { number: string | null; amount: number | null; vat: number | null }; extras: LpoInvExtra[]; paid: boolean; today: string; /** 15 November 2026: "Invoices total AED … of the LPO's AED …" and the warnings (a part on two invoices or none). */ check?: { words: string; warnings: string[] } | null; /** Each line's price before VAT (invoice price, else the LPO price): the value that moves with a part. */ prices?: Record<string, number> }) {
   const waiting = coverage.filter((c) => c.waiting > 0.0005);
   const onFirst = coverage.filter((c) => c.onFirst > 0.0005);
   return (
-    <Card className="flex flex-col gap-3" data-lpo-invoices>
+    <Card className="flex flex-col gap-3" id="invoices" data-lpo-invoices>
       <SectionLabel>Supplier invoices on this LPO</SectionLabel>
       <p className={`text-sm font-bold ${waiting.length ? "text-amber-text" : ""}`} data-lpo-invoices-summary>{summary}</p>
+      {check ? (
+        <div className={`flex flex-col gap-1 rounded-control border px-3 py-2 text-sm ${check.warnings.length ? "border-amber-bar bg-amber-soft" : "border-line"}`} data-lpo-invoices-check={check.warnings.length ? "warn" : "ok"}>
+          <span className="font-bold" data-lpo-invoices-total>{check.words}{check.warnings.length ? "" : " ✓"}</span>
+          {check.warnings.map((w, i) => <span key={i} className="font-semibold" data-lpo-invoices-warning>{w}</span>)}
+        </div>
+      ) : null}
       {!ready ? <p className="text-xs text-muted" data-lpo-invoices-dormant>Several invoices on one LPO switch on once the database change is applied (waiting for the owner&apos;s apply).</p> : null}
       <ul className="flex flex-col divide-y divide-line text-sm" data-lpo-invoice-lines>
         {coverage.map((c) => (
@@ -35,6 +41,7 @@ export function LpoInvoicesCard({ poId, jobId, canPay, ready, summary, coverage,
               {extras.filter((e) => e.lines.some((l) => l.lineId === c.lineId)).map((e) => <Badge key={e.id} tone="neutral">{e.number}{(() => { const q = e.lines.find((l) => l.lineId === c.lineId)?.qty ?? 0; return q < c.qty ? ` × ${qtyText(q)}` : ""; })()}</Badge>)}
               {c.waiting > 0.0005 ? <Badge tone="amber" data-line-waiting>Waiting for invoice{c.waiting < c.qty ? ` × ${qtyText(c.waiting)}` : ""}</Badge> : null}
             </span>
+            {canPay && ready && first.number && extras.length ? <MoveLine poId={poId} c={c} first={first} firstPaid={paid} extras={extras} price={prices[c.lineId] ?? 0} /> : null}
           </li>
         ))}
       </ul>
@@ -126,7 +133,8 @@ function SplitInvoice({ poId, jobId, first, lines, today }: { poId: string; jobI
 }
 
 function ExtraInvoice({ e, canPay, coverage }: { e: LpoInvExtra; canPay: boolean; coverage: LpoInvCoverage[] }) {
-  const lines = coverage.map((c) => ({ lineId: c.lineId, description: c.description }));
+  // 15 November 2026: editing an invoice shows only ITS OWN lines (a part moves with "Move to another invoice").
+  const lines = e.lines.map((l) => ({ lineId: l.lineId, description: l.description }));
   return (
     <div className="flex flex-col gap-2 rounded-control border border-line p-3" data-lpo-extra-invoice={e.number}>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -184,6 +192,50 @@ function NotOnFirst({ poId, first, lines }: { poId: string; first: { number: str
             <p className="text-xs text-muted">Tick what the supplier will send on another invoice: those lines show &quot;Waiting for invoice&quot; until it comes.</p>
             <LinePicks lines={lines} max={(lid) => lines.find((w) => w.lineId === lid)?.onFirst ?? 0} prefix="off:" />
             <Button type="submit" size="md" tone="secondary" data-not-on-first-save>Not on this invoice</Button>
+          </>
+        )}
+      </ActionForm>
+    </details>
+  );
+}
+
+/** "Move to another invoice" on one line (15 November 2026): a quantity of the part leaves one invoice for another, with its amount. */
+function MoveLine({ poId, c, first, firstPaid, extras, price }: { poId: string; c: LpoInvCoverage; first: { number: string | null }; firstPaid: boolean; extras: LpoInvExtra[]; price: number }) {
+  const on = [
+    ...(c.onFirst > 0.0005 ? [{ id: "first", number: first.number ?? "", qty: c.onFirst, paid: firstPaid }] : []),
+    ...extras.filter((e) => e.lines.some((l) => l.lineId === c.lineId)).map((e) => ({ id: e.id, number: e.number, qty: e.lines.find((l) => l.lineId === c.lineId)?.qty ?? 0, paid: e.paid })),
+  ].filter((x) => !x.paid);
+  const [from, setFrom] = useState(on[0]?.id ?? "");
+  const [qty, setQty] = useState(qtyText(on[0]?.qty ?? 0));
+  if (!on.length) return null;
+  const all = [{ id: "first", number: first.number ?? "", paid: firstPaid }, ...extras.map((e) => ({ id: e.id, number: e.number, paid: e.paid }))];
+  const targets = all.filter((x) => x.id !== from && !x.paid);
+  const value = Math.round((Number(qty.replace(/,/g, ".")) || 0) * price * 100) / 100;
+  return (
+    <details className="w-full" data-move-line={c.lineId}>
+      <summary className="cursor-pointer min-h-11 inline-flex items-center text-sm font-bold underline underline-offset-4" data-move-open>Move to another invoice</summary>
+      <ActionForm action={moveInvoiceLineAction.bind(null, poId, c.lineId)} className="mt-2 flex flex-col gap-2 rounded-control bg-surface p-3">
+        {() => (
+          <>
+            {on.length > 1 ? (
+              <label className="flex flex-col gap-1 text-sm"><span className="font-semibold">From invoice</span>
+                <select name="from" value={from} onChange={(e) => { setFrom(e.target.value); setQty(qtyText(on.find((x) => x.id === e.target.value)?.qty ?? 0)); }} className="h-11 rounded-control border border-line-strong px-2" data-move-from>
+                  {on.map((x) => <option key={x.id} value={x.id}>{x.number} (× {qtyText(x.qty)})</option>)}
+                </select>
+              </label>
+            ) : <><input type="hidden" name="from" value={from} /><span className="text-sm">From invoice <strong>{on[0].number}</strong> (× {qtyText(on[0].qty)})</span></>}
+            <label className="flex flex-wrap items-center gap-2 text-sm"><span className="font-semibold">How many</span>
+              <input name="qty" value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" className="h-11 w-24 rounded-control border border-line-strong px-2" data-move-qty />
+              <span className="text-muted">AED {aed(value)} before VAT moves with it</span>
+            </label>
+            <fieldset className="flex flex-col gap-1 text-sm"><legend className="font-semibold">To invoice</legend>
+              {targets.map((t) => (
+                <label key={t.id} className="flex min-h-11 items-center gap-2"><input type="radio" name="to" value={t.id} required className="h-5 w-5 accent-ink" data-move-to={t.number} /> {t.number}</label>
+              ))}
+              <label className="flex min-h-11 items-center gap-2"><input type="radio" name="to" value="new" required className="h-5 w-5 accent-ink" data-move-to-new /> A new invoice number (use &quot;Split this invoice&quot; below)</label>
+            </fieldset>
+            <Input name="remark" placeholder="Why (optional), e.g. the supplier invoiced the spark plugs separately" data-move-remark />
+            <div><Button type="submit" size="md" data-move-save>Move</Button></div>
           </>
         )}
       </ActionForm>

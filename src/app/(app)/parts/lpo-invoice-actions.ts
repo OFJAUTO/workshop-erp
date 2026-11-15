@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/auth";
 import { formValues, type FormState } from "@/lib/form-state";
-import { checkLpoInvoice, editLpoInvoice, addLpoInvoice, splitLpoInvoice, lpoInvoiceState, lpoInvoiceById, setFirstInvoiceLines, lpoInvoicesReady } from "@/lib/lpo-invoices";
+import { checkLpoInvoice, editLpoInvoice, addLpoInvoice, moveInvoiceLine, splitLpoInvoice, lpoInvoiceState, lpoInvoiceById, setFirstInvoiceLines, lpoInvoicesReady } from "@/lib/lpo-invoices";
 import { firstAfterSplit, linesFromForm } from "@/lib/lpo-invoice-rules";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -100,4 +100,19 @@ export async function notOnFirstAction(poId: string, _prev: FormState, formData:
   if (state.po.job_id) await createAdminClient().from("job_events").insert({ job_id: state.po.job_id, event_type: "supplier_invoice", note: `${state.po.number}: ${picked.length} line${picked.length === 1 ? "" : "s"} not on invoice ${state.first.number}, waiting for their own invoice (${who.display_name})`, created_by: who.id });
   refresh(poId);
   return { success: `Marked ✓ ${picked.length} line${picked.length === 1 ? "" : "s"} wait for their own invoice: use "Add another invoice" when it comes.` };
+}
+
+/** "Move to another invoice" (15 November 2026): a part (or part of its quantity) leaves one invoice for another, with its amount. */
+export async function moveInvoiceLineAction(poId: string, lineId: string, _prev: FormState, formData: FormData): Promise<FormState> {
+  const who = await payer();
+  if ("error" in who) return { error: who.error };
+  const from = String(formData.get("from") ?? "");
+  const to = String(formData.get("to") ?? "");
+  if (!to) return { error: "Pick the invoice to move it to.", values: formValues(formData) };
+  if (to === "new") return { error: "To move it onto a NEW invoice number use \"Split this invoice\" below (it asks for the new invoice's number, date and amounts).", values: formValues(formData) };
+  const qty = Number(String(formData.get("qty") ?? "").replace(/,/g, "."));
+  const r = await moveInvoiceLine(poId, { lineId, qty: Number.isFinite(qty) ? qty : 0, from, to }, String(formData.get("remark") ?? ""), who);
+  if (r.error) return { error: r.error, values: formValues(formData) };
+  refresh(poId);
+  return { success: `${r.words} ✓` };
 }

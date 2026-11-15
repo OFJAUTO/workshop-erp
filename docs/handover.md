@@ -1,4 +1,4 @@
-# Handover – list of 15 November 2026 (in progress; last update 15 Nov, 09:20 Dubai)
+# Handover – list of 15 November 2026 (in progress; last update 15 Nov, 10:05 Dubai)
 
 **NEEDS OMAR (top first):**
 1. **Apply one database change** (Section 1): turn auto mode off, reply **"apply"**. Details in `docs/waiting-for-apply.md`.
@@ -6,7 +6,8 @@
 
 **Progress (6 sections):**
 - S1 URGENT receiving never blocks: DONE, pushed (note `docs/receiving-never-blocks-15-nov-note.md`).
-- S2 to S6: in progress.
+- S2 split supplier invoices: DONE, pushed (note `docs/split-invoices-15-nov-note.md`); live check: nothing overpaid.
+- S3 to S6: in progress.
 
 ---
 

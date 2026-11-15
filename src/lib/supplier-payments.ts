@@ -209,8 +209,13 @@ export async function recordSupplierPayment(input: SupplierPaymentInput, by: { i
   const problem = checkAllocations(amount, lines, open);
   if (problem) return { error: problem };
   // 15 November 2026: never pay an LPO with a delivery still "Arrived - paperwork pending".
-  const paperwork = await (await import("./receipts")).paperworkBlockFor([...lines.map((l) => l.poId), ...uses.map((u) => u.poId)].filter(Boolean));
+  const payingKeys = [...lines.map((l) => l.poId), ...uses.map((u) => u.poId)].filter((k) => k && !isLatheKey(k));
+  const payingPos = Array.from(new Set(payingKeys.map((k) => splitPayKey(k).poId)));
+  const paperwork = await (await import("./receipts")).paperworkBlockFor(payingPos);
   if (paperwork) return { error: `Not recorded: ${paperwork}` };
+  // 15 November 2026 (Section 2): a part sitting on two invoices of an LPO is never paid twice.
+  const twice = await doublePayFor(payingPos, new Set(payingKeys));
+  if (twice) return { error: `Not recorded: ${twice}` };
   const put = r2(lines.reduce((a, l) => a + l.amount, 0));
   const excess = r2(amount - put);
   if (excess > 0.004 && !input.excessKind) return { error: `AED ${excess.toFixed(2)} is more than the invoices: choose "Advance with the supplier" or "Fee / charge".` };
@@ -336,4 +341,23 @@ export async function undoAdvanceUse(lineId: string, remark: string, by: { id: s
   if (line.po_id) await admin.from("purchase_orders").update({ supplier_paid_at: null, supplier_paid_by: null, supplier_paid_reference: null, supplier_payment_id: null, updated_by: by.id }).eq("id", line.po_id).not("supplier_paid_at", "is", null);
   if (line.lathe_bill_id) await admin.from("lathe_bills").update({ paid_at: null, paid_by: null, paid_reference: null, updated_by: by.id }).eq("id", line.lathe_bill_id);
   return { words: `AED ${Number(line.amount_aed).toFixed(2)} of ${p?.number ?? "the advance"} undone. The invoice owes it again; the advance holds it again.`, paymentId: line.payment_id as string };
+}
+
+/** The block on paying one part twice (15 November 2026): per LPO, its invoices and which of them are paid. */
+export async function doublePayFor(poIds: string[], paying: Set<string>): Promise<string | null> {
+  if (!poIds.length || !(await lpoInvoicesReady())) return null;
+  const { lpoInvoiceState } = await import("./lpo-invoices");
+  const { doublePayProblem } = await import("./lpo-invoice-rules");
+  const paidMap = await paidOnPos(poIds);
+  for (const poId of poIds) {
+    const st = await lpoInvoiceState(poId);
+    if (!st || !st.extras.length) continue;
+    const invoices = [
+      { key: poId, number: st.first.number ?? st.po.number, lineIds: st.coverage.filter((c) => c.onFirst > 0.0005).map((c) => c.lineId), paid: !!st.po.supplier_paid_at || (paidMap.get(poId) ?? 0) > 0.004 },
+      ...st.extras.map((e) => ({ key: payKeyOf(poId, e.id), number: e.number, lineIds: e.lines.map((l) => l.line_id), paid: !!e.paid_at || (paidMap.get(payKeyOf(poId, e.id)) ?? 0) > 0.004 })),
+    ];
+    const problem = doublePayProblem(st.coverage, invoices, paying);
+    if (problem) return problem;
+  }
+  return null;
 }

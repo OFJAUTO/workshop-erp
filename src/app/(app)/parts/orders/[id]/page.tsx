@@ -8,7 +8,8 @@ import { countsAsPaid } from "@/lib/bank-status";
 import { OwnerReviewCard, SendForOwner } from "./OwnerReviewCard";
 import { accountsLimitOf, loadReviews, lpoReviewReady, reviewLog } from "@/lib/lpo-review";
 import { LpoInvoicesCard } from "./LpoInvoicesCard";
-import { lpoInvoiceGross, lpoInvoiceState, lpoInvoicesReady } from "@/lib/lpo-invoices";
+import { firstInvoiceEditLines, lpoInvoiceGross, lpoInvoiceState, lpoInvoicesReady } from "@/lib/lpo-invoices";
+import { invoicesCheck } from "@/lib/lpo-invoice-rules";
 import Link from "next/link";
 import { SupplierPayBox } from "@/components/SupplierPayBox";
 import { LpoAdvanceCard } from "@/components/LpoAdvanceCard";
@@ -115,6 +116,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   // One LPO, several supplier invoices (10 November 2026, Section 3).
   const invReady = !isMain ? await lpoInvoicesReady() : false;
   const invState = !isMain && invoiceEntered ? await lpoInvoiceState(po.id) : null;
+  // 15 November 2026 (Section 2): editing the first invoice shows ONLY its own lines and their approved value.
+  const firstEdit = invState ? firstInvoiceEditLines(invState) : null;
   const lineDesc = new Map(lines.map((l) => [l.id, l.description]));
   const vsApproved = invoiceEntered ? approvedVsInvoiced(Number(po.total_cost_aed) || 0, po.supplier_invoice_amount) : null;
   const scanUrl = po.supplier_invoice_path ? (await signJobFiles([po.supplier_invoice_path]))[po.supplier_invoice_path] : null;
@@ -532,6 +535,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
               extras={invState.extras.map((e) => ({ id: e.id, number: e.number, date: e.invoice_date, amount: e.amount_aed, vat: e.vat_aed, gross: lpoInvoiceGross(e, invState.chargesVat), lines: e.lines.map((c) => ({ lineId: c.line_id, description: lineDesc.get(c.line_id) ?? "", qty: c.qty })), checked: !!e.checked_at, paid: seesPay && !!e.paid_at, query: e.query, inZoho: !!e.zoho_bill_id }))}
               paid={seesPay && !!po.supplier_paid_at}
               today={today}
+              check={invState.extras.length ? invoicesCheck(invState.coverage, [payMoney.gross, ...invState.extras.map((e) => lpoInvoiceGross(e, invState.chargesVat))], ownMoney.gross) : null}
+              prices={Object.fromEntries(invState.lines.map((l) => [l.id, l.invoice_unit_cost ?? l.unit_cost]))}
             />
           ) : null}
           <Card className="flex flex-col gap-2">
@@ -561,8 +566,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 date={String(po.supplier_invoice_date ?? "").slice(0, 10)}
                 amount={po.supplier_invoice_amount}
                 vat={po.supplier_invoice_amount ? payVat : invoiceVat}
-                lpoTotal={Number(po.total_cost_aed) || 0}
-                lines={lines.map((l) => ({ id: l.id, description: l.description, quantity: Number(l.quantity) || 0, price: Number(l.invoice_unit_cost ?? l.unit_cost) || 0 }))}
+                lpoTotal={firstEdit ? firstEdit.lpoTotal : Number(po.total_cost_aed) || 0}
+                lines={firstEdit ? firstEdit.lines : lines.map((l) => ({ id: l.id, description: l.description, quantity: Number(l.quantity) || 0, price: Number(l.invoice_unit_cost ?? l.unit_cost) || 0 }))}
                 paid={!!po.supplier_paid_at}
                 chargesVat={chargesVat}
               />

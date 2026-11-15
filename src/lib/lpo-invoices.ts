@@ -1,6 +1,6 @@
 import "server-only";
 import { logAppError } from "./app-errors";
-import { coverageOf, firstAfterSplit, firstRoom, invoiceVatOf, invoicesSummary, newInvoiceProblem, numberKey, waitingRoom, type CoveredLine, type FirstInvoice, type LineCoverage, type LpoLineFacts, type NumberUse } from "./lpo-invoice-rules";
+import { coverageOf, firstAfterSplit, firstRoom, invoiceVatOf, invoicesSummary, lineValue, moveProblem, newInvoiceProblem, numberKey, shiftLines, waitingRoom, type CoveredLine, type MoveInput, type FirstInvoice, type LineCoverage, type LpoLineFacts, type NumberUse } from "./lpo-invoice-rules";
 import { schemaReady } from "./schema-ready";
 import { createAdminClient } from "./supabase/admin";
 import { supplierChargesVat } from "./supplier-rules";
@@ -70,7 +70,7 @@ type PoFacts = { id: string; number: string; kind: string; status: string; job_i
 
 export type LpoInvoiceState = {
   po: PoFacts;
-  lines: (LpoLineFacts & { unit_cost: number })[];
+  lines: (LpoLineFacts & { unit_cost: number; invoice_unit_cost: number | null })[];
   first: FirstInvoice;
   extras: LpoInvoiceRow[];
   coverage: LineCoverage[];
@@ -94,11 +94,11 @@ export async function lpoInvoiceState(poId: string): Promise<LpoInvoiceState | n
     supplier_invoice_lines: Array.isArray(r.supplier_invoice_lines) ? (r.supplier_invoice_lines as CoveredLine[]) : null,
   };
   const [{ data: lineRows }, extrasMap, { data: sup }] = await Promise.all([
-    admin.from("purchase_order_lines").select("id, description, quantity, received_qty, unit_cost").eq("po_id", poId).eq("is_active", true).order("created_at").abortSignal(fresh()),
+    admin.from("purchase_order_lines").select("id, description, quantity, received_qty, unit_cost, invoice_unit_cost").eq("po_id", poId).eq("is_active", true).order("created_at").abortSignal(fresh()),
     loadLpoInvoices([poId]),
     po.supplier_id ? admin.from("suppliers").select("name, trn, vat_registered").eq("id", po.supplier_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
-  const lines = ((lineRows ?? []) as Record<string, unknown>[]).map((l) => ({ id: String(l.id), description: String(l.description ?? ""), quantity: Number(l.quantity) || 0, received_qty: l.received_qty == null ? null : Number(l.received_qty), unit_cost: Number(l.unit_cost) || 0 }));
+  const lines = ((lineRows ?? []) as Record<string, unknown>[]).map((l) => ({ id: String(l.id), description: String(l.description ?? ""), quantity: Number(l.quantity) || 0, received_qty: l.received_qty == null ? null : Number(l.received_qty), unit_cost: Number(l.unit_cost) || 0, invoice_unit_cost: l.invoice_unit_cost == null || Number(l.invoice_unit_cost) <= 0 ? null : Number(l.invoice_unit_cost) }));
   const first: FirstInvoice = { entered: po.supplier_invoice_status === "received" && !!po.supplier_invoice_number, number: po.supplier_invoice_number, date: po.supplier_invoice_date, lines: po.supplier_invoice_lines };
   const extras = extrasMap.get(poId) ?? [];
   const coverage = coverageOf(lines, first, extras.map((e) => ({ id: e.id, number: e.number, date: e.invoice_date, lines: e.lines })));
@@ -265,4 +265,80 @@ async function recordEdit(poId: string, invoiceId: string | null, by: Actor, rem
 /** A further invoice's gross (with VAT): what a payment can settle on it. */
 export function lpoInvoiceGross(inv: Pick<LpoInvoiceRow, "amount_aed" | "vat_aed">, chargesVat: boolean): number {
   return r2(inv.amount_aed + invoiceVatOf(inv.amount_aed, inv.vat_aed, chargesVat));
+}
+
+/**
+ * "Move to another invoice" (15 November 2026, Section 2): a quantity of one line leaves one invoice of the LPO for
+ * another ("first" or a further invoice), WITH its amount (quantity × the invoice price, else the LPO price). Both
+ * invoices go back to unchecked; a typed VAT falls back to 5% of the new amount; their Zoho bills are corrected at the
+ * next Sync to Zoho. Refused when either invoice is paid. Kept in the edit history (who, when, old → new).
+ */
+export async function moveInvoiceLine(poId: string, m: MoveInput, remark: string, by: Actor): Promise<{ error?: string; words?: string }> {
+  if (!(await lpoInvoicesReady())) return { error: "Several invoices per LPO switch on once the database change is applied." };
+  const state = await lpoInvoiceState(poId);
+  if (!state) return { error: "LPO not found." };
+  if (!state.first.entered) return { error: "There is no entered invoice on this LPO yet." };
+  const extras = state.extras.map((e) => ({ id: e.id, number: e.number, lines: e.lines, paid: !!e.paid_at }));
+  const problem = moveProblem(m, state.coverage, extras, !!state.po.supplier_paid_at, state.first.number);
+  if (problem) return { error: problem };
+  const line = state.lines.find((l) => l.id === m.lineId)!;
+  const value = lineValue(m.qty, line.invoice_unit_cost ?? line.unit_cost);
+  const admin = createAdminClient();
+  const vatReady = await schemaReady("purchase_orders", "supplier_invoice_vat_aed");
+  const nameOf = (id: string) => (id === "first" ? state.first.number ?? "" : extras.find((e) => e.id === id)?.number ?? "");
+  // The first invoice's own lines are named from now on (null meant "whatever the others do not cover").
+  let firstLines: CoveredLine[] = state.coverage.filter((c) => c.onFirst > 0.0005).map((c) => ({ line_id: c.lineId, qty: c.onFirst }));
+  let firstAmount = state.po.supplier_invoice_amount ?? 0;
+  const extraPatch = new Map<string, { lines: CoveredLine[]; amount: number }>();
+  for (const e of state.extras) extraPatch.set(e.id, { lines: e.lines.map((l) => ({ ...l })), amount: e.amount_aed });
+  const apply = (id: string, delta: number, money: number) => {
+    if (id === "first") {
+      firstLines = shiftLines(firstLines, m.lineId, delta);
+      firstAmount = r2(Math.max(0, firstAmount + money));
+    } else {
+      const x = extraPatch.get(id)!;
+      x.lines = shiftLines(x.lines, m.lineId, delta);
+      x.amount = r2(Math.max(0, x.amount + money));
+    }
+  };
+  apply(m.from, -m.qty, -value);
+  apply(m.to, m.qty, value);
+  const touched = [m.from, m.to];
+  if (touched.includes("first")) {
+    const { error } = await admin.from("purchase_orders").update({ supplier_invoice_lines: firstLines, supplier_invoice_amount: firstAmount, supplier_invoice_checked_at: null, supplier_invoice_checked_by: null, ...(vatReady ? { supplier_invoice_vat_aed: null } : {}), updated_by: by.id }).eq("id", poId).is("supplier_paid_at", null);
+    if (error) {
+      await logAppError("lpo-invoices.move", error, { detail: { po: poId } });
+      return { error: "Couldn't save – nothing was recorded. Try again or tell the owner." };
+    }
+  }
+  for (const id of touched.filter((x) => x !== "first")) {
+    const x = extraPatch.get(id)!;
+    const { error } = await admin.from("lpo_invoices").update({ lines: x.lines, amount_aed: x.amount, vat_aed: null, checked_at: null, checked_by: null, updated_by: by.id }).eq("id", id).is("paid_at", null);
+    if (error) {
+      await logAppError("lpo-invoices.move", error, { detail: { po: poId, invoice: id } });
+      return { error: `Couldn't finish the move – check invoice ${nameOf(id)} and tell the owner.` };
+    }
+  }
+  const qty = String(Math.round(m.qty * 1000) / 1000);
+  const what = `${line.description.toUpperCase()} × ${qty} (AED ${value.toFixed(2)} before VAT)`;
+  await recordEdit(poId, m.to === "first" ? (m.from === "first" ? null : m.from) : m.to, by, remark.trim() || "Part moved to another invoice", [
+    { field: "Moved", old: `${what} on ${nameOf(m.from)}`, new: `on ${nameOf(m.to)}` },
+  ]);
+  if (state.po.job_id) await admin.from("job_events").insert({ job_id: state.po.job_id, event_type: "supplier_invoice", note: `${state.po.number}: ${what} moved from invoice ${nameOf(m.from)} to ${nameOf(m.to)} by ${by.display_name}`, created_by: by.id });
+  // Bills already in Zoho are corrected at the next Sync to Zoho (OFJ TEST until go-live).
+  const { reopenZoho } = await import("./zoho-sync");
+  if (touched.includes("first") && state.po.zoho_bill_id) await reopenZoho("bill", poId);
+  for (const id of touched.filter((x) => x !== "first")) if (state.extras.find((e) => e.id === id)?.zoho_bill_id) await reopenZoho("lpoinvoice", id);
+  return { words: `${what} moved from invoice ${nameOf(m.from)} to ${nameOf(m.to)}. Both invoices go back to unchecked; their amounts moved with the part.` };
+}
+
+/** The first invoice's own lines for its Edit form (quantity on THAT invoice) and what the LPO approved for them. */
+export function firstInvoiceEditLines(state: LpoInvoiceState): { lines: { id: string; description: string; quantity: number; price: number }[]; lpoTotal: number } {
+  const own = state.coverage.filter((c) => c.onFirst > 0.0005);
+  const lines = own.map((c) => {
+    const l = state.lines.find((x) => x.id === c.lineId);
+    return { id: c.lineId, description: c.description, quantity: c.onFirst, price: Number(l?.invoice_unit_cost ?? l?.unit_cost) || 0 };
+  });
+  const lpoTotal = r2(own.reduce((a, c) => a + c.onFirst * (state.lines.find((x) => x.id === c.lineId)?.unit_cost ?? 0), 0));
+  return { lines, lpoTotal };
 }

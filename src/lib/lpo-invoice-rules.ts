@@ -119,3 +119,86 @@ export function linesFromForm(get: (name: string) => string | null, lineIds: str
   }
   return out;
 }
+
+/*
+ * 15 November 2026 (Section 2): EACH PART ON EXACTLY ONE INVOICE. The value of a line on an invoice, the running check
+ * of an LPO ("Invoices total AED … of the LPO's AED …", a part on two invoices or on none), a line moved from one
+ * invoice of the LPO to another (its amount goes with it), and the block on paying a part twice.
+ */
+
+/** What a quantity of a line is worth on an invoice: the invoice price when entered, else the LPO price. */
+export const lineValue = (qty: number, unit: number) => Math.round((q3(qty) * (Number(unit) || 0) + Number.EPSILON) * 100) / 100;
+
+/** The lines (and quantities) on one invoice of the LPO: "first" or a further invoice's own lines. */
+export function linesOnInvoice(coverage: LineCoverage[], which: "first" | CoveredLine[]): { lineId: string; description: string; qty: number }[] {
+  if (which === "first") return coverage.filter((c) => c.onFirst > 0.0005).map((c) => ({ lineId: c.lineId, description: c.description, qty: c.onFirst }));
+  return which.filter((l) => l.qty > 0.0005).map((l) => ({ lineId: l.line_id, description: coverage.find((c) => c.lineId === l.line_id)?.description ?? "", qty: q3(l.qty) }));
+}
+
+/** Lines on more than one invoice (more quantity invoiced than delivered) and lines on none. */
+export function coverageProblems(coverage: LineCoverage[]): { twice: LineCoverage[]; none: LineCoverage[] } {
+  return { twice: coverage.filter((c) => c.onFirst + c.onOthers > c.qty + 0.0005), none: coverage.filter((c) => c.waiting > 0.0005) };
+}
+
+export type InvoicesCheck = { invoicesTotal: number; lpoTotal: number; words: string; warnings: string[]; ok: boolean };
+
+/** THE running check of an LPO with several invoices (all figures with VAT). */
+export function invoicesCheck(coverage: LineCoverage[], invoicesGross: number[], lpoGross: number): InvoicesCheck {
+  const invoicesTotal = Math.round(invoicesGross.reduce((a, x) => a + x, 0) * 100) / 100;
+  const lpoTotal = Math.round(lpoGross * 100) / 100;
+  const { twice, none } = coverageProblems(coverage);
+  const warnings = [
+    ...twice.map((c) => `${c.description.toUpperCase()} is on two invoices (${q3(c.onFirst + c.onOthers)} invoiced of ${q3(c.qty)}): move it so it sits on one.`),
+    ...none.map((c) => `${c.description.toUpperCase()} is on no invoice yet${c.waiting < c.qty ? ` (${q3(c.waiting)} of ${q3(c.qty)})` : ""}.`),
+  ];
+  const fmt = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const over = invoicesTotal > lpoTotal + 0.05;
+  if (over) warnings.unshift(`The invoices add up to AED ${fmt(invoicesTotal - lpoTotal)} more than the LPO: check that no part is invoiced twice.`);
+  return { invoicesTotal, lpoTotal, words: `Invoices total AED ${fmt(invoicesTotal)} of the LPO's AED ${fmt(lpoTotal)}`, warnings, ok: !warnings.length };
+}
+
+export type MoveInput = { lineId: string; qty: number; from: string; to: string };
+
+/** May this quantity of a line move from one invoice of the LPO to another? ("first" or a further invoice's id.) */
+export function moveProblem(m: MoveInput, coverage: LineCoverage[], extras: { id: string; number: string; lines: CoveredLine[]; paid: boolean }[], firstPaid: boolean, firstNumber: string | null): string | null {
+  if (m.from === m.to) return "Pick another invoice to move it to.";
+  if (!(m.qty > 0)) return "Type how many to move.";
+  const c = coverage.find((x) => x.lineId === m.lineId);
+  if (!c) return "That line is no longer on this LPO.";
+  const nameOf = (id: string) => (id === "first" ? firstNumber ?? "the first invoice" : extras.find((e) => e.id === id)?.number ?? "");
+  const has = m.from === "first" ? c.onFirst : q3((extras.find((e) => e.id === m.from)?.lines ?? []).filter((l) => l.line_id === m.lineId).reduce((a, l) => a + l.qty, 0));
+  if (m.from !== "first" && !extras.some((e) => e.id === m.from)) return "That invoice is no longer on this LPO.";
+  if (m.to !== "first" && !extras.some((e) => e.id === m.to)) return "That invoice is no longer on this LPO.";
+  if (q3(m.qty) > q3(has) + 0.0005) return `Invoice ${nameOf(m.from)} has only ${q3(has)} of ${c.description.toUpperCase()}.`;
+  const paidOne = [m.from, m.to].find((id) => (id === "first" ? firstPaid : extras.find((e) => e.id === id)?.paid));
+  if (paidOne) return `Invoice ${nameOf(paidOne)} is already paid to the supplier: reverse the payment first, then move the part.`;
+  // An invoice is never left with no line at all (change or remove the invoice itself instead).
+  const left = m.from === "first" ? coverage.reduce((a, x) => a + (x.lineId === m.lineId ? Math.max(0, x.onFirst - m.qty) : x.onFirst), 0) : (extras.find((e) => e.id === m.from)?.lines ?? []).reduce((a, l) => a + (l.line_id === m.lineId ? Math.max(0, l.qty - m.qty) : l.qty), 0);
+  if (left <= 0.0005) return `Every part would leave invoice ${nameOf(m.from)}: change that invoice itself instead (Edit).`;
+  return null;
+}
+
+/** Add (or take away) a quantity of a line in an invoice's own line list. */
+export function shiftLines(lines: CoveredLine[], lineId: string, delta: number): CoveredLine[] {
+  const out = lines.map((l) => ({ ...l }));
+  const at = out.findIndex((l) => l.line_id === lineId);
+  if (at >= 0) out[at].qty = q3(out[at].qty + delta);
+  else if (delta > 0) out.push({ line_id: lineId, qty: q3(delta) });
+  return out.filter((l) => l.qty > 0.0005);
+}
+
+/**
+ * The block on paying a part twice: an invoice being paid that shares a part (sitting on two invoices) with another
+ * invoice already paid, or paid in the same payment, is refused with the part's name.
+ */
+export function doublePayProblem(coverage: LineCoverage[], invoices: { key: string; number: string; lineIds: string[]; paid: boolean }[], paying: Set<string>): string | null {
+  const { twice } = coverageProblems(coverage);
+  for (const c of twice) {
+    const on = invoices.filter((i) => i.lineIds.includes(c.lineId));
+    const pay = on.filter((i) => paying.has(i.key));
+    if (!pay.length) continue;
+    const other = on.find((i) => i.paid && !paying.has(i.key)) ?? (pay.length > 1 ? pay[1] : null);
+    if (other) return `${c.description.toUpperCase()} is on invoice ${pay[0].number} and invoice ${other.number}${other.paid ? " (already paid)" : ""}: it would be paid twice. Move it to one invoice first (LPO page > Supplier invoices on this LPO).`;
+  }
+  return null;
+}

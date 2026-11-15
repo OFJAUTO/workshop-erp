@@ -1,3 +1,4 @@
+import { firstInvoiceEditLines, lpoInvoiceState } from "@/lib/lpo-invoices";
 import { latheV2Ready } from "@/lib/lathe";
 import { ReceiptsCard } from "@/components/ReceiptsCard";
 import { loadReceipts } from "@/lib/receipts";
@@ -183,6 +184,9 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, 
   const toPay = unpaidShares(row);
   // Supplier invoice edit (5 November 2026): the Edit button (owner + accounts), "Approved → Invoiced" and the record of edits.
   const editOn = acts && row.status !== "waiting" ? await invoiceEditReady() : false;
+  // 15 November 2026 (Section 2): each invoice is edited with ONLY its own lines (a further invoice on its LPO page).
+  const firstEdits = new Map<string, Awaited<ReturnType<typeof firstInvoiceEditLines>>>();
+  if (editOn) for (const s of row.shares.filter((x) => !x.invoiceId)) { const st = await lpoInvoiceState(s.poId).catch(() => null); if (st && st.extras.length) firstEdits.set(s.poId, firstInvoiceEditLines(st)); }
   const edits = await loadInvoiceEdits(poIds);
   const vsApproved = row.status === "waiting" ? null : approvedVsInvoiced(Math.round(row.shares.reduce((a, s) => a + s.lpoTotal, 0) * 100) / 100, row.beforeVat);
   return (
@@ -294,7 +298,9 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, 
           {/* Supplier invoice edit (5 November 2026): owner + accounts, compulsory remark; one button per LPO of a split invoice. */}
           {editOn
             ? row.shares.map((s) => {
+                if (s.invoiceId) return <LinkButton key={`edit-${s.poId}-${s.invoiceId}`} href={`/parts/orders/${s.poId}#invoices`} tone="secondary" size="md" data-si-edit-on-lpo>Edit this invoice (on {s.poNumber})</LinkButton>;
                 const p = payOf.get(s.poId);
+                const fe = firstEdits.get(s.poId);
                 const amt = p?.supplier_invoice_amount ?? null;
                 const vatEff = p?.supplier_invoice_vat_aed ?? (amt ? s.vat : null);
                 return (
@@ -307,8 +313,8 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, 
                     date={String(row.date ?? "").slice(0, 10)}
                     amount={amt}
                     vat={vatEff}
-                    lpoTotal={s.lpoTotal}
-                    lines={((lines ?? []) as { id: string; po_id: string; description: string; quantity: number; unit_cost: number; invoice_unit_cost: number | null }[]).filter((l) => l.po_id === s.poId).map((l) => ({ id: l.id, description: l.description, quantity: Number(l.quantity) || 0, price: Number(l.invoice_unit_cost ?? l.unit_cost) || 0 }))}
+                    lpoTotal={fe ? fe.lpoTotal : s.lpoTotal}
+                    lines={fe ? fe.lines : ((lines ?? []) as { id: string; po_id: string; description: string; quantity: number; unit_cost: number; invoice_unit_cost: number | null }[]).filter((l) => l.po_id === s.poId).map((l) => ({ id: l.id, description: l.description, quantity: Number(l.quantity) || 0, price: Number(l.invoice_unit_cost ?? l.unit_cost) || 0 }))}
                     paid={!!p?.supplier_paid_at}
                     label={row.shares.length > 1 ? `Edit invoice · ${s.poNumber}` : "Edit invoice"}
                     chargesVat={row.vatCharged}
