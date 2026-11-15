@@ -43,7 +43,7 @@ export function PartSticker({ w, h, d }: { w: number; h: number; logoUrl?: strin
   );
 }
 
-/** Portrait: logo, title, which battery, installed, the black "Warranty until" band with the months, the QR, the VIN large, "Valid for this vehicle only". */
+/** Portrait: logo, title, which battery, INSTALLED / VALID UNTIL / months in a thin black outline (never a fill), the QR, the VIN, "Valid for this vehicle only". */
 export function BatterySticker({ w, h, logoUrl, d }: { w: number; h: number; logoUrl: string; d: BatteryStickerData }) {
   const u = w / 50;
   // 13 November 2026 (Section 2, the owner's real print): pure black only; INSTALLED and VALID UNTIL big, bold, in
@@ -51,27 +51,31 @@ export function BatterySticker({ w, h, logoUrl, d }: { w: number; h: number; log
   // no empty gap between the dates and the QR (the parts sit together from the top). The QR is unchanged (staff only).
   const caps = (x: string) => x.toUpperCase();
   const innerW = w - 6 * u;
-  const vinSize = Math.min(4.4 * u, innerW / (Math.max(d.vin.length, 1) * 0.7));
+  const vinFit = Math.min(4.4 * u, innerW / (Math.max(d.vin.length, 1) * 0.7));
   // Each date line on ONE line inside the band: as big as the band allows (bold capitals are about 0.7 em wide).
-  const bandW = w - 9 * u;
+  const bandW = w - 10 * u;
   const fitLine = (t: string, max: number) => Math.min(max, bandW / (Math.max(t.length, 1) * 0.7));
   const installedText = `INSTALLED ${caps(d.installed)}`;
   const untilText = `VALID UNTIL ${caps(d.until)}`;
+  // 15 November 2026 (Section 6): the two date lines share ONE size, the biggest text after the title; the VIN stays smaller.
+  const dateSize = Math.min(fitLine(installedText, 4.6 * u), fitLine(untilText, 4.6 * u));
+  const vinSize = Math.min(vinFit, dateSize * 0.9);
   return (
     <div style={{ ...base(w, h), padding: `${3 * u}mm`, justifyContent: "flex-start", gap: `${1.6 * u}mm` }} data-battery-sticker>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={logoUrl} alt="" style={{ height: `${11 * u}mm`, maxWidth: `${46 * u}mm`, objectFit: "contain", filter: "grayscale(1) contrast(100)" }} data-battery-logo />
-      <div style={{ fontSize: `${4.2 * u}mm`, fontWeight: 800, letterSpacing: "0.5px", textTransform: "uppercase", textAlign: "center", lineHeight: 1.1 }}>{d.title}</div>
-      <div style={{ fontSize: `${3 * u}mm`, fontWeight: 700, textAlign: "center", lineHeight: 1.25 }}>{d.line}</div>
-      <div style={{ width: "100%", background: "#000", color: "#fff", padding: `${2 * u}mm ${1.5 * u}mm`, textAlign: "center" }} data-battery-dates>
-        <div style={{ fontSize: `${fitLine(installedText, 4.6 * u)}mm`, fontWeight: 800, lineHeight: 1.1, whiteSpace: "nowrap" }} data-battery-installed>{installedText}</div>
-        <div style={{ fontSize: `${fitLine(untilText, 4.6 * u)}mm`, fontWeight: 800, lineHeight: 1.1, marginTop: `${1 * u}mm`, whiteSpace: "nowrap" }} data-battery-valid-until>{untilText}</div>
-        <div style={{ fontSize: `${2.8 * u}mm`, fontWeight: 700, marginTop: `${0.8 * u}mm`, textTransform: "uppercase" }}>{d.months} months warranty</div>
+      <div style={{ fontSize: `${5.4 * u}mm`, fontWeight: 800, letterSpacing: "0.5px", textTransform: "uppercase", textAlign: "center", lineHeight: 1.1 }} data-battery-title>{d.title}</div>
+      <div style={{ fontSize: `${Math.min(3 * u, dateSize * 0.9)}mm`, fontWeight: 700, textAlign: "center", lineHeight: 1.25 }}>{d.line}</div>
+      {/* 15 November 2026 (Section 6): the dates in a thin black OUTLINE, black bold text - never a filled box. */}
+      <div style={{ width: "100%", boxSizing: "border-box", border: `${0.5 * u}mm solid #000`, color: "#000", padding: `${1.6 * u}mm ${1.5 * u}mm`, textAlign: "center" }} data-battery-dates>
+        <div style={{ fontSize: `${dateSize}mm`, fontWeight: 800, lineHeight: 1.1, whiteSpace: "nowrap" }} data-battery-installed>{installedText}</div>
+        <div style={{ fontSize: `${dateSize}mm`, fontWeight: 800, lineHeight: 1.1, marginTop: `${1 * u}mm`, whiteSpace: "nowrap" }} data-battery-valid-until>{untilText}</div>
+        <div style={{ fontSize: `${Math.min(2.8 * u, dateSize * 0.85)}mm`, fontWeight: 800, marginTop: `${0.8 * u}mm`, textTransform: "uppercase" }}>{d.months} months warranty</div>
       </div>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={d.qr} alt="" style={{ width: `${22 * u}mm`, height: `${22 * u}mm`, marginTop: `${1 * u}mm` }} />
       <div style={{ fontSize: `${vinSize}mm`, fontWeight: 800, letterSpacing: "0.3px", whiteSpace: "nowrap", textAlign: "center", lineHeight: 1.15 }} data-battery-vin>{d.vin}</div>
-      <div style={{ fontSize: `${2.8 * u}mm`, fontWeight: 700, textAlign: "center" }}>{d.valid}</div>
+      <div style={{ fontSize: `${Math.min(2.8 * u, dateSize * 0.85)}mm`, fontWeight: 700, textAlign: "center" }}>{d.valid}</div>
     </div>
   );
 }
@@ -88,8 +92,8 @@ export function ServiceSticker({ w, h, logoUrl, d }: { w: number; h: number; log
         Serviced on <b>{d.servicedOn}</b>
         {d.mileage ? <><br />at <b>{d.mileage}</b></> : null}
       </div>
-      <div style={{ width: "100%", background: "#000", color: "#fff", padding: `${2 * u}mm ${2 * u}mm`, textAlign: "center" }}>
-        <div style={{ fontSize: `${2.4 * u}mm`, letterSpacing: "0.4px", textTransform: "uppercase", lineHeight: 1.2 }}>{d.band}</div>
+      <div style={{ width: "100%", boxSizing: "border-box", border: `${0.5 * u}mm solid #000`, color: "#000", padding: `${1.6 * u}mm ${2 * u}mm`, textAlign: "center" }} data-service-band>
+        <div style={{ fontSize: `${2.4 * u}mm`, fontWeight: 700, letterSpacing: "0.4px", textTransform: "uppercase", lineHeight: 1.2 }}>{d.band}</div>
         <div style={{ fontSize: `${4.6 * u}mm`, fontWeight: 800, marginTop: `${0.8 * u}mm`, lineHeight: 1.05 }}>{d.nextDate}</div>
         {d.nextMileage ? <div style={{ fontSize: `${3.4 * u}mm`, fontWeight: 700, marginTop: `${0.5 * u}mm` }}>{d.nextMileage}</div> : null}
       </div>

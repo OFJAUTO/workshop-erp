@@ -37,7 +37,7 @@ export default async function ItemTagsPage({ params }: { params: Promise<{ jobId
   for (const it of items) {
     const qr = it.qr_code ? await qrDataUrl(qrUrl(it.qr_code), 300) : null;
     tags.push(
-      <div key={it.id} style={{ width: `${size}mm`, height: `${size}mm`, boxSizing: "border-box", padding: `${size * 0.05}mm`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", fontFamily: "system-ui, sans-serif", color: "#111113", textAlign: "center", pageBreakAfter: "always" }}>
+      <div key={it.id} style={{ width: `${size}mm`, height: `${size}mm`, boxSizing: "border-box", padding: `${size * 0.05}mm`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "space-between", fontFamily: "system-ui, sans-serif", color: "#000", textAlign: "center", pageBreakAfter: "always" }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={logo} alt="" style={{ height: `${size * 0.14}mm`, maxWidth: `${size * 0.8}mm`, objectFit: "contain" }} />
         <div style={{ fontSize: `${size * 0.11}mm`, fontWeight: 800, lineHeight: 1.1 }}>{job.job_number}</div>
@@ -45,7 +45,7 @@ export default async function ItemTagsPage({ params }: { params: Promise<{ jobId
         <div style={{ fontSize: `${size * 0.075}mm`, fontWeight: 700, lineHeight: 1.15 }}>{it.quantity > 1 ? `${it.quantity} × ` : ""}{it.item_type}{it.description ? ` · ${it.description}` : ""}</div>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {qr ? <img src={qr} alt="" style={{ width: `${size * 0.38}mm`, height: `${size * 0.38}mm` }} /> : null}
-        <div style={{ fontSize: `${size * 0.055}mm`, color: "#5F6368" }}>Item {it.position} of {items.length} · {date}</div>
+        <div style={{ fontSize: `${size * 0.055}mm`, color: "#000" }}>Item {it.position} of {items.length} · {date}</div>
       </div>,
     );
   }

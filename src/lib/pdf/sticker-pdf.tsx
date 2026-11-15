@@ -37,9 +37,9 @@ export async function renderStickersPdf(stickers: PdfSticker[]): Promise<Buffer>
                   </View>
                 </View>
               </View>
-              <View style={{ width: "100%", backgroundColor: "#000", padding: `${1 * u} ${1.5 * u}`, flexDirection: "row", justifyContent: "space-between" }}>
-                <Text style={{ color: "#fff", fontSize: (s.name.length > 80 ? 1.6 : s.name.length > 40 ? 2.1 : 2.7) * u, fontFamily: "Helvetica-Bold", flex: 1, marginRight: 2 * u }}>{s.name.toUpperCase()}</Text>
-                <Text style={{ color: "#fff", fontSize: 2.7 * u, fontFamily: "Helvetica-Bold" }}>{s.index} OF {s.count}</Text>
+              <View style={{ width: "100%", borderWidth: 0.4 * u, borderColor: "#000", borderStyle: "solid", padding: `${1 * u} ${1.5 * u}`, flexDirection: "row", justifyContent: "space-between" }}>
+                <Text style={{ color: "#000", fontSize: (s.name.length > 80 ? 1.6 : s.name.length > 40 ? 2.1 : 2.7) * u, fontFamily: "Helvetica-Bold", flex: 1, marginRight: 2 * u }}>{s.name.toUpperCase()}</Text>
+                <Text style={{ color: "#000", fontSize: 2.7 * u, fontFamily: "Helvetica-Bold" }}>{s.index} OF {s.count}</Text>
               </View>
             </Page>
           );
@@ -49,13 +49,12 @@ export async function renderStickersPdf(stickers: PdfSticker[]): Promise<Buffer>
           return (
             <Page key={i} size={[s.w * MM, s.h * MM]} style={[styles.page, { padding: 3 * u }]}>
               {logo ? <Image src={{ data: logo, format: "png" }} style={{ height: 8 * u, width: 42 * u, objectFit: "contain" }} /> : null}
-              <Text style={{ fontSize: 4.2 * u, fontFamily: "Helvetica-Bold", textAlign: "center" }}>{s.title.toUpperCase()}</Text>
+              <Text style={{ fontSize: 5.4 * u, fontFamily: "Helvetica-Bold", textAlign: "center" }}>{s.title.toUpperCase()}</Text>
               <Text style={{ fontSize: 3 * u, fontFamily: "Helvetica-Bold", textAlign: "center" }}>{s.line}</Text>
-              <Text style={{ fontSize: 3 * u }}>Installed {s.installed}</Text>
-              <View style={{ width: "100%", backgroundColor: "#000", padding: 2 * u, alignItems: "center" }}>
-                <Text style={{ color: "#fff", fontSize: 2.6 * u }}>WARRANTY UNTIL</Text>
-                <Text style={{ color: "#fff", fontSize: 5.4 * u, fontFamily: "Helvetica-Bold", marginTop: 0.6 * u }}>{s.until}</Text>
-                <Text style={{ color: "#fff", fontSize: 2.6 * u, marginTop: 0.6 * u }}>{s.months} months</Text>
+              <View style={{ width: "100%", borderWidth: 0.5 * u, borderColor: "#000", borderStyle: "solid", padding: 1.6 * u, alignItems: "center" }}>
+                <Text style={{ color: "#000", fontSize: 4.4 * u, fontFamily: "Helvetica-Bold" }}>INSTALLED {s.installed.toUpperCase()}</Text>
+                <Text style={{ color: "#000", fontSize: 4.4 * u, fontFamily: "Helvetica-Bold", marginTop: 0.6 * u }}>VALID UNTIL {s.until.toUpperCase()}</Text>
+                <Text style={{ color: "#000", fontSize: 2.8 * u, fontFamily: "Helvetica-Bold", marginTop: 0.6 * u }}>{s.months} MONTHS WARRANTY</Text>
               </View>
               <Image src={{ data: qr, format: "png" }} style={{ width: 22 * u, height: 22 * u }} />
               <Text style={{ fontSize: 3.4 * u, fontFamily: "Helvetica-Bold", letterSpacing: 0.6, textAlign: "center" }}>{s.vin}</Text>
@@ -71,10 +70,10 @@ export async function renderStickersPdf(stickers: PdfSticker[]): Promise<Buffer>
               <Text style={{ fontSize: 3 * u }}>Serviced on {s.servicedOn}</Text>
               {s.mileage ? <Text style={{ fontSize: 3 * u }}>at {s.mileage}</Text> : null}
             </View>
-            <View style={{ width: "100%", backgroundColor: "#000", padding: 2 * u, alignItems: "center" }}>
-              <Text style={{ color: "#fff", fontSize: 2.4 * u, textAlign: "center" }}>{s.band.toUpperCase()}</Text>
-              <Text style={{ color: "#fff", fontSize: 4.6 * u, fontFamily: "Helvetica-Bold", marginTop: 0.8 * u }}>{s.nextDate}</Text>
-              {s.nextMileage ? <Text style={{ color: "#fff", fontSize: 3.4 * u, fontFamily: "Helvetica-Bold", marginTop: 0.5 * u }}>{s.nextMileage}</Text> : null}
+            <View style={{ width: "100%", borderWidth: 0.5 * u, borderColor: "#000", borderStyle: "solid", padding: 1.6 * u, alignItems: "center" }}>
+              <Text style={{ color: "#000", fontSize: 2.4 * u, fontFamily: "Helvetica-Bold", textAlign: "center" }}>{s.band.toUpperCase()}</Text>
+              <Text style={{ color: "#000", fontSize: 4.6 * u, fontFamily: "Helvetica-Bold", marginTop: 0.8 * u }}>{s.nextDate}</Text>
+              {s.nextMileage ? <Text style={{ color: "#000", fontSize: 3.4 * u, fontFamily: "Helvetica-Bold", marginTop: 0.5 * u }}>{s.nextMileage}</Text> : null}
             </View>
             <View style={{ alignItems: "center" }}>
               <Text style={{ fontSize: 4 * u, fontFamily: "Helvetica-Bold", letterSpacing: 0.5 }}>{s.plate}</Text>

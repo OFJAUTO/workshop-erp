@@ -1,4 +1,4 @@
-# Handover – list of 15 November 2026 (in progress; last update 15 Nov, 11:10 Dubai)
+# Handover – list of 15 November 2026 (in progress; last update 15 Nov, 11:30 Dubai)
 
 **NEEDS OMAR (top first):**
 1. **Apply two database changes** (Sections 1 and 4): turn auto mode off, reply **"apply"**. Details in `docs/waiting-for-apply.md`.
@@ -11,7 +11,8 @@
 - S3 proof tag: DONE, pushed (note `docs/proof-tag-15-nov-note.md`); live: only SPAY-00031 was affected, now right.
 - S4 lathe bills through Supplier invoices: DONE, pushed (note `docs/lathe-invoices-15-nov-note.md`).
 - S5 supplier payments choose/confirm/correct + no money pre-selected anywhere: DONE, pushed (note `docs/supplier-pay-correct-15-nov-note.md`).
-- S6: in progress.
+- S6 labels black only: DONE, pushed (note `docs/labels-black-15-nov-note.md`). NEEDS OMAR: print one battery label and send a photo.
+- End-of-batch checks: in progress.
 
 ---
 
