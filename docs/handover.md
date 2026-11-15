@@ -1,18 +1,15 @@
-# Handover – list of 15 November 2026 (in progress; last update 15 Nov, 11:30 Dubai)
+# Handover – list of 15 November 2026 (ALL DONE; last update 15 Nov, 13:40 Dubai)
 
 **NEEDS OMAR (top first):**
-1. **Apply two database changes** (Sections 1 and 4): turn auto mode off, reply **"apply"**. Details in `docs/waiting-for-apply.md`.
-2. **Mathew or Aleemath corrects SPAY-00032 to cash** (Supplier payments → Payment history → Correct this payment).
-3. **Mathew confirms which reference types count as the supplier's invoice** (now: Invoice yes, Pre-payment yes, WIP no; Settings > Supplier references).
+1. **Apply two database changes** (Sections 1 and 4): turn auto mode off, reply **"apply"**. Details and backups in `docs/waiting-for-apply.md`. Until then: "Arrived - paperwork pending" already works for every supplier; the reference-type choice, the PRE-PAYMENT / WIP columns, the close/pay block and the lathe-bill check switch on with the apply.
+2. **Mathew or Aleemath corrects SPAY-00032 to cash:** Supplier payments → Payment history → SPAY-00032 → Correct this payment → Cash → reason → YES, CORRECT IT.
+3. **Mathew confirms which reference types count as the supplier's invoice** (now Invoice yes, Pre-payment yes, WIP no; Settings > Supplier references). After the apply he can change LPO-00079-1's "PP26POR24179" to the Pre-payment type.
+4. **Print one battery label and send a photo** (black only now: Labels > Printer > Test label).
+5. Still open from earlier: Mathew re-posts the LPO-00076-2 bill with one line per part; the 12 shared tablets' departments and KHADIJA's password; J-00317 brake pad (LPO-00083); Sparein merge; Patrol J-01007 relink; the Zoho rows to fix by hand.
 
-**Progress (6 sections):**
-- S1 URGENT receiving never blocks: DONE, pushed (note `docs/receiving-never-blocks-15-nov-note.md`).
-- S2 split supplier invoices: DONE, pushed (note `docs/split-invoices-15-nov-note.md`); live check: nothing overpaid.
-- S3 proof tag: DONE, pushed (note `docs/proof-tag-15-nov-note.md`); live: only SPAY-00031 was affected, now right.
-- S4 lathe bills through Supplier invoices: DONE, pushed (note `docs/lathe-invoices-15-nov-note.md`).
-- S5 supplier payments choose/confirm/correct + no money pre-selected anywhere: DONE, pushed (note `docs/supplier-pay-correct-15-nov-note.md`).
-- S6 labels black only: DONE, pushed (note `docs/labels-black-15-nov-note.md`). NEEDS OMAR: print one battery label and send a photo.
-- End-of-batch checks: in progress.
+**Done (6 of 6), each with its note in `docs/`:** S1 receiving never blocks (d7120328); S2 each part on one invoice (eff9a347); S3 one proof rule (069a325f); S4 lathe bills through Supplier invoices (7bdd31d5); S5 choose, confirm, correct + nothing money pre-selected (a71099e6); S6 labels black only (5d16ef51); end checks (8e6fffd5).
+
+**End of batch:** unit tests all pass; full layout 174 pages / 1,566 views clean (after fixing 16 word-break and phone-width faults on the job card, money page and parts page); security all pass; whole-job simulation 645 + 182 re-run = all green after bringing 11 steps up to the new rules (nothing pre-selected, lathe bills checked first, a receipt timing wait).
 
 ---
 
