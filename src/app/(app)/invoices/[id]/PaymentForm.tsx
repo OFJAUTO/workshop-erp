@@ -150,7 +150,7 @@ export function PaymentForm({
         {balance && balance > 0 ? (
           <div className="grid grid-cols-2 gap-2">
             <button type="button" onClick={() => setMode("full")} aria-pressed={mode === "full"} data-amount-full className={`min-h-12 rounded-control border-2 text-sm font-bold ${mode === "full" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
-              Full amount · {money(balance)}
+              Full amount · <span className="whitespace-nowrap">{money(balance)}</span>
             </button>
             <button type="button" onClick={() => setMode("partial")} aria-pressed={mode === "partial"} data-amount-partial className={`min-h-12 rounded-control border-2 text-sm font-bold ${mode === "partial" ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>
               Part payment

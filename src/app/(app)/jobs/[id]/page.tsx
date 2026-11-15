@@ -940,9 +940,9 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         <Card id="deposit" className={tile(barStates.advance ?? "later")} data-stage-card="advance" data-state={barStates.advance ?? "later"}>
           <span className={boxTitle(barStates.advance ?? "later")}>{tick(barStates.advance ?? "later")}Advance payment</span>
           <span className="text-sm font-semibold">
-            {dep.short ? `AED ${Math.max(0, dep.required - dep.received).toLocaleString("en-GB")} to receive` : "Received in full"}
-            {` · asked AED ${dep.required.toLocaleString("en-GB")} on ${dep.quotationNumbers.join(", ")}`}
-            {dep.received > 0 ? ` · AED ${dep.received.toLocaleString("en-GB")} received` : ""}
+            {dep.short ? <><span className="whitespace-nowrap">AED {Math.max(0, dep.required - dep.received).toLocaleString("en-GB")}</span> to receive</> : "Received in full"}
+            {" · asked "}<span className="whitespace-nowrap">AED {dep.required.toLocaleString("en-GB")}</span>{" on "}{dep.quotationNumbers.map((n, i) => <span key={n} className="whitespace-nowrap">{i ? ", " : ""}{n}</span>)}
+            {dep.received > 0 ? <>{" · "}<span className="whitespace-nowrap">AED {dep.received.toLocaleString("en-GB")}</span> received</> : ""}
           </span>
           {job.deposit_requested_at ? <span className="text-xs text-muted">Request sent {formatDayTime(job.deposit_requested_at)}</span> : null}
           {dep.short ? <span className="text-xs text-muted">Recorded by accounts or the owner only. Parts wait for it; the owner can approve the LPO without it.</span> : null}

@@ -40,7 +40,8 @@ export function StageTrack({ stage, timing, compact = false, skip, roadTest = nu
   void partly; // in progress is always amber now; the shared classes carry the whole look
   return (
     <div className="overflow-x-auto" data-stage-track data-scroll-ok>
-      <div className="grid gap-1 min-w-[560px]" style={{ gridTemplateColumns: `repeat(${boxes.length}, minmax(0, 1fr))` }}>
+      {/* 15 November 2026: each box keeps room for its longest word ("Inspection", "Advance payment" at 130% text); the strip scrolls sideways when the screen is narrower. */}
+      <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${boxes.length}, minmax(0, 1fr))`, minWidth: `max(560px, ${boxes.length * 4.1}rem)` }}>
         {boxes.map((b) => (
           <div key={b.key} data-stage-box={b.key} data-state={b.state} className={`min-h-10 rounded-control px-1 py-1 flex items-center justify-center text-center text-xs leading-tight ${STAGE_BOX_CLASS[b.state]} ${STAGE_BOX_TITLE[b.state]} ${b.state === "current" ? "font-bold" : "font-semibold"}`} title={b.title}>
             <span>{b.state === "done" ? "✓ " : ""}{b.label}</span>

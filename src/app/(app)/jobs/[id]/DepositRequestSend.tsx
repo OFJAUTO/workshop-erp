@@ -57,7 +57,7 @@ export function DepositRequestSend({ jobId, message, phoneDigits, requestedAt }:
 
   return (
     <>
-      <Button type="button" size="md" tone={requestedAt ? "secondary" : "primary"} disabled={busy} onClick={() => void openDialog()} data-send-deposit-request>
+      <Button type="button" size="md" tone={requestedAt ? "secondary" : "primary"} disabled={busy} onClick={() => void openDialog()} className="max-w-full !whitespace-normal" data-send-deposit-request>
         {busy && !open ? "…" : requestedAt ? "Send the request again" : "Send deposit request"}
       </Button>
       {linkError && !open ? <p className="text-xs font-semibold text-red">{linkError}</p> : null}

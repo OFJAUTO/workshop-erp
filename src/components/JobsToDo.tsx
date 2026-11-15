@@ -59,7 +59,7 @@ export function JobsToDo({ jobId, data, canTick = false, print = false, showChec
       })()}
       {j.parts.length ? (
         <ul className="ml-14 flex flex-wrap gap-1.5">
-          {j.parts.map((p) => <li key={p.id} className={`rounded-full border px-2 py-0.5 text-xs font-bold ${PART_TONE[p.state]}`} data-todo-part={p.state}>{p.name.toUpperCase()}{p.positions?.length ? ` (${p.positions.join(", ")})` : ""} · {PART_WORDS[p.state]}{p.when ? ` ${p.when}` : ""}</li>)}
+          {j.parts.map((p) => <li key={p.id} className={`rounded-full border px-2 py-0.5 text-xs font-bold ${PART_TONE[p.state]}`} data-todo-part={p.state}>{p.name.toUpperCase()}{p.positions?.length ? ` (${p.positions.join(", ")})` : ""} · {PART_WORDS[p.state]}{p.when ? <span className="whitespace-nowrap">{" "}{p.when}</span> : ""}</li>)}
         </ul>
       ) : null}
     </li>

@@ -1045,7 +1045,7 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
           </span>
         ) : null}
         {v.cost_note && !row.removed ? <span className="max-w-full break-words text-xs font-semibold text-amber-text" data-cost-note>{v.cost_note}</span> : null}
-        <span className="min-w-0 flex-1 break-words text-muted">{notes}</span>
+        <span className="min-w-[9rem] flex-1 break-words text-muted">{notes}</span>
         {row.removed && !row.ended && canPrice ? <button type="button" onClick={() => run(() => putBackPart(jobId, removeTarget))} className="shrink-0 h-5 rounded-control border border-line-strong bg-white px-2 text-xs font-bold">{undo ? "Undo" : "Put back"}</button> : null}
         <span className={`max-w-full break-words ${tag.cls}`} data-row-tag>{tag.text}</span>
       </div>

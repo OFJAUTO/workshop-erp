@@ -179,6 +179,8 @@ async function recordFullPayment(jobId, pathKey, { method = null, doubleTap = fa
     if (await chip.count()) await chip.click();
     else { const named = page.getByRole("button", { name: new RegExp(`^${method}$`, "i") }).first(); if (await named.count()) await named.click(); }
   }
+  // 15 November 2026: no method is pre-selected any more - pick one as a person would.
+  if (!(await page.locator('[data-method][aria-pressed="true"]').count())) await page.locator("[data-method]").first().click().catch(() => {});
   const full = page.locator("[data-amount-full]").first();
   if (await full.count()) await full.click();
   await page.locator("[data-record-payment]").first().click();
@@ -465,6 +467,8 @@ await section("a", "mechanical + supplier parts + deposit + pay-link", async () 
     {
       const [poRow] = await sql("select id from public.purchase_orders where job_id = $1 and kind = 'supplier' order by created_at desc limit 1", [jobId]);
       if (poRow) {
+        // The receipt's LAST step marks the LPO "invoice to follow": wait for it, never a fixed pause.
+        await until(async () => (await sql("select 1 from public.purchase_orders where id = $1 and supplier_invoice_status = 'to_follow'", [poRow.id]))[0], 40, 500);
         const acc = await browserFor("accounts");
         await go(acc.page, `${base}/supplier-invoices?open=${encodeURIComponent(`follow:${poRow.id}`)}`);
         await acc.page.locator("[data-si-enter] [data-invoice-number]").fill("SIM-INV-1");
@@ -1212,7 +1216,7 @@ await section("j", "parts changed after approval → resend for approval", async
     await go(page, `${base}/parts/${jobId}`);
     const s = await states(page);
     check(`j3: the bar is open again, never all green (${bar(s)})`, s.approval === "current" && s.handover !== "done", bar(s));
-    const words = ((await page.locator("[data-parts-changes-words]").textContent().catch(() => "")) ?? "").trim();
+    const words = ((await page.locator("[data-parts-changes-words]").textContent().catch(() => "")) ?? "").replace(/ /g, " ").trim();
     check(`j3: "${words}"`, words === "Changes since approval: 1 added, 1 removed, cost + AED 474.80");
     check("j3: the new line says it needs approval", ((await page.textContent("body")) ?? "").includes("New – needs approval"));
     check("j3: the removed line shows with its reason", /Wrong part, supplier cancelled/.test(((await page.locator("[data-change-row='removed']").textContent().catch(() => "")) ?? "")));
@@ -2008,8 +2012,8 @@ await section("r", "supplier payments: exact, less, advance, fee, two invoices, 
       await page.keyboard.press("Tab");
       await sleep(1500); // the box commits the number and the part-paid / excess lines appear before anything is pressed
     }
-    if (method) await box.locator(`input[name="method"][value="${method}"]`).evaluate((el) => el.click());
-    if (fee) await box.locator('input[name="excess_kind"][value="fee"]').evaluate((el) => el.click());
+    await box.locator(`input[name="method"][value="${method ?? "transfer"}"]`).evaluate((el) => el.click()).catch(() => null);
+    if (await box.locator('input[name="excess_kind"]').count()) await box.locator(`input[name="excess_kind"][value="${fee ? "fee" : "advance"}"]`).evaluate((el) => el.click());
     await sleep(500);
     await box.locator("[data-supplier-pay-save]").click();
     await page.locator("[data-confirm-yes-money]").click({ timeout: 8000 });
@@ -2483,6 +2487,7 @@ await section("y", "purchase returns: note, sent back, credit expected, credit r
   await rowA.locator("[data-return-cn-date]").fill(new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10));
   await rowA.locator("[data-return-cn-net]").fill("400");
   await rowA.locator("[data-return-cn-vat]").fill("20");
+  await chooseRequiredSelects(rowA);
   await rowA.locator("[data-return-cn-save]").click();
   await rowA.locator("[data-return-done], [data-return-error]").first().waitFor({ timeout: 30000 }).catch(() => null);
   const credited = (await sql("select r.status, p.disposition from public.purchase_returns r join public.part_items p on p.id = r.part_item_id where r.id = $1", [pr.id]))[0];
@@ -2497,6 +2502,7 @@ await section("y", "purchase returns: note, sent back, credit expected, credit r
   const rowB = desk.page.locator(`[data-return-row="${pr2.number}"]`);
   await rowB.locator("[data-return-open='refused']").click();
   await rowB.locator("[data-return-refused-note]").fill("Supplier says it was fitted");
+  await chooseRequiredSelects(rowB);
   await rowB.locator("[data-return-refused-save]").click();
   await rowB.locator("[data-return-done], [data-return-error]").first().waitFor({ timeout: 30000 }).catch(() => null);
   const refused = (await sql("select r.status, r.refused_action, p.disposition from public.purchase_returns r join public.part_items p on p.id = r.part_item_id where r.id = $1", [pr2.id]))[0];
@@ -2820,6 +2826,7 @@ await section("sec3", "one payment for several cars", async () => {
   const w2 = a.page.locator("[data-receive-window]");
   await w2.waitFor({ timeout: 15000 });
   await w2.locator("[data-receive-amount]").pressSequentially("4868", { delay: 20 });
+  await w2.locator('[data-receive-method="cheque"]').click();
   await w2.locator("[data-receive-cheque-number]").fill("019400");
   await w2.locator("[data-receive-cheque-date]").fill(today);
   check("c4: AED 500.00 left over becomes an advance", /AED 500\.00 left over becomes an advance/.test((await w2.locator("[data-receive-leftover]").textContent().catch(() => "")) ?? ""));
@@ -3198,7 +3205,9 @@ await section("sec8", "outsourced lathe work", async () => {
     const told = await sql("select count(*)::int as n from public.notifications where id > $1 and type = 'lathe_unmatched' and staff_id in (select id from public.staff where role_id = 'parts')", [m0]);
     check("l6: the parts desk is told about the line with no ticket", Number(told[0]?.n) >= 1);
     const zoho = (await sql("select status from public.zoho_outbox where kind = 'lathebill' and record_id = $1", [bill?.id]))[0];
-    check("l6: one Zoho bill waits for Sync to Zoho", !!zoho, zoho?.status ?? "none");
+    // 15 November 2026 (Section 4): the lathe bill is a supplier invoice - its Zoho bill waits for accounts' check.
+    check("l6: no Zoho bill before accounts check it on Supplier invoices", !zoho, zoho?.status ?? "none");
+    await sql("update public.lathe_bills set checked_at = now() where id = $1", [bill?.id]).catch(() => null);
     await go(acc.page, `${base}/parts/lathe`);
     const open = await acc.page.locator("[data-lathe-ticket]").evaluateAll((els) => els.map((e) => e.getAttribute("data-lathe-ticket")));
     check("l7: the open list keeps only the unbilled ticket", open.includes(t3.lathe_ticket) && !open.includes(t1.lathe_ticket) && !open.includes(t2.lathe_ticket), open.join(","));
@@ -3215,6 +3224,7 @@ await section("sec8", "outsourced lathe work", async () => {
       await go(acc.page, `${base}/supplier-payments?supplier=${encodeURIComponent(sup ?? "name:E2E Lathe Works")}#pay`);
       const box = acc.page.locator("[data-sp-pay-card] [data-supplier-pay-box]");
       await box.locator(`[data-supplier-pay-invoice="lathe:${bill?.id}"]`).waitFor({ timeout: 20000 });
+      await box.locator('input[name="method"][value="transfer"]').evaluate((el) => el.click()).catch(() => null);
       await box.locator("[data-supplier-pay-save]").click();
       await acc.page.locator("[data-confirm-yes-money]").click({ timeout: 8000 });
     } else {
@@ -4873,3 +4883,12 @@ await section("e15", "HR: people, documents, reminders, access", async () => {
 const failed = summary();
 cleanupDb();
 process.exit(failed ? 1 : 0);
+
+/** 15 November 2026: money choices are never pre-selected - pick the first real option of every empty required list. */
+async function chooseRequiredSelects(scope) {
+  for (const sel of await scope.locator("select[required]").all()) {
+    if ((await sel.inputValue().catch(() => "x")) !== "") continue;
+    const first = await sel.locator("option:not([disabled])").first().getAttribute("value").catch(() => null);
+    if (first) await sel.selectOption(first).catch(() => null);
+  }
+}

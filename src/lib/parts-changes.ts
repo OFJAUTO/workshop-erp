@@ -42,7 +42,8 @@ const money = (n: number) => Math.abs(n).toLocaleString("en-GB", { minimumFracti
 /** "cost + AED 31.58", "cost − AED 12.00", "cost unchanged". */
 export function costDeltaWords(delta: number): string {
   if (Math.abs(delta) < 0.005) return "cost unchanged";
-  return `cost ${delta > 0 ? "+" : "−"} AED ${money(delta)}`;
+  // A no-break space keeps "AED 31.58" whole on screens (15 November 2026, layout check).
+  return `cost ${delta > 0 ? "+" : "−"} AED ${money(delta)}`;
 }
 
 /** Live, order status "none", on no approved quotation: the part waits for an approval that only a resend can give. */

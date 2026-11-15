@@ -151,6 +151,8 @@ export async function pickPerson(scope, id) {
 /** Record a payment (B3, 1 November 2026): the Record button always opens the question now; this presses its Yes. */
 export async function pressRecord(scope) {
   const page = typeof scope.page === "function" ? scope.page() : scope;
+  // 15 November 2026: no method is pre-selected any more - pick the first one when none is chosen.
+  if (!(await scope.locator('[data-method][aria-pressed="true"]').count())) await scope.locator("[data-method]").first().click().catch(() => {});
   await scope.locator("[data-record-payment]").first().click();
   await page.locator("[data-confirm-yes]").click({ timeout: 8000 }).catch(() => {});
 }

@@ -25,7 +25,7 @@ const c = partsChangesOf(approved, parts);
 check("J-00985: 8 added, 6 removed, 0 changed", c.added.length === 8 && c.removed.length === 6 && c.changed.length === 0);
 check(`J-00985: the new parts cost AED 5,678.24 (${c.added.reduce((a, x) => a + x.total, 0).toFixed(2)})`, Math.abs(c.added.reduce((a, x) => a + x.total, 0) - 5678.24) < 0.005);
 check(`J-00985: the removed parts were AED 5,646.66 (${c.removed.reduce((a, x) => a + x.oldTotal, 0).toFixed(2)})`, Math.abs(c.removed.reduce((a, x) => a + x.oldTotal, 0) - 5646.66) < 0.005);
-check(`J-00985: "${c.words}"`, c.words === "Changes since approval: 8 added, 6 removed, cost + AED 31.58");
+check(`J-00985: "${c.words}"`, c.words === "Changes since approval: 8 added, 6 removed, cost + AED 31.58");
 check("J-00985: all eight new parts need approval", c.needsApproval.length === 8 && c.needsApproval.every((id) => id.startsWith("n")));
 check("a removed part keeps its reason", c.removed[0].reason === "Deleted from the Parts table");
 
@@ -34,7 +34,7 @@ const c2 = partsChangesOf([{ part_item_id: "a", unit_cost: 250, quantity: 2 }, {
   { id: "a", description: "STABILISER LINK", cost: 260, qty: 2, order_status: "to_order", live: true, reason: null },
   { id: "left", description: "WIPER BLADES", cost: 80, qty: 1, order_status: "none", live: true, reason: null },
 ]);
-check(`a cost change reads as changed, old vs new (${c2.words})`, c2.changed.length === 1 && c2.changed[0].oldTotal === 500 && c2.changed[0].newTotal === 520 && c2.words === "Changes since approval: 1 changed, cost + AED 20.00");
+check(`a cost change reads as changed, old vs new (${c2.words})`, c2.changed.length === 1 && c2.changed[0].oldTotal === 500 && c2.changed[0].newTotal === 520 && c2.words === "Changes since approval: 1 changed, cost + AED 20.00");
 check("a part left off the approved quotation is never new and never needs approval", c2.added.length === 0 && c2.needsApproval.length === 0);
 // After "Resend for approval" the new parts are "to order" (then ordered, received): still ADDED since approval,
 // no longer waiting for approval.
@@ -42,7 +42,7 @@ const resent = partsChangesOf(approved, parts.map((p) => (p.live ? { ...p, order
 check("after the resend: still 8 added (the card keeps the words), none needs approval", resent.added.length === 8 && resent.needsApproval.length === 0 && resent.words === c.words);
 check("nothing changed: no words", partsChangesOf([{ part_item_id: "a", unit_cost: 10, quantity: 1 }], [{ id: "a", description: "X", cost: 10, qty: 1, order_status: "ordered", live: true, reason: null }]).words === null);
 check("a new part not priced yet is listed as not priced", partsChangesOf([], [{ id: "z", description: "NEW", cost: null, qty: 1, order_status: "none", live: true, reason: null }]).added[0].priced === false);
-check("cost words", costDeltaWords(31.58) === "cost + AED 31.58" && costDeltaWords(-12) === "cost − AED 12.00" && costDeltaWords(0.001) === "cost unchanged");
+check("cost words", costDeltaWords(31.58) === "cost + AED 31.58" && costDeltaWords(-12) === "cost − AED 12.00" && costDeltaWords(0.001) === "cost unchanged");
 check("an ordered part off the quotation is not 'needs approval'", needsApprovalAfter({ id: "q", live: true, order_status: "ordered" }, new Set()) === false);
 
 console.log(failed ? `\n${failed} check(s) failed` : "\nAll parts-changes checks passed");
