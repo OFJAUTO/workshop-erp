@@ -76,7 +76,7 @@ export function LatheBillForm({ suppliers, tickets, today }: { suppliers: string
     <form action={action} className="flex flex-col gap-3" data-lathe-bill-form>
       <div className="flex flex-wrap items-end gap-2">
         <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Lathe shop</span>
-          <select name="supplier" required defaultValue={suppliers[0] ?? ""} className="min-h-11 w-56 rounded-control border border-line-strong bg-white px-2 text-sm" data-lathe-bill-supplier>{suppliers.map((s) => <option key={s} value={s}>{s}</option>)}</select>
+          <select name="supplier" required defaultValue="" className="min-h-11 w-56 rounded-control border border-line-strong bg-white px-2 text-sm" data-lathe-bill-supplier><option value="" disabled>Choose the lathe shop…</option>{suppliers.map((s) => <option key={s} value={s}>{s}</option>)}</select>
         </label>
         <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Bill number</span><Input name="bill_number" required className="w-40" data-lathe-bill-number /></label>
         <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Bill date</span><Input name="bill_date" type="date" required max={today} className="w-44" data-lathe-bill-date /></label>
@@ -112,7 +112,7 @@ export function LathePaidForm({ billId, today }: { billId: string; today: string
   if (state?.message) return <Answer s={state} />;
   return (
     <form action={action} className="flex flex-wrap items-end gap-2" data-lathe-paid-form>
-      <select name="method" defaultValue="transfer" className="min-h-11 rounded-control border border-line-strong bg-white px-2 text-sm"><option value="transfer">Bank transfer</option><option value="cheque">Cheque</option><option value="card">Card</option><option value="cash">Cash</option></select>
+      <select name="method" required defaultValue="" className="min-h-11 rounded-control border border-line-strong bg-white px-2 text-sm"><option value="" disabled>How was it paid?</option><option value="transfer">Bank transfer</option><option value="cheque">Cheque</option><option value="card">Card</option><option value="cash">Cash</option></select>
       <Input name="paid_on" type="date" required max={today} className="w-44" />
       <Input name="reference" placeholder="Reference" className="w-36" />
       <Button type="submit" size="md" tone="secondary" disabled={busy}>Paid (one payment)</Button>

@@ -10,6 +10,7 @@ import { getSettings } from "@/lib/settings";
 import { formatDate } from "@/lib/format";
 import { moneyFrom } from "@/lib/supplier-money";
 import { advancesOf, openInvoicesOf } from "@/lib/supplier-payments";
+import { CorrectSupplierPayment } from "@/components/CorrectSupplierPayment";
 import { METHOD_WORDS, loadPaymentsTab } from "@/lib/supplier-payments-tab";
 import { SUPPLIER_PAY_METHODS, readZohoMap } from "@/lib/zoho-sync";
 
@@ -155,6 +156,8 @@ export default async function SupplierPaymentsPage({ searchParams }: { searchPar
                 {h.status === "void" ? <Badge tone="neutral">Void{h.voidReason ? `: ${h.voidReason}` : ""}</Badge> : null}
                 <span className="ml-auto font-bold">AED {money(h.amount)}</span>
                 {h.by ? <span className="basis-full text-xs text-muted">by {h.by}</span> : null}
+                {h.edits.map((e, i) => <span key={i} className="basis-full text-xs text-muted" data-sp-history-edit>Corrected {formatDate(e.at)} by {e.by}: {e.changes.map((c) => `${c.field} ${c.old || "—"} → ${c.new || "—"}`).join("; ")} ({e.remark})</span>)}
+                {canPay && h.status === "recorded" && (staff.role_id === "owner" || staff.role_id === "accounts") ? <span className="basis-full"><CorrectSupplierPayment id={h.id} number={h.number} method={h.method} paidOn={String(h.paidOn).slice(0, 10)} reference={h.reference} today={today} proofScope={h.firstPoId} /></span> : null}
               </li>
             ))}
           </ul>

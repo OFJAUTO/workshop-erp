@@ -218,7 +218,8 @@ export function GateInForm({
                 </Field>
                 {arrivedBy === "our_recovery" && recoveryTypes.length ? (
                   <Field label="Recovery type" hint="Goes onto the quotation as the recovery line, with its usual price.">
-                    <ChoiceButtons name="recovery_type" columns={3} defaultValue={v.recovery_type || recoveryTypes[0].key} options={recoveryTypes.map((t) => ({ value: t.key, label: t.label }))} />
+                    <input type="hidden" name="recovery_type_asked" value="1" />
+                    <ChoiceButtons name="recovery_type" columns={3} required defaultValue={v.recovery_type || null} options={recoveryTypes.map((t) => ({ value: t.key, label: t.label }))} />
                   </Field>
                 ) : null}
               </div>

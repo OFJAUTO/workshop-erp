@@ -23,7 +23,11 @@ export type PaymentHistoryRow = {
   lpos: string[];
   by: string | null;
   hasProof: boolean;
+  /** 15 November 2026: an LPO it paid (a corrected proof is filed under it) and every correction (who, when, old, new). */
+  firstPoId: string | null;
+  edits: PaymentEdit[];
 };
+export type PaymentEdit = { at: string; by: string; remark: string; changes: { field: string; old: string; new: string }[] };
 
 /** A supplier's LPOs still waiting for their invoice (ordered, or delivered with the invoice to follow), car or stock. */
 export type AwaitingSupplier = { supplier: string; supplierId: string | null; count: number; notReceived: number; total: number; lpos: string[] };
@@ -64,12 +68,12 @@ export async function loadPaymentsTab(opts: { from?: string | null; to?: string 
   if (!ready) return { ready, due, advances: new Map(), history: [], read: !!inv, awaiting, suppliers };
   const admin = createAdminClient();
   const advances = await advancesBySupplier();
-  let q = admin.from("supplier_payments").select("id, number, supplier_id, supplier_name, paid_on, method, reference, amount_aed, excess_kind, fee_aed, status, void_reason, created_by, proof_path").eq("is_active", true).order("paid_on", { ascending: false }).order("created_at", { ascending: false }).limit(500);
+  let q = admin.from("supplier_payments").select("id, number, supplier_id, supplier_name, paid_on, method, reference, amount_aed, excess_kind, fee_aed, status, void_reason, created_by, proof_path, edit_history").eq("is_active", true).order("paid_on", { ascending: false }).order("created_at", { ascending: false }).limit(500);
   if (opts.from) q = q.gte("paid_on", opts.from);
   if (opts.to) q = q.lte("paid_on", opts.to);
   if (opts.supplier) q = /^[0-9a-f-]{36}$/.test(opts.supplier) ? q.eq("supplier_id", opts.supplier) : q.ilike("supplier_name", opts.supplier);
   const { data: pays } = await q;
-  const list = (pays ?? []) as { id: string; number: string; supplier_id: string | null; supplier_name: string; paid_on: string; method: string; reference: string | null; amount_aed: number; excess_kind: string | null; fee_aed: number; status: string; void_reason: string | null; created_by: string | null; proof_path: string | null }[];
+  const list = (pays ?? []) as { id: string; number: string; supplier_id: string | null; supplier_name: string; paid_on: string; method: string; reference: string | null; amount_aed: number; excess_kind: string | null; fee_aed: number; status: string; void_reason: string | null; created_by: string | null; proof_path: string | null; edit_history: PaymentEdit[] | null }[];
   const ids = list.map((p) => p.id);
   const { data: lines } = ids.length ? await admin.from("supplier_payment_lines").select("payment_id, po_id").in("payment_id", ids).eq("is_active", true) : { data: [] };
   const poIds = Array.from(new Set((lines ?? []).map((l) => l.po_id as string)));
@@ -94,6 +98,8 @@ export async function loadPaymentsTab(opts: { from?: string | null; to?: string 
     lpos: Array.from(new Set((lines ?? []).filter((l) => l.payment_id === p.id).map((l) => poNum.get(l.po_id as string) ?? ""))).filter(Boolean),
     by: p.created_by ? who.get(p.created_by) ?? null : null,
     hasProof: !!p.proof_path,
+    firstPoId: ((lines ?? []).find((l) => l.payment_id === p.id && l.po_id)?.po_id as string | undefined) ?? null,
+    edits: (p.edit_history ?? []).filter((e) => e && Array.isArray(e.changes) && !e.changes.some((c) => c.field === "status")),
   }));
   return { ready, due, advances, history, read: !!inv, awaiting, suppliers };
 }

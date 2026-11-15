@@ -138,6 +138,8 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
   const values = formValues(formData);
   const parsed = parseGateIn(formData);
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Check the form.", values };
+  // 15 November 2026 (Section 5): the recovery type prices the recovery, so it is chosen, never assumed.
+  if (parsed.data.arrived_by === "our_recovery" && formData.get("recovery_type_asked") === "1" && !parsed.data.recovery_type) return { error: "Choose the recovery type (it sets the recovery price).", values };
   const d = parsed.data;
   const requests = await requestLines(formData);
   // 30 October 2026: PPF RECHECK (FREE) - the 10-day final check of an earlier PPF job of this car. No inspection fee,

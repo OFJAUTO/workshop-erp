@@ -118,3 +118,23 @@ export async function undoAdvanceUseAction(lineId: string, _prev: PayState, form
   revalidatePath("/parts-accounts");
   return { ok: true, message: r.words };
 }
+
+/** "Correct this payment" (15 November 2026): method, date, reference, proof - with a reason; the amount and supplier never. */
+export async function correctSupplierPaymentAction(paymentId: string, _prev: PayState, formData: FormData): Promise<PayState> {
+  const staff = await requireStaff();
+  if (staff.viewingAs) return { error: "View as is read-only." };
+  const { correctSupplierPayment } = await import("@/lib/supplier-payments");
+  const r = await correctSupplierPayment(paymentId, {
+    method: String(formData.get("method") ?? ""),
+    paidOn: String(formData.get("paid_on") ?? ""),
+    reference: String(formData.get("reference") ?? ""),
+    proofPath: String(formData.get("proof_path") ?? "") || null,
+    reason: String(formData.get("reason") ?? ""),
+  }, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+  if (r.error) return { error: r.error };
+  revalidatePath("/parts/orders", "layout");
+  revalidatePath("/supplier-payments");
+  revalidatePath("/supplier-invoices");
+  revalidatePath("/parts-accounts");
+  return { ok: true, message: r.words };
+}

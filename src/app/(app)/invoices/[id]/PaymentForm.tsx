@@ -80,7 +80,8 @@ export function PaymentForm({
   /** The number the tax invoice will get when this payment settles the proforma. */
   nextTaxNumber?: string | null;
 }) {
-  const first = prefill && methods.includes(prefill.method) ? prefill.method : expected && methods.includes(expected) ? expected : methods[0] ?? "";
+  // 15 November 2026: a money choice is never pre-selected; only the method the advisor reported (a fact) fills it in.
+  const first = prefill && methods.includes(prefill.method) ? prefill.method : "";
   const [method, setMethod] = useState(first);
   // "Cheque 019383 is already recorded: …" (11 November 2026, Section 5).
   const [chequeWords, setChequeWords] = useState<string | null>(null);
@@ -118,7 +119,7 @@ export function PaymentForm({
   const needsProof = proofRequired(method);
   const proofBlocked = needsProof && !!proofJobId && proofs.length === 0;
   const proofLine = !proofBlocked ? null : proofWait.stopped ? "The proof could not be sent – try again or remove it, then attach it again." : proofWait.count ? "The proof is still sending – Record works once it has arrived." : "Attach the proof first.";
-  const blocked = !clientKey || proofBlocked;
+  const blocked = !method || !clientKey || proofBlocked;
   if (!methods.length) return <p className="text-sm text-muted">Payments are recorded by accounts (bank side) or the advisor at the counter.</p>;
 
   // A box still missing (the note on an over-payment, a cheque number) is pointed at before the question opens.

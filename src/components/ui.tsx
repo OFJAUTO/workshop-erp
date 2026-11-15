@@ -245,11 +245,14 @@ export function ChoiceButtons({
   options,
   defaultValue,
   columns = 3,
+  required = false,
 }: {
   name: string;
   options: { value: string; label: string; hint?: string }[];
   defaultValue?: string | null;
   columns?: 2 | 3 | 4;
+  /** 15 November 2026: one must be chosen (a money choice is never pre-selected). */
+  required?: boolean;
 }) {
   // 13 November 2026 (Section 1b): every option is the SAME size, aligned left, whatever wraps (a flex strip
   // stretched the leftovers of a wrapped row into giant cells). One grid of equal tiles; the chosen one is black.
@@ -263,6 +266,7 @@ export function ChoiceButtons({
             name={name}
             value={o.value}
             defaultChecked={defaultValue === o.value}
+            required={required}
             className="peer sr-only"
           />
           <span className="flex h-full min-h-11 flex-col items-center justify-center rounded-control border border-line-strong bg-white px-3 py-2 text-center text-sm font-semibold peer-checked:border-ink peer-checked:bg-ink peer-checked:text-on-dark peer-focus-visible:ring-2 peer-focus-visible:ring-inset peer-focus-visible:ring-ink/30">

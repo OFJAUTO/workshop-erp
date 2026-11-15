@@ -28,6 +28,7 @@ export async function paymentFromForm(staff: { id: string; display_name: string;
   const amount = Number(String(formData.get("amount") ?? "").replace(/[^\d.]/g, ""));
   const method = String(formData.get("method") ?? "");
   const out = (r: PaymentResult, jobId: string | null = jobIdIn): FormPaymentOutcome => ({ ...r, jobId, invoiceId });
+  if (!method) return out({ error: "Choose how it was paid." });
   if (!methodsFor(staff.role_id).includes(method as (typeof PAYMENT_METHODS)[number])) return out({ error: "Not allowed: payments are recorded by accounts or the owner only." });
   const proof = formData.get("proof");
   const proofFile = proof instanceof File && proof.size > 0 ? proof : null;

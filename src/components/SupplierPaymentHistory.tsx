@@ -3,14 +3,15 @@
 import { useActionState } from "react";
 import { undoAdvanceUseAction, voidSupplierPaymentAction, type PayState } from "@/app/(app)/parts/supplier-payment-actions";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
+import { CorrectSupplierPayment } from "@/components/CorrectSupplierPayment";
 import { Input } from "@/components/ui";
 import { SUPPLIER_PAY_METHOD_LABELS, type SupplierPayMethod } from "@/lib/supplier-payment-rules";
 
-type Row = { id: string; number: string; paidOn: string; method: string; reference: string | null; amount: number; onThis: number; status: string; voidReason: string | null; laterAdvance: boolean; lineId?: string };
+type Row = { id: string; number: string; paidOn: string; method: string; reference: string | null; amount: number; onThis: number; status: string; voidReason: string | null; laterAdvance: boolean; lineId?: string; edits?: { at: string; by: string; remark: string; changes: { field: string; old: string; new: string }[] }[] };
 const fmt = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** The payments on one supplier invoice (6 November 2026): who, when, how, how much; Void with a remark (owner, accounts). */
-export function SupplierPaymentHistory({ rows, canChange }: { rows: Row[]; canChange: boolean }) {
+export function SupplierPaymentHistory({ rows, canChange, today = "", poId = null }: { rows: Row[]; canChange: boolean; /** 15 November 2026: for "Correct this payment". */ today?: string; poId?: string | null }) {
   if (!rows.length) return null;
   return (
     <ul className="flex flex-col gap-2" data-supplier-pay-history>
@@ -19,7 +20,8 @@ export function SupplierPaymentHistory({ rows, canChange }: { rows: Row[]; canCh
           <span className="font-semibold">
             {r.number} · {r.paidOn} · {SUPPLIER_PAY_METHOD_LABELS[r.method as SupplierPayMethod] ?? r.method}{r.reference ? ` · ${r.reference}` : ""} · AED {fmt(r.onThis)} on this invoice{Math.abs(r.amount - r.onThis) > 0.004 ? ` (payment AED ${fmt(r.amount)})` : ""}{r.laterAdvance ? " · from an advance" : ""}
           </span>
-          {r.status === "void" ? <span className="text-xs no-underline">Voided: {r.voidReason}</span> : canChange && r.laterAdvance && r.lineId ? <UndoAdvanceForm lineId={r.lineId} number={r.number} amount={r.onThis} /> : canChange ? <VoidForm id={r.id} number={r.number} /> : null}
+          {(r.edits ?? []).map((e, i) => <span key={i} className="text-xs text-muted" data-pay-edit>Corrected {e.at.slice(0, 10)} by {e.by}: {e.changes.map((c) => `${c.field} ${c.old || "—"} → ${c.new || "—"}`).join("; ")} ({e.remark})</span>)}
+          {r.status === "void" ? <span className="text-xs no-underline">Voided: {r.voidReason}</span> : canChange && r.laterAdvance && r.lineId ? <UndoAdvanceForm lineId={r.lineId} number={r.number} amount={r.onThis} /> : canChange ? <><CorrectSupplierPayment id={r.id} number={r.number} method={r.method} paidOn={r.paidOn.slice(0, 10)} reference={r.reference} today={today} proofScope={poId} /><VoidForm id={r.id} number={r.number} /></> : null}
         </li>
       ))}
     </ul>

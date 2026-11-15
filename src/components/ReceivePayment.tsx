@@ -34,7 +34,7 @@ export function ReceivePaymentButton({ customerId, docs, receipts, ready, openOn
 
 function ReceiveWindow({ customerId, docs, receipts, ready, firstJobTitle, replaceId, onClose }: { customerId: string; docs: ReceiveDoc[]; receipts: ReplaceableReceipt[]; ready: boolean; firstJobTitle: string | null; replaceId: string | null; onClose: () => void }) {
   const replaceFrom = receipts.find((r) => r.id === replaceId) ?? null;
-  const [method, setMethod] = useState<string>(replaceFrom?.method ?? "cheque");
+  const [method, setMethod] = useState<string>(replaceFrom?.method ?? "");
   const [amountText, setAmountText] = useState("");
   const [shares, setShares] = useState<Record<string, string> | null>(null);
   const [replace, setReplace] = useState<Set<string>>(() => new Set(replaceFrom ? receipts.filter((r) => r.id === replaceFrom.id || (!!replaceFrom.chequeNumber && r.chequeNumber === replaceFrom.chequeNumber)).map((r) => r.id) : []));
@@ -126,7 +126,7 @@ function ReceiveWindow({ customerId, docs, receipts, ready, firstJobTitle, repla
             ) : null}
             {state?.error ? <p className="text-sm font-semibold text-red" data-receive-error>{state.error}</p> : null}
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" size="md" disabled={busy || !(amount > 0) || left < -0.004} data-receive-save>{busy ? "Saving…" : `Record ${amount > 0 ? aed(amount) : ""}`}</Button>
+              <Button type="submit" size="md" disabled={busy || !method || !(amount > 0) || left < -0.004} data-receive-save>{busy ? "Saving…" : `Record ${amount > 0 ? aed(amount) : ""}`}</Button>
               <Button type="button" tone="ghost" size="md" disabled={busy} onClick={onClose}>Cancel</Button>
             </div>
           </form>

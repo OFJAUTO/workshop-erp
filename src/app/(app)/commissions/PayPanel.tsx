@@ -16,7 +16,7 @@ const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDig
  */
 export function PayPanel({ rows, action, today, isOwner }: { rows: ReadyRow[]; action: (formData: FormData) => Promise<void>; today: string; isOwner: boolean }) {
   const [ticked, setTicked] = useState<Set<string>>(new Set());
-  const [method, setMethod] = useState<"cash" | "transfer">("cash");
+  const [method, setMethod] = useState<"" | "cash" | "transfer">("");
   const [amount, setAmount] = useState("");
   const recipient = useMemo(() => rows.find((r) => ticked.has(r.quotationId))?.recipient ?? null, [rows, ticked]);
   const total = useMemo(() => Math.round(rows.filter((r) => ticked.has(r.quotationId)).reduce((a, r) => a + r.amount, 0) * 100) / 100, [rows, ticked]);
@@ -69,7 +69,7 @@ export function PayPanel({ rows, action, today, isOwner }: { rows: ReadyRow[]; a
             <Input name="note" placeholder="Anything worth writing down" />
           </label>
           {/* The one money question before paying (audit M4, 6 November 2026). */}
-          <ConfirmSubmit label={method === "cash" ? "Record cash payment (voucher follows)" : "Record transfer"} title={`Pay AED ${total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}${recipient ? ` to ${recipient}` : ""}?`} lines={[`${ticked.size} commission${ticked.size === 1 ? "" : "s"} · ${method === "cash" ? "cash" : "bank transfer"}`]} confirmLabel="Yes, record it" hook="pay-commission" attrs={{ "data-pay-save": "" }} />
+          <ConfirmSubmit disabled={!method} label={!method ? "Choose cash or bank transfer first" : method === "cash" ? "Record cash payment (voucher follows)" : "Record transfer"} title={`Pay AED ${total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}${recipient ? ` to ${recipient}` : ""}?`} lines={[`${ticked.size} commission${ticked.size === 1 ? "" : "s"} · ${method === "cash" ? "cash" : "bank transfer"}`]} confirmLabel="Yes, record it" hook="pay-commission" attrs={{ "data-pay-save": "" }} />
         </div>
       ) : (
         <p className="text-sm text-muted">Tick the commissions to pay. One payment covers one person; ticking someone greys the others out.</p>

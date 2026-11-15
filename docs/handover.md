@@ -1,15 +1,17 @@
-# Handover – list of 15 November 2026 (in progress; last update 15 Nov, 10:50 Dubai)
+# Handover – list of 15 November 2026 (in progress; last update 15 Nov, 11:10 Dubai)
 
 **NEEDS OMAR (top first):**
 1. **Apply two database changes** (Sections 1 and 4): turn auto mode off, reply **"apply"**. Details in `docs/waiting-for-apply.md`.
-2. **Mathew confirms which reference types count as the supplier's invoice** (now: Invoice yes, Pre-payment yes, WIP no; Settings > Supplier references).
+2. **Mathew or Aleemath corrects SPAY-00032 to cash** (Supplier payments → Payment history → Correct this payment).
+3. **Mathew confirms which reference types count as the supplier's invoice** (now: Invoice yes, Pre-payment yes, WIP no; Settings > Supplier references).
 
 **Progress (6 sections):**
 - S1 URGENT receiving never blocks: DONE, pushed (note `docs/receiving-never-blocks-15-nov-note.md`).
 - S2 split supplier invoices: DONE, pushed (note `docs/split-invoices-15-nov-note.md`); live check: nothing overpaid.
 - S3 proof tag: DONE, pushed (note `docs/proof-tag-15-nov-note.md`); live: only SPAY-00031 was affected, now right.
 - S4 lathe bills through Supplier invoices: DONE, pushed (note `docs/lathe-invoices-15-nov-note.md`).
-- S5, S6: in progress.
+- S5 supplier payments choose/confirm/correct + no money pre-selected anywhere: DONE, pushed (note `docs/supplier-pay-correct-15-nov-note.md`).
+- S6: in progress.
 
 ---
 

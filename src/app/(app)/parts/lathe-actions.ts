@@ -60,7 +60,8 @@ export async function recordLatheBillAction(_prev: LatheAnswer | null, formData:
 export async function latheBillPaidAction(billId: string, _prev: LatheAnswer | null, formData: FormData): Promise<LatheAnswer> {
   const staff = await requireStaff();
   if (!(staff.role_id === "owner" || staff.role_id === "accounts") || staff.viewingAs) return { error: "Accounts or the owner record the payment.", at: Date.now() };
-  const method = String(formData.get("method") ?? "transfer");
+  const method = String(formData.get("method") ?? "");
+  if (!["transfer", "card", "cash", "cheque"].includes(method)) return { error: "Choose how it was paid.", at: Date.now() };
   const day = String(formData.get("paid_on") ?? "").slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return { error: "Pick the day it was paid.", at: Date.now() };
   const { error } = await createAdminClient().from("lathe_bills").update({ paid_at: `${day}T08:00:00.000Z`, paid_method: ["transfer", "card", "cash", "cheque"].includes(method) ? method : "transfer", paid_reference: String(formData.get("reference") ?? "").trim() || null, paid_by: staff.id, updated_by: staff.id }).eq("id", billId).is("paid_at", null);

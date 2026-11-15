@@ -140,7 +140,8 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
           </div>
           <Field label="How it was paid">
             <div data-pay-method>
-              <ChoiceButtons name="method" columns={3} defaultValue="transfer" options={SUPPLIER_PAY_METHOD_KEYS.map((k) => ({ value: k, label: SUPPLIER_PAY_METHOD_LABELS[k] }))} />
+              {/* 15 November 2026 (Section 5): never pre-selected - the person must choose how it was paid. */}
+              <ChoiceButtons name="method" columns={3} required options={SUPPLIER_PAY_METHOD_KEYS.map((k) => ({ value: k, label: SUPPLIER_PAY_METHOD_LABELS[k] }))} />
               {paidFromWords ? <p className="pt-1 text-xs text-muted" data-pay-paid-from>Paid from in Zoho — {paidFromWords}</p> : null}
             </div>
           </Field>
@@ -161,7 +162,7 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
           {excess > 0.004 ? (
             <div className="flex flex-col gap-2 rounded-control border-2 border-amber-bar bg-amber-soft px-3 py-2" data-supplier-pay-excess>
               <span className="text-sm font-bold">AED {fmt(excess)} more than the invoices. What is it?</span>
-              <ChoiceButtons name="excess_kind" columns={2} defaultValue="advance" options={[{ value: "advance", label: `Advance with ${supplierName}` }, { value: "fee", label: "Fee / charge (an expense)" }]} />
+              <ChoiceButtons name="excess_kind" columns={2} required options={[{ value: "advance", label: `Advance with ${supplierName}` }, { value: "fee", label: "Fee / charge (an expense)" }]} />
             </div>
           ) : null}
           {short > 0.004 && excess <= 0.004 ? <p className="text-sm font-semibold text-amber-text" data-supplier-pay-short>Part paid · balance AED {fmt(short)} stays owed.</p> : null}
@@ -180,17 +181,29 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
         <ConfirmSubmit
           label={newMoney ? (usedAdv.length ? "Apply advance and record the payment" : "Record the payment") : "Apply advance"}
           title={newMoney ? `Record AED ${fmt(amount)} paid to ${supplierName}${usedAdv.length ? ` and apply AED ${fmt(advTotal)} of advances` : ""}?` : `Apply AED ${fmt(advTotal)} of advances to ${supplierName}'s invoices?`}
+          titleOf={newMoney ? (form) => payQuestion(supplierName, amount, form) : undefined}
+          cancelLabel="GO BACK AND EDIT"
           lines={[
             ...usedAdv.map((a) => `${a.number}: AED ${fmt(r2(a.left - (leftAfter.get(a.paymentId) ?? 0)))} used · ${advanceLeftWords(leftAfter.get(a.paymentId) ?? 0)}`),
             newMoney ? `${ticked.size} invoice${ticked.size === 1 ? "" : "s"} · new payment AED ${fmt(put)}` : "No new payment",
             short > 0.004 && excess <= 0.004 ? `Part paid: AED ${fmt(short)} still owed` : excess > 0.004 ? `AED ${fmt(excess)} over the invoices` : "Settles them in full",
           ]}
           live={newMoney ? [{ field: "method" }, { label: "ref", field: "reference" }, ...(proofScope ? [{ field: "proof_path", proof: true }] : [])] : []}
-          confirmLabel={newMoney ? "Yes, record it" : "Yes, apply it"}
+          confirmLabel={newMoney ? "YES, RECORD" : "Yes, apply it"}
           hook="supplier-pay"
           attrs={{ "data-supplier-pay-save": "", ...(overAdvance ? { "data-over-advance": "" } : {}) }}
         />
       </div>
     </form>
   );
+}
+
+/** THE supplier payment question (15 November 2026): "Pay <supplier> AED <amount> by <METHOD> on <date>?" - read at the tap. */
+export function payQuestion(supplier: string, amount: number, form: HTMLFormElement): string {
+  const fd = new FormData(form);
+  const method = String(fd.get("method") ?? "");
+  const label = (SUPPLIER_PAY_METHOD_LABELS as Record<string, string>)[method] ?? method;
+  const day = String(fd.get("paid_on") ?? "");
+  const when = /^\d{4}-\d{2}-\d{2}$/.test(day) ? new Date(day + "T12:00:00Z").toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : day;
+  return `Pay ${supplier} AED ${fmt(amount)} by ${label.toUpperCase()} on ${when}?`;
 }

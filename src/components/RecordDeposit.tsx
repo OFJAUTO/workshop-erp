@@ -48,7 +48,7 @@ function todayDubai() {
 export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d: RecordDepositData; charges: BankFees; label?: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [method, setMethod] = useState("cash");
+  const [method, setMethod] = useState("");
   const [amount, setAmount] = useState(d.outstanding > 0 ? String(d.outstanding) : "");
   const [reference, setReference] = useState("");
   const [authCode, setAuthCode] = useState("");
@@ -77,7 +77,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
   const value = Number(amount.replace(/[^\d.]/g, "")) || 0;
   const overBy = Math.max(0, Math.round((value - d.outstanding) * 100) / 100);
   const needsProof = proofRequired(method);
-  const rule = charges[method];
+  const rule = charges[method] ?? { msfPercent: 0, txnFee: 0, vatPercent: 0, terminals: [] };
   const fee = feesFor(value, rule);
 
   const close = () => {
@@ -240,7 +240,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
                   </div>
                 ) : (
                   <div>
-                    <Button type="button" size="lg" disabled={!clientKey || !(value > 0) || (needsProof && files.length === 0)} onClick={() => {
+                    <Button type="button" size="lg" disabled={!method || !clientKey || !(value > 0) || (needsProof && files.length === 0)} onClick={() => {
                         // A code of the wrong length is refused before the question (the panel has no form to stop it).
                         const problem = needsAuthCode(method) ? authCodeProblem(method, authCode) : null;
                         if (problem) return setError(problem);

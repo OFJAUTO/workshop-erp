@@ -11,10 +11,11 @@ type Live = { label?: string; field: string; /** Shown when the field is empty. 
  * fixed words plus what is typed in the form right now ("Card · ref 123456 · proof attached ✓") - with Cancel and a
  * button that names the action ("Yes, record payment"), never just OK. The form is sent only from that button.
  */
-export function ConfirmSubmit({ label, title, lines, live = [], confirmLabel, name, value, tone = "primary", size = "lg", disabled = false, className, hook = "money", attrs }: { label: string; title: string; lines: string[]; live?: Live[]; confirmLabel: string; name?: string; value?: string; tone?: "primary" | "secondary" | "danger" | "ghost"; size?: "md" | "lg"; disabled?: boolean; className?: string; hook?: string; /** data-* hooks kept on the opening button. */ attrs?: Record<string, string> }) {
+export function ConfirmSubmit({ label, title, titleOf, cancelLabel = "Cancel", lines, live = [], confirmLabel, name, value, tone = "primary", size = "lg", disabled = false, className, hook = "money", attrs }: { label: string; title: string; /** 15 November 2026: the question built from the form at the tap ("Pay X AED 80.00 by CASH on 15 Nov 2026?"). */ titleOf?: (form: HTMLFormElement) => string; cancelLabel?: string; lines: string[]; live?: Live[]; confirmLabel: string; name?: string; value?: string; tone?: "primary" | "secondary" | "danger" | "ghost"; size?: "md" | "lg"; disabled?: boolean; className?: string; hook?: string; /** data-* hooks kept on the opening button. */ attrs?: Record<string, string> }) {
   const btn = useRef<HTMLSpanElement>(null);
   const [open, setOpen] = useState(false);
   const [words, setWords] = useState<string[]>([]);
+  const [shownTitle, setShownTitle] = useState(title);
   const read = (): string[] => {
     const form = btn.current?.closest("form");
     if (!form) return [];
@@ -53,17 +54,17 @@ export function ConfirmSubmit({ label, title, lines, live = [], confirmLabel, na
   return (
     <>
       <span ref={btn} className="contents">
-        <Button type="button" size={size} tone={tone} disabled={disabled} className={className} onClick={() => { const form = btn.current?.closest("form"); if (form && !form.reportValidity()) return; setWords(read()); setOpen(true); }} data-confirm-open={hook} {...attrs}>
+        <Button type="button" size={size} tone={tone} disabled={disabled} className={className} onClick={() => { const form = btn.current?.closest("form"); if (form && !form.reportValidity()) return; setWords(read()); setShownTitle(form && titleOf ? titleOf(form) : title); setOpen(true); }} data-confirm-open={hook} {...attrs}>
           {label}
         </Button>
       </span>
       {open ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label={title} onClick={() => setOpen(false)} onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }} data-confirm-money={hook}>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label={shownTitle} onClick={() => setOpen(false)} onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }} data-confirm-money={hook}>
           <div className="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-3 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-lg font-extrabold">{title}</h2>
+            <h2 className="text-lg font-extrabold" data-confirm-title>{shownTitle}</h2>
             <p className="text-sm font-semibold leading-relaxed" data-confirm-text>{[...lines, ...words].join(" · ")}</p>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" size="lg" tone="secondary" onClick={() => setOpen(false)} data-confirm-cancel autoFocus>Cancel</Button>
+              <Button type="button" size="lg" tone="secondary" onClick={() => setOpen(false)} data-confirm-cancel autoFocus>{cancelLabel}</Button>
               <Button type="button" size="lg" tone={tone === "danger" ? "danger" : "primary"} onClick={submit} data-confirm-yes-money={hook}>{confirmLabel}</Button>
             </div>
           </div>

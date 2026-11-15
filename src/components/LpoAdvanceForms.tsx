@@ -34,7 +34,7 @@ export function PayInAdvanceButton({ poId, poNumber, supplier, suggest, today, d
                     <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Amount paid (incl. VAT)
                       <Input name="amount" defaultValue={v.amount ?? suggest.toFixed(2)} inputMode="decimal" required data-advance-amount />
                     </label>
-                    <div className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">How was it paid?</span><ChoiceButtons name="method" defaultValue="transfer" options={methods} /></div>
+                    <div className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">How was it paid?</span><ChoiceButtons name="method" required options={methods} /></div>
                     <div className="grid grid-cols-2 gap-2">
                       <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Date<Input type="date" name="paid_on" defaultValue={v.paid_on ?? today} max={today} required data-advance-date /></label>
                       <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Reference (optional)<Input name="reference" defaultValue={v.reference ?? ""} placeholder="transfer ref, cheque no…" data-advance-reference /></label>

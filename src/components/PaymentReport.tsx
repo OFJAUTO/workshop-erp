@@ -41,14 +41,14 @@ export function PaymentReportButton({ jobId = null, estimateId = null, balance, 
   );
 }
 
-function ReportDialog({ jobId = null, estimateId = null, balance, expected, replaces, onClose }: { jobId?: string | null; estimateId?: string | null; balance: number | null; expected: string | null; replaces: PaymentReport | null; onClose: () => void }) {
+function ReportDialog({ jobId = null, estimateId = null, balance, replaces, onClose }: { jobId?: string | null; estimateId?: string | null; balance: number | null; expected: string | null; replaces: PaymentReport | null; onClose: () => void }) {
   const router = useRouter();
   const place = jobId ?? estimateId ?? "";
   const tag = `payreport:${place}`;
   const { key } = useFormKey(tag, place);
   // An estimate's slip goes to its own place (no job yet): sent by THE queue, Send works once it has arrived.
   const [estSlip, setEstSlip] = useState(false);
-  const [method, setMethod] = useState<string>(replaces?.method ?? (expected && (PAYMENT_METHODS as readonly string[]).includes(expected) ? expected : "card"));
+  const [method, setMethod] = useState<string>(replaces?.method ?? "");
   const [authCode, setAuthCode] = useState(replaces?.authCode ?? "");
   const [reference, setReference] = useState(replaces?.reference ?? "");
   const [note, setNote] = useState(replaces?.note ?? "");
@@ -162,7 +162,7 @@ function ReportDialog({ jobId = null, estimateId = null, balance, expected, repl
             ) : null}
             {state?.error && state.at !== errorSeen ? <p className="text-sm font-semibold text-red" data-report-error>{state.error}<ReleaseFormLock key={state.at} /></p> : null}
             <div className="flex flex-wrap items-center gap-2">
-              <Button type="submit" size="lg" disabled={!key || !hasPhoto || pending} data-report-send>{pending ? "Sending…" : "Send to accounts"}</Button>
+              <Button type="submit" size="lg" disabled={!key || !method || !hasPhoto || pending} data-report-send>{pending ? "Sending…" : "Send to accounts"}</Button>
               <span className="text-xs text-muted">Accounts and the owner are told at once.</span>
             </div>
           </form>

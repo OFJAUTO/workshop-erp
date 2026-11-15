@@ -615,8 +615,10 @@ export async function markSupplierPaid(poId: string, formData: FormData) {
   if (twicePaid) redirect(`${back}?error=${encodeURIComponent(`Cannot mark paid: ${twicePaid}`)}`);
   const reference = blankToNull(formData.get("reference"));
   // How it was paid (bank transfer unless chosen otherwise) — the Zoho payment uses this method and its mapped account.
-  const methodRaw = String(formData.get("method") ?? "transfer");
-  const method = SUPPLIER_PAY_METHODS.some((m) => m.key === methodRaw) ? methodRaw : "transfer";
+  // 15 November 2026 (Section 5): the method is chosen by the person, never assumed.
+  const methodRaw = String(formData.get("method") ?? "");
+  if (!SUPPLIER_PAY_METHODS.some((m) => m.key === methodRaw)) redirect(`${back}?error=${encodeURIComponent("Choose how it was paid (cash, card, transfer or cheque).")}#paid`);
+  const method = methodRaw;
   const methodLabel = SUPPLIER_PAY_METHODS.find((m) => m.key === method)!.label;
   // The proof (bank slip, card slip, signed receipt or cheque copy): with the payment, or uploaded on the LPO later.
   // 31 October 2026: the page sends it straight to storage first (it waits on the device without signal) and hands over

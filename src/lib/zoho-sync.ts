@@ -1815,9 +1815,9 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
  */
 async function syncSupplierPayRow(org: string, accounts: Resolved, paymentId: string): Promise<HandlerOut> {
   const admin = createAdminClient();
-  const { data: pRow } = await admin.from("supplier_payments").select("id, number, supplier_id, supplier_name, paid_on, method, reference, amount_aed, excess_kind, fee_aed, status, zoho_payment_id, zoho_fee_expense_id").eq("id", paymentId).maybeSingle();
+  const { data: pRow } = await admin.from("supplier_payments").select("id, number, supplier_id, supplier_name, paid_on, method, reference, amount_aed, excess_kind, fee_aed, status, zoho_payment_id, zoho_fee_expense_id, edit_history").eq("id", paymentId).maybeSingle();
   if (!pRow) return { result: { skipped: "The payment no longer exists in the ERP." } };
-  const pay = pRow as { id: string; number: string; supplier_id: string | null; supplier_name: string; paid_on: string; method: string; reference: string | null; amount_aed: number; excess_kind: string | null; fee_aed: number; status: string; zoho_payment_id: string | null; zoho_fee_expense_id: string | null };
+  const pay = pRow as { id: string; number: string; supplier_id: string | null; supplier_name: string; paid_on: string; method: string; reference: string | null; amount_aed: number; excess_kind: string | null; fee_aed: number; status: string; zoho_payment_id: string | null; zoho_fee_expense_id: string | null; edit_history: { zoho?: string; reposted_at?: string }[] | null };
   if (pay.status === "void") {
     if (!pay.zoho_payment_id) return { result: { skipped: "Voided in the ERP before it reached Zoho: nothing to post." } };
     let gone = false;
@@ -1830,6 +1830,28 @@ async function syncSupplierPayRow(org: string, accounts: Resolved, paymentId: st
     if (!gone) await zohoFetch(`/vendorpayments/${encodeURIComponent(pay.zoho_payment_id)}`, { org, method: "DELETE" });
     await admin.from("supplier_payments").update({ zoho_payment_id: null }).eq("id", pay.id);
     return { zohoId: pay.zoho_payment_id, result: { payment: pay.number, reversed: gone ? "already removed in Zoho" : "removed from Zoho", reversed_at: new Date().toISOString() } };
+  }
+  // 15 November 2026 (Section 5): "Correct this payment" changed its method, date or reference after it reached Zoho:
+  // the old vendor payment (and its fee expense) is taken back, then the corrected one is posted below.
+  const history = Array.isArray(pay.edit_history) ? pay.edit_history : [];
+  const repostAt = history.findIndex((h) => h && h.zoho === "repost" && !h.reposted_at);
+  let reposted = false;
+  if (repostAt >= 0 && pay.zoho_payment_id) {
+    let gone = false;
+    try {
+      await zohoFetch(`/vendorpayments/${encodeURIComponent(pay.zoho_payment_id)}`, { org });
+    } catch (e) {
+      if (e instanceof ZohoError && /not exist|not found|invalid.*payment/i.test(e.message)) gone = true;
+      else throw e;
+    }
+    if (!gone) await zohoFetch(`/vendorpayments/${encodeURIComponent(pay.zoho_payment_id)}`, { org, method: "DELETE" });
+    if (pay.zoho_fee_expense_id) {
+      try { await zohoFetch(`/expenses/${encodeURIComponent(pay.zoho_fee_expense_id)}`, { org, method: "DELETE" }); } catch (e) { if (!(e instanceof ZohoError && /not exist|not found/i.test(e.message))) throw e; }
+    }
+    await admin.from("supplier_payments").update({ zoho_payment_id: null, zoho_fee_expense_id: null }).eq("id", pay.id);
+    pay.zoho_payment_id = null;
+    pay.zoho_fee_expense_id = null;
+    reposted = true;
   }
   const gate = await startDateSkip(pay.paid_on, "supplierpay", pay.id);
   if (gate) return gate;
@@ -1917,7 +1939,11 @@ async function syncSupplierPayRow(org: string, accounts: Resolved, paymentId: st
   const vp = await zohoFetch<{ vendorpayment?: { amount?: number } }>(`/vendorpayments/${zid}`, { org });
   const zAmount = round2(Number(vp.vendorpayment?.amount) || 0);
   if (Math.abs(zAmount - amount) > 0.004) throw new ZohoError(`Zoho differs: ${zAmount.toFixed(2)} vs ${amount.toFixed(2)} (${(zAmount - amount).toFixed(2)}) on ${pay.number}.`);
-  return { zohoId: zid, result: { payment: pay.number, amount, applied, bills: bills.length, excess: round2(amount - applied), fee, method: SUPPLIER_PAY_METHODS.find((m) => m.key === method)?.label ?? method } };
+  if (repostAt >= 0) {
+    const next = history.map((h, i) => (i === repostAt ? { ...h, reposted_at: new Date().toISOString() } : h));
+    await admin.from("supplier_payments").update({ edit_history: next }).eq("id", pay.id);
+  }
+  return { zohoId: zid, result: { payment: pay.number, amount, applied, bills: bills.length, excess: round2(amount - applied), fee, method: SUPPLIER_PAY_METHODS.find((m) => m.key === method)?.label ?? method, ...(reposted ? { reposted: "taken back and posted again after a correction" } : {}) } };
 }
 
 async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string): Promise<HandlerOut> {

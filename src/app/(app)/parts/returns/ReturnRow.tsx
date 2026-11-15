@@ -89,7 +89,7 @@ export function ReturnRow({ r, today, canParts, canMoney, isOwner }: { r: Purcha
             <label className="flex w-36 flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Before VAT</span><Input name="credit_net" inputMode="decimal" required data-return-cn-net /></label>
             <label className="flex w-32 flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">VAT as printed</span><Input name="credit_vat" inputMode="decimal" defaultValue="0" data-return-cn-vat /></label>
             <label className="flex w-36 flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Restocking fee</span><Input name="restock_fee" inputMode="decimal" defaultValue="0" data-return-fee /></label>
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Fee goes to</span><select name="cost_to" className="min-h-11 rounded-control border border-line px-2" defaultValue="overhead"><option value="overhead">Overhead</option><option value="job">The job</option></select></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Fee goes to</span><select name="cost_to" required className="min-h-11 rounded-control border border-line px-2" defaultValue=""><option value="" disabled>Choose…</option><option value="overhead">Overhead</option><option value="job">The job</option></select></label>
           </div>
           {r.jobId ? <JobFileUpload jobId={r.jobId} kind="supplier_invoice" refId={r.id} files={[]} label="Scan of the credit note" caption={`Credit note for ${r.number}`} /> : null}
           <Button type="submit" size="md" disabled={busy} data-return-cn-save>{busy ? "Saving…" : "Save the credit"}</Button>
@@ -97,7 +97,7 @@ export function ReturnRow({ r, today, canParts, canMoney, isOwner }: { r: Purcha
       ) : null}
       {open === "refund" ? (
         <form action={run((fd) => recordReturnRefund(r.id, fd))} className="flex flex-wrap items-end gap-3 rounded-card border border-line p-3" data-return-form="refund">
-          <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">How</span><select name="refund_method" className="min-h-11 rounded-control border border-line px-2" defaultValue="transfer"><option value="transfer">Transfer</option><option value="cheque">Cheque</option><option value="cash">Cash</option><option value="card">Card</option></select></label>
+          <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">How</span><select name="refund_method" required className="min-h-11 rounded-control border border-line px-2" defaultValue=""><option value="" disabled>Choose…</option><option value="transfer">Transfer</option><option value="cheque">Cheque</option><option value="cash">Cash</option><option value="card">Card</option></select></label>
           <MoneyDate name="refund_date" label="Refund date" defaultValue="" max={today} />
           <label className="flex w-36 flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Amount</span><Input name="refund_amount" inputMode="decimal" required /></label>
           <label className="flex w-36 flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Restocking fee</span><Input name="restock_fee" inputMode="decimal" defaultValue="0" /></label>
@@ -113,7 +113,7 @@ export function ReturnRow({ r, today, canParts, canMoney, isOwner }: { r: Purcha
       {open === "refused" ? (
         <form action={run((fd) => markReturnRefused(r.id, fd))} className="flex flex-wrap items-end gap-3 rounded-card border border-line p-3" data-return-form="refused">
           <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">The part</span><select name="refused_action" className="min-h-11 rounded-control border border-line px-2" defaultValue="stock" data-return-refused-action><option value="stock">Back to our stock at cost</option><option value="write_off">Write it off (owner approves)</option></select></label>
-          <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Cost goes to</span><select name="cost_to" className="min-h-11 rounded-control border border-line px-2" defaultValue="overhead"><option value="overhead">Overhead</option><option value="job">The job</option></select></label>
+          <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Cost goes to</span><select name="cost_to" required className="min-h-11 rounded-control border border-line px-2" defaultValue=""><option value="" disabled>Choose…</option><option value="overhead">Overhead</option><option value="job">The job</option></select></label>
           <label className="flex min-w-64 flex-1 flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Why the supplier refused</span><Input name="note" required minLength={3} data-return-refused-note /></label>
           <Button type="submit" size="md" tone="danger" disabled={busy} data-return-refused-save>Save: refused</Button>
         </form>

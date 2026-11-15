@@ -582,7 +582,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {seesPay && !isMain && po.status !== "pending_approval" && po.status !== "cancelled" && (po.supplier_invoice_status !== "none" || invoiceFiles.length > 0 || po.status === "received") ? (
             <Card className="flex flex-col gap-3 scroll-mt-4" id="paid" data-supplier-pay>
               <SectionLabel>{po.job_id ? <>Invoice files &amp; payment</> : "Payment"}</SectionLabel>
-              <SupplierPaymentHistory rows={payHistory} canChange={canPay} />
+              <SupplierPaymentHistory rows={payHistory} canChange={canPay} today={todayDubai} poId={po.id} />
               {po.job_id ? <InvoiceFiles jobId={po.job_id} poId={po.id} files={invoiceFiles} canEdit={canPay} /> : <p className="text-xs text-muted" data-stock-order-pay>Stock order (no car): the supplier invoice is the one entered when the order was received.</p>}
               {po.supplier_paid_at ? (
                 <div className="flex flex-col gap-2">
@@ -620,7 +620,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                   <form action={markSupplierPaid.bind(null, po.id)} className="flex flex-col gap-3" data-pay-form>
                     <div data-pay-method>
                       <span className="text-xs font-semibold text-muted">How was it paid?</span>
-                      <ChoiceButtons name="method" defaultValue="transfer" columns={4} options={SUPPLIER_PAY_METHODS.map((m) => ({ value: m.key, label: m.label }))} />
+                      <ChoiceButtons name="method" required columns={4} options={SUPPLIER_PAY_METHODS.map((m) => ({ value: m.key, label: m.label }))} />
                       <p className="text-xs text-muted pt-1">Paid from in Zoho — {paidFromWords}</p>
                     </div>
                     <label className="flex flex-col gap-1 max-w-md"><span className="text-xs font-semibold text-muted">Payment reference (optional)</span><Input name="reference" placeholder="transfer ref, cheque no…" /></label>
@@ -630,7 +630,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                       <SupplierProofUpload poId={po.id} inForm />
                     </div>
                     <div className="border-t border-line pt-3">
-                      <ConfirmSubmit label="Paid to supplier" title="Record the payment to the supplier?" lines={[`Record payment to ${po.supplier_name}`, `invoice ${po.supplier_invoice_number ?? ""}`, payWords]} live={[{ field: "method" }, { label: "ref", field: "reference" }, { field: "proof_path", proof: true }]} confirmLabel="Yes, record payment" hook="supplier-paid" />
+                      <ConfirmSubmit label="Paid to supplier" cancelLabel="GO BACK AND EDIT" title="Record the payment to the supplier?" lines={[`Record payment to ${po.supplier_name}`, `invoice ${po.supplier_invoice_number ?? ""}`, payWords]} live={[{ field: "method" }, { label: "ref", field: "reference" }, { field: "proof_path", proof: true }]} confirmLabel="Yes, record payment" hook="supplier-paid" />
                     </div>
                   </form>
                 )

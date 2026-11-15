@@ -5,7 +5,7 @@ import { lpoAmounts, supplierVatLookup } from "./supplier-vat";
 import { loadLpoInvoices, lpoInvoiceGross, lpoInvoicesReady } from "./lpo-invoices";
 import { payKeyOf, splitPayKey } from "./lpo-invoice-rules";
 import { schemaReady } from "./schema-ready";
-import { advanceLeft, checkAdvanceUses, checkAllocations, type AdvanceUse, type Allocation, type OpenInvoice, type SupplierPayMethod, SUPPLIER_PAY_METHOD_KEYS } from "./supplier-payment-rules";
+import { advanceLeft, checkAdvanceUses, checkAllocations, type AdvanceUse, type Allocation, type OpenInvoice, type SupplierPayMethod, SUPPLIER_PAY_METHOD_KEYS, SUPPLIER_PAY_METHOD_LABELS } from "./supplier-payment-rules";
 
 /**
  * SUPPLIER PAYMENTS, the server half (6 November 2026, Section 4). THE supplier balance and its open invoices, the
@@ -263,18 +263,19 @@ export async function recordSupplierPayment(input: SupplierPaymentInput, by: { i
 }
 
 /** The payments that put money on one LPO (its history on the LPO page), newest first. */
-export async function paymentsOnPo(poId: string): Promise<{ id: string; number: string; paidOn: string; method: string; reference: string | null; amount: number; onThis: number; status: string; voidReason: string | null; laterAdvance: boolean; lineId: string }[]> {
+export async function paymentsOnPo(poId: string): Promise<{ id: string; number: string; paidOn: string; method: string; reference: string | null; amount: number; onThis: number; status: string; voidReason: string | null; laterAdvance: boolean; lineId: string; edits: { at: string; by: string; remark: string; changes: { field: string; old: string; new: string }[] }[] }[]> {
   if (!(await supplierPaymentsReadyNow())) return [];
   const admin = createAdminClient();
   const { data: lines } = await admin.from("supplier_payment_lines").select("id, payment_id, amount_aed, applied_later").eq("po_id", poId).eq("is_active", true);
   const rows = (lines ?? []) as { id: string; payment_id: string; amount_aed: number; applied_later: boolean }[];
   if (!rows.length) return [];
-  const { data: pays } = await admin.from("supplier_payments").select("id, number, paid_on, method, reference, amount_aed, status, void_reason").in("id", Array.from(new Set(rows.map((r) => r.payment_id))));
-  const byId = new Map(((pays ?? []) as { id: string; number: string; paid_on: string; method: string; reference: string | null; amount_aed: number; status: string; void_reason: string | null }[]).map((p) => [p.id, p]));
+  const { data: pays } = await admin.from("supplier_payments").select("id, number, paid_on, method, reference, amount_aed, status, void_reason, edit_history").in("id", Array.from(new Set(rows.map((r) => r.payment_id))));
+  type Edit = { at: string; by: string; remark: string; changes: { field: string; old: string; new: string }[] };
+  const byId = new Map(((pays ?? []) as { id: string; number: string; paid_on: string; method: string; reference: string | null; amount_aed: number; status: string; void_reason: string | null; edit_history: Edit[] | null }[]).map((p) => [p.id, p]));
   return rows
     .map((r) => {
       const p = byId.get(r.payment_id);
-      return p ? { id: p.id, number: p.number, paidOn: p.paid_on, method: p.method, reference: p.reference, amount: Number(p.amount_aed), onThis: Number(r.amount_aed), status: p.status, voidReason: p.void_reason, laterAdvance: !!r.applied_later, lineId: r.id } : null;
+      return p ? { id: p.id, number: p.number, paidOn: p.paid_on, method: p.method, reference: p.reference, amount: Number(p.amount_aed), onThis: Number(r.amount_aed), status: p.status, voidReason: p.void_reason, laterAdvance: !!r.applied_later, lineId: r.id, edits: (p.edit_history ?? []).filter((e) => e && Array.isArray(e.changes) && !e.changes.some((c) => c.field === "status")) } : null;
     })
     .filter((x): x is NonNullable<typeof x> => !!x)
     .sort((a, b) => b.paidOn.localeCompare(a.paidOn));
@@ -390,4 +391,44 @@ export async function proofsByInvoiceKey(poIds: string[]): Promise<Map<string, s
     if (!out.has(key)) out.set(key, proof);
   }
   return out;
+}
+
+export type PaymentCorrection = { method: string; paidOn: string; reference: string | null; proofPath: string | null; reason: string };
+
+/**
+ * "Correct this payment" (15 November 2026, Section 5): accounts or the owner change a recorded supplier payment's
+ * METHOD, DATE, REFERENCE or PROOF with a reason. The old values stay in its history (who, when, old, new). The amount
+ * and the supplier never change this way (void it and record a new payment). A payment already in Zoho is taken back
+ * and posted again at the next Sync to Zoho, so the cash and bank accounts follow (OFJ TEST until go-live).
+ */
+export async function correctSupplierPayment(paymentId: string, c: PaymentCorrection, by: { id: string; display_name: string; role_id: string }): Promise<{ error?: string; words?: string }> {
+  if (!(by.role_id === "owner" || by.role_id === "accounts")) return { error: "Only the owner or accounts correct a supplier payment." };
+  const reason = c.reason.trim();
+  if (reason.length < 5) return { error: "Write why it is corrected (a few words) – it stays in the history." };
+  if (!SUPPLIER_PAY_METHOD_KEYS.includes(c.method as SupplierPayMethod)) return { error: "Choose how it was really paid." };
+  const today = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(c.paidOn) || c.paidOn > today) return { error: "Pick the real payment date (not in the future)." };
+  const admin = createAdminClient();
+  const { data: raw } = await admin.from("supplier_payments").select("id, number, status, method, paid_on, reference, proof_path, edit_history, zoho_payment_id").eq("id", paymentId).maybeSingle();
+  const pay = raw as { id: string; number: string; status: string; method: string; paid_on: string; reference: string | null; proof_path: string | null; edit_history: unknown[] | null; zoho_payment_id: string | null } | null;
+  if (!pay || pay.status !== "recorded") return { error: "This payment is voided or gone: nothing to correct." };
+  const label = (k: string) => (SUPPLIER_PAY_METHOD_LABELS as Record<string, string>)[k] ?? k;
+  const ref = c.reference?.trim() || null;
+  const changes: { field: string; old: string; new: string }[] = [];
+  if (pay.method !== c.method) changes.push({ field: "Method", old: label(pay.method), new: label(c.method) });
+  if (String(pay.paid_on).slice(0, 10) !== c.paidOn) changes.push({ field: "Date", old: String(pay.paid_on).slice(0, 10), new: c.paidOn });
+  if ((pay.reference ?? "") !== (ref ?? "")) changes.push({ field: "Reference", old: pay.reference ?? "", new: ref ?? "" });
+  if (c.proofPath && c.proofPath !== pay.proof_path) changes.push({ field: "Proof", old: pay.proof_path ? "a proof" : "none", new: "new proof" });
+  if (!changes.length) return { words: "Nothing changed." };
+  const repost = !!pay.zoho_payment_id && changes.some((x) => x.field !== "Proof");
+  const entry = { at: new Date().toISOString(), by: by.display_name, by_id: by.id, remark: reason, changes, ...(repost ? { zoho: "repost" } : {}) };
+  const { error } = await admin.from("supplier_payments").update({ method: c.method, paid_on: c.paidOn, reference: ref, ...(c.proofPath ? { proof_path: c.proofPath } : {}), edit_history: [...(pay.edit_history ?? []), entry], updated_by: by.id }).eq("id", paymentId).eq("status", "recorded");
+  if (error) return { error: "Couldn't save – nothing was changed. Try again or tell the owner." };
+  // The LPOs it paid carry the same facts on their "Paid to supplier" line.
+  await admin.from("purchase_orders").update({ supplier_paid_method: c.method === "link" ? "card" : c.method, supplier_paid_reference: [pay.number, ref].filter(Boolean).join(" · ").slice(0, 120), ...(c.proofPath ? { supplier_paid_proof_path: c.proofPath, supplier_paid_proof_at: new Date().toISOString(), supplier_paid_proof_by: by.id } : {}), updated_by: by.id }).eq("supplier_payment_id", paymentId);
+  if (repost) {
+    const { reopenZoho } = await import("./zoho-sync");
+    await reopenZoho("supplierpay", paymentId);
+  }
+  return { words: `${pay.number} corrected (${changes.map((x) => `${x.field}: ${x.old || "—"} → ${x.new || "—"}`).join("; ")}).${repost ? " Its Zoho payment is taken back and posted again at the next Sync to Zoho." : ""}` };
 }
