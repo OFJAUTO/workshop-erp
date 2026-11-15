@@ -1685,9 +1685,12 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   if (partsRate < -0.005) throw new ZohoError(`${po.number}: the invoice amount entered (${expectedNet.toFixed(2)}) is less than the courier/freight charges on it (${chargesSum.toFixed(2)}): check the figures on the LPO page.`);
   const purchases = needAccounts(accounts.purchases, accounts.purchasesError);
   const flagged = lines.filter((l) => l.check && l.check !== "match");
+  // 15 November 2026: the other references typed at receiving (pre-payment parts invoice, WIP) go on the bill as well.
+  const otherRefs = await receiptRefsWords(po.id, po.supplier_invoice_number);
   const notes = cut(
     [
       `ERP ${po.number}`,
+      ...otherRefs,
       ...(useEntered ? [`Entered invoice total ${expectedNet.toFixed(2)} (the LPO lines sum to ${linesTotal.toFixed(2)})`] : []),
       ...flagged.map((l) => `Price differs from the LPO — ${l.description}: LPO ${l.lpoUnit.toFixed(2)}, invoice ${l.unit.toFixed(2)} (${l.check})`),
     ].join("\n"),
@@ -2902,4 +2905,16 @@ export async function retrySupplierRows(supplierId: string): Promise<number> {
     await logAppError("zoho_supplier_retry", e, { detail: { supplierId } });
     return 0;
   }
+}
+
+/** The receipts' references of an LPO other than the bill's own number, in words for the Zoho bill (15 November 2026). */
+async function receiptRefsWords(poId: string, billNumber: string | null): Promise<string[]> {
+  const { receiptsReady, refsReady, receiptRefTypes } = await import("./receipts");
+  if (!(await receiptsReady()) || !(await refsReady())) return [];
+  const { refLabel, refsOfRow } = await import("./receipt-refs");
+  const { data } = await createAdminClient().from("part_receipts").select("invoice_number, refs").eq("po_id", poId).eq("is_active", true);
+  const types = await receiptRefTypes();
+  const out = new Set<string>();
+  for (const r of (data ?? []) as { invoice_number: string | null; refs: unknown }[]) for (const x of refsOfRow(r)) if (!(x.type === "invoice" && x.number === billNumber)) out.add(refLabel(types, x.type) + ": " + x.number);
+  return Array.from(out);
 }

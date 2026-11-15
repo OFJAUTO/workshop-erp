@@ -1,5 +1,6 @@
 "use client";
-import { ReceiptInvoiceFields, type ReceiptSupplier } from "@/components/ReceiptInvoiceFields";
+import { ReceiptInvoiceFields, receiptCheckWords, type ReceiptSupplier } from "@/components/ReceiptInvoiceFields";
+import type { RefType } from "@/lib/receipt-refs";
 import { CheckBeforeSend, type CheckLine } from "@/components/CheckBeforeSend";
 import { flagsOf } from "@/lib/send-check-rules";
 import { logSendCheckAction } from "../../send-check-actions";
@@ -32,11 +33,11 @@ export function LinePrices({ lines, word }: { lines: Pick<Line, "id" | "descript
 }
 
 /** Receiving: a quantity per line, partial allowed, wrong or damaged flagged for return. The invoice is NEVER entered here (4 November 2026: accounts collect the paper and scan it). */
-export function ReceiveForm({ lines, action, invoiceOpen = false, receipt = null }: { lines: Line[]; action: (formData: FormData) => void; /** The LPO's invoice is still to come: the note under the form says accounts take it over. */ invoiceOpen?: boolean; /** 13 November 2026: the supplier's invoice number at every receipt (null until the database update). */ receipt?: { supplier: ReceiptSupplier; poId: string; dueOn: string | null } | null }) {
+export function ReceiveForm({ lines, action, invoiceOpen = false, receipt = null }: { lines: Line[]; action: (formData: FormData) => void; /** The LPO's invoice is still to come: the note under the form says accounts take it over. */ invoiceOpen?: boolean; /** 13 November 2026: the supplier's invoice number at every receipt (null until the database update). */ receipt?: { supplier: ReceiptSupplier; poId: string; dueOn: string | null; types?: RefType[] | null } | null }) {
   const [flags, setFlags] = useState<Record<string, string>>({});
   // 13 November 2026: CHECK BEFORE YOU SEND - what is being received, the invoice number typed and the photo taken.
   const formRef = useRef<HTMLFormElement>(null);
-  const [check, setCheck] = useState<{ lines: CheckLine[]; number: string; later: boolean; photo: string | null; noPaper: boolean } | null>(null);
+  const [check, setCheck] = useState<{ lines: CheckLine[]; number: string; later: boolean; label: string; photo: string | null; noPaper: boolean } | null>(null);
   const openCheck = () => {
     const form = formRef.current;
     if (!form) return;
@@ -47,8 +48,7 @@ export function ReceiveForm({ lines, action, invoiceOpen = false, receipt = null
     const paper = fd.get("receipt_paper");
     setCheck({
       lines: typed.map(({ l, qty }) => ({ key: l.id, name: l.description, partNumber: l.part_number, qty, price: l.unit_cost, flags: [...(pure[l.id] ?? []), ...extra(l, qty)] })),
-      number: String(fd.get("receipt_invoice_number") ?? "").trim(),
-      later: fd.get("receipt_invoice_later") === "1",
+      ...receiptCheckWords(fd),
       photo: paper instanceof File && paper.size && paper.type.startsWith("image/") ? URL.createObjectURL(paper) : null,
       noPaper: !!fd.get("receipt_no_paper"),
     });
@@ -81,7 +81,7 @@ export function ReceiveForm({ lines, action, invoiceOpen = false, receipt = null
           );
         })}
       </ul>
-      {receipt ? <ReceiptInvoiceFields supplier={receipt.supplier} poIds={[receipt.poId]} dueOn={receipt.dueOn} /> : invoiceOpen ? <p className="text-xs text-muted" data-receive-invoice-note>The supplier&apos;s invoice is NOT entered here: keep the paper at the desk – accounts collect and scan it (they are told the moment you save).</p> : null}
+      {receipt ? <ReceiptInvoiceFields supplier={receipt.supplier} poIds={[receipt.poId]} dueOn={receipt.dueOn} types={receipt.types ?? null} /> : invoiceOpen ? <p className="text-xs text-muted" data-receive-invoice-note>The supplier&apos;s invoice is NOT entered here: keep the paper at the desk – accounts collect and scan it (they are told the moment you save).</p> : null}
       <div><Button type={receipt ? "button" : "submit"} onClick={receipt ? openCheck : undefined} size="md" data-record-delivery>Record the delivery</Button></div>
       {receipt ? (
         <CheckBeforeSend
@@ -90,7 +90,7 @@ export function ReceiveForm({ lines, action, invoiceOpen = false, receipt = null
           groups={[{ title: receipt.supplier.name, lines: check?.lines ?? [] }]}
           extra={check ? (
             <div className="flex flex-col gap-1 rounded-card border border-line p-3 text-sm" data-check-receipt>
-              <span className="font-bold" data-check-invoice>{check.later ? "Invoice comes later" : check.number ? `Supplier invoice number: ${check.number}` : "No invoice number typed"}</span>
+              <span className="font-bold" data-check-invoice>{check.later ? "ARRIVED - PAPERWORK PENDING (the reference is typed later)" : check.number ? `${check.label}: ${check.number}` : "No reference typed"}</span>
               {/* eslint-disable-next-line @next/next/no-img-element -- a local preview of the photo just taken */}
               {check.photo ? <img src={check.photo} alt="Delivery paper" className="max-h-40 w-auto self-start rounded-control border border-line" data-check-photo /> : check.later ? <span className="text-xs">{check.noPaper ? "No paper came with the part" : "No photo taken"}</span> : null}
             </div>

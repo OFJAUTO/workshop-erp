@@ -41,6 +41,9 @@ export async function checkInvoiceAction(key: string, formData?: FormData) {
   if (row === undefined) return to({ error: READ_FAILED });
   if (!row) return to({ error: "That invoice is no longer on the list." });
   if (row.status === "waiting") return to({ error: "The invoice has not arrived yet: Parts enter it when it comes." });
+  // 15 November 2026: an LPO is not closed while a delivery on it is "Arrived - paperwork pending".
+  const paperwork = await (await import("@/lib/receipts")).paperworkBlockFor(row.shares.map((x) => x.poId));
+  if (paperwork) return to({ error: `Not checked: ${paperwork}` });
   const { count: waitingOwner } = await createAdminClient().from("purchase_order_lines").select("id", { count: "exact", head: true }).in("po_id", row.shares.map((s) => s.poId)).eq("invoice_check", "mismatch").eq("is_active", true);
   if ((waitingOwner ?? 0) > 0) return to({ error: "A price went up above the limit: it waits for the owner's OK (or Query with supplier) before the bill goes to Zoho." });
   const admin = createAdminClient();

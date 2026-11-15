@@ -186,6 +186,8 @@ const DEFAULTS = {
   recovery_companies: [] as string[],
   /** The normal recovery price per kind of truck (see recoveryRatesOf in src/lib/recovery.ts) and the flag percent. */
   recovery_rates: {} as unknown,
+  /** 15 November 2026: the references a delivery may be recorded with, and whether each counts as the supplier's invoice. */
+  supplier_ref_types: null as unknown,
   recovery_flag_percent: 25,
   /** A supplier invoice price above the approved LPO is accepted at once up to the higher of these per LPO (1 November 2026). */
   supplier_price_auto_percent: 5,

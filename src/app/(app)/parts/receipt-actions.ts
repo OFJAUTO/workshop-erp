@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireStaff } from "@/lib/auth";
 import { formValues, type FormState } from "@/lib/form-state";
-import { askRetake, lposWithNumber, replaceReceiptFile, setReceiptNumber } from "@/lib/receipts";
+import { askRetake, lposWithNumber, replaceReceiptFile, setReceiptNumber, setReceiptRef } from "@/lib/receipts";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { laterDays } from "@/lib/receipt-rules";
 
@@ -25,6 +25,17 @@ export async function receiptNumberAction(receiptId: string, poId: string, _s: F
   const staff = await requireStaff();
   if (staff.viewingAs) return { error: "View as is read-only." };
   const r = await setReceiptNumber(receiptId, String(formData.get("number") ?? ""), formData.get("same_ok") === "on", actor(staff));
+  if (r.error) return { error: r.error, values: formValues(formData) };
+  refresh(poId);
+  return { success: r.words };
+}
+
+/** 15 November 2026: add a reference (type + number) to a receipt, or change one's type or number (logged). */
+export async function receiptRefAction(receiptId: string, poId: string, _s: FormState, formData: FormData): Promise<FormState> {
+  const staff = await requireStaff();
+  if (staff.viewingAs) return { error: "View as is read-only." };
+  const raw = String(formData.get("replace") ?? "");
+  const r = await setReceiptRef(receiptId, { type: String(formData.get("type") ?? "invoice"), number: String(formData.get("number") ?? ""), replace: raw === "" ? null : Number(raw), sameOk: formData.get("same_ok") === "on" }, actor(staff));
   if (r.error) return { error: r.error, values: formValues(formData) };
   refresh(poId);
   return { success: r.words };

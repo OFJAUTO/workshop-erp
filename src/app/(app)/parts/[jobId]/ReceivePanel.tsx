@@ -4,7 +4,8 @@ import { PositionsLine } from "@/components/PositionsLine";
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui";
-import { ReceiptInvoiceFields, type ReceiptSupplier } from "@/components/ReceiptInvoiceFields";
+import type { RefType } from "@/lib/receipt-refs";
+import { ReceiptInvoiceFields, receiptCheckWords, type ReceiptSupplier } from "@/components/ReceiptInvoiceFields";
 import { CheckBeforeSend } from "@/components/CheckBeforeSend";
 import { logSendCheckAction } from "../send-check-actions";
 
@@ -18,7 +19,7 @@ type Action = (formData: FormData) => Promise<{ error?: string; ok?: boolean; me
  * Since 4 November 2026 receiving never asks for the invoice: the supplier's paper goes to ACCOUNTS, who
  * collect it from Parts, scan it and enter it (the received lines read "invoice with accounts" until then).
  */
-export function ReceivePanel({ jobId, rows, received, canAct, action, receiptSuppliers = null }: { jobId: string; rows: ReceiveRow[]; received: ReceivedRow[]; canAct: boolean; action: Action; /** 13 November 2026: per LPO, the supplier and its "invoice later" rule (null until the database update). */ receiptSuppliers?: Record<string, { supplier: ReceiptSupplier; dueOn: string | null }> | null }) {
+export function ReceivePanel({ jobId, rows, received, canAct, action, receiptSuppliers = null }: { jobId: string; rows: ReceiveRow[]; received: ReceivedRow[]; canAct: boolean; action: Action; /** 13 November 2026: per LPO, the supplier and its "invoice later" rule (null until the database update). */ receiptSuppliers?: Record<string, { supplier: ReceiptSupplier; dueOn: string | null; types?: RefType[] | null }> | null }) {
   const router = useRouter();
   const formRef = useRef<HTMLFormElement>(null);
   const [unticked, setUnticked] = useState<Set<string>>(new Set());
@@ -28,11 +29,11 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, receiptSup
   const [pending, start] = useTransition();
   const ticked = rows.filter((r) => !unticked.has(r.id));
   // 13 November 2026: CHECK BEFORE YOU SEND - what is received, the invoice number typed and the photo taken.
-  const [check, setCheck] = useState<{ print: boolean; number: string; later: boolean; photo: string | null; noPaper: boolean } | null>(null);
+  const [check, setCheck] = useState<{ print: boolean; number: string; later: boolean; label: string; photo: string | null; noPaper: boolean } | null>(null);
   const openCheck = (print: boolean) => {
     const fd = formRef.current ? new FormData(formRef.current) : new FormData();
     const paper = fd.get("receipt_paper");
-    setCheck({ print, number: String(fd.get("receipt_invoice_number") ?? "").trim(), later: fd.get("receipt_invoice_later") === "1", photo: paper instanceof File && paper.size && paper.type.startsWith("image/") ? URL.createObjectURL(paper) : null, noPaper: !!fd.get("receipt_no_paper") });
+    setCheck({ print, ...receiptCheckWords(fd), photo: paper instanceof File && paper.size && paper.type.startsWith("image/") ? URL.createObjectURL(paper) : null, noPaper: !!fd.get("receipt_no_paper") });
   };
   const gate = !!receiptSuppliers;
   const toggle = (id: string) => setUnticked((u) => { const n = new Set(u); if (n.has(id)) n.delete(id); else n.add(id); return n; });
@@ -99,7 +100,7 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, receiptSup
                 const first = ticked.find((r) => r.poId && receiptSuppliers[r.poId])!;
                 const s = receiptSuppliers[first.poId!];
                 const pos = Array.from(new Set(ticked.map((r) => r.poId).filter((x): x is string => !!x)));
-                return <ReceiptInvoiceFields key={pos.join(",")} supplier={s.supplier} poIds={pos} dueOn={s.dueOn} />;
+                return <ReceiptInvoiceFields key={pos.join(",")} supplier={s.supplier} poIds={pos} dueOn={s.dueOn} types={s.types ?? null} />;
               })() : <p className="text-xs text-muted" data-receive-invoice-note>The supplier&apos;s invoice is NOT entered here: keep the paper at the desk – accounts collect and scan it (they are told the moment you save).</p>}
               <div className="flex flex-wrap gap-2">
                 <Button type="button" size="lg" disabled={pending} onClick={() => (gate ? openCheck(true) : submit(true))} data-print-stickers>{pending ? "Saving…" : "Print stickers"}</Button>
@@ -116,7 +117,7 @@ export function ReceivePanel({ jobId, rows, received, canAct, action, receiptSup
         groups={Array.from(new Set(ticked.map((r) => r.supplier ?? "No supplier"))).map((s) => ({ title: s, lines: ticked.filter((r) => (r.supplier ?? "No supplier") === s).map((r) => ({ key: r.id, name: r.description, partNumber: null, qty: r.qty, price: null, flags: [] })) }))}
         extra={check ? (
           <div className="flex flex-col gap-1 rounded-card border border-line p-3 text-sm" data-check-receipt>
-            <span className="font-bold" data-check-invoice>{check.later ? "Invoice comes later" : check.number ? `Supplier invoice number: ${check.number}` : "No invoice number typed"}</span>
+            <span className="font-bold" data-check-invoice>{check.later ? "ARRIVED - PAPERWORK PENDING (the reference is typed later)" : check.number ? `${check.label}: ${check.number}` : "No reference typed"}</span>
             {/* eslint-disable-next-line @next/next/no-img-element -- a local preview of the photo just taken */}
             {check.photo ? <img src={check.photo} alt="Delivery paper" className="max-h-40 w-auto self-start rounded-control border border-line" data-check-photo /> : check.later ? <span className="text-xs">{check.noPaper ? "No paper came with the part" : "No photo taken"}</span> : null}
           </div>

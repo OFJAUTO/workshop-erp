@@ -1,7 +1,7 @@
 import "server-only";
-import { loadReceipts } from "@/lib/receipts";
+import { loadReceipts, receiptRefTypes, refsReady } from "@/lib/receipts";
 import { mayCorrectNumber, mayReplaceFile, mayTypeMissingNumber } from "@/lib/receipt-rules";
-import { receiptFileAction, receiptNumberAction, receiptRetakeAction } from "@/app/(app)/parts/receipt-actions";
+import { receiptFileAction, receiptNumberAction, receiptRefAction, receiptRetakeAction } from "@/app/(app)/parts/receipt-actions";
 import { formatDateTime } from "@/lib/format";
 import { ReceiptActions } from "./ReceiptActions";
 import { Card, SectionLabel } from "./ui";
@@ -15,6 +15,7 @@ import { Words } from "./Words";
 export async function ReceiptsCard({ poIds, role, viewingAs, bare = false }: { poIds: string[]; role: string; viewingAs: boolean; /** Inside another card (Supplier invoices): no card of its own. */ bare?: boolean }) {
   const receipts = await loadReceipts(poIds).catch(() => []);
   if (!receipts.length) return null;
+  const types = (await refsReady()) ? await receiptRefTypes() : null;
   const body = (
     <ul className="flex flex-col gap-3" data-receipts>
       {receipts.map((r) => {
@@ -25,11 +26,12 @@ export async function ReceiptsCard({ poIds, role, viewingAs, bare = false }: { p
           <li key={r.id} className={`rounded-md border p-3 flex flex-col gap-2 ${r.overdue ? "border-red-bar border-2" : r.tag ? "border-amber-bar" : "border-line"}`} data-receipt={r.id}>
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <span className="text-sm font-bold"><Words text={`${r.poNumber} · received ${formatDateTime(r.receivedAt)}${r.receivedBy ? ` by ${r.receivedBy}` : ""}`} /></span>
-              {r.number ? (
-                <span className="text-sm font-bold" data-receipt-invoice={r.number}>Invoice {r.number}</span>
-              ) : (
-                <span className={`rounded-full px-2 py-0.5 text-xs font-extrabold ${r.overdue ? "bg-red text-white" : "bg-amber-bar text-ink"}`} data-receipt-due={r.overdue ? "overdue" : "due"}>{r.tag}{r.overdue ? " · OVERDUE" : ""}</span>
+              <span className="flex flex-wrap items-center gap-2">
+                {r.refs.map((x, i) => <span key={i} className="text-sm font-bold" data-receipt-ref={x.type} {...(x.counts && x.number === r.number ? { "data-receipt-invoice": x.number } : {})}>{x.label} {x.number}</span>)}
+              {r.number ? null : (
+                <span className={`rounded-full px-2 py-0.5 text-xs font-extrabold ${r.overdue ? "bg-red text-white" : "bg-amber-bar text-ink"}`} data-receipt-due={r.overdue ? "overdue" : "due"}>{r.tag}</span>
               )}
+              </span>
             </div>
             <p className="text-xs text-muted"><Words text={r.lines.map((l) => `${l.description.toUpperCase()} × ${l.qty}`).join(" · ")} /></p>
             {r.noPaper ? <p className="text-xs font-semibold">No paper came with the part (logged).</p> : null}
@@ -49,7 +51,7 @@ export async function ReceiptsCard({ poIds, role, viewingAs, bare = false }: { p
               <details className="text-xs" data-receipt-history>
                 <summary className="cursor-pointer font-semibold">History ({old.length + r.history.length})</summary>
                 <ul className="mt-1 flex flex-col gap-1">
-                  {r.history.map((h, i) => <li key={`h${i}`}>Number {h.old ?? "(none)"} → {h.new} · {h.by_name}, {formatDateTime(h.at)}</li>)}
+                  {r.history.map((h, i) => <li key={`h${i}`}>{h.old_type || h.new_type ? `${h.old_type ?? ""} ${h.old ?? "(none)"} → ${h.new_type ?? ""} ${h.new}` : `Number ${h.old ?? "(none)"} → ${h.new}`} · {h.by_name}, {formatDateTime(h.at)}</li>)}
                   {old.map((f) => <li key={f.id}>{f.kind === "paper" ? "Delivery paper" : "Invoice"} by {f.by ?? ""} ({formatDateTime(f.at)}) replaced by {f.replacedBy ?? ""}, {formatDateTime(f.replacedAt ?? "")} {f.url ? <a className="underline" href={f.url} target="_blank" rel="noreferrer">open the old file</a> : null}</li>)}
                 </ul>
               </details>
@@ -57,8 +59,11 @@ export async function ReceiptsCard({ poIds, role, viewingAs, bare = false }: { p
             {!viewingAs ? (
               <ReceiptActions
                 number={r.number}
-                canNumber={r.number ? mayCorrectNumber(role) : mayTypeMissingNumber(role)}
-                correcting={!!r.number}
+                canNumber={r.refs.length || r.number ? mayCorrectNumber(role) : mayTypeMissingNumber(role)}
+                correcting={!!(r.refs.length || r.number)}
+                refs={r.refs}
+                types={types}
+                refAction={receiptRefAction.bind(null, r.id, r.poId)}
                 fileKinds={kinds}
                 canAskRetake={role === "owner" || role === "accounts"}
                 numberAction={receiptNumberAction.bind(null, r.id, r.poId)}

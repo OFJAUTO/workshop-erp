@@ -82,7 +82,7 @@ try {
   await receive(parts.page, B.po, B.lines, "", { dropRequired: true });
   check("2a: no invoice number: refused in plain words", /invoice number/i.test(urlOf(parts.page)) && /error=/.test(parts.page.url()), urlOf(parts.page).slice(-160));
   check("2b: nothing was received", (await sql("select count(*)::int as n from public.part_receipts where po_id = $1", [B.po]))[0].n === 0 && (await sql("select status from public.purchase_orders where id = $1", [B.po]))[0].status === "ordered");
-  check("2c: no \"Invoice comes later\" button for a normal supplier", (await parts.page.locator("[data-receipt-later-button]").count()) === 0);
+  check("2c: since 15 Nov a normal supplier also gets \"Arrived - paperwork pending\" (it never blocks)", (await parts.page.locator("[data-receipt-later-button]").count()) === 1);
 
   // 3. "Same invoice as LPO-…?": the number already used for this supplier asks instead of refusing.
   await receive(parts.page, B.po, B.lines, "INV-E2E-1002");
@@ -111,7 +111,7 @@ try {
   const paperFile = (await sql("select count(*)::int as n from public.receipt_files where receipt_id = $1 and kind = 'paper'", [later?.id]))[0]?.n;
   check("4b: saved with the exception: due in 5 days, the delivery paper's photo kept", later?.invoice_later === true && later?.due === dubai(5) && paperFile === 1, JSON.stringify(later));
   await go(parts.page, `${base}/parts/orders/${C.po}`);
-  check("4c: the receipt is tagged \"INVOICE DUE BY <date>\"", /^INVOICE DUE BY \d{2} [A-Z]{3} \d{4}/.test(await text(parts.page, "[data-receipt-due]")));
+  check("4c: the receipt is tagged \"INVOICE DUE BY <date>\"", /(PAPERWORK|INVOICE) DUE BY \d{2} [A-Z]{3} \d{4}/.test(await text(parts.page, "[data-receipt-due]")));
   await parts.page.locator("[data-receipts-card]").screenshot({ path: path.join(OUT, "4-due-tag-1440.png") });
 
   // 5. Reminders: day 3, day 5, then every day while overdue - to the parts desk and accounts (the date moved forward).
@@ -138,7 +138,7 @@ try {
   // 6. The parts desk types the number later: the reminder stops.
   await go(parts.page, `${base}/parts/orders/${C.po}`);
   const rc = parts.page.locator(`[data-receipt="${later.id}"]`);
-  await rc.locator('[data-receipt-action="number"]').click();
+  await rc.locator('[data-receipt-action="add-ref"]').click();
   await rc.locator("[data-receipt-number-input]").fill("INV-E2E-3001");
   await rc.locator("[data-receipt-number-save]").click();
   const typed = await until(async () => (await sql("select invoice_number from public.part_receipts where id = $1 and invoice_number is not null", [later.id]))[0]);
@@ -172,11 +172,11 @@ try {
   await ar3.locator('[data-receipt-action="retake-paper"]').click();
   await ar3.locator("[data-receipt-file-input]").setInputFiles({ name: "paper3.png", mimeType: "image/png", buffer: PNG });
   await ar3.locator("[data-receipt-file-save]").click();
-  const files = await until(async () => { const r = await sql("select kind, replaced_at is not null as old, is_active from public.receipt_files where receipt_id = $1", [later.id]); return r.filter((f) => f.kind === "paper").length >= 3 ? r : null; });
+  const files = await until(async () => { const r = await sql("select kind, replaced_at is not null as old, is_active from public.receipt_files where receipt_id = $1", [later.id]); return r.filter((f) => f.kind === "paper" && f.old).length >= 2 ? r : null; });
   check("7c: accounts replace the photo: the old files stay (nothing deleted), each marked replaced", (files ?? []).filter((f) => f.kind === "paper").length === 3 && (files ?? []).filter((f) => f.kind === "paper" && f.old).length === 2 && (files ?? []).every((f) => f.is_active), JSON.stringify(files));
   await go(acc.page, `${base}/parts/orders/${C.po}`);
   const ar4 = acc.page.locator(`[data-receipt="${later.id}"]`);
-  await ar4.locator('[data-receipt-action="correct"]').click();
+  await ar4.locator('[data-receipt-action="change-ref"]').click();
   await ar4.locator("[data-receipt-number-input]").fill("INV-E2E-3001B");
   await ar4.locator("[data-receipt-number-save]").click();
   const fixed = await until(async () => (await sql("select invoice_number, number_history from public.part_receipts where id = $1 and invoice_number = 'INV-E2E-3001B'", [later.id]))[0]);

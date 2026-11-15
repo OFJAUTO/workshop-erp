@@ -130,7 +130,9 @@ async function readSupplierInvoices(opts: { jobId?: string; poIds?: string[] }):
   const partNames = new Map<string, string[]>();
   for (const l of lines) partNames.set(l.po_id, [...(partNames.get(l.po_id) ?? []), l.description]);
   const today = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
-  return { rows: groupInvoices(pos, lines, jobs, suppliers, 5, today), partNames, lines };
+  const rows = groupInvoices(pos, lines, jobs, suppliers, 5, today);
+  await attachReceiptRefs(rows);
+  return { rows, partNames, lines };
 }
 
 const sum2 = (xs: number[]) => Math.round(xs.reduce((a, x) => a + x, 0) * 100) / 100;
@@ -145,6 +147,8 @@ export function supplierInvoiceSheet(rows: InvoiceRow[]): XlsxSheet {
     columns: [
       { header: "Supplier", key: "supplier", width: 28 },
       { header: "Invoice no.", key: "number", width: 16 },
+      { header: "Pre-payment parts invoice no.", key: "prepay", width: 18 },
+      { header: "WIP no.", key: "wip", width: 14 },
       { header: "Date", key: "date", width: 12 },
       { header: "TRN", key: "trn", width: 18 },
       { header: "Before VAT (AED)", key: "before", width: 15, numFmt: "#,##0.00" },
@@ -159,6 +163,8 @@ export function supplierInvoiceSheet(rows: InvoiceRow[]): XlsxSheet {
     rows: rows.map((r) => ({
       supplier: r.supplier,
       number: r.number ?? "Invoice missing",
+      prepay: r.prepayNo ?? "",
+      wip: [r.wipNo, r.otherRefs].filter(Boolean).join(" · "),
       date: r.date ? new Date(`${r.date}T12:00:00Z`) : "",
       trn: r.trn ?? "",
       before: r.beforeVat,
@@ -230,4 +236,27 @@ export async function supplierInvoicesToCheckCount(): Promise<number> {
   const { rows, lines } = await loadSupplierInvoices({ strict: true });
   const undecided = new Set(lines.filter((l) => l.invoice_check === "mismatch").map((l) => l.po_id));
   return rows.filter((r) => ["waiting", "new", "queried"].includes(r.status) || r.shares.some((s) => undecided.has(s.poId))).length;
+}
+
+/** 15 November 2026: the PRE-PAYMENT PARTS INVOICE NO. / WIP NO. (and any added type) typed at receiving, per invoice row. */
+async function attachReceiptRefs(rows: InvoiceRow[]): Promise<void> {
+  const { receiptsReady, refsReady, receiptRefTypes } = await import("./receipts");
+  if (!rows.length || !(await receiptsReady()) || !(await refsReady())) return;
+  const { refColumns, refLabel, refsOfRow } = await import("./receipt-refs");
+  const poIds = Array.from(new Set(rows.flatMap((r) => r.shares.map((x) => x.poId))));
+  const admin = createAdminClient();
+  const recs = await pageAllIn<Record<string, unknown>>(poIds, (ids, a, b) => admin.from("part_receipts").select("po_id, invoice_number, refs").in("po_id", ids).eq("is_active", true).order("id").range(a, b) as unknown as PromiseLike<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>);
+  const byPo = new Map<string, { type: string; number: string }[]>();
+  for (const r of recs) byPo.set(String(r.po_id), [...(byPo.get(String(r.po_id)) ?? []), ...refsOfRow(r as { refs?: unknown; invoice_number?: string | null })]);
+  const types = await receiptRefTypes();
+  for (const row of rows) {
+    const refs = row.shares.flatMap((x) => byPo.get(x.poId) ?? []);
+    const seen = new Set<string>();
+    const key = (x: { type: string; number: string }) => `${x.type}:${x.number.toUpperCase()}`;
+    const uniq = refs.filter((x) => (seen.has(key(x)) ? false : (seen.add(key(x)), true)));
+    const cols = refColumns(uniq);
+    row.prepayNo = cols.prepay;
+    row.wipNo = cols.wip;
+    row.otherRefs = cols.other.map((x) => `${refLabel(types, x.type)} ${x.number}`).join(", ") || null;
+  }
 }

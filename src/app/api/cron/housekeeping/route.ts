@@ -563,10 +563,11 @@ async function runHousekeeping(): Promise<Record<string, number>> {
   // number and the date are entered. Accounts see the same LPOs on their Waiting list all along.
   // 13 November 2026: once receipts exist the invoice number is typed at receiving, "Invoice comes later" receipts are
   // reminded on day 3, day 5 and every day while overdue (parts desk and accounts), and older LPOs are never reminded.
-  const { receiptsReady: rcReady, receiptReminders } = await import("@/lib/receipts");
+  const { receiptsReady: rcReady, receiptReminders, paperworkOwnerSummary } = await import("@/lib/receipts");
   if (await rcReady()) {
     try {
       report.invoiceDueReminders = await receiptReminders();
+      report.paperworkOwnerSummary = await paperworkOwnerSummary().catch(() => -1);
     } catch {
       report.invoiceDueReminders = -1;
     }

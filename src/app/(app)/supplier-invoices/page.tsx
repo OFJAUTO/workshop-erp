@@ -28,6 +28,7 @@ export default async function SupplierInvoicesPage({ searchParams }: { searchPar
         subtitle="Every supplier invoice with its LPOs and cars. Accounts check it (the bill then goes to Zoho Books) or query it back to Parts."
         actions={
           <>
+            {["owner", "accounts"].includes(staff.role_id) ? <LinkButton href="/settings/receipt-references" tone="ghost" size="lg" data-si-ref-types>Reference types</LinkButton> : null}
             {partsAccounts ? <LinkButton href="/parts-accounts?tab=invoices" tone="ghost" size="lg" data-si-parts-accounts>Parts accounts</LinkButton> : null}
             <LinkButton href={`/api/export/supplier-invoices?${params.toString()}`} tone="secondary" size="lg" data-si-export>Export to Excel</LinkButton>
           </>

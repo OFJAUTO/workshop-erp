@@ -133,6 +133,9 @@ function InvoiceCard({ r, href, open }: { r: InvoiceRow; href: string; open: boo
       <div className="pointer-events-none relative z-10 flex flex-wrap items-center gap-x-3 gap-y-1.5 p-4">
         <span className="font-extrabold uppercase">{r.supplier}</span>
         <span className="font-semibold">{invWords(r.number)}</span>
+        {r.prepayNo ? <span className="text-sm font-semibold" data-si-prepay={r.prepayNo}>PRE-PAYMENT PARTS INVOICE NO. {r.prepayNo}</span> : null}
+        {r.wipNo ? <span className="text-sm font-semibold" data-si-wip={r.wipNo}>WIP NO. {r.wipNo}</span> : null}
+        {r.otherRefs ? <span className="text-sm font-semibold" data-si-other-ref>{r.otherRefs}</span> : null}
         {r.date ? <span className="text-sm text-muted">{formatDate(r.date)}</span> : null}
         <Badge tone={STATUS_TONE[r.status]}>{STATUS_WORDS[r.status]}</Badge>
         {r.notReceived ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text" data-si-not-received>Not received yet</span> : null}

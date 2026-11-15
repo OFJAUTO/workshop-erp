@@ -208,6 +208,9 @@ export async function recordSupplierPayment(input: SupplierPaymentInput, by: { i
   }
   const problem = checkAllocations(amount, lines, open);
   if (problem) return { error: problem };
+  // 15 November 2026: never pay an LPO with a delivery still "Arrived - paperwork pending".
+  const paperwork = await (await import("./receipts")).paperworkBlockFor([...lines.map((l) => l.poId), ...uses.map((u) => u.poId)].filter(Boolean));
+  if (paperwork) return { error: `Not recorded: ${paperwork}` };
   const put = r2(lines.reduce((a, l) => a + l.amount, 0));
   const excess = r2(amount - put);
   if (excess > 0.004 && !input.excessKind) return { error: `AED ${excess.toFixed(2)} is more than the invoices: choose "Advance with the supplier" or "Fee / charge".` };

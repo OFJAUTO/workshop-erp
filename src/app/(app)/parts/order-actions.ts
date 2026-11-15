@@ -278,7 +278,7 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
   const lines = ((lineRows ?? []) as Record<string, unknown>[]).map(toPoLine);
   // 13 November 2026: the supplier's invoice number is compulsory at every receipt (or "Invoice comes later" for a
   // supplier marked so, with the delivery paper's photo or "No paper came"). Checked BEFORE anything is received.
-  const { checkReceipt, receiptInputFrom, saveReceipts } = await import("@/lib/receipts");
+  const { checkReceipt, receiptInputFrom, receiptSavedWords, saveReceipts } = await import("@/lib/receipts");
   const receiptIn = receiptInputFrom(formData);
   const receiptOk = await checkReceipt(receiptIn, [poId]);
   if (receiptOk.error) redirect(`${back}?error=${encodeURIComponent(receiptOk.error)}#receive`);
@@ -306,7 +306,7 @@ export async function receivePurchaseOrder(poId: string, formData: FormData) {
   }
   if (!received) redirect(`${back}?error=${encodeURIComponent("Enter the quantity received on at least one line.")}`);
   await saveReceipts(receiptIn, receiptOk, [{ poId, jobId: po.job_id ?? null, lines: receiptLines }], { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
-  const receiptWords = receiptOk.supplier ? (receiptIn.later ? ` INVOICE DUE BY ${receiptOk.due ?? ""}: the parts desk and accounts are reminded until the number is typed.` : ` Invoice ${receiptIn.number} recorded.`) : "";
+  const receiptWords = await receiptSavedWords(receiptIn, receiptOk);
   const { data: after } = await admin.from("purchase_order_lines").select("quantity, received_qty").eq("po_id", poId).eq("is_active", true);
   const allIn = (after ?? []).every((l) => Number(l.received_qty) + 0.005 >= Number(l.quantity));
   await admin.from("purchase_orders").update({ status: allIn ? "received" : "partly_received", received_at: allIn ? now : null, updated_by: staff.id }).eq("id", poId);
@@ -609,6 +609,8 @@ export async function markSupplierPaid(poId: string, formData: FormData) {
   const hasFile = (files ?? []).length > 0 || !!po.supplier_invoice_path;
   if (!hasFile && po.job_id) missing.push("the scan or photo of the invoice");
   if (missing.length) redirect(`${back}?error=${encodeURIComponent(`Cannot mark paid: enter ${missing.join(", ")} first. No payment without the full invoice on file.`)}`);
+  const paperwork = await (await import("@/lib/receipts")).paperworkBlockFor([poId]);
+  if (paperwork) redirect(`${back}?error=${encodeURIComponent(`Cannot mark paid: ${paperwork}`)}`);
   const reference = blankToNull(formData.get("reference"));
   // How it was paid (bank transfer unless chosen otherwise) — the Zoho payment uses this method and its mapped account.
   const methodRaw = String(formData.get("method") ?? "transfer");

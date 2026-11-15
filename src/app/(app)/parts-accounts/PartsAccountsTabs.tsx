@@ -180,6 +180,8 @@ export function PaymentsTab({ rows, canPay, advances = {} }: { rows: SupplierBal
               {b.invoices.map((r) => (
                 <li key={r.key} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2" data-pa-invoice-row={r.key}>
                   <Link href={`/parts-accounts?tab=invoices&open=${encodeURIComponent(r.key)}`} className={`${LINK} whitespace-nowrap`}>{invWords(r.number)}</Link>
+                  {r.prepayNo ? <span className="text-xs font-semibold" data-pa-prepay>PRE-PAYMENT PARTS INVOICE NO. {r.prepayNo}</span> : null}
+                  {r.wipNo ? <span className="text-xs font-semibold" data-pa-wip>WIP NO. {r.wipNo}</span> : null}
                   {r.date ? <span className="text-muted">{formatDate(r.date)}</span> : null}
                   <span className="whitespace-nowrap font-semibold">{money(r.total)}</span>
                   <span className="text-xs text-muted">{r.shares.map((s, i) => <Fragment key={s.poId}>{i ? ", " : ""}<span className="whitespace-nowrap">{s.poNumber}</span></Fragment>)}</span>

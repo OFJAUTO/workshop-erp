@@ -65,9 +65,13 @@ async function seedStage(request: NextRequest) {
     const { lpoApprovalNudges } = await import("@/lib/lpo-nudge");
     return NextResponse.json({ told: await lpoApprovalNudges({ force: true, now: (body as { now?: number }).now ?? undefined }) });
   }
+  if (stage === "paperwork-summary") {
+    const { paperworkOwnerSummary } = await import("@/lib/receipts");
+    return NextResponse.json({ told: await paperworkOwnerSummary((body as { now?: number }).now ?? undefined) });
+  }
   if (stage === "receipt-reminders") {
     const { receiptReminders } = await import("@/lib/receipts");
-    return NextResponse.json({ told: await receiptReminders((body as { today?: string }).today ?? undefined) });
+    return NextResponse.json({ told: await receiptReminders((body as { today?: string }).today ?? undefined, (body as { hour?: number }).hour ?? 9) });
   }
   // Two side doors for the tests: the work order lines of a job, and an open QC round with its items.
   if (stage === "worklines" && body.id) {

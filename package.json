@@ -207,6 +207,7 @@
     "test:s13-15": "node --env-file=.env.test.local tests/browser/test-s13-15-standin.mjs",
     "test:backorder": "node --env-file=.env.test.local tests/browser/test-backorder.mjs",
     "test:receipts": "node --env-file=.env.test.local tests/browser/test-receipts.mjs",
+    "test:receipts2": "node --env-file=.env.test.local tests/browser/test-receipts2.mjs",
     "test:sendcheck": "node --env-file=.env.test.local tests/browser/test-sendcheck.mjs",
     "test:s1-work": "node --env-file=.env.test.local tests/browser/test-s1-work.mjs",
     "test:s2-labels": "node --env-file=.env.test.local tests/browser/test-s2-labels.mjs",

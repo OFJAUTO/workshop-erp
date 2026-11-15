@@ -235,7 +235,7 @@ export async function receiveTicked(jobId: string, formData: FormData): Promise<
   const { data: poRows } = await admin.from("part_items").select("id, po_id, po_line_id, description, quantity, confirmed_quantity, received_qty").in("id", ids).not("po_id", "is", null);
   const poIds = Array.from(new Set((poRows ?? []).map((r) => r.po_id as string)));
   // 13 November 2026: the supplier's invoice number is compulsory at every receipt (see src/lib/receipts.ts).
-  const { checkReceipt, receiptInputFrom, saveReceipts } = await import("@/lib/receipts");
+  const { checkReceipt, receiptInputFrom, receiptSavedWords, saveReceipts } = await import("@/lib/receipts");
   const receiptIn = receiptInputFrom(formData);
   const receiptOk = await checkReceipt(receiptIn, poIds);
   if (receiptOk.error) return { error: receiptOk.error };
@@ -245,7 +245,7 @@ export async function receiveTicked(jobId: string, formData: FormData): Promise<
   }
   const perPo = poIds.map((poId) => ({ poId, jobId, lines: ((poRows ?? []) as { id: string; po_id: string; po_line_id: string | null; description: string; quantity: number | string; confirmed_quantity: number | string | null; received_qty: number | string | null }[]).filter((p) => p.po_id === poId).map((p) => ({ line_id: p.po_line_id, part_item_id: p.id, description: p.description, qty: Math.max(0, (Number(p.confirmed_quantity ?? p.quantity) || 1) - (Number(p.received_qty) || 0)) || Number(p.confirmed_quantity ?? p.quantity) || 1 })) }));
   await saveReceipts(receiptIn, receiptOk, perPo, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
-  const receiptWord = receiptOk.supplier ? (receiptIn.later ? ` INVOICE DUE BY ${receiptOk.due ?? ""}: the parts desk and accounts are reminded until the number is typed.` : ` Invoice ${receiptIn.number} recorded.`) : "";
+  const receiptWord = await receiptSavedWords(receiptIn, receiptOk);
   /*
    * 4 November 2026: receiving no longer asks for the invoice. The parts desk's angled photos misread amounts,
    * so the supplier's paper stays with Parts and ACCOUNTS collect, scan and enter it (owner + accounts only).

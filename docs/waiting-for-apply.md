@@ -9,9 +9,13 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 3. record it;
 4. run the read-only live check (`npm run check:live`).
 
-## Waiting now
+## Waiting now (15 November 2026)
 
-Nothing is waiting.
+Backup taken first: `backups/2026-11-15T05-11-50` (134 tables, 290,845 rows). Applied on the TEST database and tested there. **From your phone:** turn auto mode off, reply **"apply"**. They run in this order.
+
+| # | What | What it does on live | Size |
+|---|---|---|---|
+| 1 | `supabase/migrations/20261217090000_receipt_refs.sql` (Section 1, URGENT: receiving never blocks) | Adds two columns to `part_receipts`: the references typed at receiving (invoice / pre-payment parts invoice / WIP number, any added type) and the "Arrived - paperwork pending" flag. Copies each existing receipt's invoice number into the references. Adds one settings row: which reference types count as the supplier's invoice (Invoice and Pre-payment yes, WIP no). **Already live without it:** "Arrived - paperwork pending" works for every supplier (due the same day), so the mechanic is never blocked. **Switched on by the apply:** the reference-type choice, the PRE-PAYMENT / WIP columns, and the block on checking or paying an LPO while a delivery has no reference. | 2 columns + 1 setting |
 
 ## Applied on 13 November 2026, evening
 

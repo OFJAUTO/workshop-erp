@@ -74,6 +74,10 @@ export const MATCH_WORDS: Record<InvoiceMatch, string> = {
 export type InvoiceShare = { /** The further invoice this share is (null = the LPO's first invoice). */ invoiceId: string | null; poId: string; poNumber: string; jobId: string | null; jobNumber: string | null; plate: string; car: string; amount: number; /** This share's VAT (the LPO's typed VAT when one was entered, else 5% of the amount) and the share with it. */ vat: number; withVat: number; lpoTotal: number; parts: number; paidAt: string | null; /** Fix 4 (4 November 2026): the payment's own facts, so the proof box reads per LPO. */ paidMethod: string | null; paidReference: string | null; proofPath: string | null; paidBy: string | null };
 export type InvoiceRow = {
   key: string;
+  /** 15 November 2026: the other references typed at receiving (PRE-PAYMENT PARTS INVOICE NO., WIP NO., any added type). */
+  prepayNo?: string | null;
+  wipNo?: string | null;
+  otherRefs?: string | null;
   /** 11 November 2026: ordered from the supplier, nothing delivered yet ("Not received yet"). */
   notReceived: boolean;
   /** Every LPO of the row is a stock purchase with no car. */
@@ -292,7 +296,7 @@ export function filterInvoices(rows: InvoiceRow[], f: InvoiceFilter, partNames: 
     if (f.noProof && !r.proofMissing) return false;
     if (f.job && !r.shares.some((s) => s.jobId === f.job)) return false;
     if (needle) {
-      const hay = [r.number ?? "", r.supplier, ...r.shares.flatMap((s) => [s.poNumber, s.jobNumber ?? "", s.plate, s.car, ...(partNames.get(s.poId) ?? [])])].join(" ").toLowerCase();
+      const hay = [r.number ?? "", r.prepayNo ?? "", r.wipNo ?? "", r.otherRefs ?? "", r.supplier, ...r.shares.flatMap((s) => [s.poNumber, s.jobNumber ?? "", s.plate, s.car, ...(partNames.get(s.poId) ?? [])])].join(" ").toLowerCase();
       if (!hay.includes(needle) && !invoiceKeyNumber(hay).includes(invoiceKeyNumber(needle))) return false;
     }
     return true;

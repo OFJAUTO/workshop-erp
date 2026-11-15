@@ -1,3 +1,15 @@
+# Handover – list of 15 November 2026 (in progress; last update 15 Nov, 09:20 Dubai)
+
+**NEEDS OMAR (top first):**
+1. **Apply one database change** (Section 1): turn auto mode off, reply **"apply"**. Details in `docs/waiting-for-apply.md`.
+2. **Mathew confirms which reference types count as the supplier's invoice** (now: Invoice yes, Pre-payment yes, WIP no; Settings > Supplier references).
+
+**Progress (6 sections):**
+- S1 URGENT receiving never blocks: DONE, pushed (note `docs/receiving-never-blocks-15-nov-note.md`).
+- S2 to S6: in progress.
+
+---
+
 # Handover – evening list of 13 November 2026 (ALL DONE; last update 13 Nov, evening, Dubai)
 
 **NEEDS OMAR (top first):**

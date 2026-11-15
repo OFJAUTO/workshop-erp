@@ -4,7 +4,18 @@ import { schemaReady } from "./schema-ready";
 import { logAppError } from "./app-errors";
 import { notifyRoles } from "./notifications";
 import { newUuid } from "./uuid";
-import { addDays, dubaiDay, dueTag, laterDays, receiptNumberProblem, reminderDue, reminderWords, sameNumber, daysBetween } from "./receipt-rules";
+import { dubaiDay, dueTag, laterDays, receiptNumberProblem, reminderDue, reminderWords, sameNumber, daysBetween } from "./receipt-rules";
+import { countingNumber, paperworkBlock, paperworkDue, pendingTag, refCounts, refLabel, refNumberProblem, refTypesOf, refsOfRow, type Ref, type RefType } from "./receipt-refs";
+import { getSettings } from "./settings";
+
+/** 15 November 2026: the reference types (Invoice / Pre-payment parts invoice / WIP and any added), from Settings. */
+export async function receiptRefTypes(): Promise<RefType[]> {
+  return refTypesOf((await getSettings()).supplier_ref_types);
+}
+/** The columns for several references on a receipt (dormant until the database change is applied). */
+export async function refsReady(): Promise<boolean> {
+  return schemaReady("part_receipts", "refs, paperwork_pending");
+}
 
 /*
  * THE SUPPLIER'S INVOICE NUMBER AT RECEIVING (13 November 2026, URGENT). Every delivery received is a receipt
@@ -63,11 +74,16 @@ export async function lposWithNumber(supplierId: string | null, supplierName: st
   return Array.from(out).sort();
 }
 
-export type ReceiptInput = { number: string; later: boolean; noPaper: boolean; paper: File | null; sameOk: boolean };
+/**
+ * `later` = "Arrived - paperwork pending" (no reference typed): any supplier since 15 November 2026 - the part is
+ * recorded and handed over at once, the paperwork is due the same day (or within the supplier's "invoice later" days).
+ */
+export type ReceiptInput = { number: string; refType: string; later: boolean; noPaper: boolean; paper: File | null; sameOk: boolean };
 /** Reads the receipt fields of a receive form (the ONE box, ReceiptInvoiceFields). */
 export function receiptInputFrom(formData: FormData): ReceiptInput {
   const f = formData.get("receipt_paper");
   return {
+    refType: String(formData.get("receipt_ref_type") ?? "invoice").trim() || "invoice",
     number: String(formData.get("receipt_invoice_number") ?? "").trim(),
     later: formData.get("receipt_invoice_later") === "1",
     noPaper: formData.get("receipt_no_paper") === "on" || formData.get("receipt_no_paper") === "1",
@@ -77,7 +93,9 @@ export function receiptInputFrom(formData: FormData): ReceiptInput {
 }
 
 /** THE check before anything is received: a number, or the exception with its paper (or "No paper came"). */
-export async function checkReceipt(input: ReceiptInput, poIds: string[]): Promise<{ error?: string; supplier?: SupplierFacts; due?: string | null }> {
+export type ReceiptCheck = { error?: string; supplier?: SupplierFacts; due?: string | null; /** The reference saved (null = paperwork pending). */ ref?: Ref | null; /** It counts as the supplier's invoice. */ counts?: boolean };
+
+export async function checkReceipt(input: ReceiptInput, poIds: string[]): Promise<ReceiptCheck> {
   if (!(await receiptsReady())) return {};
   const firstPo = poIds[0];
   if (!firstPo) return {};
@@ -85,16 +103,25 @@ export async function checkReceipt(input: ReceiptInput, poIds: string[]): Promis
   const s = sups[0];
   if (!s) return { error: "That LPO was not found." };
   if (sups.some((x) => (x?.supplierId ?? x?.name) !== (s.supplierId ?? s.name))) return { error: "Receive one supplier at a time: each supplier's paper has its own invoice number." };
+  const today = dubaiDay(Date.now());
+  // 15 November 2026: "Arrived - paperwork pending" for EVERY supplier. Same working day for a normal supplier, the
+  // supplier's own days for one marked "Invoice later allowed". The parts are recorded and can be handed over at once.
   if (input.later) {
-    if (!s.laterAllowed) return { error: `${s.name} is not marked "Invoice later allowed": type the supplier's invoice number (ask accounts or the owner to mark the supplier).` };
-    if (!input.paper && !input.noPaper) return { error: "Invoice comes later: add a photo of the delivery paper that came with the part, or tick \"No paper came\"." };
-    return { supplier: s, due: addDays(dubaiDay(Date.now()), s.laterDays) };
+    if (!input.paper && !input.noPaper) return { error: "Arrived - paperwork pending: add a photo of the delivery paper that came with the part, or tick \"No paper came\"." };
+    return { supplier: s, due: paperworkDue(today, s.laterAllowed, s.laterDays), ref: null, counts: false };
   }
-  const bad = receiptNumberProblem(input.number);
-  if (bad) return { error: `Not received: ${bad}${s.laterAllowed ? ` Or press "Invoice comes later" (${s.name} may send it within ${s.laterDays} day${s.laterDays === 1 ? "" : "s"}).` : ""}` };
-  const others = await lposWithNumber(s.supplierId, s.name, input.number, poIds);
-  if (others.length && !input.sameOk) return { error: `Invoice ${input.number} is already on ${others.join(", ")} for ${s.name}. Same invoice as ${others[0]}? Tick "Same invoice" and save again.` };
-  return { supplier: s, due: null };
+  const types = await receiptRefTypes();
+  const typesOn = await refsReady();
+  const type = typesOn && types.some((t) => t.key === input.refType) ? input.refType : "invoice";
+  const label = refLabel(types, type);
+  const bad = type === "invoice" ? receiptNumberProblem(input.number) : refNumberProblem(input.number, label);
+  if (bad) return { error: `Not received: ${bad} Or press "Arrived - paperwork pending" to record the parts now and type the reference later today.` };
+  const counts = refCounts(types, type) || !typesOn;
+  if (counts) {
+    const others = await lposWithNumber(s.supplierId, s.name, input.number, poIds);
+    if (others.length && !input.sameOk) return { error: `${label} ${input.number} is already on ${others.join(", ")} for ${s.name}. Same invoice as ${others[0]}? Tick "Same invoice" and save again.` };
+  }
+  return { supplier: s, due: counts ? null : paperworkDue(today, s.laterAllowed, s.laterDays), ref: { type, number: input.number.trim() }, counts };
 }
 
 async function storeFile(receiptId: string, kind: "paper" | "invoice", file: File, by: string): Promise<string | null> {
@@ -115,15 +142,19 @@ async function storeFile(receiptId: string, kind: "paper" | "invoice", file: Fil
 }
 
 /** Saves one receipt per LPO received now (the same number on each when one paper covered several LPOs). */
-export async function saveReceipts(input: ReceiptInput, checked: { supplier?: SupplierFacts; due?: string | null }, perPo: { poId: string; jobId: string | null; lines: { line_id: string | null; part_item_id: string | null; description: string; qty: number }[] }[], by: Staffish): Promise<string[]> {
+export async function saveReceipts(input: ReceiptInput, checked: ReceiptCheck, perPo: { poId: string; jobId: string | null; lines: { line_id: string | null; part_item_id: string | null; description: string; qty: number }[] }[], by: Staffish): Promise<string[]> {
   if (!(await receiptsReady()) || !checked.supplier) return [];
   const admin = createAdminClient();
   const ids: string[] = [];
   const now = new Date().toISOString();
   let paperDone = false;
+  const typesOn = await refsReady();
+  // THE number that counts as the supplier's invoice (null = the real invoice is still due: paperwork pending or WIP).
+  const counting = !input.later && checked.counts !== false ? input.number : null;
+  const pendingInvoice = !counting;
   for (const p of perPo) {
     if (!p.lines.length) continue;
-    const others = !input.later && input.sameOk ? await lposWithNumber(checked.supplier.supplierId, checked.supplier.name, input.number, [p.poId]) : [];
+    const others = counting && input.sameOk ? await lposWithNumber(checked.supplier.supplierId, checked.supplier.name, input.number, [p.poId]) : [];
     let samePo: string | null = null;
     if (others.length) {
       const { data } = await admin.from("purchase_orders").select("id").eq("number", others[0]).maybeSingle();
@@ -131,8 +162,9 @@ export async function saveReceipts(input: ReceiptInput, checked: { supplier?: Su
     }
     const { data: r, error } = await admin.from("part_receipts").insert({
       po_id: p.poId, job_id: p.jobId, supplier_id: checked.supplier.supplierId, supplier_name: checked.supplier.name, lines: p.lines, received_at: now, received_by: by.id,
-      invoice_number: input.later ? null : input.number, invoice_later: input.later, invoice_due_date: input.later ? checked.due ?? null : null, no_paper: input.later && input.noPaper,
-      same_invoice_po_id: samePo, invoice_entered_at: input.later ? null : now, invoice_entered_by: input.later ? null : by.id, created_by: by.id, updated_by: by.id,
+      invoice_number: counting, invoice_later: pendingInvoice, invoice_due_date: pendingInvoice ? checked.due ?? null : null, no_paper: input.later && input.noPaper,
+      same_invoice_po_id: samePo, invoice_entered_at: counting ? now : null, invoice_entered_by: counting ? by.id : null, created_by: by.id, updated_by: by.id,
+      ...(typesOn ? { refs: checked.ref ? [checked.ref] : [], paperwork_pending: input.later } : {}),
     }).select("id").single();
     if (error || !r) {
       logAppError("receipts.save", error ?? new Error("no row"), { staffId: by.id, detail: { poId: p.poId } });
@@ -151,7 +183,9 @@ export type ReceiptFile = { id: string; kind: "paper" | "invoice"; url: string |
 export type ReceiptView = {
   id: string; poId: string; poNumber: string; jobId: string | null; supplierName: string; lines: { description: string; qty: number }[];
   receivedAt: string; receivedBy: string | null; number: string | null; later: boolean; due: string | null; tag: string | null; overdue: boolean; noPaper: boolean;
-  history: { old: string | null; new: string; by_name: string; at: string }[];
+  /** 15 November 2026: every reference on the receipt (type, its words, number); none = "Arrived - paperwork pending". */
+  refs: { type: string; label: string; number: string; counts: boolean }[]; pending: boolean;
+  history: { old: string | null; new: string; old_type?: string | null; new_type?: string | null; by_name: string; at: string }[];
   retakeAsked: { at: string; by: string | null; note: string | null } | null; retakeDone: string | null;
   files: ReceiptFile[]; invoiceChecked: boolean;
 };
@@ -178,15 +212,18 @@ export async function loadReceipts(poIds: string[]): Promise<ReceiptView[]> {
   }
   const poOf = new Map(((pos ?? []) as { id: string; number: string; supplier_invoice_checked_at: string | null }[]).map((p) => [p.id, p]));
   const today = dubaiDay(Date.now());
+  const types = await receiptRefTypes();
   return rows.map((r) => {
     const po = poOf.get(String(r.po_id));
+    const refs = refsOfRow(r as { refs?: unknown; invoice_number?: string | null });
     const due = (r.invoice_due_date as string | null) ?? null;
     const number = (r.invoice_number as string | null) ?? null;
     return {
       id: String(r.id), poId: String(r.po_id), poNumber: po?.number ?? "", jobId: (r.job_id as string | null) ?? null, supplierName: String(r.supplier_name ?? ""),
       lines: ((r.lines as { description: string; qty: number }[] | null) ?? []).map((l) => ({ description: String(l.description ?? ""), qty: Number(l.qty) || 0 })),
       receivedAt: String(r.received_at), receivedBy: r.received_by ? name.get(String(r.received_by)) ?? null : null,
-      number, later: !!r.invoice_later, due, tag: !number && r.invoice_later ? dueTag(due) : null, overdue: !number && !!due && today > due, noPaper: !!r.no_paper,
+      number, later: !!r.invoice_later, due, tag: !number && r.invoice_later ? pendingTag({ refs, due, today }) : null, overdue: !number && !!due && today > due, noPaper: !!r.no_paper,
+      refs: refs.map((x) => ({ type: x.type, label: refLabel(types, x.type), number: x.number, counts: refCounts(types, x.type) })), pending: !refs.length,
       history: ((r.number_history as ReceiptView["history"] | null) ?? []),
       retakeAsked: r.retake_asked_at ? { at: String(r.retake_asked_at), by: r.retake_asked_by ? name.get(String(r.retake_asked_by)) ?? null : null, note: (r.retake_note as string | null) ?? null } : null,
       retakeDone: (r.retake_done_at as string | null) ?? null,
@@ -196,27 +233,84 @@ export async function loadReceipts(poIds: string[]): Promise<ReceiptView[]> {
   });
 }
 
-/** The number typed later (clears the reminders), or corrected by accounts (logged old → new). */
-export async function setReceiptNumber(receiptId: string, number: string, sameOk: boolean, by: Staffish): Promise<{ error?: string; ok?: boolean; words?: string }> {
+/**
+ * Add a reference to a receipt, or change one (its type or its number). The parts desk only ADDS one to a delivery
+ * recorded with none; accounts and the owner may add or change any (logged old -> new, type and number, who, when).
+ * THE invoice number of the receipt follows: the first reference of a type that counts as the supplier's invoice. When it
+ * counts, the reminders stop; when nothing counts any more (a type changed to WIP) the real invoice is due again.
+ */
+export async function setReceiptRef(receiptId: string, o: { type: string; number: string; replace: number | null; sameOk: boolean }, by: Staffish): Promise<{ error?: string; ok?: boolean; words?: string }> {
   const { mayCorrectNumber, mayTypeMissingNumber } = await import("./receipt-rules");
   const admin = createAdminClient();
-  const { data: r } = await admin.from("part_receipts").select("id, po_id, supplier_id, supplier_name, invoice_number, number_history").eq("id", receiptId).eq("is_active", true).maybeSingle();
+  const typesOn = await refsReady();
+  const { data: r } = await admin.from("part_receipts").select(`id, po_id, supplier_id, supplier_name, invoice_number, invoice_later, invoice_due_date, received_at, number_history${typesOn ? ", refs" : ""}`).eq("id", receiptId).eq("is_active", true).maybeSingle();
   if (!r) return { error: "That receipt was not found." };
-  const old = (r.invoice_number as string | null) ?? null;
-  if (old ? !mayCorrectNumber(by.role_id) : !mayTypeMissingNumber(by.role_id)) return { error: old ? "Only accounts or the owner can correct an invoice number." : "Only the parts desk, accounts or the owner can type the invoice number." };
-  const bad = receiptNumberProblem(number);
+  const row = r as unknown as Record<string, unknown>;
+  const types = await receiptRefTypes();
+  const type = typesOn && types.some((t) => t.key === o.type) ? o.type : "invoice";
+  const label = refLabel(types, type);
+  const refs = refsOfRow(row as { refs?: unknown; invoice_number?: string | null });
+  const changing = o.replace !== null && o.replace >= 0 && o.replace < refs.length;
+  const mayChange = mayCorrectNumber(by.role_id);
+  if (changing || refs.length ? !mayChange : !mayTypeMissingNumber(by.role_id)) return { error: changing || refs.length ? "Only accounts or the owner can change or add a reference once one is saved." : "Only the parts desk, accounts or the owner can type the reference." };
+  const number = o.number.trim();
+  const bad = type === "invoice" ? receiptNumberProblem(number) : refNumberProblem(number, label);
   if (bad) return { error: bad };
-  if (old && sameNumber(old, number)) return { ok: true, words: "Nothing changed." };
-  const others = await lposWithNumber((r.supplier_id as string | null) ?? null, String(r.supplier_name ?? ""), number, [String(r.po_id)]);
-  if (others.length && !sameOk) return { error: `Invoice ${number.trim()} is already on ${others.join(", ")} for ${r.supplier_name}. Same invoice as ${others[0]}? Tick "Same invoice" and save again.` };
+  const before = changing ? refs[o.replace!] : null;
+  if (before && before.type === type && sameNumber(before.number, number)) return { ok: true, words: "Nothing changed." };
+  const counts = refCounts(types, type) || !typesOn;
+  if (counts) {
+    const others = await lposWithNumber((row.supplier_id as string | null) ?? null, String(row.supplier_name ?? ""), number, [String(row.po_id)]);
+    if (others.length && !o.sameOk) return { error: `${label} ${number} is already on ${others.join(", ")} for ${row.supplier_name}. Same invoice as ${others[0]}? Tick "Same invoice" and save again.` };
+  }
+  const next: Ref[] = changing ? refs.map((x, i) => (i === o.replace ? { type, number } : x)) : [...refs, { type, number }];
+  const invoiceNow = typesOn ? countingNumber(next, types) : number;
   const now = new Date().toISOString();
-  const history = [...(((r.number_history as unknown[]) ?? []) as unknown[]), { old, new: number.trim(), by: by.id, by_name: by.display_name, at: now }];
-  const { error } = await admin.from("part_receipts").update({ invoice_number: number.trim(), invoice_entered_at: now, invoice_entered_by: by.id, number_history: history, updated_by: by.id }).eq("id", receiptId);
+  const history = [...(((row.number_history as unknown[]) ?? []) as unknown[]), { old: before?.number ?? null, new: number, old_type: before ? refLabel(types, before.type) : null, new_type: label, by: by.id, by_name: by.display_name, at: now }];
+  const patch: Record<string, unknown> = { invoice_number: invoiceNow, number_history: history, updated_by: by.id };
+  if (typesOn) patch.refs = next;
+  if (invoiceNow && !row.invoice_number) Object.assign(patch, { invoice_entered_at: now, invoice_entered_by: by.id });
+  if (!invoiceNow) {
+    // The real invoice is still (or again) due: same working day, or the supplier's own days.
+    const s = await supplierOfPo(String(row.po_id));
+    Object.assign(patch, { invoice_later: true, invoice_due_date: (row.invoice_due_date as string | null) ?? paperworkDue(dubaiDay(String(row.received_at)), !!s?.laterAllowed, s?.laterDays ?? 5) });
+  }
+  const { error } = await admin.from("part_receipts").update(patch).eq("id", receiptId);
   if (error) {
     logAppError("receipts.number", error, { staffId: by.id });
     return { error: "Couldn't save – nothing was recorded. Try again or tell the owner." };
   }
-  return { ok: true, words: old ? `Invoice number corrected: ${old} → ${number.trim()} (${by.display_name}).` : `Invoice number ${number.trim()} saved: the reminders stop.` };
+  if (before) return { ok: true, words: `Changed: ${refLabel(types, before.type)} ${before.number} → ${label} ${number} (${by.display_name}).${invoiceNow ? "" : " The supplier's real invoice is still due."}` };
+  return { ok: true, words: counts ? `${label} ${number} saved: the reminders stop.` : `${label} ${number} saved. It does not count as the supplier's invoice: the real invoice is still due.` };
+}
+
+/** The invoice number typed later, or corrected (kept for older callers: an invoice-type reference). */
+export async function setReceiptNumber(receiptId: string, number: string, sameOk: boolean, by: Staffish): Promise<{ error?: string; ok?: boolean; words?: string }> {
+  const typesOn = await refsReady();
+  const admin = createAdminClient();
+  const { data: r } = await admin.from("part_receipts").select(`invoice_number${typesOn ? ", refs" : ""}`).eq("id", receiptId).maybeSingle();
+  const refs = r ? refsOfRow(r as unknown as { refs?: unknown; invoice_number?: string | null }) : [];
+  const at = refs.findIndex((x) => x.type === "invoice");
+  return setReceiptRef(receiptId, { type: "invoice", number, replace: at >= 0 ? at : null, sameOk }, by);
+}
+
+/**
+ * THE paperwork rule for closing (checking) and paying an LPO (15 November 2026): no delivery on it may still be
+ * "Arrived - paperwork pending" with no reference typed. Dormant until the database change (it needs the pending flag).
+ */
+export async function paperworkBlockFor(poIds: string[]): Promise<string | null> {
+  if (!poIds.length || !(await receiptsReady()) || !(await refsReady())) return null;
+  const admin = createAdminClient();
+  const [{ data: recs }, { data: pos }] = await Promise.all([
+    admin.from("part_receipts").select("po_id, invoice_number, refs, paperwork_pending").in("po_id", poIds).eq("is_active", true).eq("paperwork_pending", true),
+    admin.from("purchase_orders").select("id, number").in("id", poIds),
+  ]);
+  for (const p of (pos ?? []) as { id: string; number: string }[]) {
+    const mine = ((recs ?? []) as unknown as { po_id: string; invoice_number: string | null; refs?: unknown; paperwork_pending: boolean }[]).filter((x) => x.po_id === p.id).map((x) => ({ poNumber: p.number, refs: refsOfRow(x), pending: !!x.paperwork_pending }));
+    const words = paperworkBlock(mine);
+    if (words) return words;
+  }
+  return null;
 }
 
 /** "Retake photo" / "Scan again": a new file; the old one stays in the history with who replaced it and when. */
@@ -290,7 +384,7 @@ export async function retakesAsked(): Promise<{ id: string; poId: string; poNumb
 }
 
 /** The reminders (hourly job): day 3, day 5, then every day while overdue - the parts desk and accounts. `today` lets a test move the date. */
-export async function receiptReminders(today = dubaiDay(Date.now())): Promise<number> {
+export async function receiptReminders(today = dubaiDay(Date.now()), hour = new Date(Date.now() + 4 * 3600000).getUTCHours()): Promise<number> {
   if (!(await receiptsReady())) return 0;
   const admin = createAdminClient();
   const { data } = await admin.from("part_receipts").select("id, po_id, job_id, supplier_name, received_at, invoice_due_date, invoice_number, invoice_later, reminded_day3_at, reminded_day5_at, last_reminded_on, is_active").is("invoice_number", null).eq("invoice_later", true).eq("is_active", true);
@@ -298,6 +392,8 @@ export async function receiptReminders(today = dubaiDay(Date.now())): Promise<nu
   for (const r of (data ?? []) as { id: string; po_id: string; job_id: string | null; supplier_name: string | null; received_at: string; invoice_due_date: string | null; invoice_number: string | null; invoice_later: boolean; reminded_day3_at: string | null; reminded_day5_at: string | null; last_reminded_on: string | null; is_active: boolean }[]) {
     const step = reminderDue(r, today);
     if (!step) continue;
+    // 15 November 2026: the overdue reminder is a MORNING one (from 07:00 Dubai), once a day.
+    if (step === "overdue" && hour < 7) continue;
     const now = new Date().toISOString();
     const patch: Record<string, unknown> = { last_reminded_on: today };
     if (step === "day3") patch.reminded_day3_at = now;
@@ -312,16 +408,50 @@ export async function receiptReminders(today = dubaiDay(Date.now())): Promise<nu
   return n;
 }
 
-/** For the receive forms: per LPO, its supplier and the day an "invoice later" would be due (null until the update). */
-export async function receiptPropsFor(poIds: string[]): Promise<Record<string, { supplier: SupplierFacts; dueOn: string | null }> | null> {
+/**
+ * 15 November 2026: THE owner's daily summary line - deliveries whose supplier paperwork (or real invoice) is overdue.
+ * Once a day at the evening summary hour, only when there is something to count. nowMs lets a test move the clock.
+ */
+export async function paperworkOwnerSummary(nowMs = Date.now()): Promise<number> {
+  const { SUMMARY_HOUR, dubaiClock } = await import("./password-alert-rules");
+  const { hour, dayStartIso } = dubaiClock(nowMs);
+  if (hour < SUMMARY_HOUR) return 0;
+  const open = (await invoicesNotReceived()).filter((r) => r.overdue);
+  if (!open.length) return 0;
+  const admin = createAdminClient();
+  const { data: owners } = await admin.from("staff").select("id").eq("role_id", "owner").eq("is_active", true);
+  const ids = ((owners ?? []) as { id: string }[]).map((o) => o.id);
+  if (!ids.length) return 0;
+  const { count } = await admin.from("notifications").select("id", { count: "exact", head: true }).eq("type", "paperwork_pending_count").in("staff_id", ids).gte("created_at", dayStartIso);
+  if ((count ?? 0) > 0) return 0;
+  const { notifyStaff } = await import("./notifications");
+  const lpos = Array.from(new Set(open.map((r) => r.poNumber)));
+  await notifyStaff(ids, { type: "paperwork_pending_count", title: `${open.length} deliver${open.length === 1 ? "y" : "ies"} with supplier paperwork overdue`, body: `Parts received and handed over, the supplier's reference or invoice not typed yet: ${lpos.slice(0, 10).join(", ")}${lpos.length > 10 ? "…" : ""}. The parts desk and accounts are reminded every morning.`, href: "/supplier-invoices" });
+  return open.length;
+}
+
+/** For the receive forms: per LPO, its supplier, when paperwork pending would be due ("today" or a date) and the reference types. */
+export async function receiptPropsFor(poIds: string[]): Promise<Record<string, { supplier: SupplierFacts; dueOn: string | null; types: RefType[] | null }> | null> {
   if (!(await receiptsReady())) return null;
-  const out: Record<string, { supplier: SupplierFacts; dueOn: string | null }> = {};
+  const out: Record<string, { supplier: SupplierFacts; dueOn: string | null; types: RefType[] | null }> = {};
   const today = dubaiDay(Date.now());
+  const types = (await refsReady()) ? await receiptRefTypes() : null;
   for (const id of Array.from(new Set(poIds))) {
     const s = await supplierOfPo(id);
     if (!s) continue;
-    const due = addDays(today, s.laterDays);
-    out[id] = { supplier: s, dueOn: s.laterAllowed ? new Date(`${due}T12:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : null };
+    const due = paperworkDue(today, s.laterAllowed, s.laterDays);
+    out[id] = { supplier: s, types, dueOn: due === today ? "today" : new Date(`${due}T12:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) };
   }
   return out;
+}
+
+/** The words after a delivery is recorded (both receive doors). */
+export async function receiptSavedWords(input: ReceiptInput, c: ReceiptCheck): Promise<string> {
+  if (!c.supplier) return "";
+  const today = dubaiDay(Date.now());
+  const when = c.due === today ? "by the end of today" : `by ${c.due ?? ""}`;
+  if (input.later) return ` ARRIVED - PAPERWORK PENDING: the parts can be issued now; the supplier's reference is due ${when} (the parts desk and accounts are reminded).`;
+  const label = c.ref ? refLabel(await receiptRefTypes(), c.ref.type) : "Invoice";
+  if (c.counts === false) return ` ${label} ${input.number} recorded. It does not count as the supplier's invoice: the real invoice is due ${when}.`;
+  return ` ${label} ${input.number} recorded.`;
 }
