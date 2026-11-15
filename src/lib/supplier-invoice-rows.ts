@@ -74,6 +74,8 @@ export const MATCH_WORDS: Record<InvoiceMatch, string> = {
 export type InvoiceShare = { /** The further invoice this share is (null = the LPO's first invoice). */ invoiceId: string | null; poId: string; poNumber: string; jobId: string | null; jobNumber: string | null; plate: string; car: string; amount: number; /** This share's VAT (the LPO's typed VAT when one was entered, else 5% of the amount) and the share with it. */ vat: number; withVat: number; lpoTotal: number; parts: number; paidAt: string | null; /** Fix 4 (4 November 2026): the payment's own facts, so the proof box reads per LPO. */ paidMethod: string | null; paidReference: string | null; proofPath: string | null; paidBy: string | null };
 export type InvoiceRow = {
   key: string;
+  /** 15 November 2026 (Section 4): a lathe bill (key "lathe:<id>"), tagged LATHE; it has no LPO shares. */
+  lathe?: boolean;
   /** 15 November 2026: the other references typed at receiving (PRE-PAYMENT PARTS INVOICE NO., WIP NO., any added type). */
   prepayNo?: string | null;
   wipNo?: string | null;
@@ -323,8 +325,10 @@ export function unpaidBySupplier(rows: InvoiceRow[]): UnpaidSupplier[] {
     cur.count++;
     cur.total = r2(cur.total + r.unpaidAmount);
     const open = r.shares.filter((s) => !s.paidAt);
-    cur.net = r2(cur.net + open.reduce((a, s) => a + s.amount, 0));
-    cur.vat = r2(cur.vat + open.reduce((a, s) => a + s.vat, 0));
+    // A lathe bill (15 November 2026) has no LPO shares: what is still to pay, split by its own before-VAT share.
+    const latheNet = r.lathe && r.total > 0 ? r2(r.unpaidAmount * (r.beforeVat / r.total)) : 0;
+    cur.net = r2(cur.net + (r.lathe ? latheNet : open.reduce((a, s) => a + s.amount, 0)));
+    cur.vat = r2(cur.vat + (r.lathe ? r2(r.unpaidAmount - latheNet) : open.reduce((a, s) => a + s.vat, 0)));
     cur.vatCharged = cur.vatCharged || r.vatCharged;
     const day = r.date ?? (r.at ? r.at.slice(0, 10) : null);
     if (day && (!cur.oldest || day < cur.oldest)) cur.oldest = day;

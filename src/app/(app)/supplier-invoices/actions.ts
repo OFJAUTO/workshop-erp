@@ -40,6 +40,12 @@ export async function checkInvoiceAction(key: string, formData?: FormData) {
   const row = await rowOf(key);
   if (row === undefined) return to({ error: READ_FAILED });
   if (!row) return to({ error: "That invoice is no longer on the list." });
+  // 15 November 2026 (Section 4): a lathe bill is checked here like any supplier invoice, then paid on Supplier payments.
+  if (row.lathe) {
+    const { checkLatheBill, latheBillIdOf } = await import("@/lib/lathe-invoices");
+    const r = await checkLatheBill(latheBillIdOf(row.key), staff);
+    return to(r.error ? { error: r.error } : { message: r.words });
+  }
   if (row.status === "waiting") return to({ error: "The invoice has not arrived yet: Parts enter it when it comes." });
   // 15 November 2026: an LPO is not closed while a delivery on it is "Arrived - paperwork pending".
   const paperwork = await (await import("@/lib/receipts")).paperworkBlockFor(row.shares.map((x) => x.poId));
@@ -77,6 +83,13 @@ export async function queryInvoiceAction(key: string, formData: FormData) {
   const row = await rowOf(key);
   if (row === undefined) return to({ error: READ_FAILED });
   if (!row) return to({ error: "That invoice is no longer on the list." });
+  if (row.lathe) {
+    const { queryLatheBill, latheBillIdOf } = await import("@/lib/lathe-invoices");
+    const r = await queryLatheBill(latheBillIdOf(row.key), comment, staff);
+    if (r.error) return to({ error: r.error });
+    await notifyRoles(["parts"], { type: "supplier_invoice_missing", title: `Accounts query · lathe bill ${r.number} · ${row.supplier}`, body: `${staff.display_name}: ${comment}. Check the lathe tickets and the paper with the shop, and tell accounts.`, href: "/parts/lathe" });
+    return to({ message: r.words });
+  }
   const admin = createAdminClient();
   const now = new Date().toISOString();
   for (const s of row.shares) {

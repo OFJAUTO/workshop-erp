@@ -172,9 +172,12 @@ export async function recordLatheBill(input: BillInput, actor: Actor): Promise<{
     const { notifyRoles } = await import("./notifications");
     await notifyRoles(["parts"], { type: "lathe_unmatched", title: `Lathe bill ${input.billNumber}: ${input.extraLines.length} line${input.extraLines.length === 1 ? "" : "s"} with no ticket`, body: `${input.extraLines.map((l) => `${l.description} AED ${Number(l.amount).toFixed(2)}`).join("; ")}. Find the car each was for (or ask the lathe shop).`, href: "/parts/lathe" });
   }
-  const { tryEnqueueZoho } = await import("./zoho-sync");
-  await tryEnqueueZoho("lathebill", bill.id as string, null, actor.id).catch(() => null);
-  return { ok: true, words: `Bill ${input.billNumber}: ${done} ticket${done === 1 ? "" : "s"} billed (AED ${round2(input.beforeVat).toFixed(2)} + VAT ${round2(input.vat).toFixed(2)})${extra ? `; AED ${extra.toFixed(2)} on lines with no ticket – Parts told` : ""}.` };
+  // 15 November 2026 (Section 4): the Zoho bill goes when accounts CHECK it on Supplier invoices (until that switches on, at entry).
+  if (!(await (await import("./lathe-invoices")).latheCheckReady())) {
+    const { tryEnqueueZoho } = await import("./zoho-sync");
+    await tryEnqueueZoho("lathebill", bill.id as string, null, actor.id).catch(() => null);
+  }
+  return { ok: true, words: `Bill ${input.billNumber} is on Supplier invoices to check: ${done} ticket${done === 1 ? "" : "s"} billed (AED ${round2(input.beforeVat).toFixed(2)} + VAT ${round2(input.vat).toFixed(2)})${extra ? `; AED ${extra.toFixed(2)} on lines with no ticket – Parts told` : ""}.` };
 }
 
 /** The lathe report of a month: tickets, our cost (the bill, else the estimate), what we charged, the profit. */

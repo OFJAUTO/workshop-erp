@@ -88,7 +88,7 @@ async function readSupplierInvoices(opts: { jobId?: string; poIds?: string[] }):
     query_at: (r.supplier_invoice_query_at as string | null | undefined) ?? null,
     line_ids: Array.isArray(r.supplier_invoice_lines) ? (r.supplier_invoice_lines as CoveredLine[]).map((c) => String(c.line_id)) : null,
   }));
-  if (!pos.length) return none();
+  if (!pos.length) return !opts.jobId && !opts.poIds?.length ? { ...none(), rows: await (await import("./lathe-invoices")).latheInvoiceRows() } : none();
   // Part payments (6 November 2026): what the recorded supplier payments put on each LPO.
   const paidOn = await paidOnPos(pos.map((p) => p.id));
   for (const p of pos) p.paid_aed = paidOn.get(p.id) ?? 0;
@@ -135,6 +135,9 @@ async function readSupplierInvoices(opts: { jobId?: string; poIds?: string[] }):
   const today = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
   const rows = groupInvoices(pos, lines, jobs, suppliers, 5, today);
   await attachReceiptRefs(rows);
+  // 15 November 2026 (Section 4): lathe bills are supplier invoices too (tagged LATHE), on the full list only.
+  if (!opts.jobId && !opts.poIds?.length) rows.push(...(await (await import("./lathe-invoices")).latheInvoiceRows()));
+  rows.sort((x, y) => String(y.at ?? "").localeCompare(String(x.at ?? "")));
   return { rows, partNames, lines };
 }
 
@@ -173,8 +176,8 @@ export function supplierInvoiceSheet(rows: InvoiceRow[]): XlsxSheet {
       before: r.beforeVat,
       vat: r.vat,
       total: r.total,
-      lpos: r.shares.map((s) => s.poNumber).join(", "),
-      cars: r.shares.map((s) => [s.jobNumber, s.plate, s.car].filter(Boolean).join(" ")).filter(Boolean).join("; ") || "Stock order",
+      lpos: r.lathe ? "LATHE" : r.shares.map((s) => s.poNumber).join(", "),
+      cars: r.lathe ? `Lathe bill · ${r.parts} ticket${r.parts === 1 ? "" : "s"}` : r.shares.map((s) => [s.jobNumber, s.plate, s.car].filter(Boolean).join(" ")).filter(Boolean).join("; ") || "Stock order",
       parts: r.parts,
       match: [...r.match.map((m) => MATCH_WORDS[m]), r.duplicateOf ? `Possible duplicate of ${r.duplicateOf}` : ""].filter(Boolean).join(", "),
       status: STATUS_WORDS[r.status],

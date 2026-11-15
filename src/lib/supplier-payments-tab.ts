@@ -52,7 +52,8 @@ export async function loadPaymentsTab(opts: { from?: string | null; to?: string 
   const awaiting = awaitingBySupplier(inv?.rows ?? []);
   const { data: supList } = await createAdminClient().from("suppliers").select("id, name").eq("is_active", true).order("name").limit(1000);
   const suppliers = ((supList ?? []) as { id: string; name: string }[]).filter((x) => !/^our stock$/i.test(x.name.trim()));
-  const dueRaw = unpaidBySupplier(inv?.rows ?? []);
+  // Lathe rows are on Supplier invoices too (15 November 2026): their dues come from latheDueBySupplier below (checked bills only).
+  const dueRaw = unpaidBySupplier((inv?.rows ?? []).filter((r) => !r.lathe));
   // Lathe bills (11 November 2026, Section 6) are due like any supplier invoice (no VAT split: the total as printed).
   for (const l of await latheDueBySupplier()) {
     const cur = dueRaw.find((d) => (l.supplierId && d.supplierId === l.supplierId) || d.supplier.toUpperCase() === l.supplier.toUpperCase());

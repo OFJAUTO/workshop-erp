@@ -1,5 +1,7 @@
 import { firstInvoiceEditLines, lpoInvoiceState } from "@/lib/lpo-invoices";
 import { latheV2Ready } from "@/lib/lathe";
+import { latheBillIdOf } from "@/lib/lathe-invoices";
+import { JobFileUpload } from "@/components/JobFileUpload";
 import { ReceiptsCard } from "@/components/ReceiptsCard";
 import { loadReceipts } from "@/lib/receipts";
 import { SupplierAmount } from "@/components/SupplierAmount";
@@ -141,6 +143,7 @@ function InvoiceCard({ r, href, open }: { r: InvoiceRow; href: string; open: boo
         <Badge tone={STATUS_TONE[r.status]}>{STATUS_WORDS[r.status]}</Badge>
         {r.notReceived ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text" data-si-not-received>Not received yet</span> : null}
         {r.stock ? <Badge tone="ink">Stock purchase</Badge> : null}
+        {r.lathe ? <span className="rounded-full border-2 border-ink px-2 py-0.5 text-xs font-extrabold" data-si-lathe>LATHE</span> : null}
         {r.dateWarning ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text" title={r.dateWarning} data-si-date-warning>Check the date</span> : null}
         {r.partlyPaid ? <span className="rounded-full border border-amber-bar bg-amber-soft px-2 py-0.5 text-xs font-bold text-amber-text" data-si-partly-paid>Partly paid · AED {money(r.unpaidAmount)} to pay</span> : null}
         {r.proofMissing ? <span className="rounded-full border border-red-bar bg-white px-2 py-0.5 text-xs font-bold text-red" data-si-proof-missing-tag>Proof missing – upload</span> : null}
@@ -162,9 +165,12 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, 
   const typedNumber = row.shares.length === 1 ? ((await loadReceipts([row.shares[0].poId]).catch(() => [])).find((r) => r.number)?.number ?? null) : null;
   const admin = createAdminClient();
   const poIds = row.shares.map((s) => s.poId);
+  // 15 November 2026 (Section 4): a lathe bill's scans are filed under the bill itself.
+  const latheId = row.lathe ? latheBillIdOf(row.key) : null;
+  const fileRefs = latheId ? [latheId] : poIds;
   const vatOn = await invoiceVatReady();
   const [{ data: files }, { data: pos }, { data: lines }] = await Promise.all([
-    admin.from("job_files").select("id, storage_path, content_type, caption, created_at").eq("kind", "supplier_invoice").in("ref_id", poIds).is("removed_at", null).order("created_at"),
+    admin.from("job_files").select("id, storage_path, content_type, caption, created_at").eq("kind", "supplier_invoice").in("ref_id", fileRefs).is("removed_at", null).order("created_at"),
     admin.from("purchase_orders").select("id, supplier_invoice_path, supplier_invoice_at, supplier_invoice_amount, supplier_paid_at, supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path, supplier_paid_by" + (vatOn ? ", supplier_invoice_vat_aed" : "")).in("id", poIds),
     admin.from("purchase_order_lines").select("id, po_id, description, quantity, received_qty, unit_cost, invoice_unit_cost, invoice_check").in("po_id", poIds).eq("is_active", true).order("position"),
   ]);
@@ -270,6 +276,7 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, 
       </div>
       <InvoiceEditHistory entries={edits} />
       {outcome ? <div data-si-outcome={outcome.tone}><Notice tone={outcome.tone}>{outcome.text}</Notice></div> : null}
+      {latheId ? <LatheInvoiceBlock billId={latheId} row={row} acts={acts} seesPay={seesPay} /> : null}
       {/* 13 November 2026 (Section 4): a row still waiting for its invoice - pay the supplier in advance from here. */}
       {row.status === "waiting" && row.shares.length === 1 ? <LpoAdvanceByPoId poId={row.shares[0].poId} role={acts ? "accounts" : "viewer"} viewingAs={!acts} /> : null}
       {/* 4 November 2026: a row still waiting for its invoice - accounts scan the paper and enter it right here. */}
@@ -335,5 +342,28 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, 
         </div>
       ) : null}
     </Card>
+  );
+}
+
+/** 15 November 2026 (Section 4): what a lathe bill adds to the opened invoice - its tickets, the scan, and where it is paid. */
+async function LatheInvoiceBlock({ billId, row, acts, seesPay }: { billId: string; row: InvoiceRow; acts: boolean; seesPay: boolean }) {
+  const admin = createAdminClient();
+  const { data: tix } = await admin.from("part_items").select("id, lathe_ticket, description, lathe_bill_amount_aed").eq("lathe_bill_id", billId);
+  const { data: files } = await admin.from("job_files").select("id, storage_path, caption, content_type, ref_id").eq("kind", "supplier_invoice").eq("ref_id", billId).is("removed_at", null);
+  const list = (tix ?? []) as { id: string; lathe_ticket: string | null; description: string; lathe_bill_amount_aed: number | null }[];
+  const fileRows = (files ?? []) as { id: string; storage_path: string; caption: string | null; content_type: string | null; ref_id: string }[];
+  const urls = fileRows.length ? await signJobFiles(fileRows.map((f) => f.storage_path)) : {};
+  const amountOf = (t: { lathe_bill_amount_aed: number | null }) => (t.lathe_bill_amount_aed !== null ? " · AED " + money(Number(t.lathe_bill_amount_aed)) : "");
+  return (
+    <div className="flex flex-col gap-2 rounded-control border-2 border-ink p-3" data-si-lathe-block>
+      <span className="text-xs font-extrabold uppercase tracking-[0.08em]">Lathe bill · {list.length} ticket{list.length === 1 ? "" : "s"}</span>
+      {list.length ? <ul className="flex flex-col gap-0.5 text-sm">{list.map((t) => <li key={t.id} data-si-lathe-ticket>{t.lathe_ticket ?? ""} · {t.description.toUpperCase()}{amountOf(t)}</li>)}</ul> : <p className="text-sm text-muted">No ticket on this bill (lines with no ticket are on the Lathe page).</p>}
+      {acts ? <JobFileUpload jobId="nocar" kind="supplier_invoice" refId={billId} files={fileRows.map((f) => ({ id: f.id, path: f.storage_path, url: urls[f.storage_path] ?? null, caption: f.caption, contentType: f.content_type, refId: f.ref_id }))} accept="pdf" label={fileRows.length ? "Add another scan" : "Scan / attach the lathe bill"} caption={"Lathe bill " + (row.number ?? "")} /> : null}
+      <div className="flex flex-wrap items-center gap-2">
+        <LinkButton href="/parts/lathe" tone="ghost" size="md">Lathe tickets</LinkButton>
+        {seesPay && !row.paid && (row.status === "checked" || row.status === "zoho") ? <LinkButton href={"/supplier-payments?supplier=" + encodeURIComponent(row.supplierId ?? "name:" + row.supplier)} tone="secondary" size="md" data-si-lathe-pay>Pay on Supplier payments</LinkButton> : null}
+        {seesPay && !row.paid && (row.status === "new" || row.status === "queried") ? <span className="text-sm font-semibold" data-si-lathe-check-first>Check it first: only a checked lathe bill can be paid.</span> : null}
+      </div>
+    </div>
   );
 }

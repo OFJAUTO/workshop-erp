@@ -35,6 +35,8 @@ async function latheOpenOf(supplierId: string | null, supplierName: string): Pro
   if (!(await lathePayReady())) return [];
   const admin = createAdminClient();
   let q = admin.from("lathe_bills").select("id, bill_number, bill_date, total_aed, paid_at, supplier_id, supplier_name").eq("is_active", true).is("voided_at", null).abortSignal(fresh());
+  // 15 November 2026 (Section 4): a lathe bill is paid only once accounts checked it on Supplier invoices.
+  if (await (await import("./lathe-invoices")).latheCheckReady()) q = q.not("checked_at", "is", null);
   q = supplierId ? q.eq("supplier_id", supplierId) : q.ilike("supplier_name", supplierName);
   const { data } = await q;
   const bills = (data ?? []) as { id: string; bill_number: string; bill_date: string; total_aed: number | string; paid_at: string | null }[];
