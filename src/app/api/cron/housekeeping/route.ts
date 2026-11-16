@@ -563,6 +563,13 @@ async function runHousekeeping(): Promise<Record<string, number>> {
   // number and the date are entered. Accounts see the same LPOs on their Waiting list all along.
   // 13 November 2026: once receipts exist the invoice number is typed at receiving, "Invoice comes later" receipts are
   // reminded on day 3, day 5 and every day while overdue (parts desk and accounts), and older LPOs are never reminded.
+  // 16 November 2026 (Section 1): last month's closing stock snapshot (once), and stock usage never waiting for Zoho while it is not synced.
+  try {
+    report.stockSnapshot = (await (await import("@/lib/stock-report")).monthEndStockSnapshot()) ? 1 : 0;
+    report.stockUsageClosed = (await (await import("@/lib/zoho-sync")).cancelStockUsageRows(null)).closed;
+  } catch {
+    report.stockSnapshot = -1;
+  }
   const { receiptsReady: rcReady, receiptReminders, paperworkOwnerSummary } = await import("@/lib/receipts");
   if (await rcReady()) {
     try {

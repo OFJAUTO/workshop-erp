@@ -65,7 +65,7 @@ export const PURCHASE_TYPES = [
   // 11 November 2026 (Section 1): a stock purchase (no car) is bought for the shelf: its bill goes to the stock account.
   // 13 November 2026 (Section 2, option B): the ERP is the ONLY stock count; Zoho keeps the VALUE in an Other Current
   // Asset account (never Zoho's own Inventory Asset, which wants a Zoho item on every line).
-  { key: "stock", label: "Stock value (the ERP keeps the count)" },
+  { key: "stock", label: "Stock purchase bills (the ERP keeps the count and value)" },
   // A stock item used on a job moves its cost from the stock value to this cost account (empty = Parts purchases).
   { key: "stockused", label: "Stock used on jobs (cost)" },
 ] as const;
@@ -341,7 +341,7 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
     purchases.stockused = (map.purchases.stockused ?? "").trim() ? await resolve(map.purchases.stockused, "Stock used on jobs (cost)", "expense").catch(() => purchases.parts) : purchases.parts;
     // The stock account resolves on its own: a missing one fails only the stock purchases' bills.
     try {
-      purchases.stock = await resolve(map.purchases.stock, "Stock value (the ERP keeps the count)", "stock");
+      purchases.stock = await resolve(map.purchases.stock, "Stock purchase bills (the ERP keeps the count and value)", "stock");
     } catch (e) {
       out.purchasesStockError = e instanceof Error ? e.message : String(e);
     }
@@ -997,6 +997,18 @@ async function syncStockUseRow(org: string, accounts: Resolved, movementId: stri
   if (!m) return { result: { skipped: "The stock movement no longer exists in the ERP." } };
   if (!m.job_id || (m.kind !== "out" && m.kind !== "return")) return { result: { skipped: "Not stock used on a job: nothing for Zoho (the count lives in the ERP only)." } };
   const day = new Date(new Date(m.created_at).getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+  // 16 November 2026 (Section 1): stock stays in the ERP only. With the switch OFF nothing is posted, and a journal that
+  // reached Zoho earlier is taken back out (found by its reference, deleted).
+  if (!(await stockUsagePosts())) {
+    const { data: jobRow } = await admin.from("jobs").select("job_number").eq("id", m.job_id).maybeSingle();
+    const refOff = cut(`STK ${(jobRow as { job_number?: string } | null)?.job_number ?? "job"} ${m.id.slice(0, 8)}`, 50);
+    const hit = await zohoFetch<{ journals?: { journal_id: string; reference_number?: string }[] }>(`/journals?reference_number=${encodeURIComponent(refOff)}`, { org }).catch(() => ({ journals: [] }));
+    const posted = hit.journals?.find((j) => j.reference_number === refOff)?.journal_id ?? null;
+    if (!posted) return { result: { skipped: STOCK_USAGE_NOT_SENT, not_sent: true } };
+    await zohoFetch(`/journals/${encodeURIComponent(posted)}`, { org, method: "DELETE" });
+    if (await stockUseColumnReady()) await admin.from("stock_movements").update({ zoho_journal_id: null }).eq("id", m.id);
+    return { zohoId: posted, result: { reversed: `Stock usage taken back out of Zoho (${refOff}): ${STOCK_USAGE_NOT_SENT}`, journal: refOff } };
+  }
   const gate = await startDateSkip(day, "stockuse", m.id);
   if (gate) return gate;
   const [{ data: item }, { data: job }] = await Promise.all([
@@ -2943,4 +2955,45 @@ async function receiptRefsWords(poId: string, billNumber: string | null): Promis
   const out = new Set<string>();
   for (const r of (data ?? []) as { invoice_number: string | null; refs: unknown }[]) for (const x of refsOfRow(r)) if (!(x.type === "invoice" && x.number === billNumber)) out.add(refLabel(types, x.type) + ": " + x.number);
   return Array.from(out);
+}
+
+/*
+ * 16 November 2026 (Section 1): STOCK STAYS IN THE ERP ONLY (accounts' decision). The stock count and value live only in
+ * the ERP; Zoho gets only the supplier bills for stock purchases (to the account chosen in Account mapping). "Stock used
+ * on a job" journals go to Zoho only while the owner or accounts switch "Post stock usage to Zoho" on (default OFF).
+ */
+export const STOCK_USAGE_NOT_SENT = "NOT SENT - STOCK USAGE IS NOT SYNCED";
+
+/** Is stock usage posted to Zoho? Read fresh (the switch can change mid-run). */
+export async function stockUsagePosts(): Promise<boolean> {
+  const { data } = await createAdminClient().from("settings").select("value").eq("key", "zoho_post_stock_usage").maybeSingle();
+  return data?.value === true || data?.value === "true";
+}
+
+/**
+ * While the switch is OFF: every stock-usage entry still waiting for Zoho is closed as NOT SENT (kept in the history, never
+ * sent with "Sync to Zoho"), and any that DID reach Zoho is put back in the queue to be taken back out of Zoho (OFJ TEST
+ * until go-live). Safe to call any time; does nothing while the switch is on. Returns how many were closed / reopened.
+ */
+export async function cancelStockUsageRows(by: string | null): Promise<{ closed: number; reversing: number }> {
+  if (await stockUsagePosts()) return { closed: 0, reversing: 0 };
+  const admin = createAdminClient();
+  const now = new Date().toISOString();
+  const { data: closed } = await admin
+    .from("zoho_outbox")
+    .update({ status: "synced", synced_at: now, claimed_at: null, last_error: null, zoho_result: { skipped: STOCK_USAGE_NOT_SENT, not_sent: true, closed_at: now, closed_by: by }, updated_at: now })
+    .eq("kind", "stockuse")
+    .in("status", ["pending", "failed"])
+    .is("zoho_id", null)
+    .is("claimed_at", null)
+    .select("id");
+  // Posted while it was on: back to the queue, and the handler takes the journal back out of Zoho.
+  const { data: posted } = await admin.from("zoho_outbox").select("id, zoho_result").eq("kind", "stockuse").not("zoho_id", "is", null);
+  let reversing = 0;
+  for (const r of (posted ?? []) as { id: string; zoho_result: Record<string, unknown> | null }[]) {
+    if (r.zoho_result?.reversed || r.zoho_result?.reverse) continue;
+    await admin.from("zoho_outbox").update({ status: "pending", claimed_at: null, zoho_result: { ...(r.zoho_result ?? {}), reverse: true }, updated_at: now }).eq("id", r.id);
+    reversing++;
+  }
+  return { closed: (closed ?? []).length, reversing };
 }

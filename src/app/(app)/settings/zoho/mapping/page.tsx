@@ -4,7 +4,7 @@ import { requirePermission } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { listAccounts, zohoConfigured, zohoConnection, type ZohoAccount } from "@/lib/zoho";
 import { DEPOSIT_METHODS, EXPENSE_TYPES, INCOME_TYPES, PURCHASE_TYPES, SUGGESTED_MAP, SUPPLIER_PAY_METHODS, readZohoMap, zohoWriteOrg } from "@/lib/zoho-sync";
-import { saveZohoMapping, useSuggestedMapping } from "./actions";
+import { saveZohoMapping, setStockUsagePostingAction, useSuggestedMapping } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -72,7 +72,10 @@ export default async function ZohoMappingPage({ searchParams }: { searchParams: 
   const depositable = chart.filter((a) => ["bank", "cash", "other_current_asset"].includes(a.account_type)).map((a) => a.account_name);
   const expense = chart.filter((a) => a.account_type === "expense").map((a) => a.account_name);
   // Option B (13 November 2026): the stock VALUE is an Other Current Asset; Zoho's own inventory accounts want a Zoho item per line.
-  const stockAccounts = chart.filter((a) => a.account_type === "other_current_asset").map((a) => a.account_name);
+  // 16 November 2026: the stock stays in the ERP; its purchase bills go to the account Mathew picks (an asset or an expense, never Zoho's inventory).
+  const stockAccounts = chart.filter((a) => a.account_type === "other_current_asset" || a.account_type === "expense").map((a) => a.account_name);
+  const postsStock = settings.zoho_post_stock_usage === true || (settings.zoho_post_stock_usage as unknown) === "true";
+  const staff = await requirePermission("zohoSync");
   const liability = chart.filter((a) => a.account_type.includes("liability")).map((a) => a.account_name);
 
   /** The select shows the live chart, with the picked or suggested name added when the chart does not hold it yet. */
@@ -102,6 +105,21 @@ export default async function ZohoMappingPage({ searchParams }: { searchParams: 
       {error ? <Notice tone="error">{error}</Notice> : null}
       {!configured ? <Notice tone="info">Zoho is not set up on this server, so the live chart cannot be shown — the names can still be typed and saved.</Notice> : null}
       {chartError ? <Notice tone="error">The chart of accounts could not be read: {chartError}</Notice> : null}
+
+      {/* 16 November 2026 (Section 1): stock stays in the ERP only - "Stock used on a job" is posted only while this is on. */}
+      <Card className="flex flex-col gap-2" data-stock-usage-card>
+        <SectionLabel>Stock and Zoho</SectionLabel>
+        <p className="text-sm">The stock count and the stock value live in the ERP only. Zoho gets the supplier bills for stock purchases (to the account chosen below under purchases). The ERP&apos;s job profit always includes the cost of stock used.</p>
+        <form action={setStockUsagePostingAction} className="flex flex-wrap items-center gap-3">
+          <label className="flex min-h-11 items-center gap-2 text-sm font-semibold">
+            <input type="checkbox" name="on" defaultChecked={postsStock} disabled={!!staff.viewingAs} className="h-5 w-5 accent-ink" data-stock-usage-switch />
+            Post stock usage to Zoho
+          </label>
+          <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${postsStock ? "bg-amber-soft" : "bg-green-soft text-green-text"}`} data-stock-usage-state={postsStock ? "on" : "off"}>{postsStock ? "ON: each use on a job posts a journal" : "OFF: stock usage is not synced"}</span>
+          {staff.viewingAs ? null : <Button type="submit" size="md" tone="secondary" data-stock-usage-save>Save</Button>}
+          <LinkButton href="/stock-report" tone="ghost" size="md">Stock report (count and value)</LinkButton>
+        </form>
+      </Card>
 
       <form action={saveZohoMapping} className="flex flex-col gap-4">
         <Card className="flex flex-col gap-3" data-map-income>

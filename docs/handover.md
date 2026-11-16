@@ -1,3 +1,16 @@
+# Handover – list of 16 November 2026 (in progress; last update 16 Nov, 10:00 Dubai)
+
+**NEEDS OMAR (top first):**
+1. **Apply three database changes** (15 Nov S1 and S4, 16 Nov S1): turn auto mode off, reply **"apply"**. Details in `docs/waiting-for-apply.md`.
+2. **AED 8,000.00 advance for E-00082 / J-01013 is NOT recorded anywhere** (PRO-00029 issued, no payment) - steps after Section 2.
+3. Mathew chooses the Zoho account for stock purchase bills (Account mapping); and decides whether to post one closing stock figure a month.
+
+**Progress (2 sections):**
+- S1 stock stays in the ERP: DONE, pushed (note `docs/stock-erp-only-16-nov-note.md`).
+- S2 estimate advance payments: in progress.
+
+---
+
 # Handover – list of 15 November 2026 (ALL DONE; last update 15 Nov, 13:40 Dubai)
 
 **NEEDS OMAR (top first):**

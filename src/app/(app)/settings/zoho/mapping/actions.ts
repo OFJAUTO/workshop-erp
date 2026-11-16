@@ -87,3 +87,17 @@ export async function useSuggestedMapping() {
   if (error) return back("error", dbWords(error, "settings/zoho/mapping/actions"));
   return back("message", "Every empty box took the suggested name. Accounts that do not exist yet are created in OFJ TEST at the first sync; in the REAL book the accountant creates them before go-live.");
 }
+
+/** 16 November 2026 (Section 1): "Post stock usage to Zoho" - owner and accounts (permission zohoSync); OFF closes the waiting entries as NOT SENT. */
+export async function setStockUsagePostingAction(formData: FormData) {
+  const staff = await requirePermission("zohoSync");
+  if (staff.viewingAs) return back("error", "Viewing only.");
+  const on = formData.get("on") === "on";
+  const { error } = await createAdminClient().from("settings").upsert({ key: "zoho_post_stock_usage", label: "Post stock usage to Zoho (stock lives in the ERP)", value: on, updated_by: staff.id }, { onConflict: "key" });
+  if (error) return back("error", dbWords(error, "settings/zoho/stock-usage"));
+  // The settings audit trigger keeps who changed it, when, old and new.
+  if (on) return back("message", "Stock usage is posted to Zoho from now on (each use on a job sends one journal).");
+  const { cancelStockUsageRows } = await import("@/lib/zoho-sync");
+  const r = await cancelStockUsageRows(staff.id);
+  return back("message", `Stock usage is NOT synced to Zoho.${r.closed ? ` ${r.closed} waiting entr${r.closed === 1 ? "y" : "ies"} closed as NOT SENT (kept in the history).` : ""}${r.reversing ? ` ${r.reversing} already in Zoho will be taken back out at the next Sync to Zoho.` : ""}`);
+}

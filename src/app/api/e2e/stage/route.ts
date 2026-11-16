@@ -65,6 +65,14 @@ async function seedStage(request: NextRequest) {
     const { lpoApprovalNudges } = await import("@/lib/lpo-nudge");
     return NextResponse.json({ told: await lpoApprovalNudges({ force: true, now: (body as { now?: number }).now ?? undefined }) });
   }
+  if (stage === "stock-snapshot") {
+    const { monthEndStockSnapshot } = await import("@/lib/stock-report");
+    return NextResponse.json({ saved: await monthEndStockSnapshot((body as { now?: number }).now ?? undefined) });
+  }
+  if (stage === "stock-usage-close") {
+    const { cancelStockUsageRows } = await import("@/lib/zoho-sync");
+    return NextResponse.json(await cancelStockUsageRows(null));
+  }
   if (stage === "paperwork-summary") {
     const { paperworkOwnerSummary } = await import("@/lib/receipts");
     return NextResponse.json({ told: await paperworkOwnerSummary((body as { now?: number }).now ?? undefined) });

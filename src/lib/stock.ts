@@ -78,7 +78,8 @@ export async function recordStockMovement(itemId: string, input: { kind: Movemen
   const movementId = (mv as { id?: string } | null)?.id ?? null;
   if (movementId && input.jobId && (input.kind === "out" || input.kind === "return")) {
     const z = await import("@/lib/zoho-sync");
-    if (await z.stockUseColumnReady()) await z.tryEnqueueZoho("stockuse", movementId, input.jobId, actor.id).catch(() => null);
+    // 16 November 2026: stock stays in the ERP only - queued for Zoho only while "Post stock usage to Zoho" is on.
+    if ((await z.stockUseColumnReady()) && (await z.stockUsagePosts())) await z.tryEnqueueZoho("stockuse", movementId, input.jobId, actor.id).catch(() => null);
   }
   return { after };
 }

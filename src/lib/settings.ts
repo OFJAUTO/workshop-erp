@@ -188,6 +188,8 @@ const DEFAULTS = {
   recovery_rates: {} as unknown,
   /** 15 November 2026: the references a delivery may be recorded with, and whether each counts as the supplier's invoice. */
   supplier_ref_types: null as unknown,
+  /** 16 November 2026: accounts decided the stock count and value live in the ERP only - no "Stock used on a job" journals to Zoho unless switched on. */
+  zoho_post_stock_usage: false as boolean,
   recovery_flag_percent: 25,
   /** A supplier invoice price above the approved LPO is accepted at once up to the higher of these per LPO (1 November 2026). */
   supplier_price_auto_percent: 5,

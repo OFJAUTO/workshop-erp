@@ -170,6 +170,8 @@ async function freshRunningRun(): Promise<{ id: string; name: string; startedAt:
  * hangs on a document outside the selection — with the row to add, or why it cannot go.
  */
 export async function loadSyncPreview(onlyIds: string[] | null = null): Promise<SyncPreview> {
+  // 16 November 2026: stock usage is not synced while the switch is off - waiting entries close as NOT SENT first.
+  await (await import("./zoho-sync")).cancelStockUsageRows(null).catch(() => null);
   const [state, all, minutes, running, { count: red }] = await Promise.all([
     sendState(),
     loadPendingRows(true),
@@ -342,6 +344,8 @@ export type StartResult = { runId: string | null; ids: string[]; error: string |
  * preview goes with the next press), in posting order. One run at a time once the runs table exists.
  */
 export async function startSyncRun(staff: CurrentStaff, idsIn: string[], preview: Record<string, unknown>): Promise<StartResult> {
+  // 16 November 2026: stock usage is not synced while the switch is off - waiting entries close as NOT SENT first.
+  await (await import("./zoho-sync")).cancelStockUsageRows(null).catch(() => null);
   const state = await sendState();
   if (state.block) return { runId: null, ids: [], error: state.block };
   const asked = new Set(idsIn.filter((x) => typeof x === "string").slice(0, 2000));
@@ -469,6 +473,8 @@ export async function loadRun(id: string): Promise<{ run: SyncRunRow; now: Map<s
  * answers, so the job is never "late" because the sync is manual.
  */
 export async function zohoCronTick(limit: number): Promise<{ words: string; pushed: number; failed: number; waiting: number; recon: { day: string; status: string }[] }> {
+  // 16 November 2026: stock usage is not synced while the switch is off - waiting entries close as NOT SENT first.
+  await (await import("./zoho-sync")).cancelStockUsageRows(null).catch(() => null);
   const reconWords = (days: { day: string; status: string }[]) => (days.length ? ` · reconciled ${days.map((d) => `${d.day}: ${d.status}`).join(", ")}` : "");
   const books = await zohoBooksNow();
   if (books.auto) {

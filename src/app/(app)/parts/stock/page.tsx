@@ -64,7 +64,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
       <PageHeader
         title="Stock"
         subtitle={`${items.length} item${items.length === 1 ? "" : "s"}${low.length ? ` · ${low.length} below minimum` : ""}${lastCount ? ` · last count ${formatDate(lastCount)}` : " · never counted"}`}
-        actions={<><LinkButton href="/parts/stock?order=1" size="lg" data-new-workshop-order>New workshop order</LinkButton><LinkButton href="/parts/stock?count=1" tone="secondary" size="lg">Monthly count</LinkButton><LinkButton href="/parts" tone="secondary" size="lg">Parts desk</LinkButton></>}
+        actions={<><LinkButton href="/parts/stock?order=1" size="lg" data-new-workshop-order>New workshop order</LinkButton><LinkButton href="/parts/stock?count=1" tone="secondary" size="lg">Monthly count</LinkButton>{["owner", "accounts"].includes(staff.role_id) ? <LinkButton href="/stock-report" tone="ghost" size="lg" data-stock-report-link>Stock report</LinkButton> : null}<LinkButton href="/parts" tone="secondary" size="lg">Parts desk</LinkButton></>}
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}

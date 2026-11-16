@@ -9,7 +9,7 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 3. record it;
 4. run the read-only live check (`npm run check:live`).
 
-## Waiting now (15 November 2026)
+## Waiting now (15 and 16 November 2026)
 
 Backup taken first: `backups/2026-11-15T05-11-50` (134 tables, 290,845 rows). Applied on the TEST database and tested there. **From your phone:** turn auto mode off, reply **"apply"**. They run in this order.
 
@@ -17,6 +17,7 @@ Backup taken first: `backups/2026-11-15T05-11-50` (134 tables, 290,845 rows). Ap
 |---|---|---|---|
 | 1 | `supabase/migrations/20261217090000_receipt_refs.sql` (Section 1, URGENT: receiving never blocks) | Adds two columns to `part_receipts`: the references typed at receiving (invoice / pre-payment parts invoice / WIP number, any added type) and the "Arrived - paperwork pending" flag. Copies each existing receipt's invoice number into the references. Adds one settings row: which reference types count as the supplier's invoice (Invoice and Pre-payment yes, WIP no). **Already live without it:** "Arrived - paperwork pending" works for every supplier (due the same day), so the mechanic is never blocked. **Switched on by the apply:** the reference-type choice, the PRE-PAYMENT / WIP columns, and the block on checking or paying an LPO while a delivery has no reference. | 2 columns + 1 setting |
 | 2 | `supabase/migrations/20261217100000_lathe_bill_check.sql` (Section 4: lathe bills go through Supplier invoices first; backup `backups/2026-11-15T05-44-16`) | Adds five columns to `lathe_bills` (checked when and by whom, the query text, when and by whom). Marks the lathe bills already paid or sent to Zoho as checked, so nothing settled goes back to accounts. **Already live without it:** every lathe bill shows on Supplier invoices tagged LATHE, with its tickets, scan, search and export. **Switched on by the apply:** "Mark checked" and "Query" on a lathe bill, and Supplier payments offers a lathe bill only after it is checked. | 5 columns |
+| 3 | `supabase/migrations/20261218090000_stock_snapshots.sql` (16 Nov, Section 1: stock stays in the ERP; backup `backups/2026-11-16T05-46-40`) | Adds one server-only table `stock_snapshots`: the stock count and value saved on the last day of each month (taken by the hourly job on the 1st). RLS on, no grants to logins, audit + no-delete triggers. **Already live without it:** the switch "Post stock usage to Zoho" (OFF), the waiting stock-usage entries closed as NOT SENT, and the Stock report with any as-of date and Excel. **Switched on by the apply:** the saved month-end snapshots. | 1 table |
 
 ## Applied on 13 November 2026, evening
 

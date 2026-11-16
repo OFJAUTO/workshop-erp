@@ -96,6 +96,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/parts-accounts", label: "Parts accounts", show: can(role, "viewPartsAccounts") },
     { href: "/parts/returns", label: "Purchase returns", show: ["owner", "accounts", "parts"].includes(role) },
     { href: "/parts/suppliers", label: "Suppliers", show: can(role, "manageSuppliers") },
+    // 16 November 2026: the stock count and value live in the ERP only - the stock report (owner and accounts).
+    { href: "/stock-report", label: "Stock report", show: role === "owner" || role === "accounts" },
     { href: "/parts/lathe", label: "Lathe", show: ["owner", "parts", "accounts", "workshop_manager"].includes(role) },
   ];
   const partsManagement = { group: "parts-management", label: "Parts management", items: partsManagementItems.filter((i) => i.show).map(({ href, label, badge }) => ({ href, label, badge })) };
