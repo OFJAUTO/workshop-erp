@@ -32,10 +32,10 @@ const mayRecord = (s: Money) => !s.viewingAs && can(s.role_id as RoleId, "record
 
 export type ChoicesAnswer = { error?: string; choices?: PaymentChoices; methods?: string[]; charges?: BankFees; isOwner?: boolean; /** Opened from an advisor's payment report: what he sent, to pre-fill the form (2 November 2026, section 3). */ report?: WindowReport | null; /** The targets the report's pre-fill and receipt key apply to (its job, or its estimate's proforma). */ reportTargetKeys?: string[]; /** The one-tap reasons for a Query. */ queryReasons?: string[] };
 
-export async function loadPaymentChoices(input: { jobId?: string | null; customerId?: string | null; vehicleId?: string | null; reportId?: string | null }): Promise<ChoicesAnswer> {
+export async function loadPaymentChoices(input: { jobId?: string | null; customerId?: string | null; vehicleId?: string | null; reportId?: string | null; estimateId?: string | null }): Promise<ChoicesAnswer> {
   const staff = await requireStaff();
   if (!mayRecord(staff)) return { error: "Payments are recorded by accounts or the owner." };
-  for (const v of [input.jobId, input.customerId, input.vehicleId, input.reportId]) if (v && !isUuid(v)) return { error: "Not found." };
+  for (const v of [input.jobId, input.customerId, input.vehicleId, input.reportId, input.estimateId]) if (v && !isUuid(v)) return { error: "Not found." };
   const settings = await getSettings();
   // A payment an advisor sent to accounts: the window opens on its car's job, pre-filled with what he sent.
   const report = input.reportId ? await reportForWindow(input.reportId, settings) : null;
@@ -46,7 +46,9 @@ export async function loadPaymentChoices(input: { jobId?: string | null; custome
   // Another car or the customer's account is "Record a different payment instead" - without the report.
   // A report on an ESTIMATE (car not here yet): the one target is that estimate's own proforma.
   const estProformaId = report?.estimateId ? (await (await import("@/lib/estimate-money")).estimateMoneyOf(report.estimateId))?.proforma?.id ?? null : null;
-  const own = report ? all.targets.filter((t) => (report.jobId ? t.jobId === report.jobId : !!estProformaId && t.invoiceId === estProformaId)) : all.targets;
+  // 16 November 2026: an estimate with no proforma yet - its own "advance" place (recording makes the proforma).
+  const estFamily = report?.estimateId && !estProformaId ? new Set((await (await import("@/lib/estimate-money")).familyIdsOf([report.estimateId])).get(report.estimateId)?.ids ?? [report.estimateId]) : null;
+  const own = report ? all.targets.filter((t) => (report.jobId ? t.jobId === report.jobId : estProformaId ? t.invoiceId === estProformaId : !!estFamily && t.kind === "estimate" && !!t.estimateId && estFamily.has(t.estimateId))) : all.targets;
   const choices = report && own.length ? { ...all, targets: own, suggested: own[0].key } : all;
   // The window pre-fills and keys the receipt on the report ONLY on the report's own targets (job or estimate proforma).
   const reportTargetKeys = report ? own.map((t) => t.key) : [];

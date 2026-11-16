@@ -251,15 +251,16 @@ try {
   check("G: the advisor sees no Record payment", (await advisor.page.locator("[data-record-payment-open]").count()) === 0);
   await advisor.page.locator("[data-send-payment-link]").click();
   await advisor.page.locator("[data-link-custom]").click();
-  await advisor.page.locator("[data-link-amount]").fill("1234");
+  await advisor.page.locator("[data-link-amount]").fill("900");
+  await advisor.page.locator("[data-link-make]:not([disabled])").waitFor({ timeout: 10000 }).catch(() => {});
   await advisor.page.locator("[data-link-make]").click();
   const msg = await until(async () => (await advisor.page.locator("[data-send-message]").count()) ? await advisor.page.locator("[data-send-message]").inputValue() : null, 30, 400);
-  check("G: the message asks for AED 1,234.00 with our payment page link", !!msg && /AED 1,234\.00/.test(msg) && /https:\/\/\S+/.test(msg), (msg ?? "").slice(0, 220));
+  check("G: the message asks for AED 900.00 with our payment page link", !!msg && /AED 900.00/.test(msg) && /https:\/\/\S+/.test(msg), (msg ?? "").slice(0, 220));
   await advisor.page.locator("[role=dialog]").last().screenshot({ path: shot("G-advisor-payment-link.png") });
   await advisor.page.getByRole("button", { name: /Copy message and link/ }).click();
   const req = (await sql("select amount_aed::float8 as a from public.payment_requests where job_id = $1 and kind = 'advance' and is_active", [seedG.jobId]))[0];
-  const logged = await until(async () => (await sql("select count(*)::int as n from public.job_events where job_id = $1 and note like 'Payment link for AED 1,234.00 sent by%'", [seedG.jobId]))[0].n >= 1, 20, 500);
-  check("G: the payment page is for AED 1,234.00 and the send is logged", req?.a === 1234 && !!logged, JSON.stringify({ req, logged }));
+  const logged = await until(async () => (await sql("select count(*)::int as n from public.job_events where job_id = $1 and note like 'Payment link for AED 900.00 sent by%'", [seedG.jobId]))[0].n >= 1, 20, 500);
+  check("G: the payment page is for AED 900.00 and the send is logged", req?.a === 900 && !!logged, JSON.stringify({ req, logged }));
   // The short link points at the live address: follow it by hand on the TEST server only (tests never reach live).
   const toTest = (u) => (u ?? "").replace(/^https:\/\/erp\.ofjauto\.com/, base);
   const hop = await fetch(toTest(msg?.match(/https:\/\/\S+/)?.[0]) || `${base}/x`, { redirect: "manual" });
@@ -267,7 +268,7 @@ try {
   const tok = (await sql("select token from public.payment_requests where job_id = $1 and kind = 'advance' and is_active", [seedG.jobId]))[0]?.token;
   const pPage = await fetch(`${base}/p/${tok}`, { redirect: "manual" });
   const pHtml = (await pPage.text()).replace(/<!--.*?-->/g, "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
-  check("G: the short link answers, and the payment page shows the amount", hop.status < 500 && pPage.status === 200 && /1,234\.00/.test(pHtml), `${hop.status} ${pPage.status} ${pHtml.slice(pHtml.indexOf("AED"), pHtml.indexOf("AED") + 60)}`);
+  check("G: the short link answers, and the payment page shows the amount", hop.status < 500 && pPage.status === 200 && /900.00/.test(pHtml), `${hop.status} ${pPage.status} ${pHtml.slice(pHtml.indexOf("AED"), pHtml.indexOf("AED") + 60)}`);
 
   /* ---------------- H. Search results: Pay on a car ---------------- */
   await go(owner.page, `${base}/dashboard`);

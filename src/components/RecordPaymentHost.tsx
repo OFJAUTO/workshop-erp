@@ -23,7 +23,7 @@ import { isUuid } from "@/lib/uuid";
  * customer's account as an unallocated advance with a note. The answer (the receipt, Send the receipt) stays in it.
  */
 
-export type RecordPaymentOpen = { jobId?: string | null; customerId?: string | null; vehicleId?: string | null; /** An advisor's payment report: the window opens pre-filled with what he sent (2 November 2026, section 3). */ reportId?: string | null };
+export type RecordPaymentOpen = { jobId?: string | null; customerId?: string | null; vehicleId?: string | null; /** An advisor's payment report: the window opens pre-filled with what he sent (2 November 2026, section 3). */ reportId?: string | null; /** 16 November 2026: opened from an estimate's PAYMENTS box (its proforma, else the estimate itself). */ estimateId?: string | null };
 
 const EVENT = "erp:record-payment";
 
@@ -361,7 +361,7 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
                 proofJobId={target.jobId}
                 spentKeys={spent}
                 balance={target.balance}
-                balanceLabel={target.kind === "invoice" ? "the balance" : "what is left of the approved total"}
+                balanceLabel={target.kind === "invoice" ? "the balance" : target.kind === "estimate" ? "the estimate total" : "what is left of the approved total"}
                 action={formAction}
                 charges={answer.charges!}
                 methods={answer.methods ?? []}
@@ -370,7 +370,7 @@ function RecordPaymentDialog({ start, onClose }: { start: RecordPaymentOpen; onC
                 isProforma={target.isProforma}
                 nextTaxNumber={choices.nextTaxNumber}
                 pendingBank={state?.needsDuplicateReason && state.at !== dismissedAt ? state.needsDuplicateReason : null}
-                hidden={target.kind === "unallocated" ? { unallocated: "1", customer_id: choices.customer.id, vehicle_id: carId } : null}
+                hidden={target.kind === "unallocated" ? { unallocated: "1", customer_id: choices.customer.id, vehicle_id: carId } : target.kind === "estimate" && target.estimateId ? { estimate_id: target.estimateId } : null}
                 extra={
                   target.kind === "unallocated" ? (
                     <div className="flex flex-col gap-2">

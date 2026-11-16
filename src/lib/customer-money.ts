@@ -129,7 +129,9 @@ export async function jobMoneyMany(jobIds: string[], settings: Settings, pre: { 
 export type PayTarget = {
   /** "inv:<id>", "job:<id>" or "credit". */
   key: string;
-  kind: "invoice" | "job" | "unallocated";
+  kind: "invoice" | "job" | "unallocated" | "estimate";
+  /** 16 November 2026: an estimate with no proforma yet (recording makes the proforma, the receipt and the advance tax invoice). */
+  estimateId?: string | null;
   jobId: string | null;
   invoiceId: string | null;
   vehicleId: string | null;
@@ -188,7 +190,7 @@ export type PaymentChoices = {
  * the asked-for job always, and the customer's account. A job's live proforma or invoice is the target once it exists;
  * before that the job itself (an advance that comes off the invoice by itself).
  */
-export async function paymentChoices(input: { customerId?: string | null; vehicleId?: string | null; jobId?: string | null }, settings: Settings): Promise<PaymentChoices | null> {
+export async function paymentChoices(input: { customerId?: string | null; vehicleId?: string | null; jobId?: string | null; estimateId?: string | null }, settings: Settings): Promise<PaymentChoices | null> {
   const admin = createAdminClient();
   let customerId = input.customerId ?? null;
   let vehicleId = input.vehicleId ?? null;
@@ -237,12 +239,20 @@ export async function paymentChoices(input: { customerId?: string | null; vehicl
   // 4 November 2026: an estimate's proforma (the car not here yet) is a place for the money too.
   for (const e of await loadEstimateMoneyRows({ customerId })) {
     if (!e.proformaId || e.balance <= 0.005) continue;
-    targets.push({ key: `inv:${e.proformaId}`, kind: "invoice", jobId: null, invoiceId: e.proformaId, vehicleId: e.vehicleId, title: `Estimate ${e.number} · car not here yet`, detail: `Proforma ${e.proformaNumber} · balance ${aed(e.balance)}${e.paid > 0 ? ` · ${aed(e.paid)} paid so far` : ""} · the tax invoice follows the moment it is paid`, total: e.total, paid: e.paid, balance: e.balance, invoiceNumber: e.proformaNumber, isProforma: true, gone: false });
+    targets.push({ key: `inv:${e.proformaId}`, kind: "invoice", estimateId: e.estimateId, jobId: null, invoiceId: e.proformaId, vehicleId: e.vehicleId, title: `Estimate ${e.number} · car not here yet`, detail: `Proforma ${e.proformaNumber} · balance ${aed(e.balance)}${e.paid > 0 ? ` · ${aed(e.paid)} paid so far` : ""} · the tax invoice follows the moment it is paid`, total: e.total, paid: e.paid, balance: e.balance, invoiceNumber: e.proformaNumber, isProforma: true, gone: false });
+  }
+  // 16 November 2026 (Section 2): an estimate of this customer with NO proforma yet takes an advance too - recording it
+  // makes the proforma for the amount, the receipt and the advance tax invoice (an advance can be paid at any time).
+  for (const e of await (await import("./estimate-money")).estimatesWithoutProforma(customerId)) {
+    if (targets.some((t) => t.estimateId === e.estimateId)) continue;
+    targets.push({ key: `est:${e.estimateId}`, kind: "estimate", estimateId: e.estimateId, jobId: null, invoiceId: null, vehicleId: e.vehicleId, title: `Estimate ${e.number} · advance`, detail: `No proforma yet: recording it makes the proforma for the amount, the receipt and the advance tax invoice${e.jobNumber ? ` · held as ${e.jobNumber}` : ""}`, total: e.total, paid: 0, balance: e.total, invoiceNumber: null, isProforma: false, gone: false });
   }
   // That car's jobs first, then the rest as they came (newest first).
   targets.sort((a, b) => Number(b.vehicleId === vehicleId) - Number(a.vehicleId === vehicleId));
   if (ready) targets.push({ key: "credit", kind: "unallocated", jobId: null, invoiceId: null, vehicleId, title: "Customer's account (not allocated)", detail: "Saved as an advance on the customer's account, with a note of what it is for. Allocated later in one step.", total: null, paid: 0, balance: null, invoiceNumber: null, isProforma: false, gone: false });
-  const asked = input.jobId ? targets.find((t) => t.jobId === input.jobId) : null;
+  // 16 November 2026: opened from an estimate's PAYMENTS box - its proforma, else the estimate itself.
+  const estAsked = input.estimateId ? (await (await import("./estimate-money")).estimateMoneyOf(input.estimateId)) : null;
+  const asked = input.estimateId ? (targets.find((t) => t.invoiceId && t.invoiceId === estAsked?.proforma?.id) ?? targets.find((t) => t.estimateId === input.estimateId) ?? null) : input.jobId ? targets.find((t) => t.jobId === input.jobId) : null;
   const suggested = asked?.key ?? targets.find((t) => t.kind !== "unallocated" && t.vehicleId === vehicleId && (t.balance === null || t.balance > 0.005) && !t.gone)?.key ?? targets.find((t) => t.kind !== "unallocated" && (t.balance ?? 0) > 0.005)?.key ?? targets.at(-1)?.key ?? "";
   const nextTaxNumber = targets.some((t) => t.isProforma) ? await nextDocumentNumber("tax_invoice", settings) : null;
   return {

@@ -35,7 +35,9 @@ export type MoneyCardFacts = {
  * block (company, address, TRN, attention, PO number — may differ from the car's owner), send through
  * the one dialog, and the money recorded by accounts; the tax invoice follows by itself when paid.
  */
-export function EstimateMoneyCard({ estimateId, number, approved, money, billTo, canCreate, canRecord, recordReadOnly, canReport = false, isOwner = false, customerId, vehicleId, phoneDigits, customerName = "", customerPhone = "" }: {
+export function EstimateMoneyCard({ estimateId, number, approved, money, billTo, canCreate, canRecord, recordReadOnly, canReport = false, isOwner = false, customerId, vehicleId, phoneDigits, customerName = "", customerPhone = "", hideRecord = false }: {
+  /** 16 November 2026: the PAYMENTS box above carries Record / Tell accounts (one button each, never twice). */
+  hideRecord?: boolean;
   /** 13 November 2026 (Section 6): the customer record's name and mobile (the bill-to default, never retyped). */
   customerName?: string;
   customerPhone?: string;
@@ -212,8 +214,8 @@ export function EstimateMoneyCard({ estimateId, number, approved, money, billTo,
           <div className="flex flex-wrap gap-2">
             {canCreate ? <Button type="button" size="md" disabled={busy} onClick={openSend} data-em-send>Send to customer</Button> : null}
             {canCreate ? <Button type="button" tone="secondary" size="md" disabled={busy} onClick={() => { setLinkAmount(String(Math.max(0, pro.total - money.paid).toFixed(2))); setLinking(!linking); }} data-em-paylink>Send payment link</Button> : null}
-            {canRecord || recordReadOnly ? <RecordPaymentButton customerId={customerId} vehicleId={vehicleId} readOnly={recordReadOnly} size="md" tone="secondary" /> : null}
-            {canReport && !canRecord ? <PaymentReportButton estimateId={estimateId} balance={Math.max(0, pro.total - money.paid)} size="md" /> : null}
+            {!hideRecord && (canRecord || recordReadOnly) ? <RecordPaymentButton customerId={customerId} vehicleId={vehicleId} readOnly={recordReadOnly} size="md" tone="secondary" /> : null}
+            {!hideRecord && canReport && !canRecord ? <PaymentReportButton estimateId={estimateId} balance={Math.max(0, pro.total - money.paid)} size="md" /> : null}
             {canRecord && !recordReadOnly ? (
               voiding ? null : <Button type="button" tone="ghost" size="md" onClick={() => setVoiding(true)} data-em-void>Void…</Button>
             ) : null}

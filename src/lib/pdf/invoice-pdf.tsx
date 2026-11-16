@@ -158,7 +158,9 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const gross = round2(pkgRows.reduce((a, l) => a + l.unit_price * l.quantity, 0) + [...services, ...parts, ...fees].reduce((a, l) => a + l.amount, 0));
   const paidRows = isCredit ? [] : live.map((p) => {
     const pending = awaitsBank(p);
-    const what = p.is_deposit ? (p.deposit_invoice_number ? `Less advance paid (${p.deposit_invoice_number})` : `Less advance paid (${p.number})`) : `Paid ${formatDate(p.received_at)} · ${METHOD_LABELS[p.method] ?? p.method} (${p.number})`;
+    // 16 November 2026: an advance paid on an ESTIMATE (its own advance tax invoice) counts as an advance here too.
+    const advancePaid = p.is_deposit || (!!p.deposit_invoice_number && p.deposit_invoice_number !== invoice.number) || (!!p.deposit_quotation_id && !p.deposit_invoice_number);
+    const what = advancePaid ? (p.deposit_invoice_number && p.deposit_invoice_number !== invoice.number ? `LESS ADVANCE PAID (${p.deposit_invoice_number})` : `LESS ADVANCE PAID (${p.number})`) : `Paid ${formatDate(p.received_at)} · ${METHOD_LABELS[p.method] ?? p.method} (${p.number})`;
     return { label: pending ? `Cheque pending, not counted yet (${p.number})` : what, value: p.amount_aed, kind: pending ? ("after" as const) : ("paid" as const) };
   });
   const advanceRows = bundle.advance ? advanceMoneyRows(bundle.advance) : null;

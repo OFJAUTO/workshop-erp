@@ -174,13 +174,13 @@ try {
   await acc.page.screenshot({ path: path.join(dir, "c1-part-paid-advance.png"), fullPage: true });
 
   /* ---------- D. The Estimates list badges + filters; the money list row ---------- */
-  await go(adv.page, `${base}/estimates`);
+  await go(adv.page, `${base}/estimates?tab=approved`);
   check("D1: the list shows Prepaid and Part paid badges", (await adv.page.locator('[data-em-list-badge="Prepaid"]').count()) >= 1 && (await adv.page.locator('[data-em-list-badge^="Part paid"]').count()) >= 1);
   check("D2: the list rows carry Paid X of Y", (await adv.page.locator("[data-em-list-paid]").count()) >= 2);
   await adv.page.screenshot({ path: path.join(dir, "d1-list-badges.png"), fullPage: true });
-  await go(adv.page, `${base}/estimates?money=prepaid`);
+  await go(adv.page, `${base}/estimates?tab=approved&money=prepaid`);
   check("D3: the Prepaid filter keeps the prepaid one only", (await adv.page.locator(`[data-estimate-row="${e1.number}"]`).count()) >= 1 && (await adv.page.locator(`[data-estimate-row="${e2.number}"]`).count()) === 0);
-  await go(adv.page, `${base}/estimates?money=part_paid`);
+  await go(adv.page, `${base}/estimates?tab=approved&money=part_paid`);
   check("D4: the Part paid filter keeps the half-paid one only", (await adv.page.locator(`[data-estimate-row="${e2.number}"]`).count()) >= 1 && (await adv.page.locator(`[data-estimate-row="${e1.number}"]`).count()) === 0);
   await go(acc.page, `${base}/invoices`);
   const estRow = acc.page.locator(`[data-money-row="estimate:${e2.id}"]`);

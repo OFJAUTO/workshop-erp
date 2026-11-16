@@ -20,12 +20,24 @@ export type FormPaymentOutcome = PaymentResult & { jobId: string | null; invoice
  * on the customer's account; more than what is left needs a note.
  */
 export async function paymentFromForm(staff: { id: string; display_name: string; role_id: string; is_head_accountant?: boolean }, formData: FormData, settings: Settings): Promise<FormPaymentOutcome> {
+  // A proforma made here for an estimate advance is voided again when the payment itself is refused (nothing half-done).
+  const made: { proformaId: string | null } = { proformaId: null };
+  const outcome = await paymentFromFormInner(staff, formData, settings, made);
+  if (outcome.error && made.proformaId) {
+    const { voidEstimateProforma } = await import("./estimate-money");
+    await voidEstimateProforma(made.proformaId, "The advance payment was not recorded", { id: staff.id, display_name: staff.display_name, role_id: staff.role_id === "owner" ? "owner" : "accounts" }).catch(() => null);
+  }
+  return outcome;
+}
+
+async function paymentFromFormInner(staff: { id: string; display_name: string; role_id: string; is_head_accountant?: boolean }, formData: FormData, settings: Settings, madeHolder: { proformaId: string | null }): Promise<FormPaymentOutcome> {
   const actor: Actor = { id: staff.id, display_name: staff.display_name, role_id: staff.role_id, is_head_accountant: staff.is_head_accountant };
-  const invoiceId = blankToNull(formData.get("invoice_id"));
+  let invoiceId = blankToNull(formData.get("invoice_id"));
   const jobIdIn = blankToNull(formData.get("job_id"));
   const unallocatedCustomer = !invoiceId && !jobIdIn && formData.get("unallocated") === "1" ? blankToNull(formData.get("customer_id")) : null;
   const vehicleIn = blankToNull(formData.get("vehicle_id"));
-  const amount = Number(String(formData.get("amount") ?? "").replace(/[^\d.]/g, ""));
+  let amount = Number(String(formData.get("amount") ?? "").replace(/[^\d.]/g, ""));
+  const typedAmount = amount;
   const method = String(formData.get("method") ?? "");
   const out = (r: PaymentResult, jobId: string | null = jobIdIn): FormPaymentOutcome => ({ ...r, jobId, invoiceId });
   if (!method) return out({ error: "Choose how it was paid." });
@@ -46,6 +58,39 @@ export async function paymentFromForm(staff: { id: string; display_name: string;
         await closeReportWithPayment(clientKeyIn as string, { id: String(same.id), number: String(same.number), amount: Number(same.amount_aed), method: String(same.method) }, { id: staff.id, display_name: staff.display_name }).catch(() => null);
       }
       return out(differs ? { error: `This form was already used for ${same.number}. Nothing new was recorded – reload the page and record it again.` } : { ok: true, number: same.number, paymentId: same.id, token: (same.token as string | null) ?? null, message: `${same.number} was already recorded.`, repeat: { amount: Number(same.amount_aed), method: String(same.method) } }, (same.job_id as string | null) ?? jobIdIn);
+    }
+  }
+  // 16 November 2026 (Section 2): an advance on an ESTIMATE with no proforma yet - the proforma is made for this amount
+  // first (the receipt and the advance tax invoice follow when it is paid, as for every estimate proforma).
+  const estimateIn = blankToNull(formData.get("estimate_id"));
+  let estExtra = 0;
+  let estInfo: { estimateId: string; number: string; customerId: string; vehicleId: string | null } | null = null;
+  if (!invoiceId && estimateIn && amount > 0.004) {
+    const em = await import("./estimate-money");
+    const made = await em.createEstimateProforma(estimateIn, { mode: "partial", partial: { kind: "aed", value: amount } }, { id: staff.id, display_name: staff.display_name }, settings);
+    if (made.error || !made.invoice) return out({ error: made.error ?? "Couldn't make the proforma for the advance – nothing was recorded." });
+    invoiceId = made.invoice.id;
+    madeHolder.proformaId = made.invoice.id;
+  }
+  const estInvoiceId = invoiceId;
+  if (estInvoiceId && !unallocatedCustomer && amount > 0.004) {
+    const em = await import("./estimate-money");
+    const est = await em.estimateOfInvoice(estInvoiceId);
+    if (est) {
+      const m = await em.estimateMoneyOf(est.estimateId);
+      const pro = m?.proforma && m.proforma.id === estInvoiceId ? m.proforma : null;
+      if (pro) {
+        const onIt = (m?.payments ?? []).filter((p) => p.invoice_id === pro.id && p.status !== "voided" && p.status !== "reversed").reduce((a, p) => a + p.amount_aed, 0);
+        const due = Math.round((pro.total_aed - onIt) * 100) / 100;
+        // More than the proforma still owes: the proforma is settled, the extra stays as the customer's advance.
+        if (due > 0.004 && amount > due + 0.004) {
+          estExtra = Math.round((amount - due) * 100) / 100;
+          amount = due;
+          const { data: invRow } = await admin.from("invoices").select("customer_id").eq("id", estInvoiceId).maybeSingle();
+          const { data: qRow } = await admin.from("quotations").select("customer_id, vehicle_id").eq("id", est.estimateId).maybeSingle();
+          estInfo = { estimateId: est.estimateId, number: est.number, customerId: String((qRow as { customer_id?: string } | null)?.customer_id ?? (invRow as { customer_id?: string } | null)?.customer_id ?? ""), vehicleId: (qRow as { vehicle_id?: string | null } | null)?.vehicle_id ?? null };
+        }
+      }
     }
   }
   const proofJobId = jobIdIn ?? (invoiceId ? ((await loadInvoice(invoiceId))?.invoice.job_id ?? null) : null);
@@ -111,6 +156,29 @@ export async function paymentFromForm(staff: { id: string; display_name: string;
   if (invoiceId && !r.error) {
     const cur = currentPaymentLink(await paymentLinksOf(invoiceId));
     if (cur?.provider === "ngenius" && !cur.paid_at) await ensureAutoPayLink(invoiceId, { id: staff.id, display_name: staff.display_name }, await getSiteUrl());
+  }
+  // 16 November 2026 (Section 2): paid MORE than the estimate's proforma owed - the extra is the customer's advance (its
+  // own receipt, on the customer's account, named for the estimate), never lost and never on the proforma.
+  if (!r.error && r.paymentId && !r.repeat && estExtra > 0.004 && estInfo?.customerId) {
+    const extra = await recordPaymentCore(actor, {
+      invoiceId: null, jobId: null, method, amount: estExtra,
+      reference: blankToNull(formData.get("reference")), authCode: blankToNull(formData.get("auth_code")),
+      cheque: { number: blankToNull(formData.get("cheque_number")), bank: blankToNull(formData.get("cheque_bank")), date: blankToNull(formData.get("cheque_date")) },
+      chequeTotal: null,
+      notes: `Extra paid on ${estInfo.number} (AED ${typedAmount.toFixed(2)} received, AED ${amount.toFixed(2)} on the proforma): kept as the customer's advance`,
+      clientKey: null,
+      unallocated: { customerId: estInfo.customerId, vehicleId: estInfo.vehicleId },
+      overNote: null, duplicateReason: "Extra of an estimate advance (same tap)", overCheck: false, reportId: null,
+    }, settings);
+    if (!extra.error && extra.number) r.message = `${r.message ?? r.number ?? ""} · AED ${estExtra.toFixed(2)} more than the proforma: kept as the customer's advance (${extra.number}).`.replace(/^ · /, "");
+  }
+  // An estimate whose car has a job (here, or HELD for parts ordered first): its money follows onto that job.
+  if (!r.error && invoiceId && !jobIdIn) {
+    const em = await import("./estimate-money");
+    const est = await em.estimateOfInvoice(invoiceId);
+    const job = est ? await em.jobOfEstimate(est.estimateId) : null;
+    // A HELD job (parts ordered first, car not here) keeps the money on the estimate until gate-in moves it.
+    if (est && job && !job.booked) await em.moveEstimateMoneyToJob([est.estimateId], job.id, staff.id).catch(() => null);
   }
   return out(r, proofJobId);
 }

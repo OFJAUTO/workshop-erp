@@ -47,7 +47,7 @@ async function loadEstimate(id: string): Promise<EstimateRow | null> {
 }
 
 /** Every version id of each estimate's NUMBER (a revision makes a new row; its documents must stay counted). */
-async function familyIdsOf(estimateIds: string[]): Promise<Map<string, { number: string; ids: string[] }>> {
+export async function familyIdsOf(estimateIds: string[]): Promise<Map<string, { number: string; ids: string[] }>> {
   const admin = createAdminClient();
   const out = new Map<string, { number: string; ids: string[] }>();
   const ids = Array.from(new Set(estimateIds.filter(Boolean)));
@@ -619,4 +619,53 @@ export async function loadEstimateMoneyRows(filter: { customerId?: string } = {}
     });
   }
   return out;
+}
+
+/**
+ * 16 November 2026 (Section 2): the customer's open estimates with no proforma and nothing invoiced yet - places an
+ * advance can be recorded at any time (recording makes the proforma for the amount). Newest version of each number.
+ */
+export async function estimatesWithoutProforma(customerId: string): Promise<{ estimateId: string; number: string; vehicleId: string | null; total: number; jobNumber: string | null }[]> {
+  if (!(await estimateMoneyReady())) return [];
+  const admin = createAdminClient();
+  const { data } = await admin.from("quotations").select("id, number, version, status, vehicle_id, total_aed, rounded_total_aed, carried_job_id, job_id, cancelled_at, deleted_at, is_active").eq("kind", "estimate").eq("customer_id", customerId).eq("is_active", true).order("version", { ascending: false }).limit(200);
+  const newest = new Map<string, Record<string, unknown>>();
+  for (const q of (data ?? []) as Record<string, unknown>[]) if (!newest.has(String(q.number))) newest.set(String(q.number), q);
+  const open = Array.from(newest.values()).filter((q) => !q.cancelled_at && !q.deleted_at && !q.carried_job_id && !q.job_id && OPEN_ESTIMATE_STATUSES.includes(String(q.status) as (typeof OPEN_ESTIMATE_STATUSES)[number]));
+  if (!open.length) return [];
+  const many = await estimateMoneyMany(open.map((q) => String(q.id)));
+  const held = await admin.from("jobs").select("job_number, estimate_id").in("estimate_id", open.map((q) => String(q.id)));
+  const heldOf = new Map(((held.data ?? []) as { job_number: string; estimate_id: string }[]).map((j) => [j.estimate_id, j.job_number]));
+  return open
+    .filter((q) => { const m = many.get(String(q.id)); return !!m && !m.proforma && !m.fullyInvoiced && m.advanceInvoiced <= 0.004; })
+    .map((q) => ({ estimateId: String(q.id), number: String(q.number), vehicleId: (q.vehicle_id as string | null) ?? null, total: Math.round((Number(q.rounded_total_aed ?? q.total_aed) || 0) * 100) / 100, jobNumber: heldOf.get(String(q.id)) ?? null }));
+}
+
+/** The job an estimate's family belongs to (the car here, or a HELD job for parts ordered first), else null. */
+export async function jobOfEstimate(estimateId: string): Promise<{ id: string; number: string; booked: boolean } | null> {
+  const admin = createAdminClient();
+  const fam = await familyIdsOf([estimateId]);
+  const ids = fam.get(estimateId)?.ids ?? [estimateId];
+  const { data: carried } = await admin.from("quotations").select("carried_job_id, job_id").in("id", ids);
+  const viaQuote = ((carried ?? []) as { carried_job_id: string | null; job_id: string | null }[]).map((q) => q.carried_job_id ?? q.job_id).find((x) => !!x) ?? null;
+  const q = viaQuote ? admin.from("jobs").select("id, job_number, status").eq("id", viaQuote) : admin.from("jobs").select("id, job_number, status").in("estimate_id", ids).order("created_at", { ascending: false }).limit(1);
+  const { data: j } = await q;
+  const row = ((j ?? []) as { id: string; job_number: string; status: string }[])[0];
+  return row ? { id: row.id, number: row.job_number, booked: row.status === "booked" } : null;
+}
+
+/** The estimates behind a job (its own estimate and every one carried onto it), newest version of each number. */
+export async function estimatesOfJob(jobId: string): Promise<string[]> {
+  const admin = createAdminClient();
+  const [{ data: j }, { data: carried }] = await Promise.all([
+    admin.from("jobs").select("estimate_id").eq("id", jobId).maybeSingle(),
+    admin.from("quotations").select("id").eq("kind", "estimate").eq("carried_job_id", jobId),
+  ]);
+  const ids = Array.from(new Set([(j as { estimate_id: string | null } | null)?.estimate_id, ...((carried ?? []) as { id: string }[]).map((q) => q.id)].filter((x): x is string => !!x)));
+  if (!ids.length) return [];
+  const fam = await familyIdsOf(ids);
+  const { data: rows } = await admin.from("quotations").select("id, number, version").in("id", Array.from(new Set(Array.from(fam.values()).flatMap((f) => f.ids)))).order("version", { ascending: false });
+  const newest = new Map<string, string>();
+  for (const r of (rows ?? []) as { id: string; number: string }[]) if (!newest.has(r.number)) newest.set(r.number, r.id);
+  return Array.from(newest.values());
 }

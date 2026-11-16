@@ -144,6 +144,8 @@ import { anyApproved } from "@/lib/quote-history";
 import { refuseRecord } from "@/lib/refusal";
 import { RecordPaymentButton } from "@/components/RecordPaymentHost";
 import { PaidSoFar } from "@/components/PaidSoFar";
+import { AdvancePaymentsBox } from "@/components/AdvancePaymentsBox";
+import { advancePaymentsFor } from "@/lib/advance-payments";
 import { UnallocatedList } from "@/components/UnallocatedList";
 import { PaymentLinkSend } from "./PaymentLinkSend";
 import { jobMoneyOf, unallocatedOf } from "@/lib/customer-money";
@@ -1058,6 +1060,11 @@ export default async function JobPage({ params, searchParams }: { params: Promis
         </Card>
         ) : null}
       </div>
+      {/* 16 November 2026 (Section 2): the estimate's PAYMENTS box follows the car - what was asked and paid before it came. */}
+      {can(role, "viewInvoices") ? await (async () => {
+        const adv = await advancePaymentsFor({ jobId: id });
+        return adv && (adv.asks.length || adv.receipts.length) ? <AdvancePaymentsBox box={adv} place="job" jobId={id} canRecord={mayPay && job.is_open} recordReadOnly={viewPay} canReport={mayReport && job.is_open} jobBalance={jobMoney?.balance ?? null} /> : null;
+      })() : null}
       {credit.length && jobMoney ? (
         <Card className="flex flex-col gap-2 border-amber-bar" data-credit-offer>
           <SectionLabel right={`AED ${aedOf(credit.filter((p) => p.status === "recorded").reduce((a, p) => a + p.amount_aed, 0))}`}>Customer credit, not allocated</SectionLabel>

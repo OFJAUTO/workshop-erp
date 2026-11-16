@@ -49,6 +49,8 @@ import { EstimateMoneyCard, type MoneyCardFacts } from "./EstimateMoneyCard";
 import { DeskPartsCard } from "./DeskPartsCard";
 import { deskPartsOf } from "@/lib/desk-parts";
 import { OrderPartsNow } from "./OrderPartsNow";
+import { AdvancePaymentsBox } from "@/components/AdvancePaymentsBox";
+import { advancePaymentsFor } from "@/lib/advance-payments";
 
 export const dynamic = "force-dynamic";
 
@@ -90,13 +92,18 @@ export default async function EstimatePage({ params, searchParams }: { params: P
     .replaceAll("[plate]", vehicle ? formatPlate(vehicle) : "")
     .replaceAll("[advisor]", staff.display_name);
   const accepted = q.status === "approved";
-  const { data: attachedRows } = await createAdminClient().from("jobs").select("id, job_number").or(q.carried_job_id ? `estimate_id.eq.${q.id},id.eq.${q.carried_job_id}` : `estimate_id.eq.${q.id}`).limit(1);
+  const { data: attachedRows } = await createAdminClient().from("jobs").select("id, job_number, status").or(q.carried_job_id ? `estimate_id.eq.${q.id},id.eq.${q.carried_job_id}` : `estimate_id.eq.${q.id}`).limit(1);
   const attached = attachedRows?.[0] ?? null;
   const addsTo = q.additional_to_id ? (await createAdminClient().from("quotations").select("id, number").eq("id", q.additional_to_id).maybeSingle()).data : null;
   const tone = accepted ? "green" : q.status === "declined" || q.status === "expired" ? "red" : q.status === "draft" ? "outline" : "amber";
   // Money from the estimate (4 November 2026): dormant until the migration is applied.
   const emReady = await estimateMoneyReady();
-  const em = emReady && !attached ? await estimateMoneyOf(q.id) : null;
+  // 16 November 2026 (Section 2, E-00082): a HELD job (parts ordered before the car came) is not the car arriving - the
+  // estimate keeps its money card until gate-in; only a real job takes the money over.
+  const attachedReal = attached && attached.status !== "booked" ? attached : null;
+  const em = emReady && !attachedReal ? await estimateMoneyOf(q.id) : null;
+  // THE PAYMENTS box: on every estimate, before and after approval and after the car arrives (then it links to the job).
+  const advBox = emReady ? await advancePaymentsFor({ estimateId: q.id }) : null;
   // Part 3: accepted additional estimates of the same car that could join a COMBINED proforma.
   const emSiblings = em && accepted && (await (await import("@/lib/schema-ready")).estimateCombineReady())
     ? ((await createAdminClient().from("quotations").select("id, number, status, total_aed, rounded_total_aed, carried_job_id, job_id, cancelled_at, deleted_at, is_active").eq("kind", "estimate").eq("customer_id", q.customer_id).eq("vehicle_id", q.vehicle_id ?? "").eq("status", "approved").neq("number", q.number)).data ?? [])
@@ -197,8 +204,18 @@ export default async function EstimatePage({ params, searchParams }: { params: P
           )}
         </Card>
       ) : null}
+      {advBox ? (
+        <AdvancePaymentsBox
+          box={advBox}
+          place="estimate"
+          canRecord={["owner", "accounts"].includes(role) && !staff.viewingAs}
+          recordReadOnly={["owner", "accounts"].includes(role) && !!staff.viewingAs}
+          canReport={!staff.viewingAs && !["owner", "accounts"].includes(role)}
+        />
+      ) : null}
       {emShow && emFacts ? (
         <EstimateMoneyCard
+          hideRecord={!!advBox}
           estimateId={q.id}
           number={q.number}
           approved={accepted}

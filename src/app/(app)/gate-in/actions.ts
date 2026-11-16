@@ -365,6 +365,19 @@ export async function createGateIn(vehicleId: string, _state: FormState, formDat
       await logAppError("gate-in: move estimate money", err, { staffId: staff.id, jobId: job.id });
     }
   }
+  // 16 November 2026 (Section 2): a HELD job (parts ordered before the car came) carries its own estimate's money too,
+  // even when that estimate was not ticked at gate-in (E-00082 / J-01013). Idempotent: money already on the job stays.
+  if (job?.id) {
+    try {
+      const { estimatesOfJob, moveEstimateMoneyToJob } = await import("@/lib/estimate-money");
+      const own = (await estimatesOfJob(job.id)).filter((id) => !carried.some((e) => e.id === id));
+      const movedOwn = own.length ? await moveEstimateMoneyToJob(own, job.id, staff.id) : null;
+      if (movedOwn?.words) await supabase.from("job_events").insert({ job_id: job.id, event_type: "payment", note: movedOwn.words, created_by: staff.id });
+    } catch (err) {
+      const { logAppError } = await import("@/lib/app-errors");
+      await logAppError("gate-in: move held estimate money", err, { staffId: staff.id, jobId: job.id });
+    }
+  }
   // A car arriving with no advisor takes the advisor who made its estimate (8 November 2026).
   if (job?.id) {
     const { fillMissingAdvisor } = await import("@/lib/job-advisor");
