@@ -1,13 +1,15 @@
-# Handover – list of 16 November 2026 (both sections done, end checks running; last update 16 Nov, 14:30 Dubai)
+# Handover – list of 16 November 2026 (ALL DONE; last update 16 Nov, 17:45 Dubai)
 
 **NEEDS OMAR (top first):**
 1. **Apply three database changes** (15 Nov S1 and S4, 16 Nov S1): turn auto mode off, reply **"apply"**. Details in `docs/waiting-for-apply.md`.
 2. **AED 8,000.00 advance for E-00082 / J-01013 is NOT recorded anywhere** (PRO-00029 issued, no payment): Estimates → Approved → E-00082 → PAYMENTS box → Record advance payment → method, 8,000.00 → Record → Yes (steps in `docs/advance-box-16-nov-note.md`).
 3. Mathew chooses the Zoho account for stock purchase bills (Account mapping); and decides whether to post one closing stock figure a month.
 
-**Progress (2 sections):**
+**Done (2 of 2):**
 - S1 stock stays in the ERP: DONE, pushed (note `docs/stock-erp-only-16-nov-note.md`).
 - S2 estimate advance payments: DONE, pushed (note `docs/advance-box-16-nov-note.md`): the PAYMENTS box on every estimate and its job, Record advance payment with no proforma needed, LESS ADVANCE PAID on the final invoice. No database change.
+
+**End of batch:** unit all pass; security all pass; full layout (171 pages, every size, pop-ups, 130% text) clean + 51 document checks; whole-job simulation 713 of 713; check:live 33 of 33. Two stale checks brought up to date (estmoney1 list tab, payanytime link amount).
 
 ---
 
