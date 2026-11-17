@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { Button } from "@/components/ui";
 import { reloadIfStale } from "@/lib/app-version";
 import { PART_TYPE_LABELS } from "@/lib/quotes";
-import { absorbOf, changedPhrases, needsOwner, profitOf, type PartFacts, type PriceChoice } from "@/lib/part-change-rules";
+import { absorbOf, approverFor, changedPhrases, needsOwner, profitOf, type PartFacts, type PriceChoice } from "@/lib/part-change-rules";
 import { changePartAction, linkReplacementAction, partChangePreviewAction } from "../part-change-actions";
 
 const DAY_CHOICES: { key: string; label: string; days: number | null; inStock: boolean }[] = [
@@ -16,7 +16,8 @@ const DAY_CHOICES: { key: string; label: string; days: number | null; inStock: b
   { key: "3", label: "3 days", days: 3, inStock: false },
   { key: "7", label: "1 week", days: 7, inStock: false },
 ];
-const REASONS = ["Better price", "Faster delivery", "Supplier has none", "Supplier price changed", "Wrong part number"];
+// 17 November 2026 (Section 4): the quick reasons to tap; "Other" asks for the words.
+const REASONS = ["Cannot deliver today", "Out of stock", "Better price"];
 const aed = (n: number | null) => (n === null ? "—" : `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 const box = "min-h-11 w-full rounded-control border border-line-strong bg-white px-3 text-sm";
 
@@ -44,6 +45,8 @@ export function PartChangeDialog({ jobId, partId, name, isOwner: ownerProp = fal
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
+  const [minMarkup, setMinMarkup] = useState(5);
+  const [otherReason, setOtherReason] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -54,6 +57,7 @@ export function PartChangeDialog({ jobId, partId, name, isOwner: ownerProp = fal
       setApproved(p.approved);
       setQuote(p.quote);
       setIsOwner(p.isOwner);
+      setMinMarkup(p.minMarkup);
       setSupplier(p.before.supplier ?? "");
       setCost(p.before.cost === null ? "" : String(p.before.cost));
       setDay(p.before.availability === "in_stock" ? "stock" : p.before.days === null ? "2" : String(DAY_CHOICES.find((d) => d.days === p.before.days)?.key ?? "2"));
@@ -71,6 +75,8 @@ export function PartChangeDialog({ jobId, partId, name, isOwner: ownerProp = fal
   const phrases = before && after ? changedPhrases(before, after) : [];
   const owner = before && after ? needsOwner(before, after) : false;
   const askChoice = approved && owner;
+  // WHO approves (the one rule): nobody, the advisor in charge of the car, or the owner.
+  const approver = before && after ? approverFor(before, after, sellEach, minMarkup, askChoice ? choice : null) : "none";
   const profitNow = before ? profitOf(sellEach, before) : null;
   const profitAfter = after ? profitOf(sellEach, after) : null;
   const absorb = before && after ? absorbOf(before, after) : 0;
@@ -147,14 +153,15 @@ export function PartChangeDialog({ jobId, partId, name, isOwner: ownerProp = fal
             <div className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">Why (the history keeps it)</span>
               <div className="flex flex-wrap gap-1.5">
-                {REASONS.map((r) => <button key={r} type="button" onClick={() => setReason(r)} className={`min-h-9 rounded-full border px-3 text-xs font-semibold ${reason === r ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`}>{r}</button>)}
+                {REASONS.map((r) => <button key={r} type="button" onClick={() => { setOtherReason(false); setReason(r); }} aria-pressed={reason === r && !otherReason} className={`min-h-11 rounded-full border px-3 text-sm font-semibold ${reason === r && !otherReason ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-change-reason-chip={r}>{r}</button>)}
+                <button type="button" onClick={() => { setOtherReason(true); setReason(""); }} aria-pressed={otherReason} className={`min-h-11 rounded-full border px-3 text-sm font-semibold ${otherReason ? "border-ink bg-ink text-on-dark" : "border-line-strong bg-white"}`} data-change-reason-chip="Other">Other</button>
               </div>
-              <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Or type the reason" className={box} data-change-reason data-spell="" />
+              {otherReason || (reason && !REASONS.includes(reason)) ? <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Say why in a few words" autoFocus className={box} data-change-reason data-spell="" /> : null}
             </div>
             <div className="flex flex-col gap-0.5 rounded-control border border-line p-3 text-sm" data-change-profit>
               <span className="font-semibold">{phrases.length ? phrases.join(" · ") : "Nothing changed yet."}</span>
               {sellEach !== null ? <span>Customer pays {aed(sellEach)} each · profit on this line <b>{aed(profitNow)}</b> → <b className={profitAfter !== null && profitNow !== null && profitAfter < profitNow ? "text-red" : "text-green-text"} data-change-profit-after>{aed(profitAfter)}</b></span> : <span className="text-muted">Not on a quotation yet: the advisor prices it.</span>}
-              {owner ? <span className="font-semibold text-amber-text" data-change-needs-owner>{after && before && (after.cost ?? 0) > (before.cost ?? 0) ? "The cost goes up" : "The part type changes"}: the owner approves it before it is applied.</span> : phrases.length ? <span className="text-green-text">Cost down or the same, same type: applied at once (logged).</span> : null}
+              {!phrases.length ? null : approver === "owner" ? <span className="font-semibold text-amber-text" data-change-needs-owner>{after && before && (after.partType ?? "") !== (before.partType ?? "") && !!(after.partType || before.partType) ? "The part type changes" : askChoice && choice === "revise" ? "The customer's price must change" : `Below the minimum markup (${minMarkup}%)`}: the owner approves it before it is applied.</span> : approver === "advisor" ? <span className="font-semibold text-amber-text" data-change-needs-advisor>Dearer, but still at least the minimum markup ({minMarkup}%): the advisor in charge of this car approves it with one tap.</span> : <span className="text-green-text" data-change-applies-now>Cost down or the same, same type: applied at once (logged).</span>}
             </div>
             {askChoice ? (
               <div className="flex flex-col gap-1.5" data-change-choice>
@@ -165,7 +172,7 @@ export function PartChangeDialog({ jobId, partId, name, isOwner: ownerProp = fal
             ) : null}
             {error ? <p className="rounded-control bg-red-soft px-3 py-2 text-sm font-semibold text-red" role="alert" data-part-change-error>{error}</p> : null}
             <div className="flex flex-wrap gap-2">
-              <Button type="button" disabled={!ready} onClick={() => void save()} data-part-change-save>{busy ? "Saving…" : owner && !isOwner ? "Send to the owner" : "Save the change"}</Button>
+              <Button type="button" disabled={!ready} onClick={() => void save()} data-part-change-save>{busy ? "Saving…" : isOwner || approver === "none" ? "Save the change" : approver === "advisor" ? "Send to the advisor" : "Send to the owner"}</Button>
               <Button type="button" tone="secondary" onClick={onClose}>Cancel</Button>
             </div>
           </>

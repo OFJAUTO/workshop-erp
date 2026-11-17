@@ -4,7 +4,8 @@ import { createAdminClient } from "./supabase/admin";
 import { jobAdvisorIds, notifyRoles, notifyStaff } from "./notifications";
 import { formatDateTime } from "./format";
 import { schemaReady } from "./schema-ready";
-import { absorbOf, changeLine, changeProblem, needsOwner, profitOf, type PartFacts, type PriceChoice } from "./part-change-rules";
+import { absorbOf, approverFor, changeLine, changeProblem, decisionLines, needsOwner, profitOf, type ChangeApprover, type PartFacts, type PriceChoice } from "./part-change-rules";
+import { getSettings } from "./settings";
 
 /*
  * 13 November 2026, Section 3: THE change of a part's supplier, cost, delivery time or part number, IN PLACE.
@@ -57,11 +58,11 @@ async function customerLineOf(jobId: string, partId: string): Promise<{ quotatio
 }
 
 /** What the window shows before saving: the customer's price each, the profit now and after, what we would absorb. */
-export async function changePreview(jobId: string, partId: string): Promise<{ sellEach: number | null; approved: boolean; quote: string | null; before: PartFacts } | null> {
+export async function changePreview(jobId: string, partId: string): Promise<{ sellEach: number | null; approved: boolean; quote: string | null; before: PartFacts; minMarkup: number } | null> {
   const { data } = await createAdminClient().from("part_items").select(COLS).eq("id", partId).eq("job_id", jobId).maybeSingle();
   if (!data) return null;
   const line = await customerLineOf(jobId, partId);
-  return { sellEach: line?.sellEach ?? null, approved: !!line && ["approved", "urgent_requested"].includes(line.status), quote: line ? `${line.number} v${line.version}` : null, before: factsOfPart(data as Part) };
+  return { sellEach: line?.sellEach ?? null, approved: !!line && ["approved", "urgent_requested"].includes(line.status), quote: line ? `${line.number} v${line.version}` : null, before: factsOfPart(data as Part), minMarkup: Number((await getSettings()).parts_min_markup_percent) || 5 };
 }
 
 function afterFacts(p: Part, input: ChangeInput): PartFacts {
@@ -93,14 +94,28 @@ export async function requestPartChange(jobId: string, partId: string, input: Ch
   const choice = approved && owner ? input.choice : null;
   const absorb = choice === "keep" ? absorbOf(before, after) : null;
   const row = { job_id: jobId, part_item_id: partId, before, after, reason: input.reason.trim(), price_choice: choice, absorb_aed: absorb, words, created_by: by.id, updated_by: by.id };
-  // Cost up or another type: the owner decides first (his own change applies at once).
-  if (owner && by.role_id !== "owner") {
-    const { error } = await admin.from("part_changes").insert({ ...row, status: "pending" });
-    if (error) return { error: dbWords(error, "lib/part-change") };
+  // 17 November 2026 (Section 4): WHO approves - nobody (cheaper, same type), the job's ADVISOR (dearer, still at least
+  // the minimum markup), or the OWNER (below the minimum, another type, or the customer's price must change).
+  const approver = await approverOfChange(before, after, line?.sellEach ?? null, choice);
+  if (approver !== "none" && by.role_id !== "owner") {
+    const { data: made, error } = await admin.from("part_changes").insert({ ...row, status: "pending" }).select("id").maybeSingle();
+    if (error || !made) return { error: error ? dbWords(error, "lib/part-change") : "Couldn't save the change." };
     const { data: job } = await admin.from("jobs").select("job_number").eq("id", jobId).maybeSingle();
-    await admin.from("job_events").insert({ job_id: jobId, event_type: "part_change_asked", note: `Waiting for the owner: ${words}`, created_by: by.id });
-    await notifyRoles(["owner"], { type: "part_change", title: `Part change to approve · ${job?.job_number ?? ""}`, body: `${words}${choice === "keep" ? ` · keep the customer's price: we absorb AED ${absorb?.toFixed(2)}` : choice === "revise" ? " · revise the quotation" : ""}`, href: "/approvals", jobId });
-    return { ok: true, pending: true, words: `Sent to the owner: ${words}` };
+    const who = approver === "advisor" ? "the advisor" : "the owner";
+    const lines = decisionLines(before, after, line?.sellEach ?? null);
+    const body = [`${p.description.toUpperCase()}`, ...lines, `Why: ${input.reason.trim()}`, choice === "keep" ? `Keep the customer's price: we absorb AED ${absorb?.toFixed(2)}` : choice === "revise" ? "Revise the quotation (the customer approves the new price)" : ""].filter(Boolean).join(" · ");
+    await admin.from("job_events").insert({ job_id: jobId, event_type: "part_change_asked", note: `Waiting for ${who}: ${words}`, created_by: by.id });
+    const notice = { type: "part_change", title: `Approve a supplier change · ${job?.job_number ?? ""}`, body, href: `/parts/change/${made.id}`, jobId };
+    let names = "";
+    if (approver === "advisor") {
+      const ids = await jobAdvisorIds(jobId);
+      await notifyStaff(ids, notice);
+      if (ids.length) {
+        const { data: ppl } = await admin.from("staff").select("display_name").in("id", ids);
+        names = ((ppl ?? []) as { display_name: string }[]).map((x) => x.display_name.split(" ")[0]).join(", ");
+      }
+    } else await notifyRoles(["owner"], notice);
+    return { ok: true, pending: true, words: `Sent to ${approver === "advisor" ? `the advisor${names ? ` (${names})` : ""}` : "the owner"} to approve: ${words}` };
   }
   const { data: made, error } = await admin.from("part_changes").insert({ ...row, status: "applied", decided_by: by.id, decided_at: now.toISOString() }).select("id").maybeSingle();
   if (error || !made) return { error: error ? dbWords(error, "lib/part-change") : "Couldn't save the change." };
@@ -109,10 +124,15 @@ export async function requestPartChange(jobId: string, partId: string, input: Ch
 
 /** The owner's decision on a waiting change (Approvals). */
 export async function decidePartChange(changeId: string, approve: boolean, note: string, by: ChangeActor): Promise<ChangeAnswer> {
-  if (by.role_id !== "owner") return { error: "Only the owner decides a part change." };
   const admin = createAdminClient();
-  const { data: c } = await admin.from("part_changes").select("id, job_id, words, status, created_by").eq("id", changeId).maybeSingle();
+  const { data: c } = await admin.from("part_changes").select("id, job_id, part_item_id, words, status, created_by, before, after, price_choice").eq("id", changeId).maybeSingle();
   if (!c || c.status !== "pending") return { error: "That change is no longer waiting." };
+  // 17 November 2026 (Section 4): the job's advisor decides a change that is his (dearer, still at the minimum markup).
+  if (by.role_id !== "owner") {
+    const need = await approverOfStored(c as unknown as StoredChange);
+    const mine = need === "advisor" && by.role_id === "service_advisor" && (await jobAdvisorIds(String(c.job_id))).includes(by.id);
+    if (!mine) return { error: need === "owner" ? "This change needs the owner (below the minimum markup, another part type, or a new customer price)." : "Only the advisor in charge of this car (or the owner) decides this change." };
+  }
   const now = new Date().toISOString();
   if (!approve) {
     const { data: done } = await admin.from("part_changes").update({ status: "refused", decided_by: by.id, decided_at: now, decision_note: note.trim() || null, updated_by: by.id }).eq("id", changeId).eq("status", "pending").select("id");
@@ -223,6 +243,45 @@ async function applyChange(changeId: string, by: ChangeActor): Promise<ChangeAns
     await logAppError("part-change: proforma", e, { staffId: by.id, jobId });
   }
   return { ok: true, words: [`Changed: ${c.words}`, ...extra].join(" ") };
+}
+
+type StoredChange = { job_id: string; part_item_id: string; before: PartFacts; after: PartFacts; price_choice: PriceChoice | null };
+
+/** WHO approves (the rule in part-change-rules), with the minimum markup from Settings. */
+async function approverOfChange(before: PartFacts, after: PartFacts, sellEach: number | null, choice: PriceChoice | null): Promise<ChangeApprover> {
+  const min = Number((await getSettings()).parts_min_markup_percent) || 5;
+  return approverFor(before, after, sellEach, min, choice);
+}
+
+/** WHO approves a stored change, read again now (the customer's price as it is today). */
+export async function approverOfStored(c: StoredChange): Promise<ChangeApprover> {
+  const line = await customerLineOf(c.job_id, c.part_item_id);
+  return approverOfChange(c.before, c.after, line?.sellEach ?? null, c.price_choice);
+}
+
+/** One waiting (or decided) change, for its page: the part, the job, the decision lines and who may decide. */
+export async function partChangeView(changeId: string): Promise<{ id: string; jobId: string; jobNumber: string; partName: string; status: string; words: string; reason: string; lines: string[]; choice: PriceChoice | null; absorb: number | null; approver: ChangeApprover; advisorIds: string[]; decisionNote: string | null } | null> {
+  const admin = createAdminClient();
+  const { data: c } = await admin.from("part_changes").select("id, job_id, part_item_id, before, after, reason, price_choice, absorb_aed, words, status, decision_note").eq("id", changeId).maybeSingle();
+  if (!c) return null;
+  const [{ data: job }, { data: part }] = await Promise.all([admin.from("jobs").select("job_number").eq("id", c.job_id).maybeSingle(), admin.from("part_items").select("description").eq("id", c.part_item_id).maybeSingle()]);
+  const line = await customerLineOf(String(c.job_id), String(c.part_item_id));
+  const stored = c as unknown as StoredChange;
+  return {
+    id: String(c.id),
+    jobId: String(c.job_id),
+    jobNumber: String(job?.job_number ?? ""),
+    partName: String(part?.description ?? "").toUpperCase(),
+    status: String(c.status),
+    words: String(c.words),
+    reason: String(c.reason ?? ""),
+    lines: decisionLines(stored.before, stored.after, line?.sellEach ?? null),
+    choice: (c.price_choice as PriceChoice | null) ?? null,
+    absorb: c.absorb_aed === null ? null : Number(c.absorb_aed),
+    approver: await approverOfStored(stored),
+    advisorIds: await jobAdvisorIds(String(c.job_id)),
+    decisionNote: (c.decision_note as string | null) ?? null,
+  };
 }
 
 /** The history of every part on a job: newest first, with the change still waiting for the owner. */

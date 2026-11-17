@@ -46,3 +46,29 @@ export async function linkReplacementAction(jobId: string, newId: string, oldId:
     return { error: SAVE_FAILED };
   }
 }
+
+/**
+ * 17 November 2026 (Section 4): Approve / Refuse a waiting supplier change from its page (the job's advisor for a dearer
+ * change still at the minimum markup; the owner for the rest). The answer comes back next to the buttons.
+ */
+export async function decidePartChangeAction(changeId: string, approve: boolean, formData: FormData) {
+  const { decidePartChange } = await import("@/lib/part-change");
+  const { redirect } = await import("next/navigation");
+  const staff = await requireStaff();
+  const back = `/parts/change/${changeId}`;
+  if (staff.viewingAs) redirect(`${back}?error=${encodeURIComponent("View as is read-only - use Act as to decide it.")}#decide`);
+  let words: string;
+  let isError = false;
+  try {
+    const r = await decidePartChange(changeId, approve, String(formData.get("note") ?? "").slice(0, 300), { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+    words = r.error ?? r.words ?? (approve ? "Approved." : "Refused.");
+    isError = !!r.error;
+  } catch (e) {
+    await logAppError("parts/part-change-actions: decide", e, { staffId: staff.id });
+    words = SAVE_FAILED;
+    isError = true;
+  }
+  revalidatePath("/parts", "layout");
+  revalidatePath("/approvals");
+  redirect(`${back}?${isError ? "error" : "message"}=${encodeURIComponent(words)}#decide`);
+}

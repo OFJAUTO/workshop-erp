@@ -905,7 +905,13 @@ function Row({ jobId, estimate, unitsReady, row, suppliers, types, catalogue, ty
         </>
       )}
       {/* Supplier: from the list, with Add a supplier at the bottom */}
-      {readOnly ? textCell(v.supplier) : (
+      {/* 17 November 2026 (Section 4): an approved or ordered part changes supplier from a VISIBLE button on its line. */}
+      {readOnly && partId && row.changeable && canPrice && !row.removed && !row.ended && !estimate ? (
+        <button type="button" onClick={() => setChanging(true)} title="Change supplier or price" className="flex h-9 min-w-0 items-center gap-1 rounded-control border border-ink bg-white px-2 text-left text-xs font-bold" data-change-supplier-open={partId}>
+          <span className="min-w-0 flex-1 truncate">{v.supplier || "No supplier"}</span>
+          <span className="shrink-0 underline underline-offset-2">Change</span>
+        </button>
+      ) : readOnly ? textCell(v.supplier) : (
         <select
           ref={supplierRef}
           value={isOurStock(v.supplier) ? "__stock" : supplier ? supplier.id : v.supplier ? "__text" : ""}

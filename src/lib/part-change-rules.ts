@@ -50,6 +50,46 @@ export function needsOwner(before: PartFacts, after: PartFacts): boolean {
   return (after.cost ?? 0) > (before.cost ?? 0) + 0.004 || typeChanged(before, after);
 }
 
+/**
+ * WHO approves a change (17 November 2026, Section 4):
+ *  - cheaper or the same cost, same part type: nobody (logged);
+ *  - dearer, but the line still makes at least the minimum markup on the customer's price: the ADVISOR on that job, one tap;
+ *  - below the minimum markup, another part type (Genuine to anything else), or the customer's price must change: the OWNER.
+ * A part not on a quotation yet (no customer's price): a dearer cost is the advisor's (he prices it).
+ */
+export type ChangeApprover = "none" | "advisor" | "owner";
+export function approverFor(before: PartFacts, after: PartFacts, sellEach: number | null, minMarkupPercent: number, choice: PriceChoice | null): ChangeApprover {
+  if (typeChanged(before, after)) return "owner";
+  if (choice === "revise") return "owner";
+  const dearer = (after.cost ?? 0) > (before.cost ?? 0) + 0.004;
+  if (!dearer) return "none";
+  if (sellEach === null) return "advisor";
+  const mk = markupPercentOf(sellEach, after.cost);
+  return mk !== null && mk + 1e-9 >= minMarkupPercent ? "advisor" : "owner";
+}
+
+/** The markup on cost at a selling price each ((sell - cost) / cost), in percent; null without a cost. */
+export function markupPercentOf(sellEach: number | null, cost: number | null): number | null {
+  if (sellEach === null || cost === null || !(cost > 0)) return null;
+  return r2(((sellEach - cost) / cost) * 100);
+}
+
+/** THE decision as the approver reads it: old and new supplier and price, the difference, delivery, profit before → after. */
+export function decisionLines(before: PartFacts, after: PartFacts, sellEach: number | null): string[] {
+  const qty = after.quantity || 1;
+  const diff = r2((after.cost ?? 0) - (before.cost ?? 0));
+  const sign = (n: number) => (n > 0 ? "+" : n < 0 ? "−" : "±");
+  const out = [
+    `Old: ${before.supplier || "no supplier"} · AED ${money(before.cost)} each`,
+    `New: ${after.supplier || "no supplier"} · AED ${money(after.cost)} each`,
+    `Difference: ${sign(diff)}${money(Math.abs(diff))} each${qty > 1 ? ` (${sign(diff)}${money(Math.abs(r2(diff * qty)))} on ${qty})` : ""}`,
+    `Delivery: ${daysWords(before)} → ${daysWords(after)}`,
+  ];
+  if (sellEach !== null) out.push(`Profit on this line: AED ${money(profitOf(sellEach, before))} → AED ${money(profitOf(sellEach, after))} (customer pays AED ${money(sellEach)} each)`);
+  else out.push("Not on an approved quotation yet: the advisor prices it.");
+  return out;
+}
+
 /** What we absorb when the customer's price is kept: the extra cost on the whole quantity (never below 0). */
 export function absorbOf(before: PartFacts, after: PartFacts): number {
   return Math.max(0, r2(((after.cost ?? 0) - (before.cost ?? 0)) * (after.quantity || 1)));
