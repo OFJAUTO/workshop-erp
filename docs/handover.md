@@ -1,12 +1,20 @@
-# Handover – list of 17 November 2026 (IN PROGRESS; last update 17 Nov, 09:55 Dubai)
+# Handover – list of 17 November 2026 (ALL DONE; last update 17 Nov, 13:25 Dubai)
 
 **NEEDS OMAR (top first):**
-1. **AED 5,030.55 to ARABIAN GULF MECHANICAL CENTRE is NOT recorded** (the proof error stopped it). Supplier payments → Pay any supplier → ARABIAN GULF… → amount, method, "Advance with…" → Add the proof → Record the payment → YES, RECORD.
-2. Five supplier payments recorded right after a refused proof still have none: SPAY-00023, -00024, -00028, -00029, -00033 (Payment history → Correct this payment → Add the proof).
-3. AL TAYER: enter the one paper for LPO-00039-1 + LPO-00039-3 (Supplier invoices → LPO-00039-1 → Scan & enter → tick LPO-00039-3).
-4. Still open: the AED 8,000.00 advance for E-00082 (16 Nov list); Mathew picks the Zoho account for stock bills.
+1. **Apply one database change** (Section 6, the Journal Voucher): turn auto mode off and reply **"apply"**. File `supabase/migrations/20261219090000_journal_vouchers.sql`, backup `backups/2026-11-17T06-43-51`. Details in `docs/waiting-for-apply.md`.
+2. **AED 5,030.55 to ARABIAN GULF MECHANICAL CENTRE is NOT recorded** (the proof error stopped it). Supplier payments → Pay any supplier → ARABIAN GULF… → amount, method, "Advance with…" → Add the proof → Record the payment → YES, RECORD.
+3. Five supplier payments recorded right after a refused proof still have none: SPAY-00023, -00024, -00028, -00029, -00033 (Payment history → Correct this payment → Add the proof).
+4. AL TAYER: enter the one paper for LPO-00039-1 + LPO-00039-3 (Supplier invoices → LPO-00039-1 → Scan & enter → tick LPO-00039-3).
+5. Mathew confirms: post Journal Vouchers to Zoho as expenses (built, VAT reclaimable), as supplier bills, or as manual journals.
+6. Peter: 34 made-up part numbers on cars in the workshop (Parts → Part number check).
+7. Next.js prints a "known security vulnerability" notice on every build here (Vercel builds are fine). An upgrade is its own task with full tests – reply "upgrade Next" to queue it.
+8. Still open: the AED 8,000.00 advance for E-00082 (16 Nov list); Mathew picks the Zoho account for stock bills.
 
-**Done so far (2 of 7):** S1 proof belongs to the payment (eab9c83e, `docs/advance-proof-17-nov-note.md`); S2 one invoice, several LPOs (c8d600dc, `docs/one-invoice-many-lpos-17-nov-note.md`). No database change waiting yet.
+**Done (7 of 7), each with its note in `docs/`:** S1 proof belongs to the payment (eab9c83e); S2 one invoice, several LPOs (c8d600dc); S3 payment date + Correct this payment (e6a05b03); S4 change supplier button + advisor approval (a51e6098); S5 draft LPO + Share (03fd7c78); S6 Journal Voucher (41769282, dormant until the apply); S7 part-number check (9b5414cc); end fix (1efa4319).
+
+**End of batch:** unit all pass; security all pass; full layout 178 pages / 1,602 views + 252 pop-ups clean after one phone fix (Journal Voucher pay-later boxes); whole-job simulation 713 of 713; check:live 33 of 33.
+
+**Timing:** S1 28 min, S2 11 min, S3 24 min, S4 9 min, S5 14 min, S6 19 min, S7 11 min. Tests, builds and checks: about 2 h 10 min (three production builds about 15 min each, layout 14 min, simulation about 75 min, pop-ups 6 min, dev-server restarts about 10 min). Deploy waits: none (each push checked the previous one had succeeded).
 
 ---
 
