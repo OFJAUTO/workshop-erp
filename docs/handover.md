@@ -1,7 +1,7 @@
 # Handover – list of 17 November 2026 (ALL DONE; last update 17 Nov, 13:25 Dubai)
 
 **NEEDS OMAR (top first):**
-1. **Apply one database change** (Section 6, the Journal Voucher): turn auto mode off and reply **"apply"**. File `supabase/migrations/20261219090000_journal_vouchers.sql`, backup `backups/2026-11-17T06-43-51`. Details in `docs/waiting-for-apply.md`.
+1. ~~Apply~~ DONE 17 Nov 14:40 Dubai: the Journal Voucher migration is applied on live (backup `backups/2026-11-17T10-37-15`; check:live 33 of 33). Nothing is waiting for apply.
 2. **AED 5,030.55 to ARABIAN GULF MECHANICAL CENTRE is NOT recorded** (the proof error stopped it). Supplier payments → Pay any supplier → ARABIAN GULF… → amount, method, "Advance with…" → Add the proof → Record the payment → YES, RECORD.
 3. Five supplier payments recorded right after a refused proof still have none: SPAY-00023, -00024, -00028, -00029, -00033 (Payment history → Correct this payment → Add the proof).
 4. AL TAYER: enter the one paper for LPO-00039-1 + LPO-00039-3 (Supplier invoices → LPO-00039-1 → Scan & enter → tick LPO-00039-3).

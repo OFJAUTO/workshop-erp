@@ -11,7 +11,11 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-**From your phone:** turn auto mode off for this session and reply **"apply"**. That is all.
+Nothing is waiting.
+
+## Applied on 17 November 2026, afternoon
+
+The owner replied "apply". A fresh backup was taken first: `backups/2026-11-17T10-37-15` (135 tables, 299,271 rows). The file was run with `scripts/db-sql.mjs` without an error and recorded with `scripts/db-record-migration.mjs`. Checked on live: `journal_vouchers` and `journal_voucher_lines` have RLS on, no policies and no grants to anon or the login role. `npm run check:live`: 33 passed, 0 failed.
 
 | # | What | What it does on live | Size |
 |---|---|---|---|
