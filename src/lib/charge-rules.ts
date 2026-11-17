@@ -4,10 +4,12 @@
  * "Recovery – full down, two ways: AED 630.00 including VAT (AED 600 + VAT)". Pure: no database.
  */
 
-export type ChargeKind = "recovery" | "fuel" | "other";
+export type ChargeKind = "recovery" | "fuel" | "delivery" | "other";
 export const CHARGE_KINDS: { key: ChargeKind; label: string }[] = [
   { key: "recovery", label: "Recovery" },
   { key: "fuel", label: "Fuel" },
+  // 17 November 2026 (Section 6): a fourth type, booked on the Postage account in Zoho.
+  { key: "delivery", label: "Delivery" },
   { key: "other", label: "Other" },
 ];
 
@@ -53,6 +55,7 @@ export function chargeTitle(c: Pick<ChargeInput, "kind" | "description" | "recov
     return what ? `Recovery – ${what}` : "Recovery";
   }
   if (c.kind === "fuel") return c.litres ? `Fuel – ${c.litres} L` : c.description?.trim() || "Fuel";
+  if (c.kind === "delivery") return c.description?.trim() ? (/^delivery\b/i.test(c.description.trim()) ? c.description.trim() : `Delivery – ${c.description.trim()}`) : "Delivery";
   return c.description.trim();
 }
 
@@ -87,7 +90,7 @@ export function chargeTotals(lines: Pick<ChargeInput, "cost_aed" | "charge_aed" 
 
 /** A line's own check: a description (or a recovery type), a cost of 0 or more, a charge above 0 unless free. */
 export function chargeProblem(c: ChargeInput): string | null {
-  if (!["recovery", "fuel", "other"].includes(c.kind)) return "Pick Recovery, Fuel or Other.";
+  if (!["recovery", "fuel", "delivery", "other"].includes(c.kind)) return "Pick Recovery, Fuel, Delivery or Other.";
   if (c.kind === "other" && !c.description.trim()) return "Write what the charge is for.";
   if (c.kind === "recovery" && !(c.recovery_type || c.description).trim()) return "Pick the recovery type.";
   if (c.kind === "fuel" && !(Number(c.litres) > 0) && !c.description.trim()) return "Type the litres.";

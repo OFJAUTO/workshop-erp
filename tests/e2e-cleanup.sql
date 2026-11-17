@@ -35,6 +35,12 @@ begin
     delete from public.back_orders where job_id = any(job_ids) or follow_job_id = any(job_ids);
   end if;
   -- Pending charges and early charges (1 November 2026): the lines, the entries, their job-less proformas and tax invoices.
+  -- Journal vouchers (17 November 2026): their lines point at the test charge lines; manual test vouchers by their words.
+  if to_regclass('public.journal_voucher_lines') is not null then
+    delete from public.zoho_outbox where kind = 'jv' and record_id in (select voucher_id from public.journal_voucher_lines where job_id = any(job_ids) or charge_line_id in (select id from public.charge_lines where job_id = any(job_ids))) or (kind = 'jv' and record_id in (select id from public.journal_vouchers where description ilike 'e2e%' or provider ilike 'e2e%'));
+    delete from public.journal_voucher_lines where job_id = any(job_ids) or charge_line_id in (select id from public.charge_lines where job_id = any(job_ids)) or voucher_id in (select id from public.journal_vouchers where description ilike 'e2e%' or provider ilike 'e2e%');
+    delete from public.journal_vouchers v where (v.description ilike 'e2e%' or v.provider ilike 'e2e%') or not exists (select 1 from public.journal_voucher_lines l where l.voucher_id = v.id) and v.kind = 'charge';
+  end if;
   if to_regclass('public.charge_lines') is not null then
     delete from public.charge_lines where job_id = any(job_ids) or entry_id in (select id from public.charge_entries where customer_id = any(cust_ids) or job_id = any(job_ids));
     delete from public.charge_entries where customer_id = any(cust_ids) or job_id = any(job_ids);

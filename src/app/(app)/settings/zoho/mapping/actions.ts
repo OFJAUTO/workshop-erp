@@ -4,6 +4,7 @@ import { dbWords } from "@/lib/app-errors";
 import { redirect } from "next/navigation";
 import { requirePermission } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { JV_TYPES } from "@/lib/jv-rules";
 import { DEPOSIT_METHODS, EXPENSE_TYPES, INCOME_TYPES, PURCHASE_TYPES, SUGGESTED_MAP, SUPPLIER_PAY_METHODS, type ZohoAccountMap } from "@/lib/zoho-sync";
 
 const back = (kind: "message" | "error", text: string): never => redirect(`/settings/zoho/mapping?${kind}=${encodeURIComponent(text)}`);
@@ -28,6 +29,12 @@ export async function saveZohoMapping(formData: FormData) {
   for (const e of EXPENSE_TYPES) {
     const v = String(formData.get(`map__expense__${e.key}`) ?? "").trim();
     if (v) map.expense[e.key] = v.slice(0, 200);
+  }
+  // 17 November 2026 (Section 6): the Journal Voucher's accounts.
+  map.jv = {};
+  for (const k of [...JV_TYPES.map((t) => t.key), "staff"] as const) {
+    const v = String(formData.get(`map__jv__${k}`) ?? "").trim();
+    if (v) map.jv[k] = v.slice(0, 200);
   }
   const paidFrom = String(formData.get("map__paid_from") ?? "").trim();
   if (paidFrom) map.paidFrom = paidFrom.slice(0, 200);
@@ -82,6 +89,8 @@ export async function useSuggestedMapping() {
     advances: stored.advances || SUGGESTED_MAP.advances,
     advancesRefund: stored.advancesRefund || SUGGESTED_MAP.advancesRefund,
     undeposited: stored.undeposited || SUGGESTED_MAP.undeposited,
+    // 17 November 2026: the Journal Voucher accounts are kept (their own defaults fill any gap at sync time).
+    jv: stored.jv ?? {},
   };
   const { error } = await admin.from("settings").update({ value: map as unknown as Record<string, unknown>, updated_by: staff.id }).eq("key", "zoho_account_map");
   if (error) return back("error", dbWords(error, "settings/zoho/mapping/actions"));

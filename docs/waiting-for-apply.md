@@ -11,7 +11,11 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Nothing is waiting.
+**From your phone:** turn auto mode off for this session and reply **"apply"**. That is all.
+
+| # | What | What it does on live | Size |
+|---|---|---|---|
+| 1 | `supabase/migrations/20261219090000_journal_vouchers.sql` (17 Nov, Section 6: the Journal Voucher tab; backup `backups/2026-11-17T06-43-51`, 135 tables, 297,728 rows) | Adds two server-only tables, `journal_vouchers` (JV-00001… numbers) and `journal_voucher_lines` (which charges a voucher covers; one charge on one live voucher only). Both have RLS on, no grants to logins, and audit + no-delete triggers. Lets a charge be of type **Delivery**. Lets the Zoho outbox carry a voucher. **Already live without it:** the menu entry "Journal Voucher" (accounts and the owner) with a notice that it switches on with the apply; "Delivery" on the charges form saves as Other titled DELIVERY. **Switched on by the apply:** the TO RECORD list, Record as paid, Pay later, To reimburse, manual vouchers, voids, the Delivery type itself, and the Zoho expense per voucher. | 2 tables + 2 rules |
 
 ## Applied on 17 November 2026, morning
 

@@ -3,6 +3,7 @@ import { Button, Card, Field, LinkButton, Notice, PageHeader, SectionLabel, Sele
 import { requirePermission } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { listAccounts, zohoConfigured, zohoConnection, type ZohoAccount } from "@/lib/zoho";
+import { JV_STAFF_ACCOUNT, JV_TYPES } from "@/lib/jv-rules";
 import { DEPOSIT_METHODS, EXPENSE_TYPES, INCOME_TYPES, PURCHASE_TYPES, SUGGESTED_MAP, SUPPLIER_PAY_METHODS, readZohoMap, zohoWriteOrg } from "@/lib/zoho-sync";
 import { saveZohoMapping, setStockUsagePostingAction, useSuggestedMapping } from "./actions";
 
@@ -157,6 +158,15 @@ export default async function ZohoMappingPage({ searchParams }: { searchParams: 
                 {box(`map__expense__${e.key}`, bestMatch(map.expense[e.key], SUGGESTED_MAP.expense[e.key], expense, MATCH_WORDS[`expense_${e.key}`] ?? []), expense)}
               </Field>
             ))}
+            {/* 17 November 2026 (Section 6): the Journal Voucher's accounts (the owner's names are the defaults). */}
+            {JV_TYPES.map((t) => (
+              <Field key={`jv-${t.key}`} label={`Journal voucher: ${t.label}`} hint={`A charge cost recorded on the Journal Voucher tab (default "${t.account}").`}>
+                {box(`map__jv__${t.key}`, map.jv?.[t.key] || t.account, expense)}
+              </Field>
+            ))}
+            <Field label="Journal voucher: paid by a staff member" hint={`What the company owes a staff member who paid with his own money, until he is reimbursed (default "${JV_STAFF_ACCOUNT}", a current liability).`}>
+              {box("map__jv__staff", map.jv?.staff || JV_STAFF_ACCOUNT, [])}
+            </Field>
             <Field label="Paid from" hint="The cash/bank account supplier payments and expenses are paid from.">
               {box("map__paid_from", bestMatch(map.paidFrom, SUGGESTED_MAP.paidFrom, depositable, MATCH_WORDS.paid_from), depositable)}
             </Field>

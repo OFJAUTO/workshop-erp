@@ -125,6 +125,11 @@ export async function outboxDocs(rows: { kind: ZohoKind; record_id: string; zoho
     const amount = round2(Number(b.total_aed) || 0);
     put(`lathebill:${b.id}`, `Lathe bill ${b.bill_number} · ${b.supplier_name} · ${aed(amount)}`, amount, { inZoho: !!b.zoho_bill_id, notForZoho: null });
   });
+  // Journal vouchers (17 November 2026, Section 6): the charge costs accounts recorded, each an expense.
+  await each<{ id: string; number: string; amount_aed: number | string; vat_aed: number | string; status: string; is_active: boolean; zoho_expense_id: string | null; provider: string | null }>("journal_vouchers", "id, number, amount_aed, vat_aed, status, is_active, zoho_expense_id, provider", idsOf("jv"), (v) => {
+    const amount = round2((Number(v.amount_aed) || 0) + (Number(v.vat_aed) || 0));
+    put(`jv:${v.id}`, `${v.number}${v.provider ? ` · ${v.provider}` : ""} · ${aed(amount)}`, amount, { inZoho: !!v.zoho_expense_id && v.status !== "void", notForZoho: v.status === "void" && !v.zoho_expense_id ? "voided before it was posted" : null });
+  });
   // Stock used on a job (13 November 2026, Section 2): the value moved from stock to the job's cost, no money.
   await each<{ id: string; kind: string; quantity: number | string; unit_cost: number | string | null; is_active: boolean }>("stock_movements", "id, kind, quantity, unit_cost, is_active", idsOf("stockuse"), (m) => {
     const amount = round2(Math.abs(Number(m.quantity) || 0) * (Number(m.unit_cost) || 0));

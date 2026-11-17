@@ -61,10 +61,11 @@ export function recoveryLabel(settings: Settings, key: string | null | undefined
 }
 
 /** One line ready to save: its title in capitals, the trips folded into the recovery words ("full down, two ways"). */
-function lineRecord(c: ChargeInput, settings: Settings) {
+function lineRecord(c: ChargeInput, settings: Settings, deliveryOk = true) {
   const label = c.kind === "recovery" ? [recoveryLabel(settings, c.recovery_type) ?? c.recovery_type ?? "", c.trips && c.trips > 1 ? (c.trips === 2 ? "two ways" : `${c.trips} trips`) : c.trips === 1 ? "one way" : ""].filter(Boolean).join(", ").toLowerCase() : null;
   return {
-    kind: c.kind,
+    // Before the Journal Voucher database change, "Delivery" is saved as Other with the word Delivery in its title.
+    kind: c.kind === "delivery" && !deliveryOk ? "other" : c.kind,
     description: capsText(chargeTitle(c, label)),
     provider: c.provider?.trim() || null,
     recovery_type: c.kind === "recovery" ? c.recovery_type ?? null : null,
@@ -110,7 +111,8 @@ export async function addCharges(home: { jobId?: string; entryId?: string }, inp
   const owner = staff.role_id === "owner";
   // 12 November 2026: a free charge of a ticked type (free recovery by default) is approved at once while the owner is
   // away - logged in the job's history, no bell to him. Only on a job (a pending charge without a car still asks).
-  const records = inputs.map((c) => lineRecord(c, settings));
+  const deliveryOk = await schemaReady("journal_vouchers", "id");
+  const records = inputs.map((c) => lineRecord(c, settings, deliveryOk));
   const autoFree = await Promise.all(inputs.map((c, i) => (c.free && !owner && home.jobId ? autoAllowsFreeCharge(c.kind, Number(records[i].cost_aed) || 0) : Promise.resolve(false))));
   const rows = inputs.map((c, i) => ({ ...records[i], job_id: home.jobId ?? null, entry_id: home.entryId ?? null, free_status: c.free ? (owner || autoFree[i] ? "approved" : "pending_owner") : null, created_by: staff.id, updated_by: staff.id }));
   const { data: made, error } = await admin.from("charge_lines").insert(rows).select(LINE_COLS);

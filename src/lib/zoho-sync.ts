@@ -1,4 +1,5 @@
 import "server-only";
+import { JV_STAFF_ACCOUNT, JV_TYPES, type JvType } from "./jv-rules";
 import { billLines, sameLayout } from "./zoho-bill-lines";
 import { billLeadOf, invoiceGroupOf } from "./invoice-cover";
 import { realPartNumber } from "./parts-rows";
@@ -107,6 +108,8 @@ export type ZohoAccountMap = {
   advancesRefund?: string;
   /** Cheques and bank transfers wait here until cleared/confirmed (9 November 2026), then move to their bank. */
   undeposited?: string;
+  /** Journal vouchers (17 November 2026): per type; an empty one uses the owner's default name. */
+  jv?: Partial<Record<JvType | "staff", string>>;
 };
 
 /** THE suggested stock VALUE account (13 November 2026, Section 2, option B): an Other Current Asset, made in OFJ TEST by itself. */
@@ -149,7 +152,7 @@ export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Reco
 
 export function readZohoMap(settings: Settings): ZohoAccountMap {
   const raw = (settings.zoho_account_map ?? {}) as ZohoAccountMap;
-  return { income: raw.income ?? {}, depositTo: raw.depositTo ?? {}, purchases: raw.purchases ?? {}, expense: raw.expense ?? {}, paidFrom: raw.paidFrom, paidFromBy: raw.paidFromBy ?? {}, bankCharges: raw.bankCharges, bankTxnFees: raw.bankTxnFees, advances: raw.advances, advancesRefund: raw.advancesRefund, undeposited: raw.undeposited };
+  return { income: raw.income ?? {}, depositTo: raw.depositTo ?? {}, purchases: raw.purchases ?? {}, expense: raw.expense ?? {}, paidFrom: raw.paidFrom, paidFromBy: raw.paidFromBy ?? {}, bankCharges: raw.bankCharges, bankTxnFees: raw.bankTxnFees, advances: raw.advances, advancesRefund: raw.advancesRefund, undeposited: raw.undeposited, jv: raw.jv ?? {} };
 }
 
 /** True once the books have EVER gone live (the switch runs once; OFJ TEST is never written again after it). */
@@ -253,6 +256,10 @@ type Resolved = {
   purchasesStockError?: string;
   expense?: Record<ExpenseKey, string>;
   expenseError?: string;
+  /** Journal vouchers (17 November 2026, Section 6): the expense account per type, and the staff reimbursement account. */
+  jv?: Record<JvType, string>;
+  jvStaff?: string;
+  jvError?: string;
   paidFrom?: string;
   paidFromError?: string;
   /** Supplier payments by method (resolved softly: a missing one falls back to paidFrom). */
@@ -312,7 +319,7 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
   if (!tax) throw new ZohoError("No 5% tax exists in this Zoho organization. Run the mirror on Settings > Zoho Books.");
   const byName = new Map(chart.filter((a) => a.is_active !== false).map((a) => [a.account_name.trim().toLowerCase(), a]));
   const mayCreate = create && org !== ZOHO_REAL_ORG_ID;
-  const resolve = async (name: string | undefined, label: string, kind: "income" | "cash" | "bank" | "expense" | "stock"): Promise<string> => {
+  const resolve = async (name: string | undefined, label: string, kind: "income" | "cash" | "bank" | "expense" | "stock" | "liability"): Promise<string> => {
     const clean = (name ?? "").trim();
     if (!clean) throw new ZohoError(`Mapping missing: ${label}. Pick the account on Settings > Zoho Books > Mapping.`);
     const found = byName.get(clean.toLowerCase());
@@ -324,9 +331,9 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
     const made =
       kind === "bank"
         ? await zohoFetch<{ bankaccount?: { account_id: string } }>("/bankaccounts", { org, method: "POST", body: { account_name: clean, account_type: "bank" } }).then((j) => j.bankaccount?.account_id)
-        : await zohoFetch<{ chart_of_account?: { account_id: string } }>("/chartofaccounts", { org, method: "POST", body: { account_name: clean, account_type: kind === "stock" ? "other_current_asset" : kind } }).then((j) => j.chart_of_account?.account_id);
+        : await zohoFetch<{ chart_of_account?: { account_id: string } }>("/chartofaccounts", { org, method: "POST", body: { account_name: clean, account_type: kind === "stock" ? "other_current_asset" : kind === "liability" ? "other_current_liability" : kind } }).then((j) => j.chart_of_account?.account_id);
     if (!made) throw new ZohoError(`Zoho did not return the new account ${clean}.`);
-    byName.set(clean.toLowerCase(), { account_id: made, account_name: clean, account_type: kind === "stock" ? "other_current_asset" : kind });
+    byName.set(clean.toLowerCase(), { account_id: made, account_name: clean, account_type: kind === "stock" ? "other_current_asset" : kind === "liability" ? "other_current_liability" : kind });
     return made;
   };
   const income = {} as Record<IncomeKey, string>;
@@ -356,6 +363,15 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
     out.expense = expense;
   } catch (e) {
     out.expenseError = e instanceof Error ? e.message : String(e);
+  }
+  // Journal vouchers resolve softly: a missing account fails only the vouchers (the owner's default names fill the gaps).
+  try {
+    const jv = {} as Record<JvType, string>;
+    for (const t of JV_TYPES) jv[t.key] = await resolve((map.jv?.[t.key] ?? "").trim() || t.account, t.label, "expense");
+    out.jv = jv;
+    out.jvStaff = await resolve((map.jv?.staff ?? "").trim() || JV_STAFF_ACCOUNT, "Staff reimbursements (a voucher paid by a staff member)", "liability");
+  } catch (e) {
+    out.jvError = e instanceof Error ? e.message : String(e);
   }
   try {
     out.paidFrom = await resolve(map.paidFrom, "Paid-from account (supplier payments and expenses)", "bank");
@@ -398,7 +414,7 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
 
 /* ------------------------------------------------------- the outbox ------------------------------------------------------- */
 
-export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery" | "vendorcredit" | "cnrefund" | "settlement" | "supplierpay" | "paygroup" | "lathebill" | "lpoinvoice" | "stockuse";
+export type ZohoKind = "contact" | "deposit" | "invoice" | "payment" | "creditnote" | "vendor" | "bill" | "billpayment" | "commission" | "recovery" | "vendorcredit" | "cnrefund" | "settlement" | "supplierpay" | "paygroup" | "lathebill" | "lpoinvoice" | "stockuse" | "jv";
 export type OutboxRow = {
   id: string;
   kind: ZohoKind;
@@ -2444,6 +2460,60 @@ async function syncCommissionRow(org: string, accounts: Resolved, paymentId: str
   };
 }
 
+/**
+ * A JOURNAL VOUCHER (17 November 2026, Section 6): one Zoho expense on its type's account (fuel, recovery, delivery,
+ * other), paid through the company cash, card or bank, or the staff reimbursement account; the VAT as input VAT when the
+ * provider charged it; the job numbers in the description; the proof attached. A voided voucher is taken back.
+ * A "pay later" voucher posts when it is paid. (Mathew confirms: expenses, bills or manual journals - NEEDS OMAR.)
+ */
+async function syncJvRow(org: string, accounts: Resolved, voucherId: string): Promise<HandlerOut> {
+  const admin = createAdminClient();
+  const { data } = await admin.from("journal_vouchers").select("id, number, kind, status, paid_by, staff_id, paid_on, reference, proof_path, provider, provider_trn, provider_invoice_number, expense_type, description, amount_aed, vat_aed, is_active, zoho_expense_id").eq("id", voucherId).maybeSingle();
+  const v = data as { id: string; number: string; kind: string; status: string; paid_by: string | null; staff_id: string | null; paid_on: string | null; reference: string | null; proof_path: string | null; provider: string | null; provider_trn: string | null; provider_invoice_number: string | null; expense_type: JvType; description: string | null; amount_aed: number | string; vat_aed: number | string; is_active: boolean; zoho_expense_id: string | null } | null;
+  if (!v) throw new ZohoError("The journal voucher no longer exists in the ERP.");
+  if (v.status === "void" || !v.is_active) {
+    if (!v.zoho_expense_id) return { result: { skipped: "Voided before it was posted. Nothing went to Zoho." } };
+    try {
+      await zohoFetch(`/expenses/${encodeURIComponent(v.zoho_expense_id)}`, { org, method: "DELETE" });
+    } catch (e) {
+      if (!(e instanceof ZohoError && /not exist|not found/i.test(e.message))) throw e;
+    }
+    await admin.from("journal_vouchers").update({ zoho_expense_id: null }).eq("id", v.id);
+    return { zohoId: v.zoho_expense_id, result: { voucher: v.number, reversed: "removed from Zoho (voided in the ERP)" } };
+  }
+  if (v.status === "unpaid" || !v.paid_on) return { wait: `${v.number} is "pay later": it posts when it is paid.` };
+  const gate = await startDateSkip(String(v.paid_on).slice(0, 10), "jv", v.id);
+  if (gate) return gate;
+  if (accounts.jvError || !accounts.jv) throw new ZohoError(accounts.jvError ?? "Journal voucher accounts are not mapped.");
+  const net = round2(Number(v.amount_aed) || 0);
+  const vat = round2(Number(v.vat_aed) || 0);
+  const total = round2(net + vat);
+  const paidThroughId =
+    v.paid_by === "staff" ? accounts.jvStaff! : v.paid_by === "cash" ? accounts.depositTo.cash : v.paid_by === "card" ? (accounts.paidFromBy?.card ?? needAccounts(accounts.paidFrom, accounts.paidFromError)) : (accounts.paidFromBy?.transfer ?? needAccounts(accounts.paidFrom, accounts.paidFromError));
+  const { data: lines } = await admin.from("journal_voucher_lines").select("job_id").eq("voucher_id", v.id).eq("is_active", true);
+  const jobIds = Array.from(new Set(((lines ?? []) as { job_id: string | null }[]).map((l) => l.job_id).filter((x): x is string => !!x)));
+  const { data: jobs } = jobIds.length ? await admin.from("jobs").select("job_number").in("id", jobIds) : { data: [] };
+  const jobWords = ((jobs ?? []) as { job_number: string }[]).map((j) => j.job_number).join(", ");
+  const account = accounts.jv[v.expense_type] ?? accounts.jv.other;
+  const description = [v.number, jobWords || null, v.provider, v.provider_trn ? `TRN ${v.provider_trn}` : null, v.provider_invoice_number ? `inv ${v.provider_invoice_number}` : null].filter(Boolean).join(" · ");
+  let z = v.zoho_expense_id ? await zohoExpenseById(org, v.zoho_expense_id) : null;
+  if (!z) {
+    z = await createExpense(org, {
+      accountId: account,
+      paidThroughId,
+      date: String(v.paid_on).slice(0, 10),
+      amount: total,
+      reference: v.number,
+      description,
+      ...(vat > 0.004 && accounts.taxId ? { lines: [{ account_id: account, amount: net, tax_id: accounts.taxId, description }], expectTotal: total } : {}),
+    });
+  }
+  if (!near(z.total, total)) throw new ZohoError(`Totals differ for ${v.number}: Zoho has ${z.total.toFixed(2)}, the ERP has ${total.toFixed(2)}.`);
+  await admin.from("journal_vouchers").update({ zoho_expense_id: z.expense_id }).eq("id", v.id);
+  const receipt = await attachReceipt(org, z, v.proof_path ? await bucketFile("job-files", v.proof_path) : null);
+  return { zohoId: z.expense_id, result: { voucher: v.number, amount: total, vat, jobs: jobWords || null, paid_by: v.paid_by, receipt } };
+}
+
 /** A recovery month marked paid = one Zoho expense per driver/company, with the month's trip list attached as Excel. */
 async function syncRecoveryRow(org: string, accounts: Resolved, payoutId: string): Promise<HandlerOut> {
   const admin = createAdminClient();
@@ -2703,6 +2773,7 @@ async function processOutboxRow(row: WorkRow, ctx: RunCtx): Promise<RowDone> {
           : row.kind === "lathebill" ? await syncLatheBillRow(org, accounts, row.record_id)
           : row.kind === "lpoinvoice" ? await syncLpoInvoiceRow(org, accounts, row.record_id)
           : row.kind === "stockuse" ? await syncStockUseRow(org, accounts, row.record_id)
+          : row.kind === "jv" ? await syncJvRow(org, accounts, row.record_id)
           : await syncPaymentRow(org, accounts, row.record_id);
       }
     }

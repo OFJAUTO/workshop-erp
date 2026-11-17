@@ -65,6 +65,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     pendingCharges = count ?? 0;
   }
 
+  // Journal Voucher (17 November 2026, Section 6): the charge costs waiting for accounts.
+  let jvToRecord = 0;
+  if (can(role, "journalVouchers")) jvToRecord = await (await import("@/lib/journal-vouchers")).jvToRecordCount().catch(() => 0);
+
   // Zoho Books on manual (3 November 2026): how many documents a press of Sync to Zoho would send, next to the menu
   // entry (THE rule sendsOnPress: a row waiting for something else, such as its red bill, is never counted).
   let zohoWaiting = 0;
@@ -140,6 +144,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/recovery", label: "Recovery", show: role === "owner" || role === "service_advisor" || role === "accounts" },
     { href: "/commissions", label: "Commissions", show: role === "owner" || role === "accounts" },
     { href: "/accounts-posting", label: "Accounts posting", show: can(role, "cardSettlements") },
+    { href: "/journal-voucher", label: "Journal Voucher", show: can(role, "journalVouchers"), badge: jvToRecord || undefined },
     { href: "/zoho", label: "Zoho Books", show: can(role, "zohoSync"), badge: zohoWaiting || undefined },
     { href: "/warranties", label: "Warranties", show: role === "owner" || role === "service_advisor" },
     { href: "/profit", label: "Profit", show: role === "owner" },

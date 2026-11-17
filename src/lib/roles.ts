@@ -136,6 +136,8 @@ export const PERMISSIONS = {
   viewPartsAccounts: ["owner", "accounts"],
   // Supplier payments tab (10 November 2026, Section 5): owner and accounts only.
   supplierPayments: ["owner", "accounts"],
+  /** 17 November 2026 (Section 6): the Journal Voucher tab - charge costs to record and pay (server-enforced). */
+  journalVouchers: ["owner", "accounts"],
 } as const satisfies Record<string, readonly RoleId[]>;
 
 export type Permission = keyof typeof PERMISSIONS;
