@@ -1,5 +1,6 @@
 "use client";
 
+import { MoneyDate } from "@/components/MoneyDate";
 import { proofLabel, proofRequired } from "@/lib/payment-proof";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -208,7 +209,7 @@ export function RecordDeposit({ d, charges, label = "Record the deposit" }: { d:
                 ) : null}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   {needsAuthCode(method) ? <AuthCodeInput method={method} value={authCode} onChange={setAuthCode} name="deposit_auth_code" /> : <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Reference (optional)</span><Input value={reference} onChange={(e) => setReference(e.target.value)} placeholder="transfer ref, cheque bank…" /></label>}
-                  <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Date received</span><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} data-deposit-date /></label>
+                  <MoneyDate name="deposit_date_shown" label="Date received" value={date} onChange={setDate} max={todayDubai()} hook="data-deposit-date" />
                 </div>
                 <div className="flex flex-col gap-1">
                   <span className="text-xs font-semibold text-muted">{proofLabel(method)}</span>

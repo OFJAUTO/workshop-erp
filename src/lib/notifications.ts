@@ -95,6 +95,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "purchase_return", label: "A part went back to its supplier, and a credit not received after 7 days" },
   { type: "lpo_check", label: "Parts on a job that cannot go on an LPO yet (a repeated part number, an unfinished line, a cost under AED 5)" },
   { type: "estimate_price_changed", label: "The parts desk changed a price or supplier on your estimate after it was sent", locked: true },
+  { type: "payment_month_differs", label: "A customer payment is dated in another month than its tax invoice (check the VAT month)", locked: true },
   { type: "estimate_carry_mismatch", label: "A job's quotation is not an exact copy of its estimate", locked: true },
   { type: "advisor_question", label: "Parts (or a colleague) asks you about one of your cars", locked: true },
   { type: "advisor_answer", label: "The advisor answered your question about a car", locked: true },

@@ -1,5 +1,7 @@
 "use server";
 
+import { checkPaymentDate, dateRoleOf } from "@/lib/payment-date-rules";
+import { closedThroughOf, flagPaymentMonth } from "@/lib/payment-date";
 import { proofMissingWords, proofRequired } from "@/lib/payment-proof";
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth";
@@ -67,6 +69,12 @@ async function recordDeposit(staff: Awaited<ReturnType<typeof requirePermission>
   if (!jobId) return { error: "Job missing." };
   if (!["cash", "card", "link", "transfer", "cheque"].includes(method)) return { error: "Pick how the money came." };
   if (!(amount > 0)) return { error: "Enter the amount received." };
+  // 17 November 2026 (Section 3): THE payment date rule (role limits, closed months), as for every customer payment.
+  const todayIso = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
+  if (receivedDate && receivedDate !== todayIso) {
+    const dc = checkPaymentDate({ day: receivedDate, today: todayIso, role: dateRoleOf(staff.role_id), closedThrough: closedThroughOf(settings) });
+    if (!dc.ok) return { error: dc.error };
+  }
   const cheque = method === "cheque" ? { number: blankToNull(formData.get("cheque_number")), bank: blankToNull(formData.get("cheque_bank")), date: blankToNull(formData.get("cheque_date")) } : null;
   if (method === "cheque" && !cheque?.number) return { error: "Enter the cheque number." };
   // The same tap again (its answer was lost): the receipt it already made, before anything else is asked for - its proof
@@ -117,8 +125,9 @@ async function recordDeposit(staff: Awaited<ReturnType<typeof requirePermission>
   async function afterReceipt(): Promise<RecordDepositResult> {
   const patch: Record<string, unknown> = { updated_by: staff.id };
   if (proofs.length) patch.proof_path = proofs[0].storage_path;
-  if (receivedDate && /^\d{4}-\d{2}-\d{2}$/.test(receivedDate)) patch.received_at = new Date(`${receivedDate}T12:00:00+04:00`).toISOString();
+  if (receivedDate && /^\d{4}-\d{2}-\d{2}$/.test(receivedDate) && receivedDate !== todayIso) patch.received_at = new Date(`${receivedDate}T12:00:00+04:00`).toISOString();
   await admin.from("payments").update(patch).eq("id", paymentId);
+  if (patch.received_at) await flagPaymentMonth(paymentId).catch(() => null);
   if (proofs.length) await admin.from("job_files").update({ ref_id: paymentId }).in("id", proofs.map((p) => p.id));
 
   // The ready "Send receipt" message, same as the money page builds it.

@@ -9,6 +9,13 @@ import { PAYMENT_METHOD_LABELS, confirmFullText } from "@/lib/money-steps";
 import { JobFileUpload, markFormSent, useFormKey, useRenewAfterAnswer, type FilesWaiting, type JobFile } from "@/components/JobFileUpload";
 import { feeRuleWords, feesFor, type BankFees } from "@/lib/bank-fees";
 import { AuthCodeInput } from "@/components/AuthCodeInput";
+import { MoneyDate } from "@/components/MoneyDate";
+import { showDay } from "@/lib/payment-date-rules";
+
+/** Today in Dubai (kept outside the component so the render stays free of clock calls). */
+function dubaiTodayIso() {
+  return new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
+}
 import { authConfirmWords, needsAuthCode, realAuthCode } from "@/lib/auth-code";
 
 const money = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -95,6 +102,8 @@ export function PaymentForm({
   const formRef = useRef<HTMLFormElement>(null);
   // The form's own key ties the proof to the payment. It stays the same across a reload or a new version (a proof still
   // waiting on the device stays with this form) and is renewed once a payment with it is recorded.
+  const [today] = useState(dubaiTodayIso);
+  const [paidOn, setPaidOn] = useState(today);
   const formTag = tag ?? (invoiceId ? `payment:${invoiceId}` : `payment:job:${jobId ?? proofJobId ?? "none"}`);
   const formKey = useFormKey(formTag, proofJobId);
   const clientKey = fixedKey ?? formKey.key;
@@ -163,6 +172,8 @@ export function PaymentForm({
             <Input value={amount} onChange={(e) => setAmount(e.target.value)} inputMode="decimal" required className="max-w-56" data-amount-input />
           </label>
         ) : null}
+        {/* 17 November 2026 (Section 3): THE payment date - today, or picked / typed earlier (never in the future). */}
+        <MoneyDate name="paid_on" label="Payment date" value={paidOn} onChange={setPaidOn} max={today} hook="data-payment-date" />
         {method === "cheque" ? (
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cheque number</span><Input name="cheque_number" inputMode="numeric" required data-cheque-number onBlur={(e) => { const form = e.currentTarget.form; const bank = (form?.elements.namedItem("cheque_bank") as HTMLInputElement | null)?.value ?? null; void chequeAlreadyAction(e.currentTarget.value, bank).then(setChequeWords).catch(() => setChequeWords(null)); }} /></label>
@@ -236,7 +247,7 @@ export function PaymentForm({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label={settles && invoiceId ? "Confirm full payment" : "Confirm the payment"} data-confirm-full>
           <div className="w-full max-w-lg max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-card bg-white p-5 flex flex-col gap-4 shadow-xl">
             <h2 className="text-lg font-extrabold">{settles && invoiceId ? "Confirm full payment" : "Confirm the payment"}</h2>
-            <p className="text-sm leading-relaxed" data-confirm-text>{settles && invoiceId ? confirmFullText({ amount: value, method, reference: needsAuthCode(method) ? (realAuthCode(authCode) ? `auth ${realAuthCode(authCode)}` : null) : reference || null, authMissing: needsAuthCode(method) && !realAuthCode(authCode), invoiceNumber, isProforma, nextTaxNumber }) : [`Record payment of ${money(value)}`, invoiceNumber ? `against ${invoiceNumber}` : jobId ? "as an advance on the job" : "on the customer's account", PAYMENT_METHOD_LABELS[method] ?? method, authConfirmWords(method, authCode) ?? (reference ? `ref ${reference}` : ""), needsProof || proofs.length ? (proofs.length ? "proof attached ✓" : "proof to attach") : ""].filter(Boolean).join(" · ")}</p>
+            <p className="text-sm leading-relaxed" data-confirm-text>{settles && invoiceId ? confirmFullText({ amount: value, method, reference: needsAuthCode(method) ? (realAuthCode(authCode) ? `auth ${realAuthCode(authCode)}` : null) : reference || null, authMissing: needsAuthCode(method) && !realAuthCode(authCode), invoiceNumber, isProforma, nextTaxNumber }) : [`Record payment of ${money(value)}`, invoiceNumber ? `against ${invoiceNumber}` : jobId ? "as an advance on the job" : "on the customer's account", PAYMENT_METHOD_LABELS[method] ?? method, paidOn && paidOn !== today ? `dated ${showDay(paidOn)}` : "", authConfirmWords(method, authCode) ?? (reference ? `ref ${reference}` : ""), needsProof || proofs.length ? (proofs.length ? "proof attached ✓" : "proof to attach") : ""].filter(Boolean).join(" · ")}</p>
             <Button
               type="button"
               size="lg"

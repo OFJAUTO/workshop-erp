@@ -1,4 +1,7 @@
 import { awaitsBank, duplicateWords, pendingLine } from "@/lib/bank-status";
+import { CorrectCustomerPayment, PaymentCorrections } from "@/components/CorrectCustomerPayment";
+import { paymentCorrections } from "@/lib/payment-date";
+import { dubaiDayOf } from "@/lib/payment-date-rules";
 import { ViewAsCustomer } from "@/components/ViewAsCustomer";
 import { readyTemplateFor, stillDueOf } from "@/lib/still-due";
 import { loadBankWaiting } from "@/lib/bank-posting";
@@ -251,6 +254,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   // 9 November 2026: a share of one payment for several cars says so ("Part of cheque 019383 (AED 4,368.00 total)").
   const { groupWordsFor } = await import("@/lib/payment-groups");
   const groupWords = await groupWordsFor([...payments, ...depositRows].map((p) => p.id));
+  const corrections = await paymentCorrections([...payments, ...depositRows].map((p) => p.id));
   const paymentLine = (p: PaymentRow, isDeposit: boolean) => {
     const by = p.received_by ? personOf.get(p.received_by) : null;
     const counter = !!by && by.role_id !== "owner" && by.role_id !== "accounts";
@@ -273,6 +277,9 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
         {p.status === "pending_owner" ? <Badge tone="amber">Waiting for the owner</Badge> : null}
         {p.status === "recorded" && !staff.viewingAs && (role === "owner" || p.received_by === staff.id) && p.created_at ? <UndoButton at={p.created_at} minutes={undoMinutes} done="Payment recorded" action={undoPaymentAction.bind(null, p.id, here)} /> : null}
         {p.status === "recorded" ? <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Receipt</a> : null}
+        {/* 17 November 2026 (Section 3): the history of corrections, and "Correct this payment" (owner and accounts). */}
+        <PaymentCorrections list={corrections.get(p.id) ?? []} />
+        {(p.status === "recorded" || p.status === "pending_owner") && !staff.viewingAs && (role === "owner" || role === "accounts") ? <CorrectCustomerPayment paymentId={p.id} number={p.number} method={p.method} day={dubaiDayOf(p.received_at)} reference={p.reference ?? null} /> : null}
         {p.proof_path && proofUrls[p.proof_path] ? (
           // 9 November 2026: a proof that is a PDF (a cheque scan) shows as a PDF tile that opens it, never a broken picture.
           <span className="inline-flex" data-proof-link><SlipTile url={proofUrls[p.proof_path] ?? null} path={p.proof_path} label={p.method === "card" ? "Card slip" : p.method === "cheque" ? "Cheque" : "Proof"} hook={p.number} size="h-12 w-12" /></span>

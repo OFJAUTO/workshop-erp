@@ -51,6 +51,8 @@ export type PaymentInput = {
   reportId?: string | null;
   /** 9 November 2026: why another payment is recorded while a cheque or transfer already waiting for the bank covers the balance. */
   duplicateReason?: string | null;
+  /** 17 November 2026 (Section 3): the day the money was received, when earlier than today (already checked by THE date rule). */
+  receivedAt?: string | null;
 };
 export type PaymentResult = { error?: string; ok?: boolean; number?: string; paymentId?: string; pendingOwner?: boolean; message?: string; /** The same client key was already used: this is that earlier receipt (its amount and method). */ repeat?: { amount: number; method: string }; /** More than what is left and no note yet: the form asks for one. */ needsOverNote?: { balance: number }; token?: string | null; /** A cheque or transfer already waiting for the bank covers what is due: the form asks why another one (9 November 2026). */ needsDuplicateReason?: string; /** The same cheque number is already on receipts: the form asks for the cheque's full amount. */ needsChequeTotal?: boolean };
 
@@ -206,7 +208,7 @@ export async function recordPaymentCore(actor: Actor, input: PaymentInput, setti
   const now = new Date().toISOString();
   // Every receipt carries its own link token, so a receipt with no invoice or quotation still reaches the customer.
   const token = newToken();
-  const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, auth_code: needsAuthCode(method) ? authCode : null, ...cheque, bank_charge_aed: fees.cost, fee_msf_aed: fees.msf, fee_txn_aed: fees.txn, fee_vat_aed: fees.vat, is_deposit: !input.invoiceId, received_by: actor.id, notes, status: "recorded", client_key: input.clientKey ?? null, token, verified_at: verifies ? now : null, verified_by: verifies ? actor.id : null, ...(over ? { approved_by: actor.id, approved_at: now } : {}), ...(anytime ? { vehicle_id: vehicleId } : {}), created_by: actor.id, updated_by: actor.id }).select("id, number").single();
+  const { data: created, error } = await admin.from("payments").insert({ job_id: jobId, invoice_id: input.invoiceId, customer_id: customerId, method, amount_aed: amount, deposit_quotation_id: depositQuoteId, reference: input.reference ?? null, auth_code: needsAuthCode(method) ? authCode : null, ...cheque, bank_charge_aed: fees.cost, fee_msf_aed: fees.msf, fee_txn_aed: fees.txn, fee_vat_aed: fees.vat, is_deposit: !input.invoiceId, received_by: actor.id, notes, status: "recorded", client_key: input.clientKey ?? null, token, verified_at: verifies ? now : null, verified_by: verifies ? actor.id : null, ...(over ? { approved_by: actor.id, approved_at: now } : {}), ...(anytime ? { vehicle_id: vehicleId } : {}), ...(input.receivedAt ? { received_at: input.receivedAt } : {}), created_by: actor.id, updated_by: actor.id }).select("id, number").single();
   if (error || !created) {
     await logAppError("record payment: insert", error ?? new Error("no row"), { staffId: actor.id, jobId, detail: { method, amount } });
     return { error: SAVE_FAILED };

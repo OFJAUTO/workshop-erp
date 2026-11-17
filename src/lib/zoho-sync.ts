@@ -1206,6 +1206,25 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
   if (groupId) return syncGroupShare(org, p, groupId);
   if ((p.status === "voided" || p.status === "reversed") && !p.zoho_payment_id) return { result: { skipped: "Voided in the ERP before it was posted. Nothing went to Zoho." } };
   if (p.status === "voided" || p.status === "reversed") return reverseZohoPayment(org, p.zoho_payment_id!, p.number, p.void_reason ?? p.reversed_reason);
+  // 17 November 2026 (Section 3): "Correct this payment" changed its date, method or reference after it reached Zoho:
+  // the old customer payment is taken back first, then the corrected one is posted below (OFJ TEST until go-live).
+  let reposted = false;
+  if (p.zoho_payment_id) {
+    const { data: ob } = await admin.from("zoho_outbox").select("zoho_result").in("kind", ["payment", "deposit"]).eq("record_id", p.id).limit(1).maybeSingle();
+    if ((ob as { zoho_result?: { repost_requested_at?: string } | null } | null)?.zoho_result?.repost_requested_at) {
+      let gone = false;
+      try {
+        await zohoFetch(`/customerpayments/${encodeURIComponent(p.zoho_payment_id)}`, { org });
+      } catch (e) {
+        if (e instanceof ZohoError && /not exist|not found|invalid.*payment/i.test(e.message)) gone = true;
+        else throw e;
+      }
+      if (!gone) await zohoFetch(`/customerpayments/${encodeURIComponent(p.zoho_payment_id)}`, { org, method: "DELETE", write: true });
+      await admin.from("payments").update({ zoho_payment_id: null }).eq("id", p.id);
+      p.zoho_payment_id = null;
+      reposted = true;
+    }
+  }
   // 9 November 2026: a cheque or transfer waiting for the bank posts at once into Undeposited Funds (dated the day it was
   // received); when it clears, the "bankmove" row moves it to the bank on the clearing day. One cleared before it
   // reached Zoho goes straight to its bank, dated the day it cleared (as before).
@@ -1290,6 +1309,7 @@ async function syncPaymentRow(org: string, accounts: Resolved, paymentId: string
       mode: MODE[p.method],
       kind: p.is_deposit ? "advance" : "payment",
       applied_now: applied,
+      ...(reposted ? { reposted: "taken back and posted again after a correction" } : {}),
     },
     ...(preStartNote ? { attention: preStartNote } : {}),
   };

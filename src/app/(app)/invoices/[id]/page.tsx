@@ -1,4 +1,7 @@
 import { awaitsBank, duplicateWords } from "@/lib/bank-status";
+import { CorrectCustomerPayment, PaymentCorrections } from "@/components/CorrectCustomerPayment";
+import { paymentCorrections } from "@/lib/payment-date";
+import { dubaiDayOf } from "@/lib/payment-date-rules";
 import { SlipTile } from "@/components/PaymentReport";
 import Link from "next/link";
 import { signJobFiles } from "@/lib/work-data";
@@ -74,6 +77,7 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   // The card slips and transfer proofs, signed for one hour.
 
   const proofUrls = await signJobFiles(payments.map((p) => p.proof_path).filter((x): x is string => !!x));
+  const corrections = await paymentCorrections(payments.map((p) => p.id));
 
 
   return (
@@ -134,6 +138,9 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
                     </div>
                     <div className="flex flex-wrap items-center gap-3 text-xs">
                       {p.status === "recorded" && !staff.viewingAs && (role === "owner" || p.received_by === staff.id) && p.created_at ? <UndoButton at={p.created_at} minutes={undoMinutes} done="Payment recorded" action={undoPaymentAction.bind(null, p.id, `/invoices/${invoice.id}`)} /> : null}
+                      {/* 17 November 2026 (Section 3): the history of corrections, and "Correct this payment" (owner and accounts). */}
+                      <PaymentCorrections list={corrections.get(p.id) ?? []} />
+                      {(p.status === "recorded" || p.status === "pending_owner") && !staff.viewingAs && (role === "owner" || role === "accounts") ? <CorrectCustomerPayment paymentId={p.id} number={p.number} method={p.method} day={dubaiDayOf(p.received_at)} reference={p.reference ?? null} /> : null}
                       {p.status === "voided" ? <span className="text-red font-semibold">Voided by {nameOf.get(p.voided_by ?? "") ?? "the owner"} {formatDateTime(p.voided_at)}: {p.void_reason}</span> : null}
                       {p.status === "reversed" ? <span className="text-red font-semibold">Reversed: {p.reversed_reason}</span> : null}
                       {p.status === "recorded" ? (p.verified_at ? <span className="text-green-text font-semibold">Verified by {nameOf.get(p.verified_by ?? "") ?? "accounts"} {formatDate(p.verified_at)}</span> : <span className="text-amber-text font-semibold">Not verified by accounts yet</span>) : null}

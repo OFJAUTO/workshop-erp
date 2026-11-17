@@ -82,7 +82,7 @@ try {
   const cp2 = acc.page.locator(`[data-correct-payment="${pay.number}"]`).first();
   await cp2.locator("[data-correct-open]").click();
   await cp2.locator('[data-correct-method] label').filter({ hasText: /Cash/ }).first().click();
-  await cp2.locator("[data-correct-date] input, input[name=paid_on]").first().fill(new Date(Date.now() + 4 * 3600000 - 86400000).toISOString().slice(0, 10));
+  await cp2.locator("[data-correct-date]").first().fill(new Date(Date.now() + 4 * 3600000 - 86400000).toISOString().slice(0, 10));
   await cp2.locator("[data-correct-reason]").fill("Paid the day before - the slip says so");
   await cp2.locator('[data-confirm-open="correct-payment"]').click();
   await acc.page.locator('[data-confirm-yes-money="correct-payment"]').click();

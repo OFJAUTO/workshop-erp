@@ -606,8 +606,12 @@ export async function saveMoneyLimits(formData: FormData) {
   const roundUp = formData.has("roundoff_up_limit_aed") ? num("roundoff_up_limit_aed", 0, 1000) : undefined;
   if (roundDown === null || roundUp === null) redirect(`/settings?error=${encodeURIComponent("Round-off limits: down 0 to 100,000 AED; up 0 to 1,000 AED.")}#money-limits`);
   if (askBelow === null || farBelow === null || similar === null || markupWarn === null) redirect(`/settings?error=${encodeURIComponent("Part costs: ask under 0 to 10,000 AED; flag under 1 to 100 %; similar 0 to 100 %; markup warning 50 to 1,000,000 %.")}#money-limits`);
+  // 17 November 2026 (Section 3): payments dated in a month up to and including this one need the owner ("" = none closed).
+  const closedRaw = formData.has("books_closed_through") ? String(formData.get("books_closed_through") ?? "").trim() : undefined;
+  if (closedRaw !== undefined && closedRaw !== "" && !/^\d{4}-\d{2}$/.test(closedRaw)) redirect(`/settings?error=${encodeURIComponent("Closed month: pick a month, or leave it empty for none.")}#money-limits`);
   const admin = createAdminClient();
   const rows = [
+    ...(closedRaw !== undefined ? [{ key: "books_closed_through", label: "Books closed through (month): payments dated in a closed month need the owner", value: closedRaw }] : []),
     { key: "money_undo_minutes", label: "Money actions: undo within (minutes)", value: Math.round(minutes) },
     { key: "supplier_price_auto_percent", label: "Supplier price above the LPO accepted up to (%)", value: percent },
     { key: "supplier_price_auto_aed", label: "Supplier price above the LPO accepted up to (AED per LPO)", value: aed },

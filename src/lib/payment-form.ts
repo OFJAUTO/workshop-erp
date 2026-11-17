@@ -10,6 +10,8 @@ import { getSiteUrl } from "./site";
 import { createAdminClient } from "./supabase/admin";
 import { isUuid } from "./uuid";
 import { photoSizesLater } from "./photo-sizes";
+import { checkPaymentDate, dateRoleOf, stampOfDay } from "./payment-date-rules";
+import { closedThroughOf, flagPaymentMonth } from "./payment-date";
 
 export type FormPaymentOutcome = PaymentResult & { jobId: string | null; invoiceId: string | null };
 
@@ -42,6 +44,15 @@ async function paymentFromFormInner(staff: { id: string; display_name: string; r
   const out = (r: PaymentResult, jobId: string | null = jobIdIn): FormPaymentOutcome => ({ ...r, jobId, invoiceId });
   if (!method) return out({ error: "Choose how it was paid." });
   if (!methodsFor(staff.role_id).includes(method as (typeof PAYMENT_METHODS)[number])) return out({ error: "Not allowed: payments are recorded by accounts or the owner only." });
+  // 17 November 2026 (Section 3): THE payment date - today unless set earlier; the role's limits and closed months apply.
+  const dayIn = blankToNull(formData.get("paid_on"));
+  const today = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
+  let receivedAt: string | null = null;
+  if (dayIn && dayIn !== today) {
+    const dateCheck = checkPaymentDate({ day: dayIn, today, role: dateRoleOf(staff.role_id), closedThrough: closedThroughOf(settings) });
+    if (!dateCheck.ok) return out({ error: dateCheck.error });
+    receivedAt = stampOfDay(dayIn, today, new Date().toISOString());
+  }
   const proof = formData.get("proof");
   const proofFile = proof instanceof File && proof.size > 0 ? proof : null;
   const clientKeyIn = blankToNull(formData.get("client_key"));
@@ -129,6 +140,7 @@ async function paymentFromFormInner(staff: { id: string; display_name: string; r
     reference: blankToNull(formData.get("reference")),
     authCode: blankToNull(formData.get("auth_code")),
     cheque: { number: blankToNull(formData.get("cheque_number")), bank: blankToNull(formData.get("cheque_bank")), date: blankToNull(formData.get("cheque_date")) },
+    receivedAt,
     chequeTotal: Number(String(formData.get("cheque_total") ?? "").replace(/,/g, "")) || null,
     notes: blankToNull(formData.get("notes")),
     clientKey: clientKeyIn,
@@ -152,6 +164,8 @@ async function paymentFromFormInner(staff: { id: string; display_name: string; r
     if (!upErr) photoSizesLater("job-files", path, proofFile.type || "image/jpeg");
     if (!upErr) await admin.from("payments").update({ proof_path: path, updated_by: staff.id }).eq("id", r.paymentId);
   }
+  // 17 November 2026 (Section 3): a payment dated earlier than today, in another month than its tax invoice: accounts told.
+  if (!r.error && r.paymentId && !r.repeat && receivedAt) await flagPaymentMonth(r.paymentId).catch(() => null);
   // A part payment: the Pay now order (if any) is remade for what is left.
   if (invoiceId && !r.error) {
     const cur = currentPaymentLink(await paymentLinksOf(invoiceId));
@@ -164,6 +178,7 @@ async function paymentFromFormInner(staff: { id: string; display_name: string; r
       invoiceId: null, jobId: null, method, amount: estExtra,
       reference: blankToNull(formData.get("reference")), authCode: blankToNull(formData.get("auth_code")),
       cheque: { number: blankToNull(formData.get("cheque_number")), bank: blankToNull(formData.get("cheque_bank")), date: blankToNull(formData.get("cheque_date")) },
+    receivedAt,
       chequeTotal: null,
       notes: `Extra paid on ${estInfo.number} (AED ${typedAmount.toFixed(2)} received, AED ${amount.toFixed(2)} on the proforma): kept as the customer's advance`,
       clientKey: null,

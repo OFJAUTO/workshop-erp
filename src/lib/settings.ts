@@ -196,6 +196,8 @@ const DEFAULTS = {
   supplier_price_auto_aed: 100,
   /** A money action may be undone for this long by the one who did it or the owner; nothing goes to Zoho before it is over (1 November 2026, B3). */
   money_undo_minutes: 10,
+  /** 17 November 2026 (Section 3): customer payments dated in a month up to and including this one ("YYYY-MM") need the owner; "" = none closed. */
+  books_closed_through: "",
   pending_charges_reminder_days: 7,
   /** The workshop dictionary for the pre-send spelling check (car words the owner adds; see src/lib/spell.ts). */
   spell_words: [] as string[],
