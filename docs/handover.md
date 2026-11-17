@@ -1,7 +1,7 @@
 # Handover – list of 16 November 2026 (ALL DONE; last update 16 Nov, 17:45 Dubai)
 
 **NEEDS OMAR (top first):**
-1. **Apply three database changes** (15 Nov S1 and S4, 16 Nov S1): turn auto mode off, reply **"apply"**. Details in `docs/waiting-for-apply.md`.
+1. ~~Apply three database changes~~ **APPLIED 17 Nov morning** (backup `backups/2026-11-17T05-10-01`, live check 33 of 33). Nothing waits for apply. The reference types, the lathe-bill check and the month-end stock snapshots are now switched on.
 2. **AED 8,000.00 advance for E-00082 / J-01013 is NOT recorded anywhere** (PRO-00029 issued, no payment): Estimates → Approved → E-00082 → PAYMENTS box → Record advance payment → method, 8,000.00 → Record → Yes (steps in `docs/advance-box-16-nov-note.md`).
 3. Mathew chooses the Zoho account for stock purchase bills (Account mapping); and decides whether to post one closing stock figure a month.
 

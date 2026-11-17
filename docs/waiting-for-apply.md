@@ -9,9 +9,13 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 3. record it;
 4. run the read-only live check (`npm run check:live`).
 
-## Waiting now (15 and 16 November 2026)
+## Waiting now
 
-Backup taken first: `backups/2026-11-15T05-11-50` (134 tables, 290,845 rows). Applied on the TEST database and tested there. **From your phone:** turn auto mode off, reply **"apply"**. They run in this order.
+Nothing is waiting.
+
+## Applied on 17 November 2026, morning
+
+The owner replied "apply". A fresh backup was taken first: `backups/2026-11-17T05-10-01` (134 tables, 296,845 rows). The three files were run with `scripts/db-sql.mjs` in order without an error and recorded with `scripts/db-record-migration.mjs` (16 receipts had their invoice number copied into the references; 3 lathe bills already paid or in Zoho were marked checked). Checked on live: `stock_snapshots` has RLS on, no policies and no grants to anon or the login role; the new `part_receipts` and `lathe_bills` columns exist. `npm run check:live`: 33 passed, 0 failed.
 
 | # | What | What it does on live | Size |
 |---|---|---|---|
