@@ -6,6 +6,7 @@ import { logAppError, SAVE_FAILED } from "@/lib/app-errors";
 import type { FormState } from "@/lib/form-state";
 import { applyLpoAdvance, markPayFirst, payInAdvance } from "@/lib/lpo-advance";
 import { reopenZoho, tryEnqueueZoho } from "@/lib/zoho-sync";
+import { isUuid } from "@/lib/uuid";
 
 const num = (v: FormDataEntryValue | null) => {
   const n = Number(String(v ?? "").replace(/,/g, "").trim());
@@ -32,6 +33,7 @@ export async function payInAdvanceAction(poId: string, _prev: FormState, formDat
       reference: String(formData.get("reference") ?? "").trim().slice(0, 120) || null,
       proofPath: /^supplier-payments\/[\w./-]+$/.test(proof) ? proof : null,
       note: String(formData.get("note") ?? "").trim().slice(0, 500) || null,
+      paymentKey: isUuid(String(formData.get("payment_key") ?? "")) ? String(formData.get("payment_key")) : null,
     }, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
     if (r.error) return { error: r.error, values };
     if (r.paymentId) await tryEnqueueZoho("supplierpay", r.paymentId, null, staff.id);

@@ -42,7 +42,7 @@ export async function customerDepositWords(jobId: string | null): Promise<string
   return paid > 0.004 ? `Customer deposit on this job: AED ${paid.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} received` : "Customer deposit on this job: none received";
 }
 
-type PayIn = { amount: number; method: string; paidOn: string; reference: string | null; proofPath: string | null; note: string | null };
+type PayIn = { amount: number; method: string; paidOn: string; reference: string | null; proofPath: string | null; note: string | null; /** The id the window made: the payment is saved under it (its proof belongs to it). */ paymentKey?: string | null };
 type Actor = { id: string; display_name: string; role_id: string };
 
 /** Records the advance for one LPO (owner and accounts). */
@@ -56,7 +56,11 @@ export async function payInAdvance(poId: string, input: PayIn, by: Actor): Promi
   if (po.status === "cancelled") return { error: `${po.number} is cancelled.` };
   if (po.supplier_invoice_status === "received") return { error: `${po.number} already has its invoice: pay it in the payment box below (an advance is for before the invoice).` };
   if (!(input.amount > 0)) return { error: "Enter the amount paid." };
-  const r = await recordSupplierPayment({ supplierId: po.supplier_id ?? null, supplierName: String(po.supplier_name), paidOn: input.paidOn, method: input.method, reference: input.reference, amount: input.amount, lines: [], excessKind: "advance", proofPath: input.proofPath, note: input.note ?? `Advance for ${po.number}` }, by);
+  if (input.paymentKey) {
+    const { data: already } = await admin.from("supplier_payments").select("id, number").eq("id", input.paymentKey).maybeSingle();
+    if (already) return { words: `${already.number} is already recorded`, paymentId: already.id as string };
+  }
+  const r = await recordSupplierPayment({ id: input.paymentKey ?? null, supplierId: po.supplier_id ?? null, supplierName: String(po.supplier_name), paidOn: input.paidOn, method: input.method, reference: input.reference, amount: input.amount, lines: [], excessKind: "advance", proofPath: input.proofPath, note: input.note ?? `Advance for ${po.number}` }, by);
   if (r.error || !r.id) return { error: r.error ?? "Couldn't save – nothing was recorded." };
   await admin.from("supplier_payments").update({ advance_for_po_id: po.id, updated_by: by.id }).eq("id", r.id);
   const words = `${r.number}: advance AED ${input.amount.toFixed(2)} paid to ${po.supplier_name} for ${po.number} on ${formatDate(input.paidOn)}`;
@@ -140,4 +144,58 @@ export async function lpoAdvanceWaiting(): Promise<ExtraWaiting[]> {
     }
   }
   return out;
+}
+
+/**
+ * 17 November 2026 (Section 1): an advance named for an LPO FOLLOWS that LPO. When the LPO was replaced (sent again as
+ * "… V2", or its parts moved to another LPO of the SAME supplier) the link moves to the LPO that now holds them; when it
+ * was cancelled with nothing to follow, the advance stays with the supplier, not linked, and its history says so. The
+ * money never moves: only the link. Read on the Supplier payments page and in the hourly clean-up.
+ */
+export async function followAdvanceLinks(): Promise<{ moved: number; unlinked: number }> {
+  const out = { moved: 0, unlinked: 0 };
+  if (!(await lpoAdvanceReady())) return out;
+  const admin = createAdminClient();
+  const { data: adv } = await admin.from("supplier_payments").select("id, number, supplier_id, supplier_name, advance_for_po_id, edit_history").not("advance_for_po_id", "is", null).eq("status", "recorded").eq("is_active", true);
+  const rows = (adv ?? []) as { id: string; number: string; supplier_id: string | null; supplier_name: string; advance_for_po_id: string; edit_history: unknown[] | null }[];
+  if (!rows.length) return out;
+  const { data: pos } = await admin.from("purchase_orders").select("id, number, status, superseded_by, supplier_id, supplier_name").in("id", Array.from(new Set(rows.map((r) => r.advance_for_po_id))));
+  const byId = new Map(((pos ?? []) as { id: string; number: string; status: string; superseded_by: string | null; supplier_id: string | null; supplier_name: string }[]).map((p) => [p.id, p]));
+  for (const r of rows) {
+    const po = byId.get(r.advance_for_po_id);
+    if (po && po.status !== "cancelled") continue;
+    const next = po ? await lpoNowHolding(po.id, po.superseded_by, r.supplier_id, r.supplier_name) : null;
+    const entry = next
+      ? { at: new Date().toISOString(), by: "the ERP", remark: `${po?.number ?? "Its LPO"} was replaced: the advance now follows ${next.number}`, changes: [{ field: "LPO", old: po?.number ?? "—", new: next.number }] }
+      : { at: new Date().toISOString(), by: "the ERP", remark: `${po?.number ?? "Its LPO"} was cancelled: the advance stays with ${r.supplier_name}, not linked to an LPO`, changes: [{ field: "LPO", old: po?.number ?? "—", new: "none" }] };
+    const { error } = await admin.from("supplier_payments").update({ advance_for_po_id: next?.id ?? null, edit_history: [...(r.edit_history ?? []), entry] }).eq("id", r.id).eq("advance_for_po_id", r.advance_for_po_id);
+    if (error) continue;
+    if (next) out.moved += 1;
+    else out.unlinked += 1;
+  }
+  return out;
+}
+
+/** The LPO of the same supplier that now holds a cancelled LPO's parts (its "V2", or where its parts moved), or null. */
+async function lpoNowHolding(oldPoId: string, supersededBy: string | null, supplierId: string | null, supplierName: string): Promise<{ id: string; number: string } | null> {
+  const admin = createAdminClient();
+  const same = (p: { supplier_id: string | null; supplier_name: string }) => (supplierId && p.supplier_id === supplierId) || String(p.supplier_name ?? "").toUpperCase() === supplierName.toUpperCase();
+  const candidates: string[] = [];
+  if (supersededBy) candidates.push(supersededBy);
+  const { data: lines } = await admin.from("purchase_order_lines").select("part_item_id").eq("po_id", oldPoId).not("part_item_id", "is", null);
+  const partIds = ((lines ?? []) as { part_item_id: string }[]).map((l) => l.part_item_id);
+  if (partIds.length) {
+    const { data: parts } = await admin.from("part_items").select("po_id, replacement_part_id").in("id", partIds);
+    const reps = ((parts ?? []) as { po_id: string | null; replacement_part_id: string | null }[]);
+    candidates.push(...reps.map((p) => p.po_id).filter((x): x is string => !!x && x !== oldPoId));
+    const repIds = reps.map((p) => p.replacement_part_id).filter((x): x is string => !!x);
+    if (repIds.length) {
+      const { data: rp } = await admin.from("part_items").select("po_id").in("id", repIds);
+      candidates.push(...((rp ?? []) as { po_id: string | null }[]).map((p) => p.po_id).filter((x): x is string => !!x));
+    }
+  }
+  if (!candidates.length) return null;
+  const { data: pos } = await admin.from("purchase_orders").select("id, number, status, kind, supplier_id, supplier_name").in("id", Array.from(new Set(candidates)));
+  const ok = ((pos ?? []) as { id: string; number: string; status: string; kind: string | null; supplier_id: string | null; supplier_name: string }[]).filter((p) => p.status !== "cancelled" && p.kind !== "main" && same(p));
+  return ok[0] ? { id: ok[0].id, number: ok[0].number } : null;
 }

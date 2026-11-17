@@ -76,6 +76,7 @@ function housekeepingWords(report: Record<string, number>): string {
     paymentReportsLate: ["reported payment reminder", "reported payment reminders"],
     pricingReleased: ["held parts change sent to the advisor", "held parts changes sent to the advisor"],
     zohoWaiting: ["Zoho waiting reminder", "Zoho waiting reminders"],
+    advanceLinksMoved: ["supplier advance moved to its new LPO", "supplier advances moved to their new LPOs"], advanceLinksUnlinked: ["supplier advance left unlinked (LPO cancelled)", "supplier advances left unlinked (LPO cancelled)"],
   };
   const parts = Object.entries(report)
     .filter(([, n]) => n > 0)
@@ -721,6 +722,17 @@ async function runHousekeeping(): Promise<Record<string, number>> {
     report.bellArchived = await archiveOldNotices();
   } catch {
     report.bellCleared = -1;
+  }
+
+  // 32. An advance named for an LPO follows that LPO when it was replaced; a cancelled one stays with the supplier,
+  //     unlinked, and says so (17 November 2026, Section 1).
+  try {
+    const { followAdvanceLinks } = await import("@/lib/lpo-advance");
+    const f = await followAdvanceLinks();
+    report.advanceLinksMoved = f.moved;
+    report.advanceLinksUnlinked = f.unlinked;
+  } catch {
+    report.advanceLinksMoved = -1;
   }
   return report;
 }

@@ -4,7 +4,8 @@ import { useState } from "react";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { ChoiceButtons, Input } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
-import { SupplierProofUpload } from "@/app/(app)/parts/orders/[id]/SupplierProofUpload";
+import { SupplierPayProof } from "@/components/SupplierPayProof";
+import { newUuid } from "@/lib/uuid";
 
 /**
  * "Pay in advance" (13 November 2026, Section 4): ONE window used on the LPO page, the Supplier invoices card and
@@ -13,9 +14,11 @@ import { SupplierProofUpload } from "@/app/(app)/parts/orders/[id]/SupplierProof
  */
 export function PayInAdvanceButton({ poId, poNumber, supplier, suggest, today, depositWords, methods, action }: { poId: string; poNumber: string; supplier: string; suggest: number; today: string; depositWords: string; methods: { value: string; label: string }[]; action: FormAction }) {
   const [open, setOpen] = useState(false);
+  // 17 November 2026 (Section 1): the advance is saved under this id, so its proof belongs to the PAYMENT.
+  const [paymentKey, setPaymentKey] = useState(() => newUuid());
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-on-dark" data-pay-in-advance={poId}>Pay in advance</button>
+      <button type="button" onClick={() => { setPaymentKey(newUuid()); setOpen(true); }} className="inline-flex min-h-11 items-center rounded-control bg-ink px-4 text-sm font-bold text-on-dark" data-pay-in-advance={poId}>Pay in advance</button>
       {open ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" onClick={() => setOpen(false)}>
           <div className="flex w-full max-w-lg max-h-[calc(100dvh-2rem)] flex-col gap-3 overflow-y-auto rounded-card bg-white p-5" onClick={(e) => e.stopPropagation()} data-pay-advance-window>
@@ -39,7 +42,8 @@ export function PayInAdvanceButton({ poId, poNumber, supplier, suggest, today, d
                       <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Date<Input type="date" name="paid_on" defaultValue={v.paid_on ?? today} max={today} required data-advance-date /></label>
                       <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Reference (optional)<Input name="reference" defaultValue={v.reference ?? ""} placeholder="transfer ref, cheque no…" data-advance-reference /></label>
                     </div>
-                    <SupplierProofUpload poId={poId} inForm />
+                    <input type="hidden" name="payment_key" value={paymentKey} />
+                    <SupplierPayProof paymentId={paymentKey} inForm />
                     <ConfirmSubmit label="Record the advance" title={`Record an advance to ${supplier}?`} lines={[`for ${poNumber}`, "the parts desk is told to confirm the order"]} live={[{ label: "AED", field: "amount" }, { field: "method" }, { field: "proof_path", proof: true }]} confirmLabel="Yes, record it" hook="pay-advance" />
                   </>
                 )

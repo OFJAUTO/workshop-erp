@@ -10,6 +10,7 @@ import Link from "next/link";
 import { SlipTile } from "@/components/PaymentReport";
 import { ViewerThumb } from "@/components/PhotoViewer";
 import { SupplierProofUpload } from "@/app/(app)/parts/orders/[id]/SupplierProofUpload";
+import { SupplierPayProof } from "@/components/SupplierPayProof";
 import { Badge, Button, Card, Input, LinkButton, Notice, SectionLabel, Select } from "@/components/ui";
 import type { CurrentStaff } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -171,10 +172,10 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, 
   const vatOn = await invoiceVatReady();
   const [{ data: files }, { data: pos }, { data: lines }] = await Promise.all([
     admin.from("job_files").select("id, storage_path, content_type, caption, created_at").eq("kind", "supplier_invoice").in("ref_id", fileRefs).is("removed_at", null).order("created_at"),
-    admin.from("purchase_orders").select("id, supplier_invoice_path, supplier_invoice_at, supplier_invoice_amount, supplier_paid_at, supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path, supplier_paid_by" + (vatOn ? ", supplier_invoice_vat_aed" : "")).in("id", poIds),
+    admin.from("purchase_orders").select("id, supplier_invoice_path, supplier_invoice_at, supplier_invoice_amount, supplier_paid_at, supplier_paid_method, supplier_paid_reference, supplier_paid_proof_path, supplier_paid_by, supplier_payment_id" + (vatOn ? ", supplier_invoice_vat_aed" : "")).in("id", poIds),
     admin.from("purchase_order_lines").select("id, po_id, description, quantity, received_qty, unit_cost, invoice_unit_cost, invoice_check").in("po_id", poIds).eq("is_active", true).order("position"),
   ]);
-  type PaidPo = { id: string; supplier_invoice_path: string | null; supplier_invoice_at?: string | null; supplier_invoice_amount: number | null; supplier_paid_at: string | null; supplier_paid_method: string | null; supplier_paid_reference: string | null; supplier_paid_proof_path: string | null; supplier_paid_by: string | null; supplier_invoice_vat_aed?: number | null };
+  type PaidPo = { id: string; supplier_invoice_path: string | null; supplier_invoice_at?: string | null; supplier_invoice_amount: number | null; supplier_paid_at: string | null; supplier_paid_method: string | null; supplier_paid_reference: string | null; supplier_paid_proof_path: string | null; supplier_paid_by: string | null; supplier_payment_id?: string | null; supplier_invoice_vat_aed?: number | null };
   // The select string is built (the vat column is ready-gated), so the result loses its type: cast it.
   const poRows = (pos ?? []) as unknown as PaidPo[];
   // Fix 4 (4 November 2026): the proof of payment shows next to "Open the invoice (PDF)", signed like the scans.
@@ -264,7 +265,7 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, 
                     ) : (
                       <span className="flex flex-wrap items-center gap-2" data-si-proof-missing={s.poId}>
                         <span className="rounded-full border border-red-bar px-2 py-0.5 text-xs font-bold text-red">Proof missing – upload</span>
-                        {acts ? <SupplierProofUpload poId={s.poId} /> : null}
+                        {acts ? (p?.supplier_payment_id ? <SupplierPayProof paymentId={p.supplier_payment_id} /> : <SupplierProofUpload poId={s.poId} />) : null}
                       </span>
                     )}
                   </li>

@@ -6,6 +6,7 @@ import { requireStaff } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { recordSupplierPayment, undoAdvanceUse } from "@/lib/supplier-payments";
 import { objectExists } from "@/lib/upload-targets/common";
+import { isUuid } from "@/lib/uuid";
 import { JOB_FILES_BUCKET } from "@/lib/work-data";
 import { reopenZoho, tryEnqueueZoho } from "@/lib/zoho-sync";
 
@@ -37,8 +38,19 @@ export async function recordSupplierPaymentAction(_prev: PayState, formData: For
     }
   });
   const excessRaw = String(formData.get("excess_kind") ?? "");
+  // 17 November 2026 (Section 1): the payment is saved under the id its form made, so a proof sent before or after the
+  // tap belongs to it. The same id twice = the same payment (a second tap or a retry): never recorded twice.
+  const key = String(formData.get("payment_key") ?? "");
+  const paymentKey = isUuid(key) ? key : null;
+  if (paymentKey) {
+    const { data: already } = await createAdminClient().from("supplier_payments").select("number").eq("id", paymentKey).maybeSingle();
+    if (already) return { ok: true, message: `Already recorded as ${already.number}.` };
+  }
+  const forPoRaw = String(formData.get("advance_for_po") ?? "");
   const res = await recordSupplierPayment(
     {
+      id: paymentKey,
+      advanceForPoId: isUuid(forPoRaw) ? forPoRaw : null,
       supplierId: String(formData.get("supplier_id") ?? "") || null,
       supplierName: String(formData.get("supplier_name") ?? "").trim(),
       paidOn: String(formData.get("paid_on") ?? "").slice(0, 10),
@@ -66,7 +78,7 @@ export async function recordSupplierPaymentAction(_prev: PayState, formData: For
   // A proof that arrived WHILE the payment was being saved (its record step looked at the LPO a moment too early) joins
   // the payment and the LPOs it settled; one still on its way lands on the LPO by itself when it arrives.
   const pending = String(formData.get("proof_pending") ?? "").trim();
-  if (!formData.get("proof_path") && /^supplier-payments\/[0-9a-f-]{36}\/[\w-]{1,60}\.[a-z]{2,5}$/i.test(pending) && (await objectExists(JOB_FILES_BUCKET, pending))) {
+  if (!formData.get("proof_path") && /^supplier-payments\/(pay\/)?[0-9a-f-]{36}\/[\w-]{1,60}\.[a-z]{2,5}$/i.test(pending) && (await objectExists(JOB_FILES_BUCKET, pending))) {
     const admin = createAdminClient();
     await admin.from("supplier_payments").update({ proof_path: pending, updated_by: staff.id }).eq("id", res.id).is("proof_path", null);
     await admin.from("purchase_orders").update({ supplier_paid_proof_path: pending, supplier_paid_proof_at: new Date().toISOString(), supplier_paid_proof_by: staff.id, updated_by: staff.id }).eq("supplier_payment_id", res.id).is("supplier_paid_proof_path", null);
@@ -128,7 +140,7 @@ export async function correctSupplierPaymentAction(paymentId: string, _prev: Pay
     method: String(formData.get("method") ?? ""),
     paidOn: String(formData.get("paid_on") ?? ""),
     reference: String(formData.get("reference") ?? ""),
-    proofPath: String(formData.get("proof_path") ?? "") || null,
+    proofPath: /^supplier-payments\/[\w./-]+$/.test(String(formData.get("proof_path") ?? "")) ? String(formData.get("proof_path")) : null,
     reason: String(formData.get("reason") ?? ""),
   }, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
   if (r.error) return { error: r.error };

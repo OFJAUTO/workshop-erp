@@ -24,6 +24,7 @@ import { notFound } from "next/navigation";
 import { Badge, Button, Card, ChoiceButtons, DescriptionList, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { SUPPLIER_PAY_METHODS, readZohoMap } from "@/lib/zoho-sync";
 import { SupplierProofUpload } from "./SupplierProofUpload";
+import { SupplierPayProof } from "@/components/SupplierPayProof";
 import { requirePermission } from "@/lib/auth";
 import { endedLinesOf } from "@/lib/part-endings-server";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -597,7 +598,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                   ) : (
                     <span className="inline-flex items-center gap-2" data-paid-proof-missing>
                       <Badge tone="red">Proof missing – upload</Badge>
-                      {canPay ? <SupplierProofUpload poId={po.id} /> : null}
+                      {/* 17 November 2026 (Section 1): paid by a recorded supplier payment = the proof goes on THAT payment. */}
+                      {canPay ? (payHistory.find((r) => r.status === "recorded") ? <SupplierPayProof paymentId={payHistory.find((r) => r.status === "recorded")!.id} /> : <SupplierProofUpload poId={po.id} />) : null}
                     </span>
                   )}
                 </div>
@@ -615,7 +617,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 payMissing.length ? (
                   <p className="text-sm font-semibold text-amber-bar" data-pay-blocked>Cannot be marked paid yet: {payMissing.join(", ")} first. No payment without the full invoice on file.</p>
                 ) : payNew ? (
-                  <SupplierPayBox key={payHistory.length} supplierId={po.supplier_id ?? null} supplierName={po.supplier_name} invoices={payNew.invoices} advances={payNew.advances} preselect={po.id} today={todayDubai} paidFromWords={paidFromWords} proofScope={po.id} />
+                  <SupplierPayBox key={payHistory.length} supplierId={po.supplier_id ?? null} supplierName={po.supplier_name} invoices={payNew.invoices} advances={payNew.advances} preselect={po.id} today={todayDubai} paidFromWords={paidFromWords} />
                 ) : (
                   <form action={markSupplierPaid.bind(null, po.id)} className="flex flex-col gap-3" data-pay-form>
                     <div data-pay-method>

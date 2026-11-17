@@ -2,7 +2,8 @@
 
 import { useActionState, useMemo, useState } from "react";
 import { recordSupplierPaymentAction, type PayState } from "@/app/(app)/parts/supplier-payment-actions";
-import { SupplierProofUpload } from "@/app/(app)/parts/orders/[id]/SupplierProofUpload";
+import { SupplierPayProof } from "@/components/SupplierPayProof";
+import { newUuid } from "@/lib/uuid";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { ChoiceButtons, Field, Input, controlClass } from "@/components/ui";
 import { advanceLeftAfter, advanceLeftWords, likelyInvoiceOf, splitOldestFirst, suggestAdvanceUses, SUPPLIER_PAY_METHOD_KEYS, SUPPLIER_PAY_METHOD_LABELS, type AdvanceHeld, type AdvanceUse } from "@/lib/supplier-payment-rules";
@@ -20,8 +21,16 @@ const numOf = (t: string) => Number(String(t).replace(/,/g, "")) || 0;
  * Only what the advances leave unpaid needs a new payment: the amount and how it was paid show for that remainder
  * alone. Advances covering everything = "Apply advance", no new payment, nothing red to fill in.
  */
-export function SupplierPayBox({ supplierId, supplierName, invoices, advances, preselect, today, paidFromWords, proofScope }: { supplierId: string | null; supplierName: string; invoices: Inv[]; advances: AdvanceHeld[]; preselect?: string | null; today: string; paidFromWords?: string; proofScope?: string | null }) {
+export function SupplierPayBox({ supplierId, supplierName, invoices, advances, preselect, today, paidFromWords, linkable = [] }: { supplierId: string | null; supplierName: string; invoices: Inv[]; advances: AdvanceHeld[]; preselect?: string | null; today: string; paidFromWords?: string; /** LPOs of this supplier still waiting for their invoice: an advance MAY name one (always optional). */ linkable?: { id: string; number: string }[] }) {
   const [state, action] = useActionState<PayState, FormData>(recordSupplierPaymentAction, null);
+  // 17 November 2026 (Section 1): the payment is saved under this id, made here, so its proof (picked before or after
+  // Record) belongs to the PAYMENT. A new id after every saved payment: the next payment is a new record.
+  const [paymentKey, setPaymentKey] = useState(() => newUuid());
+  const [seenState, setSeenState] = useState(state);
+  if (seenState !== state) {
+    setSeenState(state);
+    if (state?.ok) setPaymentKey(newUuid());
+  }
   const start = preselect ? invoices.filter((i) => i.poId === preselect) : invoices;
   const [ticked, setTicked] = useState<Set<string>>(new Set(start.map((i) => i.poId)));
   const [useAdv, setUseAdv] = useState<Set<string>>(new Set());
@@ -74,6 +83,7 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
     <form action={action} className="flex flex-col gap-3" data-supplier-pay-box>
       <input type="hidden" name="supplier_id" value={supplierId ?? ""} />
       <input type="hidden" name="supplier_name" value={supplierName} />
+      <input type="hidden" name="payment_key" value={paymentKey} />
       {!invoices.length ? <p className="text-sm text-muted" data-supplier-pay-none>No invoice due to {supplierName} yet. What you record here is kept as an advance with them.</p> : null}
       {invoices.length ? (
         <ul className="flex flex-col divide-y divide-line rounded-control border border-line">
@@ -153,16 +163,23 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
               <Input name="note" />
             </Field>
           </div>
-          {proofScope ? (
-            <div className="flex flex-col gap-1 rounded-control border border-dashed border-line-strong p-3" data-pay-proof-area>
-              <span className="text-xs font-semibold text-muted">Proof (bank slip, card slip, link receipt, cheque copy) – optional now, or add it later</span>
-              <SupplierProofUpload poId={proofScope} inForm />
-            </div>
-          ) : null}
+          <div className="flex flex-col gap-1 rounded-control border border-dashed border-line-strong p-3" data-pay-proof-area>
+            <span className="text-xs font-semibold text-muted">Proof – optional now, or add it later. It belongs to this payment, not to an LPO.</span>
+            <SupplierPayProof paymentId={paymentKey} inForm />
+          </div>
           {excess > 0.004 ? (
             <div className="flex flex-col gap-2 rounded-control border-2 border-amber-bar bg-amber-soft px-3 py-2" data-supplier-pay-excess>
               <span className="text-sm font-bold">AED {fmt(excess)} more than the invoices. What is it?</span>
               <ChoiceButtons name="excess_kind" columns={2} required options={[{ value: "advance", label: `Advance with ${supplierName}` }, { value: "fee", label: "Fee / charge (an expense)" }]} />
+              {linkable.length ? (
+                <label className="flex flex-col gap-1 text-xs font-semibold text-muted">
+                  An advance for one LPO? (optional – leave it on &quot;Not for an LPO&quot; to keep it with the supplier)
+                  <select name="advance_for_po" defaultValue="" className={controlClass} data-advance-for-po>
+                    <option value="">Not for an LPO (kept with {supplierName})</option>
+                    {linkable.map((l) => <option key={l.id} value={l.id}>{l.number}</option>)}
+                  </select>
+                </label>
+              ) : null}
             </div>
           ) : null}
           {short > 0.004 && excess <= 0.004 ? <p className="text-sm font-semibold text-amber-text" data-supplier-pay-short>Part paid · balance AED {fmt(short)} stays owed.</p> : null}
@@ -188,7 +205,7 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
             newMoney ? `${ticked.size} invoice${ticked.size === 1 ? "" : "s"} · new payment AED ${fmt(put)}` : "No new payment",
             short > 0.004 && excess <= 0.004 ? `Part paid: AED ${fmt(short)} still owed` : excess > 0.004 ? `AED ${fmt(excess)} over the invoices` : "Settles them in full",
           ]}
-          live={newMoney ? [{ field: "method" }, { label: "ref", field: "reference" }, ...(proofScope ? [{ field: "proof_path", proof: true }] : [])] : []}
+          live={newMoney ? [{ field: "method" }, { label: "ref", field: "reference" }, { field: "proof_path", proof: true }] : []}
           confirmLabel={newMoney ? "YES, RECORD" : "Yes, apply it"}
           hook="supplier-pay"
           attrs={{ "data-supplier-pay-save": "", ...(overAdvance ? { "data-over-advance": "" } : {}) }}

@@ -29,7 +29,7 @@ function whatWords(r: SendRecord): string {
   if (r.target === "gate_in") return `Gate-in ${media.toLowerCase()}`;
   if (r.target === "inspection") return `Inspection ${media.toLowerCase()}`;
   if (r.target === "job_file") return KIND_WORDS[kind] ?? media;
-  if (r.target === "supplier_proof") return "Supplier payment proof";
+  if (r.target === "supplier_proof" || r.target === "supplier_pay_proof") return "Supplier payment proof";
   if (r.target === "commission_proof") return "Commission proof";
   if (r.target === "credit_note") return "Credit note scan";
   if (r.target === "loose_item") return "Loose item photo";

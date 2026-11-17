@@ -11,7 +11,7 @@
 import { putWithProgress, reportUploadFailure, uploadProblem } from "./upload-client";
 import { newUuid } from "./uuid";
 
-export type SendTarget = "gate_in" | "inspection" | "job_file" | "supplier_proof" | "commission_proof" | "credit_note" | "loose_item" | "estimate_report";
+export type SendTarget = "gate_in" | "inspection" | "job_file" | "supplier_proof" | "commission_proof" | "credit_note" | "loose_item" | "estimate_report" | "supplier_pay_proof";
 
 /** What a component hands the queue for one file. */
 export type SendInput = {

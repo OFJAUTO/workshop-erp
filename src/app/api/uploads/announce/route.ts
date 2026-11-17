@@ -6,7 +6,7 @@ import { recordAnnounce } from "@/lib/upload-pending";
 
 export const dynamic = "force-dynamic";
 
-const TARGETS = new Set(["gate_in", "inspection", "job_file", "supplier_proof", "commission_proof", "credit_note", "loose_item", "estimate_report"]);
+const TARGETS = new Set(["gate_in", "inspection", "job_file", "supplier_proof", "commission_proof", "credit_note", "loose_item", "estimate_report", "supplier_pay_proof"]);
 const STATES = new Set(["waiting", "sending", "stopped", "removed"]);
 
 /**

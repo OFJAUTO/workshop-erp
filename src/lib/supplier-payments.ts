@@ -162,6 +162,9 @@ export async function advancesBySupplier(): Promise<Map<string, number>> {
   return out;
 }
 
+/** The column an advance names its LPO with (13 November 2026). */
+const lpoAdvanceColumnReady = () => schemaReady("supplier_payments", "advance_for_po_id");
+
 let readyCache: { at: number; ok: boolean } | null = null;
 /** The tables exist (asked again every minute until they do). */
 export async function supplierPaymentsReadyNow(): Promise<boolean> {
@@ -172,6 +175,10 @@ export async function supplierPaymentsReadyNow(): Promise<boolean> {
 }
 
 export type SupplierPaymentInput = {
+  /** The id the form made (17 November 2026): the payment is saved under it, so its proof joins it whenever it lands. */
+  id?: string | null;
+  /** An advance MAY name the LPO it is for (always optional): it shows on that LPO, and follows it when revised. */
+  advanceForPoId?: string | null;
   supplierId: string | null;
   supplierName: string;
   paidOn: string;
@@ -224,10 +231,21 @@ export async function recordSupplierPayment(input: SupplierPaymentInput, by: { i
   const admin = createAdminClient();
   const { data: pay, error } = await admin
     .from("supplier_payments")
-    .insert({ supplier_id: input.supplierId, supplier_name: input.supplierName, paid_on: input.paidOn, method: input.method, reference: input.reference, amount_aed: amount, excess_kind: excess > 0.004 ? input.excessKind : null, fee_aed: excess > 0.004 && input.excessKind === "fee" ? excess : 0, proof_path: input.proofPath, note: input.note, created_by: by.id, updated_by: by.id })
+    .insert({ ...(input.id ? { id: input.id } : {}), supplier_id: input.supplierId, supplier_name: input.supplierName, paid_on: input.paidOn, method: input.method, reference: input.reference, amount_aed: amount, excess_kind: excess > 0.004 ? input.excessKind : null, fee_aed: excess > 0.004 && input.excessKind === "fee" ? excess : 0, proof_path: input.proofPath, note: input.note, created_by: by.id, updated_by: by.id })
     .select("id, number")
     .single();
   if (error || !pay) return { error: error?.message ?? "Couldn't save – nothing was recorded." };
+  // A proof that reached the server BEFORE the payment was saved (same id) joins it now.
+  if (!input.proofPath && input.id) {
+    const { data: files } = await admin.storage.from("job-files").list(`supplier-payments/pay/${input.id}`, { limit: 5, sortBy: { column: "created_at", order: "desc" } });
+    const f = (files ?? []).find((x) => /\.(jpg|png|webp|pdf)$/i.test(x.name));
+    if (f) await admin.from("supplier_payments").update({ proof_path: `supplier-payments/pay/${input.id}/${f.name}`, updated_by: by.id }).eq("id", pay.id).is("proof_path", null);
+  }
+  if (input.advanceForPoId && excess > 0.004 && input.excessKind === "advance") {
+    const { data: lpo } = await admin.from("purchase_orders").select("id, supplier_id, supplier_name, status, kind").eq("id", input.advanceForPoId).maybeSingle();
+    const same = !!lpo && lpo.kind !== "main" && lpo.status !== "cancelled" && ((!!input.supplierId && lpo.supplier_id === input.supplierId) || String(lpo.supplier_name).toUpperCase() === input.supplierName.toUpperCase());
+    if (same && (await lpoAdvanceColumnReady())) await admin.from("supplier_payments").update({ advance_for_po_id: lpo!.id, updated_by: by.id }).eq("id", pay.id);
+  }
   if (lines.length) {
     const invReady = await lpoInvoicesReady();
     const { error: lErr } = await admin.from("supplier_payment_lines").insert(lines.map((l) => ({ payment_id: pay.id, ...lineTarget(l.poId, invReady), amount_aed: l.amount, created_by: by.id, updated_by: by.id })), { defaultToNull: false });
@@ -431,4 +449,13 @@ export async function correctSupplierPayment(paymentId: string, c: PaymentCorrec
     await reopenZoho("supplierpay", paymentId);
   }
   return { words: `${pay.number} corrected (${changes.map((x) => `${x.field}: ${x.old || "—"} → ${x.new || "—"}`).join("; ")}).${repost ? " Its Zoho payment is taken back and posted again at the next Sync to Zoho." : ""}` };
+}
+
+/** The LPOs an advance to this supplier MAY name (17 November 2026): theirs, not cancelled, invoice not entered yet. */
+export async function linkableLposOf(supplierId: string | null, supplierName: string): Promise<{ id: string; number: string }[]> {
+  if (!(await lpoAdvanceColumnReady())) return [];
+  let q = createAdminClient().from("purchase_orders").select("id, number, kind, status, supplier_invoice_status").neq("status", "cancelled").neq("supplier_invoice_status", "received").eq("is_active", true).order("created_at", { ascending: false }).limit(50);
+  q = supplierId ? q.eq("supplier_id", supplierId) : q.ilike("supplier_name", supplierName);
+  const { data } = await q;
+  return ((data ?? []) as { id: string; number: string; kind: string | null }[]).filter((p) => p.kind !== "main").map((p) => ({ id: p.id, number: p.number }));
 }

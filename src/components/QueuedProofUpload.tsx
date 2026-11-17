@@ -12,13 +12,13 @@ import { newUuid } from "@/lib/uuid";
 import { holdWhilePicking } from "@/lib/screen-hold";
 
 /** The proof places this uploader serves: one document (a photo or a PDF) for one record. */
-export type ProofTarget = Extract<SendTarget, "supplier_proof" | "commission_proof" | "credit_note" | "estimate_report">;
+export type ProofTarget = Extract<SendTarget, "supplier_proof" | "commission_proof" | "credit_note" | "estimate_report" | "supplier_pay_proof">;
 
 /**
  * Where each place keeps its files (the server's own rule, src/lib/upload-targets): a file still on its way can be named
  * before it arrives, so a save made in the meantime picks it up the moment it lands (the server checks it really did).
  */
-const FOLDER: Record<ProofTarget, string> = { supplier_proof: "supplier-payments", commission_proof: "commission-payments", credit_note: "credit-notes", estimate_report: "estimate-reports" };
+const FOLDER: Record<ProofTarget, string> = { supplier_proof: "supplier-payments", commission_proof: "commission-payments", credit_note: "credit-notes", estimate_report: "estimate-reports", supplier_pay_proof: "supplier-payments/pay" };
 const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "application/pdf": "pdf" };
 const MAX_BYTES = 20 * 1024 * 1024;
 

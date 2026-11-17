@@ -9,9 +9,10 @@ import { can, type RoleId } from "@/lib/roles";
 import { getSettings } from "@/lib/settings";
 import { formatDate } from "@/lib/format";
 import { moneyFrom } from "@/lib/supplier-money";
-import { advancesOf, openInvoicesOf } from "@/lib/supplier-payments";
+import { advancesOf, linkableLposOf, openInvoicesOf } from "@/lib/supplier-payments";
 import { CorrectSupplierPayment } from "@/components/CorrectSupplierPayment";
 import { METHOD_WORDS, loadPaymentsTab } from "@/lib/supplier-payments-tab";
+import { followAdvanceLinks } from "@/lib/lpo-advance";
 import { SUPPLIER_PAY_METHODS, readZohoMap } from "@/lib/zoho-sync";
 
 /**
@@ -29,6 +30,8 @@ export default async function SupplierPaymentsPage({ searchParams }: { searchPar
   if (!can(staff.role_id as RoleId, "supplierPayments")) return refuse("no_permission");
   const sp = await searchParams;
   const settings = await getSettings();
+  // 17 November 2026 (Section 1): an advance named for an LPO follows it when the LPO was replaced; a cancelled one leaves it with the supplier.
+  await followAdvanceLinks().catch(() => null);
   const tab = await loadPaymentsTab({ from: sp.from ?? null, to: sp.to ?? null });
   const advanceOf = (id: string | null, name: string) => tab.advances.get(id ?? "") ?? tab.advances.get(name.toUpperCase()) ?? 0;
   // A supplier with an invoice due, one whose LPOs wait for their invoice, or any supplier on the list (an advance).
@@ -44,7 +47,7 @@ export default async function SupplierPaymentsPage({ searchParams }: { searchPar
   const paidFromWords = SUPPLIER_PAY_METHODS.map((m) => `${m.label}: ${zmap.paidFromBy?.[m.key] || zmap.paidFrom || "not mapped yet"}`).join(" · ");
   // eslint-disable-next-line react-hooks/purity
   const today = new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
-  const box = pick && tab.ready ? { invoices: await openInvoicesOf(pick.supplierId, pick.supplier), advances: await advancesOf(pick.supplierId, pick.supplier) } : null;
+  const box = pick && tab.ready ? { invoices: await openInvoicesOf(pick.supplierId, pick.supplier), advances: await advancesOf(pick.supplierId, pick.supplier), linkable: await linkableLposOf(pick.supplierId, pick.supplier) } : null;
   const totalDue = tab.due.reduce((a, d) => a + d.total, 0);
   const exportHref = `/api/export/supplier-payments?${new URLSearchParams(Object.entries({ from: sp.from ?? "", to: sp.to ?? "" }).filter(([, v]) => v)).toString()}`;
 
@@ -117,7 +120,7 @@ export default async function SupplierPaymentsPage({ searchParams }: { searchPar
       {pick && box ? (
         <Card className="flex flex-col gap-3 scroll-mt-4" id="pay" data-sp-pay-card={pick.supplier}>
           <SectionLabel right={<Link href="/supplier-payments" className="text-sm font-bold underline underline-offset-4">Close</Link>}>Pay {pick.supplier}</SectionLabel>
-          <SupplierPayBox key={`${pick.supplier}-${box.invoices.length}`} supplierId={pick.supplierId} supplierName={pick.supplier} invoices={box.invoices} advances={box.advances} today={today} paidFromWords={paidFromWords} proofScope={pick.supplierId ?? null} />
+          <SupplierPayBox key={`${pick.supplier}-${box.invoices.length}`} supplierId={pick.supplierId} supplierName={pick.supplier} invoices={box.invoices} advances={box.advances} today={today} paidFromWords={paidFromWords} linkable={box.linkable} />
         </Card>
       ) : null}
 
@@ -151,13 +154,14 @@ export default async function SupplierPaymentsPage({ searchParams }: { searchPar
                 <span className="text-muted">{formatDate(h.paidOn)} · {METHOD_WORDS[h.method] ?? h.method}{h.reference ? ` · ${h.reference}` : ""}</span>
                 <span className="text-muted">{h.lpos.join(", ")}</span>
                 {h.excessKind === "advance" ? <Badge tone="green">Includes advance</Badge> : null}
+                {h.excessKind === "advance" ? <span className="text-xs font-semibold" data-sp-advance-for={h.number}>{h.advanceFor ? `For ${h.advanceFor}` : "Kept with the supplier (no LPO)"}</span> : null}
                 {h.fee > 0.005 ? <Badge tone="outline">Fee AED {money(h.fee)}</Badge> : null}
                 {!h.hasProof && h.status !== "void" ? <Badge tone="red">No proof</Badge> : null}
                 {h.status === "void" ? <Badge tone="neutral">Void{h.voidReason ? `: ${h.voidReason}` : ""}</Badge> : null}
                 <span className="ml-auto font-bold">AED {money(h.amount)}</span>
                 {h.by ? <span className="basis-full text-xs text-muted">by {h.by}</span> : null}
                 {h.edits.map((e, i) => <span key={i} className="basis-full text-xs text-muted" data-sp-history-edit>Corrected {formatDate(e.at)} by {e.by}: {e.changes.map((c) => `${c.field} ${c.old || "—"} → ${c.new || "—"}`).join("; ")} ({e.remark})</span>)}
-                {canPay && h.status === "recorded" && (staff.role_id === "owner" || staff.role_id === "accounts") ? <span className="basis-full"><CorrectSupplierPayment id={h.id} number={h.number} method={h.method} paidOn={String(h.paidOn).slice(0, 10)} reference={h.reference} today={today} proofScope={h.firstPoId} /></span> : null}
+                {canPay && h.status === "recorded" && (staff.role_id === "owner" || staff.role_id === "accounts") ? <span className="basis-full"><CorrectSupplierPayment id={h.id} number={h.number} method={h.method} paidOn={String(h.paidOn).slice(0, 10)} reference={h.reference} today={today} /></span> : null}
               </li>
             ))}
           </ul>

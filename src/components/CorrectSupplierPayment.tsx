@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { correctSupplierPaymentAction, type PayState } from "@/app/(app)/parts/supplier-payment-actions";
-import { SupplierProofUpload } from "@/app/(app)/parts/orders/[id]/SupplierProofUpload";
+import { SupplierPayProof } from "@/components/SupplierPayProof";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { MoneyDate } from "@/components/MoneyDate";
 import { ChoiceButtons, Input, Textarea } from "@/components/ui";
@@ -14,7 +14,7 @@ import { SUPPLIER_PAY_METHOD_KEYS, SUPPLIER_PAY_METHOD_LABELS } from "@/lib/supp
  * proof with a reason; the old values stay in the payment's history. The method is NOT pre-selected: the person picks
  * the real one. The amount and the supplier are not here (void it and record a new payment instead).
  */
-export function CorrectSupplierPayment({ id, number, method, paidOn, reference, today, proofScope }: { id: string; number: string; method: string; paidOn: string; reference: string | null; today: string; /** An LPO the payment paid (the proof is filed under it); null = no proof here. */ proofScope: string | null }) {
+export function CorrectSupplierPayment({ id, number, method, paidOn, reference, today }: { id: string; number: string; method: string; paidOn: string; reference: string | null; today: string }) {
   const [state, action] = useActionState<PayState, FormData>(correctSupplierPaymentAction.bind(null, id), null);
   const [open, setOpen] = useState(false);
   const was = (SUPPLIER_PAY_METHOD_LABELS as Record<string, string>)[method] ?? method;
@@ -29,7 +29,7 @@ export function CorrectSupplierPayment({ id, number, method, paidOn, reference, 
         </div>
         <MoneyDate name="paid_on" label="Paid on" defaultValue={paidOn} max={today} hook="data-correct-date" />
         <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Reference</span><Input name="reference" defaultValue={reference ?? ""} spell={false} data-correct-reference /></label>
-        {proofScope ? <SupplierProofUpload poId={proofScope} inForm /> : null}
+        <SupplierPayProof paymentId={id} inForm />
         <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Why is it corrected? (compulsory – kept in the history)</span><Textarea name="reason" required minLength={5} rows={2} placeholder="e.g. it was paid in cash, not by transfer" data-correct-reason /></label>
         <div>
           <ConfirmSubmit label="Save the correction" title={`Correct ${number}?`} cancelLabel="GO BACK AND EDIT" lines={[`${number}: the old values stay in its history`]} live={[{ field: "method" }, { label: "on", field: "paid_on" }, { label: "ref", field: "reference" }, { label: "why:", field: "reason" }]} confirmLabel="YES, CORRECT IT" size="md" hook="correct-payment" />

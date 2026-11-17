@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { schemaReady } from "@/lib/schema-ready";
 import { loadSupplierInvoices } from "@/lib/supplier-invoices";
 import { unpaidBySupplier, type InvoiceRow, type UnpaidSupplier } from "@/lib/supplier-invoice-rows";
 import { advancesBySupplier, latheDueBySupplier, supplierPaymentsReadyNow } from "@/lib/supplier-payments";
@@ -26,6 +27,8 @@ export type PaymentHistoryRow = {
   /** 15 November 2026: an LPO it paid (a corrected proof is filed under it) and every correction (who, when, old, new). */
   firstPoId: string | null;
   edits: PaymentEdit[];
+  /** 17 November 2026: the LPO an advance names (optional), as its number now. */
+  advanceFor: string | null;
 };
 export type PaymentEdit = { at: string; by: string; remark: string; changes: { field: string; old: string; new: string }[] };
 
@@ -68,15 +71,15 @@ export async function loadPaymentsTab(opts: { from?: string | null; to?: string 
   if (!ready) return { ready, due, advances: new Map(), history: [], read: !!inv, awaiting, suppliers };
   const admin = createAdminClient();
   const advances = await advancesBySupplier();
-  let q = admin.from("supplier_payments").select("id, number, supplier_id, supplier_name, paid_on, method, reference, amount_aed, excess_kind, fee_aed, status, void_reason, created_by, proof_path, edit_history").eq("is_active", true).order("paid_on", { ascending: false }).order("created_at", { ascending: false }).limit(500);
+  let q = admin.from("supplier_payments").select("id, number, supplier_id, supplier_name, paid_on, method, reference, amount_aed, excess_kind, fee_aed, status, void_reason, created_by, proof_path, edit_history" + ((await schemaReady("supplier_payments", "advance_for_po_id")) ? ", advance_for_po_id" : "")).eq("is_active", true).order("paid_on", { ascending: false }).order("created_at", { ascending: false }).limit(500);
   if (opts.from) q = q.gte("paid_on", opts.from);
   if (opts.to) q = q.lte("paid_on", opts.to);
   if (opts.supplier) q = /^[0-9a-f-]{36}$/.test(opts.supplier) ? q.eq("supplier_id", opts.supplier) : q.ilike("supplier_name", opts.supplier);
   const { data: pays } = await q;
-  const list = (pays ?? []) as { id: string; number: string; supplier_id: string | null; supplier_name: string; paid_on: string; method: string; reference: string | null; amount_aed: number; excess_kind: string | null; fee_aed: number; status: string; void_reason: string | null; created_by: string | null; proof_path: string | null; edit_history: PaymentEdit[] | null }[];
+  const list = (pays ?? []) as unknown as { advance_for_po_id?: string | null; id: string; number: string; supplier_id: string | null; supplier_name: string; paid_on: string; method: string; reference: string | null; amount_aed: number; excess_kind: string | null; fee_aed: number; status: string; void_reason: string | null; created_by: string | null; proof_path: string | null; edit_history: PaymentEdit[] | null }[];
   const ids = list.map((p) => p.id);
   const { data: lines } = ids.length ? await admin.from("supplier_payment_lines").select("payment_id, po_id").in("payment_id", ids).eq("is_active", true) : { data: [] };
-  const poIds = Array.from(new Set((lines ?? []).map((l) => l.po_id as string)));
+  const poIds = Array.from(new Set([...(lines ?? []).map((l) => l.po_id as string), ...list.map((p) => p.advance_for_po_id).filter((x): x is string => !!x)]));
   const { data: pos } = poIds.length ? await admin.from("purchase_orders").select("id, number").in("id", poIds) : { data: [] };
   const poNum = new Map((pos ?? []).map((p) => [p.id as string, p.number as string]));
   const staffIds = Array.from(new Set(list.map((p) => p.created_by).filter((x): x is string => !!x)));
@@ -100,6 +103,7 @@ export async function loadPaymentsTab(opts: { from?: string | null; to?: string 
     hasProof: !!p.proof_path,
     firstPoId: ((lines ?? []).find((l) => l.payment_id === p.id && l.po_id)?.po_id as string | undefined) ?? null,
     edits: (p.edit_history ?? []).filter((e) => e && Array.isArray(e.changes) && !e.changes.some((c) => c.field === "status")),
+    advanceFor: p.advance_for_po_id ? poNum.get(p.advance_for_po_id) ?? null : null,
   }));
   return { ready, due, advances, history, read: !!inv, awaiting, suppliers };
 }

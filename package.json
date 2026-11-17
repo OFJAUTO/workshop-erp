@@ -216,7 +216,8 @@
     "test:s4-fixes": "node --env-file=.env.test.local tests/browser/test-s4-fixes.mjs",
     "test:s5-deskparts": "node --env-file=.env.test.local tests/browser/test-s5-deskparts.mjs",
     "test:s6-lists": "node --env-file=.env.test.local tests/browser/test-s6-lists.mjs",
-    "test:s8-profit": "node --env-file=.env.test.local tests/browser/test-s8-profit.mjs"
+    "test:s8-profit": "node --env-file=.env.test.local tests/browser/test-s8-profit.mjs",
+    "test:s17-1": "node --env-file=.env.test.local tests/browser/test-s17-1-advance-proof.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",
