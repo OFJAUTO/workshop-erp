@@ -21,15 +21,17 @@ import { InvoiceEditHistory, SupplierInvoiceEditButton } from "@/components/Supp
 import { editSupplierInvoice } from "@/app/(app)/parts/order-actions";
 import { signJobFiles } from "@/lib/work-data";
 import { changeWords } from "@/lib/price-change";
-import { enterInvoiceFromList } from "@/app/(app)/parts/order-actions";
+import { addLpoToInvoiceAction, enterInvoiceFromList } from "@/app/(app)/parts/order-actions";
 import { checkInvoiceAction, queryInvoiceAction } from "./actions";
 import { ScanEnterInvoice } from "./ScanEnterInvoice";
+import { AddLpoToInvoice } from "@/components/AddLpoToInvoice";
+import { coverOptionsFor } from "@/lib/invoice-cover";
 import { LpoAdvanceByPoId } from "@/components/LpoAdvanceCard";
 
 const money = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const STATUS_TONE: Record<InvoiceStatus, "amber" | "red" | "neutral" | "green" | "ink" | "outline"> = { waiting: "amber", queried: "red", new: "ink", checked: "outline", zoho: "outline", paid: "green" };
 
-export type SiSearch = { open?: string; supplier?: string; from?: string; to?: string; status?: string; unpaid?: string; problems?: string; no_proof?: string; q?: string; job?: string; message?: string; error?: string };
+export type SiSearch = { open?: string; supplier?: string; from?: string; to?: string; status?: string; unpaid?: string; problems?: string; no_proof?: string; q?: string; job?: string; message?: string; error?: string; add_lpo_message?: string; add_lpo_error?: string };
 
 /** Where the view lives: its own page (/supplier-invoices, Parts keep it) or the Supplier invoices tab of Parts accounts. */
 export type SiPlace = "supplier-invoices" | "parts-accounts";
@@ -73,7 +75,7 @@ export async function SupplierInvoicesView({ sp: spIn, staff, place }: { sp: SiS
     <>
       {!read ? <Notice tone="error">Couldn&apos;t read the supplier invoices just now: reload the page.</Notice> : null}
       {outcome && !open ? <Notice tone={outcome.tone}>{outcome.text}</Notice> : null}
-      {open ? <OpenInvoice row={open} acts={acts} seesPay={seesPay} queryOn={queryOn} place={place} outcome={outcome} role={staff.role_id} viewingAs={!!staff.viewingAs} /> : null}
+      {open ? <OpenInvoice row={open} acts={acts} seesPay={seesPay} queryOn={queryOn} place={place} outcome={outcome} role={staff.role_id} viewingAs={!!staff.viewingAs} addLpo={{ message: sp.add_lpo_message ?? null, error: sp.add_lpo_error ?? null }} /> : null}
 
       <Card className="flex flex-col gap-3" data-si-filters>
         <form method="get" action={`/${place}`} className="flex flex-wrap items-end gap-2">
@@ -161,13 +163,15 @@ function InvoiceCard({ r, href, open }: { r: InvoiceRow; href: string; open: boo
 }
 
 /** One invoice opened: the scan or photo (zoomable) next to the parts it covers, per car, with Checked and Query. */
-async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, viewingAs }: { row: InvoiceRow; acts: boolean; seesPay: boolean; queryOn: boolean; place: SiPlace; outcome: { tone: "success" | "error"; text: string } | null; role: string; viewingAs: boolean }) {
+async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, viewingAs, addLpo }: { row: InvoiceRow; acts: boolean; seesPay: boolean; queryOn: boolean; place: SiPlace; outcome: { tone: "success" | "error"; text: string } | null; role: string; viewingAs: boolean; addLpo: { message: string | null; error: string | null } }) {
   // 13 November 2026: the number the parts desk typed at receiving pre-fills the card; accounts still scan and check.
   const typedNumber = row.shares.length === 1 ? ((await loadReceipts([row.shares[0].poId]).catch(() => [])).find((r) => r.number)?.number ?? null) : null;
   const admin = createAdminClient();
   const poIds = row.shares.map((s) => s.poId);
   // 15 November 2026 (Section 4): a lathe bill's scans are filed under the bill itself.
   const latheId = row.lathe ? latheBillIdOf(row.key) : null;
+  // The LPO the invoice was entered on (its first invoice, not a further one): "Add another LPO" anchors there.
+  const firstShare = latheId ? null : row.shares.find((x) => !x.invoiceId) ?? null;
   const fileRefs = latheId ? [latheId] : poIds;
   const vatOn = await invoiceVatReady();
   const [{ data: files }, { data: pos }, { data: lines }] = await Promise.all([
@@ -293,6 +297,8 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, 
           noCarUploads={!row.shares[0].jobId && (await latheV2Ready())}
           lines={((lines ?? []) as { id: string; po_id: string; description: string; unit_cost: number }[]).filter((l) => l.po_id === row.shares[0].poId).map((l) => ({ id: l.id, description: l.description, unit_cost: Number(l.unit_cost) }))}
           action={enterInvoiceFromList.bind(null, row.shares[0].poId, row.key)}
+          alsoCovers={await coverOptionsFor(row.shares[0].poId)}
+          poNumber={row.shares[0].poNumber}
         />
       ) : null}
       {acts && row.status !== "waiting" ? (
@@ -338,6 +344,20 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, 
                 );
               })
             : null}
+          {/* 17 November 2026 (Section 2): the same paper covers another LPO of this supplier. */}
+          {firstShare && row.number ? (
+            <div className="basis-full">
+              <AddLpoToInvoice
+                invoiceNumber={row.number}
+                coversNow={row.shares.filter((s) => !s.invoiceId).map((s) => s.poNumber)}
+                currentTotal={Math.round(row.shares.filter((s) => !s.invoiceId).reduce((a, s) => a + s.amount, 0) * 100) / 100}
+                options={await coverOptionsFor(firstShare.poId)}
+                action={addLpoToInvoiceAction.bind(null, firstShare.poId, siHref(place, [["open", row.key]]))}
+                message={addLpo.message}
+                error={addLpo.error}
+              />
+            </div>
+          ) : null}
           {/* Paid on each LPO's own page: one button per LPO still to pay, never one already paid. */}
           {(seesPay ? toPay : []).map((s) => <LinkButton key={s.poId} href={`/parts/orders/${s.poId}#paid`} tone="ghost" size="lg" data-si-pay={s.poId}>{toPay.length > 1 || row.shares.length > 1 ? `Pay ${s.poNumber} (on the LPO)` : "Paid to supplier (on the LPO)"}</LinkButton>)}
         </div>

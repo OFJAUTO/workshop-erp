@@ -25,6 +25,8 @@ import { Badge, Button, Card, ChoiceButtons, DescriptionList, Input, LinkButton,
 import { SUPPLIER_PAY_METHODS, readZohoMap } from "@/lib/zoho-sync";
 import { SupplierProofUpload } from "./SupplierProofUpload";
 import { SupplierPayProof } from "@/components/SupplierPayProof";
+import { AddLpoToInvoice } from "@/components/AddLpoToInvoice";
+import { coverOptionsFor, invoiceGroupOf } from "@/lib/invoice-cover";
 import { requirePermission } from "@/lib/auth";
 import { endedLinesOf } from "@/lib/part-endings-server";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -47,7 +49,7 @@ import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatPlate } from "@/lib/types";
 import { signJobFiles } from "@/lib/work-data";
-import { decidePurchaseOrder, receivePurchaseOrder, supplierInvoice, editSupplierInvoice, decideInvoiceCheck, markSupplierPaid, refusePoLineAction, reverseSupplierPaid, undoSupplierPaid } from "../../order-actions";
+import { addLpoToInvoiceAction, decidePurchaseOrder, receivePurchaseOrder, supplierInvoice, editSupplierInvoice, decideInvoiceCheck, markSupplierPaid, refusePoLineAction, reverseSupplierPaid, undoSupplierPaid } from "../../order-actions";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { SlipTile } from "@/components/PaymentReport";
 import { UndoButton } from "@/components/UndoButton";
@@ -75,11 +77,11 @@ const todayIso = () => new Date().toISOString().slice(0, 10);
  * One LPO. The main LPO (every supplier, grouped with a subtotal each and a grand total) is approved here with
  * one tap; its supplier LPOs (LPO-00012-1, -2, -3) are sent, marked ordered, received and invoiced here.
  */
-export default async function PurchaseOrderPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string; approval?: string }> }) {
+export default async function PurchaseOrderPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ message?: string; error?: string; approval?: string; add_lpo_message?: string; add_lpo_error?: string }> }) {
   const staff = await requirePermission("viewPurchaseOrders");
   const role = staff.role_id as RoleId;
   const { id } = await params;
-  const { message, error, approval } = await searchParams;
+  const { message, error, approval, add_lpo_message: addLpoMessage, add_lpo_error: addLpoError } = await searchParams;
   const bundle = await loadPurchaseOrder(id);
   if (!bundle) notFound();
   const { po, lines, job, names, parts } = bundle;
@@ -520,7 +522,22 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             <Card className={`flex flex-col gap-2 ${po.supplier_invoice_status === "to_follow" ? "!border-amber-bar" : ""}`}>
               <SectionLabel>Supplier invoice{po.supplier_invoice_status === "to_follow" ? " · with accounts" : ""}</SectionLabel>
               {po.supplier_invoice_status === "to_follow" ? <p className="text-sm font-semibold text-amber-bar" data-invoice-missing>{canPay ? `Collect the supplier's invoice from Parts, scan it and enter it here (or on the Supplier invoices page).` : `Invoice with accounts: they collect the supplier's paper from the desk and scan it. Keep it ready for them.`}</p> : null}
-              {canPay ? <SupplierInvoiceForm jobId={po.job_id} poId={po.id} lines={formLines} action={supplierInvoice.bind(null, po.id)} poTotal={po.total_cost_aed} lpoDate={String(po.approved_at ?? po.created_at ?? "").slice(0, 10) || null} noCarUploads={!po.job_id && (await latheV2Ready())} /> : null}
+              {canPay ? <SupplierInvoiceForm jobId={po.job_id} poId={po.id} lines={formLines} action={supplierInvoice.bind(null, po.id)} poTotal={po.total_cost_aed} lpoDate={String(po.approved_at ?? po.created_at ?? "").slice(0, 10) || null} noCarUploads={!po.job_id && (await latheV2Ready())} alsoCovers={await coverOptionsFor(po.id)} poNumber={po.number} /> : null}
+            </Card>
+          ) : null}
+          {/* 17 November 2026 (Section 2): the invoice is in - the same paper may cover another LPO of this supplier. */}
+          {!isMain && po.supplier_invoice_status === "received" && po.supplier_invoice_number && canPay ? (
+            <Card className="flex flex-col gap-2">
+              <SectionLabel>One invoice, several LPOs</SectionLabel>
+              <AddLpoToInvoice
+                invoiceNumber={po.supplier_invoice_number}
+                coversNow={(await invoiceGroupOf(po)).map((g) => g.number)}
+                currentTotal={Math.round((await invoiceGroupOf(po)).reduce((a, g) => a + (Number(g.supplier_invoice_amount) || Number(g.total_cost_aed) || 0), 0) * 100) / 100}
+                options={await coverOptionsFor(po.id)}
+                action={addLpoToInvoiceAction.bind(null, po.id, `/parts/orders/${po.id}`)}
+                message={addLpoMessage ?? null}
+                error={addLpoError ?? null}
+              />
             </Card>
           ) : null}
         </div>

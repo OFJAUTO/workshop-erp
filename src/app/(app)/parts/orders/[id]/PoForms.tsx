@@ -9,7 +9,7 @@ import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { ReasonChips } from "@/components/ReasonChips";
 
 import { useState, useRef } from "react";
-import { SupplierInvoiceBox } from "@/components/SupplierInvoiceBox";
+import { SupplierInvoiceBox, type CoverChoice } from "@/components/SupplierInvoiceBox";
 import { Button, Input, Select, Textarea } from "@/components/ui";
 import { realPartNumber } from "@/lib/parts-rows";
 
@@ -105,10 +105,10 @@ export function ReceiveForm({ lines, action, invoiceOpen = false, receipt = null
 }
 
 /** The supplier invoice entered on its own, after the delivery: the same ONE box. */
-export function SupplierInvoiceForm({ jobId, poId, lines, action, poTotal = null, lpoDate = null, noCarUploads = false }: { jobId: string | null; poId: string; lines: Line[]; action: (formData: FormData) => void; poTotal?: number | null; lpoDate?: string | null; noCarUploads?: boolean }) {
+export function SupplierInvoiceForm({ jobId, poId, lines, action, poTotal = null, lpoDate = null, noCarUploads = false, alsoCovers = [], poNumber = null }: { jobId: string | null; poId: string; lines: Line[]; action: (formData: FormData) => void; poTotal?: number | null; lpoDate?: string | null; noCarUploads?: boolean; alsoCovers?: CoverChoice[]; poNumber?: string | null }) {
   return (
     <form action={action} className="flex flex-col gap-3">
-      <SupplierInvoiceBox jobId={jobId} poId={poId} poTotal={poTotal} lpoDate={lpoDate} noCarUploads={noCarUploads} />
+      <SupplierInvoiceBox jobId={jobId} poId={poId} poTotal={poTotal} lpoDate={lpoDate} noCarUploads={noCarUploads} alsoCovers={alsoCovers} poNumber={poNumber} />
       <LinePrices lines={lines} word="PO" />
       <div><Button type="submit" size="md" data-save-invoice>Save the supplier invoice</Button></div>
     </form>

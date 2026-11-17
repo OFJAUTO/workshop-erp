@@ -5,6 +5,10 @@ import { useState } from "react";
 import { JobFileUpload, type FilesWaiting, type JobFile } from "./JobFileUpload";
 import { Input } from "./ui";
 import { checkSupplierInvoice, dubaiToday, invoiceNumberLooksReal } from "@/lib/supplier-invoice";
+import { togetherWords } from "@/lib/invoice-cover-rules";
+
+/** Another open LPO of the same supplier that the same paper may also cover (17 November 2026, Section 2). */
+export type CoverChoice = { id: string; number: string; total: number; car: string; refs: string[]; status: string };
 
 /**
  * THE supplier-invoice box (2.5, 21 October 2026): one component wherever an invoice is entered - the
@@ -26,7 +30,13 @@ export function SupplierInvoiceBox({
   prefill = null,
   lpoDate,
   noCarUploads = false,
+  alsoCovers = [],
+  poNumber = null,
 }: {
+  /** 17 November 2026 (Section 2): the supplier's other open LPOs, to tick when this one paper covers them too. */
+  alsoCovers?: CoverChoice[];
+  /** This LPO's own number (for the "Together" line). */
+  poNumber?: string | null;
   /** 11 November 2026: a supplier invoice with no car (a stock LPO) can take its scan once the database allows it. */
   noCarUploads?: boolean;
   /** The LPO's own date: an invoice dated long before it is flagged (11 November 2026). */
@@ -64,8 +74,12 @@ export function SupplierInvoiceBox({
   if (fileState.ref !== ref) setFileState({ ref, files: [] });
   const files = fileState.ref === ref ? fileState.files : [];
   const amountNum = Number(amount.replace(/[^\d.]/g, "")) || null;
-  const check = checkSupplierInvoice({ toFollow, number: number || null, date: date || null, amount: amountNum, poTotal, amountConfirmed: confirmed, today: dubaiToday() });
-  const amountOff = !toFollow && amountNum !== null && amountNum > 0 && poTotal !== null && poTotal > 0 && Math.abs(amountNum - poTotal) / poTotal > 0.05;
+  // The LPOs ticked under "THIS INVOICE ALSO COVERS…": the invoice's total is checked against them TOGETHER.
+  const [covered, setCovered] = useState<Set<string>>(new Set());
+  const ticked = alsoCovers.filter((c) => covered.has(c.id));
+  const togetherTotal = ticked.length ? Math.round(((poTotal ?? 0) + ticked.reduce((s, c) => s + c.total, 0)) * 100) / 100 : poTotal;
+  const check = checkSupplierInvoice({ toFollow, number: number || null, date: date || null, amount: amountNum, poTotal: togetherTotal, amountConfirmed: confirmed, today: dubaiToday() });
+  const amountOff = !toFollow && amountNum !== null && amountNum > 0 && togetherTotal !== null && togetherTotal > 0 && Math.abs(amountNum - togetherTotal) / togetherTotal > 0.05;
   const numberBad = !toFollow && number.trim().length > 0 && !invoiceNumberLooksReal(number);
   const dateBad = !toFollow && date !== "" && date > dubaiToday();
   // 11 November 2026 (Section 3): long before the LPO (day and month swapped?) - a warning, never a block.
@@ -102,10 +116,43 @@ export function SupplierInvoiceBox({
           {amountOff ? (
             <label className="flex items-start gap-2 rounded-control border border-amber-bar bg-amber-soft px-3 py-2 text-sm font-semibold" data-amount-check>
               <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="mt-0.5 h-5 w-5 accent-ink" data-amount-confirm />
-              <span>Invoice AED {amountNum?.toLocaleString("en-GB")} vs order AED {poTotal?.toLocaleString("en-GB")} – check the figure. Tick if the amount is right.</span>
+              <span>Invoice AED {amountNum?.toLocaleString("en-GB")} vs order{ticked.length ? "s together" : ""} AED {togetherTotal?.toLocaleString("en-GB")} – check the figure. Tick if the amount is right.</span>
             </label>
           ) : null}
           <input type="hidden" name="amount_confirmed" value={confirmed ? "on" : ""} />
+          {alsoCovers.length ? (
+            <div className="flex flex-col gap-2 rounded-control border-2 border-ink bg-white p-3" data-also-covers>
+              <span className="text-sm font-extrabold uppercase tracking-[0.06em]">This invoice also covers…</span>
+              <p className="text-xs text-muted">Tick the supplier&apos;s other LPOs that are on this same paper. Each keeps its own parts and its share of the total; their &quot;Invoice missing&quot; clears.</p>
+              <ul className="flex flex-col divide-y divide-line">
+                {alsoCovers.map((c) => (
+                  <li key={c.id}>
+                    <label className="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 py-1.5 text-sm" data-also-cover={c.number}>
+                      <input
+                        type="checkbox"
+                        name="also_covers"
+                        value={c.id}
+                        checked={covered.has(c.id)}
+                        onChange={(e) => {
+                          const n = new Set(covered);
+                          if (e.target.checked) n.add(c.id);
+                          else n.delete(c.id);
+                          setCovered(n);
+                          setConfirmed(false);
+                        }}
+                        className="h-5 w-5 accent-ink"
+                      />
+                      <span className="font-bold">{c.number}</span>
+                      <span className="text-muted">{c.car} · {c.status}</span>
+                      {c.refs.length ? <span className="text-xs text-muted">Ref at receiving: {c.refs.join(", ")}</span> : null}
+                      <span className="ml-auto font-semibold">AED {c.total.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} before VAT</span>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+              {ticked.length ? <p className="text-sm font-semibold" data-also-covers-together>{togetherWords([{ number: poNumber ?? "This LPO", total: poTotal ?? 0 }, ...ticked])}</p> : null}
+            </div>
+          ) : null}
           {jobId || noCarUploads ? (
             <div className="flex flex-col gap-1">
               <span className="text-xs font-semibold text-muted">Photo or PDF of the invoice (several pages are fine; needed before the supplier is paid)</span>

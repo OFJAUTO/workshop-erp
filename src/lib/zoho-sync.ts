@@ -1,5 +1,6 @@
 import "server-only";
 import { billLines, sameLayout } from "./zoho-bill-lines";
+import { billLeadOf, invoiceGroupOf } from "./invoice-cover";
 import { realPartNumber } from "./parts-rows";
 import { formatPlate } from "./types";
 import { DEFAULT_UNDO_MINUTES, heldForUndo } from "./money-undo";
@@ -1690,10 +1691,29 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   }
   const billGate = await startDateSkip(String(po.supplier_invoice_date).slice(0, 10), "bill", po.id);
   if (billGate) return billGate;
+  // 17 November 2026 (Section 2): ONE supplier invoice covering several LPOs is ONE bill in Zoho, carried by the oldest
+  // LPO of the group with every LPO's lines; the others point at that bill (never a second bill with the same number).
+  const group = await invoiceGroupOf(po);
+  const lead = group.length > 1 ? billLeadOf(group) : null;
+  if (lead && lead.id !== po.id) {
+    const { data: l } = await admin.from("purchase_orders").select("zoho_bill_id, zoho_bill_taxed").eq("id", lead.id).maybeSingle();
+    const leadBill = (l as { zoho_bill_id: string | null; zoho_bill_taxed: boolean | null } | null) ?? null;
+    if (!leadBill?.zoho_bill_id) {
+      await ensureQueued("bill", lead.id, lead.job_id);
+      return { wait: `On ONE bill with ${lead.number} (the same supplier invoice ${po.supplier_invoice_number}): waiting for that bill.` };
+    }
+    await admin.from("purchase_orders").update({ zoho_bill_id: leadBill.zoho_bill_id, zoho_bill_taxed: leadBill.zoho_bill_taxed }).eq("id", po.id);
+    return { zohoId: leadBill.zoho_bill_id, result: { combined: `On the one bill of ${lead.number}: supplier invoice ${po.supplier_invoice_number} covers ${group.map((g) => g.number).join(" + ")}.` } };
+  }
+  const others = lead ? group.filter((g) => g.id !== po.id) : [];
   const vendor = await poVendor(org, po);
   const taxed = await vendorVatRegistered(org, po, vendor);
   const vendorId = vendor.vendorId;
-  const { lines, charges, chargesSum, linesTotal, useEntered, expectedNet, partsRate, vat: expectedVat, gross: expectedGross } = await billErpFigures(po);
+  const figs = await billErpFigures(po);
+  const { lines, charges, chargesSum, useEntered, partsRate } = figs;
+  let { linesTotal, expectedNet } = figs;
+  let expectedVat = figs.vat;
+  let expectedGross = figs.gross;
   if (partsRate < -0.005) throw new ZohoError(`${po.number}: the invoice amount entered (${expectedNet.toFixed(2)}) is less than the courier/freight charges on it (${chargesSum.toFixed(2)}): check the figures on the LPO page.`);
   const purchases = needAccounts(accounts.purchases, accounts.purchasesError);
   const flagged = lines.filter((l) => l.check && l.check !== "match");
@@ -1712,13 +1732,27 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   // and plate), each on its own account; a discount or round-off on the paper is its own line (THE rule: zoho-bill-lines).
   const ref = await billRefOf(po);
   const built = billLines({ lines, charges, expectedNet, expectedVat, taxed, ref, accounts: { parts: billPartsAccount(po, accounts, purchases), courier: purchases.courier }, taxId: accounts.taxId ?? null });
-  const line_items = built.items as unknown as Record<string, unknown>[];
+  const items = [...built.items];
+  let zohoVat = built.zohoVat;
+  // The other LPOs on the same paper: their own lines (each with its LPO, job and plate), their figures added.
+  for (const o of others) {
+    const opo = await poForZoho(o.id);
+    const of = await billErpFigures(opo);
+    const ob = billLines({ lines: of.lines, charges: of.charges, expectedNet: of.expectedNet, expectedVat: of.vat, taxed, ref: await billRefOf(opo), accounts: { parts: billPartsAccount(opo, accounts, purchases), courier: purchases.courier }, taxId: accounts.taxId ?? null });
+    items.push(...ob.items);
+    zohoVat = round2(zohoVat + ob.zohoVat);
+    expectedNet = round2(expectedNet + of.expectedNet);
+    expectedVat = round2(expectedVat + of.vat);
+    expectedGross = round2(expectedGross + of.gross);
+    linesTotal = round2(linesTotal + of.linesTotal);
+  }
+  const refNumber = others.length ? [po.number, ...others.map((o) => o.number)].join(" + ").slice(0, 50) : po.number;
+  const line_items = items as unknown as Record<string, unknown>[];
   if (!line_items.length) throw new ZohoError(`${po.number} has nothing to bill (no lines and no charges).`);
   void partsRate;
   // Zoho works out 5% per line; the fils between that and the VAT printed on the supplier's paper ride as the bill's
   // adjustment, so the bill's TOTAL is the paper's to the fils (THE check below still names a VAT that differs).
-  const zohoVat = built.zohoVat;
-  const vatAdjust = built.adjustment;
+  const vatAdjust = others.length ? (taxed ? round2(expectedVat - zohoVat) : 0) : built.adjustment;
   const adjustment = Math.abs(vatAdjust) > 0.004 && Math.abs(vatAdjust) <= 1 ? { adjustment: vatAdjust, adjustment_description: "VAT rounding as printed on the supplier's invoice" } : {};
   if (Math.abs(vatAdjust) > 1) throw new ZohoError(`${po.number}: the VAT typed from the supplier's invoice (${expectedVat.toFixed(2)}) is more than AED 1 away from 5% of ${expectedNet.toFixed(2)} (${zohoVat.toFixed(2)}): check the VAT on the LPO page.`);
 
@@ -1736,7 +1770,7 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
     z = full;
   }
   if (!z) {
-    const body = { vendor_id: vendorId, bill_number: po.supplier_invoice_number, date: po.supplier_invoice_date, reference_number: po.number, line_items, notes, is_inclusive_tax: false, tax_treatment: taxed ? "vat_registered" : "vat_not_registered", ...adjustment };
+    const body = { vendor_id: vendorId, bill_number: po.supplier_invoice_number, date: po.supplier_invoice_date, reference_number: refNumber, line_items, notes, is_inclusive_tax: false, tax_treatment: taxed ? "vat_registered" : "vat_not_registered", ...adjustment };
     try {
       const j = await zohoFetch<{ bill?: ZohoBill }>("/bills", { org, method: "POST", body });
       z = j.bill ?? null;
@@ -1753,11 +1787,11 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   // was already paid against it in Zoho (then it is the accountant's, in plain words).
   // A bill posted with the old single summary line is re-posted in place with one line per part (same total: a payment
   // already applied to it stays applied).
-  const relayout = matches(z) && !sameLayout(z.line_items, built.items);
+  const relayout = matches(z) && !sameLayout(z.line_items, items);
   const paidBefore = round2(z.total - z.balance);
   if (!matches(z) || relayout) {
     if (!relayout && z.balance + 0.004 < z.total) throw new ZohoError(`Zoho differs: ${billDiffWords(z, expectedNet, expectedVat, expectedGross)}. The bill ${po.supplier_invoice_number} (${po.number}) is already part paid in Zoho: correct it there by hand, then press "Done by hand".`);
-    await zohoFetch(`/bills/${z.bill_id}`, { org, method: "PUT", body: { vendor_id: vendorId, bill_number: po.supplier_invoice_number, date: po.supplier_invoice_date, reference_number: po.number, line_items, notes, is_inclusive_tax: false, tax_treatment: taxed ? "vat_registered" : "vat_not_registered", adjustment: (adjustment as { adjustment?: number }).adjustment ?? 0, adjustment_description: (adjustment as { adjustment_description?: string }).adjustment_description ?? "" } });
+    await zohoFetch(`/bills/${z.bill_id}`, { org, method: "PUT", body: { vendor_id: vendorId, bill_number: po.supplier_invoice_number, date: po.supplier_invoice_date, reference_number: refNumber, line_items, notes, is_inclusive_tax: false, tax_treatment: taxed ? "vat_registered" : "vat_not_registered", adjustment: (adjustment as { adjustment?: number }).adjustment ?? 0, adjustment_description: (adjustment as { adjustment_description?: string }).adjustment_description ?? "" } });
     z = (await zohoBillById(org, z.bill_id)) ?? z;
   }
   if (!matches(z)) throw new ZohoError(`Zoho differs: ${billDiffWords(z, expectedNet, expectedVat, expectedGross)} (the bill ${po.supplier_invoice_number}, ${po.number}).`);
@@ -1768,7 +1802,7 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
   if (postedTaxed !== z.tax_total > 0.005) {
     throw new ZohoError(`The bill ${po.supplier_invoice_number} (${po.number}) carries ${z.tax_total > 0.005 ? `VAT ${z.tax_total.toFixed(2)}` : "no VAT"} in Zoho, but it was posted ${postedTaxed ? "with" : "without"} VAT: someone changed it in Zoho. Check it there, then press "Done by hand".`);
   }
-  await admin.from("purchase_orders").update({ zoho_bill_id: z.bill_id, zoho_bill_taxed: postedTaxed }).eq("id", po.id);
+  await admin.from("purchase_orders").update({ zoho_bill_id: z.bill_id, zoho_bill_taxed: postedTaxed }).in("id", [po.id, ...others.map((o) => o.id)]);
 
   // The scan: the first live invoice file on the LPO (stock orders have none - that is fine). Never twice: the
   // bill's own documents list says whether something is already attached.
@@ -1903,6 +1937,12 @@ async function syncSupplierPayRow(org: string, accounts: Resolved, paymentId: st
     }
     bills.push({ bill_id: po.zoho_bill_id, amount_applied: l.amount });
   }
+  // 17 November 2026 (Section 2): several LPOs on ONE supplier invoice share ONE bill - one entry for it, the amounts added.
+  {
+    const merged = new Map<string, number>();
+    for (const b of bills) merged.set(b.bill_id, round2((merged.get(b.bill_id) ?? 0) + b.amount_applied));
+    bills.splice(0, bills.length, ...Array.from(merged.entries()).map(([bill_id, amount_applied]) => ({ bill_id, amount_applied })));
+  }
   // 13 November 2026 (Section 2): never apply more to a bill than it still owes IN ZOHO (SPAY-00003 paid 657.00
   // against a 656.25 bill and Zoho refused the whole payment): the rest stays unused, an advance with the supplier.
   if (!pay.zoho_payment_id) {
@@ -2007,7 +2047,13 @@ async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string)
     if (bill.balance <= 0.005) {
       return { zohoId: null, result: { skipped: `The bill ${bill.bill_number} is already settled in Zoho.`, lpo: po.number } };
     }
-    amount = round2(bill.balance);
+    // 17 November 2026 (Section 2): a bill shared by several LPOs (one supplier invoice) is paid for THIS LPO's share
+    // only - never the whole bill from one LPO's "Paid to supplier".
+    const { count: sharing } = await admin.from("purchase_orders").select("id", { count: "exact", head: true }).eq("zoho_bill_id", po.zoho_bill_id).neq("id", po.id);
+    if ((sharing ?? 0) > 0) {
+      const share = (await billErpFigures(po)).gross;
+      amount = round2(Math.min(bill.balance, share));
+    } else amount = round2(bill.balance);
     const j = await zohoFetch<{ vendorpayment?: { payment_id: string } }>("/vendorpayments", {
       org,
       method: "POST",
@@ -2034,7 +2080,9 @@ async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string)
   // The id is stored only once the bill really shows 0 due: an adopted foreign/partial payment must fail loudly
   // WITHOUT locking creation out on the next run.
   const after = await zohoBillById(org, po.zoho_bill_id);
-  if (after && after.balance > 0.005) throw new ZohoError(`${po.number} is marked paid in the ERP but the Zoho bill still shows ${after.balance.toFixed(2)} due: the accountant checks it in Zoho.`);
+  // A shared bill (one supplier invoice for several LPOs) keeps the other LPOs' shares due until they are paid too.
+  const { count: sharedWith } = await admin.from("purchase_orders").select("id", { count: "exact", head: true }).eq("zoho_bill_id", po.zoho_bill_id).neq("id", po.id).is("supplier_paid_at", null);
+  if (after && after.balance > 0.005 && !(sharedWith ?? 0)) throw new ZohoError(`${po.number} is marked paid in the ERP but the Zoho bill still shows ${after.balance.toFixed(2)} due: the accountant checks it in Zoho.`);
   await admin.from("purchase_orders").update({ zoho_billpayment_id: zid }).eq("id", po.id);
 
   // The proof (bank slip, card slip, signed receipt or cheque copy), once per payment: on the payment when Zoho takes

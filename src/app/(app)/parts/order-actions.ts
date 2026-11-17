@@ -32,6 +32,7 @@ import { DEFAULT_UNDO_MINUTES, mayUndo } from "@/lib/money-undo";
 import { objectExists } from "@/lib/upload-targets/common";
 import { accountsLimitOf, closeReviews, lpoReviewReady, replyToAccounts, sendForOwner } from "@/lib/lpo-review";
 import { lpoAmounts } from "@/lib/supplier-vat";
+import { addLpoToInvoice, checkCovers, sharesFor } from "@/lib/invoice-cover";
 
 function refresh(jobId: string | null, poId?: string) {
   revalidatePath("/parts");
@@ -366,9 +367,15 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
     return { message: "Noted: invoice to follow. It sits in the pending list and the job's profit stays provisional." };
   }
   const invoiceDate = blankToNull(formData.get("invoice_date"));
+  // 17 November 2026 (Section 2): "THIS INVOICE ALSO COVERS…" - the supplier's other open LPOs on the same paper.
+  const coverIds = opts.edit ? [] : formData.getAll("also_covers").map(String).filter(Boolean);
+  const coverCheck = coverIds.length ? await checkCovers(po, coverIds) : { covers: [] };
+  if ("error" in coverCheck) return { error: coverCheck.error };
+  const covers = coverCheck.covers;
+  const coveredTotal = (Number(po.total_cost_aed) || 0) + covers.reduce((s, c) => s + (Number(c.total_cost_aed) || 0), 0);
   // The ONE rulebook (src/lib/supplier-invoice.ts): real-looking number, date not in the future,
-  // an amount more than 5% off the LPO total confirmed with a tick.
-  const check = checkSupplierInvoice({ toFollow: false, number, date: invoiceDate, amount: Number.isFinite(amount) && amount > 0 ? amount : null, poTotal: Number(po.total_cost_aed) || null, amountConfirmed: formData.get("amount_confirmed") === "on", today: dubaiToday() });
+  // an amount more than 5% off the LPO total (the LPOs together, when it covers several) confirmed with a tick.
+  const check = checkSupplierInvoice({ toFollow: false, number, date: invoiceDate, amount: Number.isFinite(amount) && amount > 0 ? amount : null, poTotal: coveredTotal || null, amountConfirmed: formData.get("amount_confirmed") === "on", today: dubaiToday() });
   if (!check.ok) return { error: check.error };
   if (!number || !invoiceDate) return { error: "Enter the supplier invoice number and date, or tick Invoice to follow." };
   const now = new Date().toISOString();
@@ -391,7 +398,8 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
   const editCols = opts.edit
     ? { supplier_invoice_vat_aed: vatValue !== null && Number.isFinite(vatValue) && vatValue >= 0 ? vatValue : null, supplier_invoice_checked_at: null }
     : {};
-  await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_date: invoiceDate, supplier_invoice_path: path ?? po.supplier_invoice_path, supplier_invoice_amount: Number.isFinite(amount) && amount > 0 ? amount : null, supplier_invoice_at: now, supplier_invoice_by: staff.id, ...editCols, ...((await siQueryReady()) ? { supplier_invoice_query: null, supplier_invoice_query_at: null, supplier_invoice_query_by: null } : {}), updated_by: staff.id }).eq("id", po.id);
+  const shares = covers.length && Number.isFinite(amount) && amount > 0 ? sharesFor(amount, po, covers) : null;
+  await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_date: invoiceDate, supplier_invoice_path: path ?? po.supplier_invoice_path, supplier_invoice_amount: shares ? (shares.get(po.id) ?? null) : Number.isFinite(amount) && amount > 0 ? amount : null, supplier_invoice_at: now, supplier_invoice_by: staff.id, ...editCols, ...((await siQueryReady()) ? { supplier_invoice_query: null, supplier_invoice_query_at: null, supplier_invoice_query_by: null } : {}), updated_by: staff.id }).eq("id", po.id);
   if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: supplier invoice ${number} entered by ${staff.display_name}${diffs.length ? `. Price differences, job cost corrected: ${diffs.join("; ")}` : ""}`, created_by: staff.id });
   // Zoho Books phase 2: the entered invoice becomes the supplier's bill. An invoice CHANGED after the bill
   // already posted cannot be re-posted (never twice): the row turns red for the accountant instead.
@@ -418,8 +426,39 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
     // so the bill waits for the fresh check.
     await tryEnqueueZoho("bill", po.id, po.job_id, staff.id);
   }
-  await notifyInvoiceReceived([po.id]);
+  // The other LPOs on the same paper: the same number, date and scan, each with its own share; their "Invoice missing" clears.
+  for (const c of covers) {
+    await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_date: invoiceDate, supplier_invoice_path: path ?? null, supplier_invoice_amount: shares ? (shares.get(c.id) ?? null) : null, supplier_invoice_at: now, supplier_invoice_by: staff.id, updated_by: staff.id }).eq("id", c.id).neq("supplier_invoice_status", "received");
+    if (c.job_id) await admin.from("job_events").insert({ job_id: c.job_id, event_type: "supplier_invoice", note: `${c.number}: supplier invoice ${number} entered by ${staff.display_name} – the same paper as ${po.number}`, created_by: staff.id });
+  }
+  await notifyInvoiceReceived([po.id, ...covers.map((c) => c.id)]);
+  if (covers.length) return { message: `Supplier invoice saved for ${[po.number, ...covers.map((c) => c.number)].join(" + ")}: one invoice, each LPO with its share. Their "Invoice missing" is cleared.` };
   return { message: mismatches ? `Supplier invoice saved. The price went up above the limit: it waits for the owner's OK (or Query with supplier).` : diffs.length ? `Supplier invoice saved. ${priced.decision.increase > 0 ? "Price up within the limit: accepted, the owner is told." : "Price down: accepted."}` : "Supplier invoice saved." };
+}
+
+/**
+ * "Add another LPO to this invoice" (17 November 2026, Section 2): an LPO of the same supplier joins an invoice already
+ * saved; the paper's before-VAT total is shared again across every LPO it covers (they go back to unchecked). Owner and
+ * accounts. The answer shows next to the button that was pressed (the page it came from, opened at that invoice).
+ */
+export async function addLpoToInvoiceAction(anchorPoId: string, back: string, formData: FormData) {
+  const staff = await requirePermission("viewPurchaseOrders");
+  const safeBack = /^\/(supplier-invoices|parts-accounts|parts\/orders\/[0-9a-f-]{36})(\?[^#]*)?$/.test(back) ? back : `/parts/orders/${anchorPoId}`;
+  const go = (q: string): never => redirect(`${safeBack}${safeBack.includes("?") ? "&" : "?"}${q}#add-lpo`);
+  if (!["owner", "accounts"].includes(staff.role_id) || staff.viewingAs) return go(`add_lpo_error=${encodeURIComponent("Supplier invoices are changed by accounts (or the owner).")}`);
+  const other = String(formData.get("other_po") ?? "");
+  const total = Number(String(formData.get("invoice_total") ?? "").replace(/[^\d.]/g, ""));
+  const r = await addLpoToInvoice(anchorPoId, other, total, staff);
+  if (r.error) return go(`add_lpo_error=${encodeURIComponent(r.error)}`);
+  // A bill already in Zoho for this invoice cannot take the new LPO by itself: it turns red for the accountant.
+  if (r.postedBill) {
+    await flagZohoAttention("bill", anchorPoId, `Another LPO was added to this supplier invoice after its bill reached Zoho: add its lines to the bill in Zoho by hand, then press "Done by hand".`);
+  }
+  await notifyInvoiceReceived(r.poIds ?? []);
+  for (const id of r.poIds ?? []) refresh(null, id);
+  revalidatePath("/supplier-invoices");
+  revalidatePath("/parts-accounts");
+  return go(`add_lpo_message=${encodeURIComponent(r.words ?? "Added.")}`);
 }
 
 /**
