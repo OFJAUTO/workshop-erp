@@ -1,3 +1,15 @@
+# Handover – list of 17 November 2026 (IN PROGRESS; last update 17 Nov, 09:55 Dubai)
+
+**NEEDS OMAR (top first):**
+1. **AED 5,030.55 to ARABIAN GULF MECHANICAL CENTRE is NOT recorded** (the proof error stopped it). Supplier payments → Pay any supplier → ARABIAN GULF… → amount, method, "Advance with…" → Add the proof → Record the payment → YES, RECORD.
+2. Five supplier payments recorded right after a refused proof still have none: SPAY-00023, -00024, -00028, -00029, -00033 (Payment history → Correct this payment → Add the proof).
+3. AL TAYER: enter the one paper for LPO-00039-1 + LPO-00039-3 (Supplier invoices → LPO-00039-1 → Scan & enter → tick LPO-00039-3).
+4. Still open: the AED 8,000.00 advance for E-00082 (16 Nov list); Mathew picks the Zoho account for stock bills.
+
+**Done so far (2 of 7):** S1 proof belongs to the payment (eab9c83e, `docs/advance-proof-17-nov-note.md`); S2 one invoice, several LPOs (c8d600dc, `docs/one-invoice-many-lpos-17-nov-note.md`). No database change waiting yet.
+
+---
+
 # Handover – list of 16 November 2026 (ALL DONE; last update 16 Nov, 17:45 Dubai)
 
 **NEEDS OMAR (top first):**
