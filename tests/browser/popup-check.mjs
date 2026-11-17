@@ -159,6 +159,8 @@ export async function runPopups() {
   else notReached.push("Ask the advisor: the advisor's name did not show on the parts page");
   await goto(p, pUrl);
   await check(p, "Part menu", "[data-part-menu]", () => click(p, 'button[aria-label="More for this part"]'), findings, shots);
+  // 17 November 2026 (Section 4): the VISIBLE "Change" button on an approved part line.
+  if (await p.locator("[data-change-supplier-open]").count()) { await goto(p, pUrl); await check(p, "Change supplier / price", "[data-part-change-dialog]", () => click(p, "[data-change-supplier-open]"), findings, shots); }
   await goto(p, pUrl);
   await check(p, "Remove: not needed", "[data-remove-dialog]", async () => { await click(p, 'button[aria-label="More for this part"]'); await p.locator("[data-part-menu]").getByText(/Remove: not needed/).first().click(); }, findings, shots);
   await goto(p, pUrl);

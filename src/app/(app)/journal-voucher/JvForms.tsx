@@ -96,7 +96,7 @@ export function ToRecordList({ rows, staff }: { rows: ToRecordView[]; staff: Sta
           <p className="text-xs text-muted">Every ticked charge on the provider&apos;s ONE invoice: one voucher, paid later from the &quot;Pay later&quot; list.</p>
           <input type="hidden" name="lines" value={lines} />
           <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Provider<Input name="provider" required textCase="upper" defaultValue={picked[0]?.provider ?? ""} key={picked[0]?.id ?? "none"} data-jv-later-provider /></label>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Invoice number<Input name="invoice_number" required spell={false} data-jv-later-number /></label>
             <MoneyDate name="invoice_date" label="Invoice date" max={today} hook="data-jv-later-date" />
           </div>
