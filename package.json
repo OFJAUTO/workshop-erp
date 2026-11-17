@@ -220,7 +220,8 @@
     "test:s17-1": "node --env-file=.env.test.local tests/browser/test-s17-1-advance-proof.mjs",
     "test:s17-2": "node --env-file=.env.test.local tests/browser/test-s17-2-one-invoice.mjs",
     "test:s17-3": "node --env-file=.env.test.local tests/browser/test-s17-3-payment-date.mjs",
-    "test:s17-4": "node --env-file=.env.test.local tests/browser/test-s17-4-change-supplier.mjs"
+    "test:s17-4": "node --env-file=.env.test.local tests/browser/test-s17-4-change-supplier.mjs",
+    "test:s17-5": "node --env-file=.env.test.local tests/browser/test-s17-5-draft-lpo.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

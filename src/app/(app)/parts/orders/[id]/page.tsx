@@ -1,4 +1,7 @@
 import { latheV2Ready } from "@/lib/lathe";
+import { LpoShareButton } from "@/components/LpoShareButton";
+import { draftSuppliersOf, lpoShareStamps } from "@/lib/lpo-share";
+import { shareApprovedLpo, shareDraftLpo } from "../../lpo-actions";
 import { sendCheckForPo } from "@/lib/send-check";
 import { receivedCountWords } from "@/lib/receipt-rules";
 import { receiptPropsFor } from "@/lib/receipts";
@@ -148,6 +151,9 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const site = await getSiteUrl();
   const supplierEmailOf = new Map<string, string | null>(((lpos?.suppliers ?? []).length ? (await admin.from("suppliers").select("id, email").in("id", (lpos?.suppliers ?? []).map((s) => s.po.supplier_id).filter((x): x is string => !!x))).data ?? [] : []).map((s) => [s.id as string, (s.email as string | null) ?? null]));
   const supplierDigits = (bundle.supplier?.phone ?? "").replace(/[^\d]/g, "");
+  const draftSuppliers = po.status === "pending_approval" ? await draftSuppliersOf(bundle) : [];
+  const { data: kidRows } = isMain ? await admin.from("purchase_orders").select("id").eq("parent_id", po.id) : { data: [] };
+  const shareStamps = await lpoShareStamps([po.id, ...((kidRows ?? []) as { id: string }[]).map((k) => k.id)]);
   const sendable = !isMain && po.status !== "pending_approval" && po.status !== "cancelled" && !!po.verify_token;
   // A later request continues the car's first LPO family, so its supplier LPOs are found by their parts too.
   const mainPartIds = new Set(lines.map((l) => l.part_item_id).filter(Boolean));
@@ -280,12 +286,32 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
         }
         actions={
           <>
+            {sendable && canManage ? <LpoShareButton mode="final" number={po.number} supplier={po.supplier_name} phoneDigits={supplierDigits || null} email={bundle.supplier?.email ?? null} emailReady={gmailConfigured()} pdfHref={`/api/pdf/po/${po.id}`} jobId={po.job_id} share={shareApprovedLpo.bind(null, po.id)} /> : null}
             {sendable && canManage ? <LpoSendControl poId={po.id} number={po.number} dateText={formatDate(po.approved_at ?? po.created_at)} link={`${site}/api/pdf/lpo/${po.verify_token}`} phoneDigits={supplierDigits} sentAt={po.sent_at} /> : null}
           </>
         }
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {/* 17 November 2026 (Section 5): a DRAFT for each supplier before approval; who shared what and when. */}
+      {po.status === "pending_approval" && canManage && draftSuppliers.length ? (
+        <Card className="flex flex-col gap-2" data-lpo-draft-share>
+          <SectionLabel>Share a draft with the supplier</SectionLabel>
+          <p className="text-xs text-muted">For a supplier who must check prices and availability before approval. The PDF says across every page: DRAFT - FOR PRICE AND AVAILABILITY ONLY. NOT AN ORDER UNTIL APPROVED. The LPO itself can only be shared once it is approved.</p>
+          <div className="flex flex-wrap gap-2">
+            {draftSuppliers.map((d) => (
+              <LpoShareButton key={d.name} mode="draft" number={po.number} supplier={d.name} phoneDigits={(d.phone ?? "").replace(/[^\d]/g, "") || null} email={d.email} emailReady={gmailConfigured()} pdfHref={`/api/pdf/lpo-draft/${po.id}?supplier=${encodeURIComponent(d.name)}`} jobId={po.job_id} share={shareDraftLpo.bind(null, po.id, d.name)} />
+            ))}
+          </div>
+        </Card>
+      ) : null}
+      {shareStamps.length ? (
+        <ul className="flex flex-col gap-0.5 text-sm" data-lpo-share-stamps>
+          {shareStamps.map((st, i) => (
+            <li key={i} data-lpo-share-stamp={st.kind}>{st.kind === "draft" ? `Draft shared with ${st.supplier}` : `LPO sent to ${st.supplier}`} · {formatDateTime(st.at)}{st.by ? ` · ${st.by}` : ""}{st.method ? ` (${st.method === "whatsapp" ? "WhatsApp" : st.method === "email" ? "email" : st.method})` : ""}</li>
+          ))}
+        </ul>
+      ) : null}
       {/* 13 November 2026: what the parts desk saw in "check before you send" (the approver sees the same flags). */}
       {sentCheck ? (
         <Card className={`flex flex-col gap-1 ${sentCheck.flags.length ? "!border-red-bar border-2" : ""}`} data-sent-check data-sent-check-flags={sentCheck.flags.length}>

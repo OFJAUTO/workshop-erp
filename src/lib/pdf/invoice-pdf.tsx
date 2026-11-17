@@ -456,7 +456,24 @@ export async function renderReceiptPdf(data: ReceiptData, settings: Settings): P
 }
 
 /** An LPO for a supplier: part numbers, quantities and the agreed cost. Internal document. */
-export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise<Buffer> {
+/** The words on every draft LPO (17 November 2026, Section 5). */
+export const LPO_DRAFT_WORDS = "DRAFT - FOR PRICE AND AVAILABILITY ONLY. NOT AN ORDER UNTIL APPROVED.";
+
+export async function renderPoPdf(bundleIn: PoBundle, settings: Settings, opts: { draft?: boolean; supplierName?: string | null; supplier?: PoBundle["supplier"] } = {}): Promise<Buffer> {
+  // 17 November 2026 (Section 5): a DRAFT for one supplier before approval - only that supplier's lines (a main LPO
+  // holds several), the draft mark across every page and in the header, no "Approved electronically" and no QR.
+  const draft = !!opts.draft;
+  const forSupplier = (opts.supplierName ?? "").trim();
+  const sameName = (a: string | null | undefined) => (a ?? "").trim().toUpperCase() === forSupplier.toUpperCase();
+  const bundle: PoBundle = forSupplier
+    ? {
+        ...bundleIn,
+        po: { ...bundleIn.po, supplier_name: forSupplier },
+        supplier: opts.supplier ?? bundleIn.supplier,
+        lines: bundleIn.lines.filter((l) => { const p = l.part_item_id ? (bundleIn.parts ?? []).find((x) => x.id === l.part_item_id) : null; return p ? sameName(p.supplier) : sameName(bundleIn.po.supplier_name); }),
+        charges: (bundleIn.charges ?? []).filter((c) => sameName((c as unknown as { supplier_name?: string | null }).supplier_name ?? bundleIn.po.supplier_name)),
+      }
+    : bundleIn;
   // The supplier copy: the only LPO that leaves the system. LPO number and date, the supplier, the VIN only, the
   // lines with list price, discount, net, VAT and total, then "Approved electronically" with the time and a QR code
   // to the verification page. No job card, no expected dates, no urgency, no staff names.
@@ -466,7 +483,7 @@ export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise
   // Supplier amounts with VAT (5 November 2026, Mathew): THE rule - VAT only from a supplier registered with a TRN,
   // 5% of the order total rounded half up, printed once in the totals box.
   const chargesVat = supplierChargesVat(supplier ? { ...supplier, name: po.supplier_name || supplier.name } : { name: po.supplier_name, trn: null, vat_registered: null });
-  const verifyUrl = po.verify_token ? `${PRODUCTION_SITE_URL}/lpo/${po.verify_token}` : null;
+  const verifyUrl = po.verify_token && !draft ? `${PRODUCTION_SITE_URL}/lpo/${po.verify_token}` : null;
   const [logo, qr] = await Promise.all([loadLogo(), verifyUrl ? qrPng(verifyUrl) : Promise.resolve(null)]);
   const rows: PoDocRow[] = lines.map((l) => {
     const list = l.list_price !== null && l.list_price !== undefined ? l.list_price : l.unit_cost;
@@ -484,8 +501,13 @@ export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise
   const vin = job?.vehicle?.vin ?? null;
   const approvedAt = po.approved_at ?? po.created_at;
   const doc = (
-    <PdfDocument title={`LPO ${po.number}`} company={company} logo={logo} footerLines={[chargesVat ? "Please quote the LPO number on your delivery note and invoice. Prices before VAT as agreed." : `Please quote the LPO number on your delivery note and invoice. Prices as agreed. ${NO_VAT_WORDS}.`]}>
-      <TitleRow title="LOCAL PURCHASE ORDER" meta={[{ label: "LPO no.", value: po.number }, { label: "Date", value: formatDate(approvedAt) }]} />
+    <PdfDocument title={draft ? `DRAFT LPO ${po.number}` : `LPO ${po.number}`} watermark={draft ? "DRAFT" : null} company={company} logo={logo} footerLines={[...(draft ? [LPO_DRAFT_WORDS] : []), chargesVat ? "Please quote the LPO number on your delivery note and invoice. Prices before VAT as agreed." : `Please quote the LPO number on your delivery note and invoice. Prices as agreed. ${NO_VAT_WORDS}.`]}>
+      <TitleRow title={draft ? "DRAFT – LOCAL PURCHASE ORDER" : "LOCAL PURCHASE ORDER"} meta={[{ label: draft ? "Draft of" : "LPO no.", value: po.number }, { label: "Date", value: formatDate(draft ? new Date().toISOString() : approvedAt) }]} />
+      {draft ? (
+        <View style={{ borderWidth: 2, borderColor: "#000000", padding: px(8), marginBottom: px(10) }} wrap={false}>
+          <Text style={{ fontSize: px(11), fontWeight: 800, textAlign: "center" }}>{LPO_DRAFT_WORDS}</Text>
+        </View>
+      ) : null}
       <InfoBoxes
         boxes={[
           { title: "Supplier", strong: po.supplier_name, lines: [supplier?.trn ? `TRN ${supplier.trn}` : null, supplier?.address ?? null, [supplier?.phone, supplier?.email].filter(Boolean).join(" · ") || null, supplier?.payment_terms ? `Terms: ${supplier.payment_terms}` : null] },
@@ -507,14 +529,19 @@ export async function renderPoPdf(bundle: PoBundle, settings: Settings): Promise
           <Text>{po.notes}</Text>
         </View>
       ) : null}
-      <View style={[styles.note, { flexDirection: "row", alignItems: "center", gap: px(14) }]} wrap={false}>
+      {draft ? (
+        <View style={styles.note} wrap={false}>
+          <Text style={styles.smallTitle}>Not approved yet</Text>
+          <Text>This draft is for checking prices and availability only. Please do not supply against it: the approved LPO follows.</Text>
+        </View>
+      ) : <View style={[styles.note, { flexDirection: "row", alignItems: "center", gap: px(14) }]} wrap={false}>
         <View style={{ flex: 1 }}>
           <Text style={styles.smallTitle}>Approved electronically</Text>
           <Text>This order was issued by the OFJ Automotive system and needs no signature or stamp.</Text>
           <Text style={styles.small}>{formatDateTime(approvedAt)}{verifyUrl ? ` · Scan the code to verify this order` : ""}</Text>
         </View>
         {qr ? <Image src={{ data: qr, format: "png" }} style={styles.qr} /> : null}
-      </View>
+      </View>}
     </PdfDocument>
   );
   return renderToBuffer(doc);

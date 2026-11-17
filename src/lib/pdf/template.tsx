@@ -181,7 +181,7 @@ export function Amount({ value, currency, size = px(12), bold = false, color = I
   );
 }
 
-export function PdfDocument({ title, company, logo, qr, footerLines = [], scanLabel = "Scan to view\nthis document online", uppercase = false, computerGenerated = false, tight = false, children }: { uppercase?: boolean; /** The tax invoice carries the "computer generated document" line; nothing else does. */ computerGenerated?: boolean; title: string; company: Company; logo: Buffer | null; qr?: Buffer | null; footerLines?: string[]; scanLabel?: string; /** 31 October 2026: drawn again with less air when it overflows a page by a little (fonts never shrink). */ tight?: boolean; children: ReactNode }) {
+export function PdfDocument({ title, company, logo, qr, footerLines = [], scanLabel = "Scan to view\nthis document online", uppercase = false, computerGenerated = false, tight = false, watermark = null, children }: { /** 17 November 2026 (Section 5): a large word across every page ("DRAFT"). */ watermark?: string | null; uppercase?: boolean; /** The tax invoice carries the "computer generated document" line; nothing else does. */ computerGenerated?: boolean; title: string; company: Company; logo: Buffer | null; qr?: Buffer | null; footerLines?: string[]; scanLabel?: string; /** 31 October 2026: drawn again with less air when it overflows a page by a little (fonts never shrink). */ tight?: boolean; children: ReactNode }) {
   // The owner's mockup (31 October 2026): ONE footer row under a thick rule - Tel, Web, Email and "Page X of Y". Lines
   // a document must carry (the tax invoice's computer-generated line, an LPO's instruction) and a QR sit just above it.
   const extra = [computerGenerated ? "This is a computer generated document which requires no stamp and signature." : null, ...footerLines].filter((x): x is string => !!x);
@@ -189,6 +189,11 @@ export function PdfDocument({ title, company, logo, qr, footerLines = [], scanLa
   return (
     <Document title={title} author={company.tradingName} creator={company.tradingName} producer={company.tradingName}>
       <Page size="A4" style={[styles.page, { paddingTop: tight ? px(20) : px(30), paddingBottom: footerRoom }]}>
+        {watermark ? (
+          <View fixed style={{ position: "absolute", top: px(330), left: 0, right: 0, alignItems: "center", transform: "rotate(-35deg)" }}>
+            <Text style={{ fontSize: px(120), fontWeight: 800, color: "#000000", opacity: 0.08, letterSpacing: px(8) }}>{watermark}</Text>
+          </View>
+        ) : null}
         <View
           style={[styles.header, tight ? { paddingBottom: px(12), marginBottom: px(14) } : {}]}
           fixed

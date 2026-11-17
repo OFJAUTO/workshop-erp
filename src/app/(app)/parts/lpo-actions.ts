@@ -277,3 +277,52 @@ export async function receiveTicked(jobId: string, formData: FormData): Promise<
   revalidatePath(`/jobs/${jobId}`);
   return { ok: true, message: `${ids.length} part${ids.length === 1 ? "" : "s"} received.${receiptWord}${invoiceWord}` };
 }
+
+/**
+ * 17 November 2026 (Section 5): share the DRAFT of a waiting LPO with one supplier, for price and availability only.
+ * WhatsApp: the browser shares the PDF file, this records it; email: the draft PDF is sent from the parts mailbox. The
+ * draft is refused once the LPO is approved (the LPO itself is shared then).
+ */
+export async function shareDraftLpo(poId: string, supplier: string, method: "whatsapp" | "email" | "pdf"): Promise<{ error?: string; message?: string }> {
+  const staff = await requirePermission("managePurchaseOrders");
+  if (staff.viewingAs) return { error: "View as is read-only – use Act as to share it." };
+  const { draftSupplierRow, recordDraftShare } = await import("@/lib/lpo-share");
+  const bundle = await loadPurchaseOrder(poId);
+  if (!bundle) return { error: "LPO not found." };
+  if (bundle.po.status !== "pending_approval") return { error: "This LPO is approved: share the LPO itself (Share), not a draft." };
+  const name = supplier.trim() || bundle.po.supplier_name;
+  if (method === "email") {
+    if (!gmailConfigured()) return { error: "Email not set up yet: share it on WhatsApp meanwhile." };
+    const row = await draftSupplierRow(name);
+    const to = (row?.email ?? "").trim();
+    if (!to) return { error: `Add ${name}'s email under Suppliers first, or share it on WhatsApp.` };
+    const settings = await getSettings();
+    const from = String(settings.supplier_lpo_from_email ?? "").trim();
+    if (!from) return { error: "Choose the mailbox to send from under Settings > Parts first." };
+    let pdf: Buffer;
+    try {
+      pdf = await renderPoPdf(bundle, settings, { draft: true, supplierName: name, supplier: row });
+    } catch {
+      return { error: "The draft PDF could not be made." };
+    }
+    try {
+      await sendGmail({ from, fromName: "OFJ Automotive, Parts", to, subject: `DRAFT for price and availability – ${bundle.po.number} (not an order)`, text: `Dear ${name},\n\nPlease check prices and availability on the attached DRAFT of our LPO ${bundle.po.number}.\n\nDRAFT - FOR PRICE AND AVAILABILITY ONLY. NOT AN ORDER UNTIL APPROVED. The approved LPO follows.\n\nOFJ Automotive, Parts`, attachments: [{ filename: `OFJ DRAFT ${bundle.po.number}.pdf`, content: pdf, contentType: "application/pdf" }] });
+    } catch (e) {
+      return { error: e instanceof Error ? dbWords(e, "parts/lpo-actions") : "The email could not be sent." };
+    }
+    await recordDraftShare(poId, name, "email", staff);
+    refresh(bundle.po.job_id, poId);
+    return { message: `Draft emailed to ${to}.` };
+  }
+  await recordDraftShare(poId, name, method, staff);
+  refresh(bundle.po.job_id, poId);
+  return { message: `Draft shared with ${name}: noted on the LPO.` };
+}
+
+/** 17 November 2026 (Section 5): the approved LPO shared on WhatsApp from the Share window (the send is recorded). */
+export async function shareApprovedLpo(poId: string, method: "whatsapp" | "email"): Promise<{ error?: string; message?: string }> {
+  if (method === "email") return emailSupplierLpo(poId);
+  const { markLpoSent } = await import("./order-actions");
+  const r = await markLpoSent(poId, "whatsapp");
+  return r.error ? { error: r.error } : { message: "Shared on WhatsApp: noted as sent on the LPO." };
+}
