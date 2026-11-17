@@ -222,7 +222,8 @@
     "test:s17-3": "node --env-file=.env.test.local tests/browser/test-s17-3-payment-date.mjs",
     "test:s17-4": "node --env-file=.env.test.local tests/browser/test-s17-4-change-supplier.mjs",
     "test:s17-5": "node --env-file=.env.test.local tests/browser/test-s17-5-draft-lpo.mjs",
-    "test:s17-6": "node --env-file=.env.test.local tests/browser/test-s17-6-journal-voucher.mjs"
+    "test:s17-6": "node --env-file=.env.test.local tests/browser/test-s17-6-journal-voucher.mjs",
+    "test:s17-7": "node --env-file=.env.test.local tests/browser/test-s17-7-part-numbers.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

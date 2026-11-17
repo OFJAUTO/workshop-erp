@@ -245,6 +245,7 @@ export default async function PartsPage({ searchParams }: { searchParams: Promis
         actions={
           <>
             <LinkButton href="/parts/inspections" tone="secondary" size="lg" data-inspection-list-link>Inspection reports</LinkButton>
+            <LinkButton href="/parts/part-number-check" tone="secondary" size="lg" data-pn-check-link>Part number check</LinkButton>
             <LinkButton href="/parts/no-home" tone="secondary" size="lg" data-returns-tab>Returns and leftovers{noHomeCount ? ` (${noHomeCount})` : ""}</LinkButton>
           </>
         }

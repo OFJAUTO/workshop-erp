@@ -4,6 +4,8 @@
  * prices back to the advisor, an LPO for approval, an LPO to the supplier, a receipt.
  */
 
+import { madeUpPartNumber } from "./part-number-check";
+
 export type SendLine = {
   key: string;
   name: string;
@@ -33,7 +35,11 @@ export function placeholderReason(l: Pick<SendLine, "partNumber" | "name" | "noN
   const pn = String(l.partNumber ?? "").trim();
   if (!pn || pn.toUpperCase() === "NO NUMBER") return l.noNumberTicked || pn.toUpperCase() === "NO NUMBER" ? null : "No part number (tick \"No part number yet\" if the supplier gave none)";
   const c = compact(pn);
+  // 17 November 2026 (Section 7): THE one rule (name, word, word + digits, placeholder, stand-in).
+  const made = madeUpPartNumber(pn, l.name);
+  if (made?.kind === "word_digits") return `Part number "${pn}" is the part's name with a number added (${made.words})`;
   if (c && c === compact(l.name)) return `Part number "${pn}" is just the part's name`;
+  if (made?.kind === "word" || made?.kind === "name") return `Part number "${pn}" is a word, not a part number`;
   if (WORD_NUMBERS.test(c)) return `Part number "${pn}" is a word, not a part number`;
   if (/^\d{3,4}[A-Z]{2}$/.test(c)) return `Part number "${pn}" looks like a placeholder (like 1234AA)`;
   if (/^OFJ\d{0,3}$/.test(c)) return `Part number "${pn}" is a stand-in`;

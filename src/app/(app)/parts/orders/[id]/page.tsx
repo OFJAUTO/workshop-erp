@@ -1,4 +1,5 @@
 import { latheV2Ready } from "@/lib/lathe";
+import { madeUpWords } from "@/lib/part-number-check";
 import { LpoShareButton } from "@/components/LpoShareButton";
 import { draftSuppliersOf, lpoShareStamps } from "@/lib/lpo-share";
 import { shareApprovedLpo, shareDraftLpo } from "../../lpo-actions";
@@ -363,6 +364,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                         <span className="text-muted">× {l.quantity} at {money(l.unit_cost)}</span>
                         <span className="ml-auto font-semibold">{money(l.quantity * l.unit_cost)}</span>
                         {lineProblems.get(l.part_item_id) ? <span className="basis-full text-xs font-bold text-red" data-lpo-line-problem={l.id}>Not a real price yet: {lineProblems.get(l.part_item_id)?.words.replace(/^[^:]*:\s*/, "")}</span> : null}
+                      {/* 17 November 2026 (Section 7): a made-up part number stays flagged until the real one is entered. */}
+                      {po.status !== "cancelled" && (madeUpWords(l.part_number, l.description) || String(l.part_number ?? "").trim().toUpperCase() === "NO NUMBER") ? <span className="basis-full text-xs font-bold text-amber-text" data-lpo-pn-flag={l.id}>{madeUpWords(l.part_number, l.description) ?? "No part number yet: ask the supplier for it."}</span> : null}
                         {canRefuseLine ? (
                           <details className="basis-full" data-refuse-line={l.id}>
                             <summary className="inline-flex min-h-9 cursor-pointer list-none items-center text-xs font-bold text-red underline underline-offset-4 [&::-webkit-details-marker]:hidden">Refuse this line</summary>
@@ -416,6 +419,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                       {realPartNumber(l.part_number) ? <span className="text-muted">{realPartNumber(l.part_number)}</span> : null}
                       <span className="text-muted">× {l.quantity} at AED {l.unit_cost.toFixed(2)}</span>
                       {lineProblems.get(l.part_item_id) ? <span className="basis-full text-xs font-bold text-red" data-lpo-line-problem={l.id}>Not a real price yet: {lineProblems.get(l.part_item_id)?.words.replace(/^[^:]*:\s*/, "")}</span> : null}
+                      {/* 17 November 2026 (Section 7): a made-up part number stays flagged until the real one is entered. */}
+                      {po.status !== "cancelled" && (madeUpWords(l.part_number, l.description) || String(l.part_number ?? "").trim().toUpperCase() === "NO NUMBER") ? <span className="basis-full text-xs font-bold text-amber-text" data-lpo-pn-flag={l.id}>{madeUpWords(l.part_number, l.description) ?? "No part number yet: ask the supplier for it."}</span> : null}
                       {l.expected_date ? <Badge tone={late ? "red" : "neutral"}>{late ? "Late, " : ""}expected {formatDate(l.expected_date)}</Badge> : null}
                       {l.received_qty > 0 ? <Badge tone={l.received_qty >= l.quantity ? "green" : "amber"}>received {l.received_qty}</Badge> : null}
                       {l.flag ? <Badge tone="red">{l.flag === "wrong" ? "Wrong part" : "Damaged"}: {l.flag_note}</Badge> : null}

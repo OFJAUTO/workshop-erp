@@ -11,6 +11,8 @@
  *    customer's price and absorb the difference, or the quotation is revised.
  */
 
+import { madeUpWords } from "./part-number-check";
+
 export type PartFacts = {
   supplier: string | null;
   cost: number | null;
@@ -125,6 +127,11 @@ const GENERIC = new Set(["PAD", "PADS", "DISC", "DISCS", "DISK", "BLADE", "BLADE
 
 /** A "part number" that is only the part's name or a kind of part: null = it looks real. */
 export function partNumberLooksLikeName(partNumber: string | null, name: string): string | null {
+  // 17 November 2026 (Section 7): THE one rule (part-number-check.ts) - also "word + digits" (BLADE78, FRONT PAD145).
+  return madeUpWords(partNumber, name) ?? legacyLooksLikeName(partNumber, name);
+}
+
+function legacyLooksLikeName(partNumber: string | null, name: string): string | null {
   const pn = (partNumber ?? "").trim().toUpperCase();
   if (!pn || pn === "NO NUMBER") return null;
   // A real number has a digit in it; letters only is a word.

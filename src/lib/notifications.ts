@@ -100,6 +100,8 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "advisor_question", label: "Parts (or a colleague) asks you about one of your cars", locked: true },
   { type: "advisor_answer", label: "The advisor answered your question about a car", locked: true },
   { type: "po_decided", label: "Your LPO was approved or refused", locked: true },
+  { type: "pn_flags_count", label: "Daily: how many part numbers look made up (BLADE78, FILTER69…)" },
+  { type: "pn_flags_weekly", label: "Weekly: the list of made-up part numbers by car and who typed them" },
   { type: "lpo_not_sent", label: "An approved LPO was not sent to the supplier after 2 working hours", locked: true },
   { type: "stock_reversal", label: "A stock entry to reverse (owner) or its decision", locked: true },
   { type: "po_owner_review", label: "An LPO sent for owner approval, the owner's reply or decision", locked: true },

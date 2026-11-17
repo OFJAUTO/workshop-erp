@@ -76,7 +76,7 @@ function housekeepingWords(report: Record<string, number>): string {
     paymentReportsLate: ["reported payment reminder", "reported payment reminders"],
     pricingReleased: ["held parts change sent to the advisor", "held parts changes sent to the advisor"],
     zohoWaiting: ["Zoho waiting reminder", "Zoho waiting reminders"],
-    lpoNotSent: ["approved LPO not sent (parts told)", "approved LPOs not sent (parts told)"], advanceLinksMoved: ["supplier advance moved to its new LPO", "supplier advances moved to their new LPOs"], advanceLinksUnlinked: ["supplier advance left unlinked (LPO cancelled)", "supplier advances left unlinked (LPO cancelled)"],
+    pnFlagsDaily: ["made-up part number counted for the owner", "made-up part numbers counted for the owner"], pnFlagsWeekly: ["made-up part number on the weekly list", "made-up part numbers on the weekly list"], lpoNotSent: ["approved LPO not sent (parts told)", "approved LPOs not sent (parts told)"], advanceLinksMoved: ["supplier advance moved to its new LPO", "supplier advances moved to their new LPOs"], advanceLinksUnlinked: ["supplier advance left unlinked (LPO cancelled)", "supplier advances left unlinked (LPO cancelled)"],
   };
   const parts = Object.entries(report)
     .filter(([, n]) => n > 0)
@@ -741,6 +741,16 @@ async function runHousekeeping(): Promise<Record<string, number>> {
     report.lpoNotSent = await approvedNotSentHourly(await getSettings());
   } catch {
     report.lpoNotSent = -1;
+  }
+
+  // 34. Made-up part numbers (17 November 2026, Section 7): the count in the owner's evening summary, the list on Mondays.
+  try {
+    const { pnFlagsOwnerSummary } = await import("@/lib/pn-flags");
+    const r = await pnFlagsOwnerSummary();
+    report.pnFlagsDaily = r.daily;
+    report.pnFlagsWeekly = r.weekly;
+  } catch {
+    report.pnFlagsDaily = -1;
   }
   return report;
 }
