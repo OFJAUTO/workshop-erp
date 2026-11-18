@@ -41,9 +41,10 @@ export async function recordSettlementAction(_prev: FormState, formData: FormDat
     },
     staff.id,
   );
-  if (!res.ok) return { error: res.error, values: { ...values, ...(res.askAgain ? { ask: "1" } : {}) } };
+  if (!res.ok) return { error: res.askAgain ? res.error : `NOT RECORDED – ${res.error}`, values: { ...values, ...(res.askAgain ? { ask: "1" } : {}) } };
   revalidatePath("/accounts-posting");
-  return { success: `${res.number} recorded: ${res.count} payment${res.count === 1 ? "" : "s"}, the bank kept AED ${res.fee.toFixed(2)} (MSF + fee AED ${res.cost.toFixed(2)} on the jobs, the VAT reclaimable)${res.difference ? `, saved with an AED ${Math.abs(res.difference).toFixed(2)} difference (written in the change log)` : ""}. Each job now shows the actual fee; Zoho gets the transfer, the fees and the input VAT.` };
+  // 19 November 2026 (Section 3): the result first, in capitals, then the details.
+  return { success: `RECORDED – ${res.number} – AED ${res.gross.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n${res.number} recorded: ${res.count} payment${res.count === 1 ? "" : "s"}, the bank kept AED ${res.fee.toFixed(2)} (MSF + fee AED ${res.cost.toFixed(2)} on the jobs, the VAT reclaimable)${res.difference ? `, saved with an AED ${Math.abs(res.difference).toFixed(2)} difference (written in the change log)` : ""}. Each job now shows the actual fee; Zoho gets the transfer, the fees and the input VAT.` };
 }
 
 /** THE bank fee settings save (owner and accounts): MSF % before VAT, fee per transaction, VAT on the fees, terminal IDs. */
@@ -105,8 +106,8 @@ export async function uploadReportAction(_prev: FormState, formData: FormData): 
   const file = formData.get("report");
   if (!(file instanceof File)) return { error: "Choose the report file (PDF, CSV or Excel)." };
   const res = await uploadSettlementReport(file, staff.id);
-  if (!res.ok) return { error: res.error };
-  redirect(`/accounts-posting?report=${res.id}#report`);
+  if (!res.ok) return { error: res.error, values: { kind: res.kind ?? "" } };
+  redirect(`/accounts-posting?report=${res.id}&found=${encodeURIComponent(res.words)}#report`);
 }
 
 /** Record the reviewed report: one settlement per method, each payment with its exact MSF, fee and VAT. */

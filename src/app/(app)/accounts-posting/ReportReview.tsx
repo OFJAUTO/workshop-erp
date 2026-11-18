@@ -31,7 +31,7 @@ export function ReportUpload({ action, canSave }: { action: (s: FormState, f: Fo
         <Button type="submit" size="md" disabled={!canSave || pending} data-report-upload-button>{pending ? "Reading…" : "Upload settlement report"}</Button>
       </div>
       <span className="text-xs text-muted">Network International&apos;s Merchant Transaction Report, as PDF, CSV or Excel - the payment link and the card machine alike. Nothing is recorded until you check the lines and press Record.</span>
-      {state.error ? <Notice tone="error">{state.error}</Notice> : null}
+      {state.error ? <div data-report-answer={state.values?.kind || "error"}><Notice tone={state.values?.kind === "all_recorded" ? "info" : "error"}>{state.error}</Notice></div> : null}
     </form>
   );
 }

@@ -37,7 +37,7 @@ const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDig
  * Mark deposited / Mark cleared (Confirmed in bank) / Bounced, and the same record row (tick, the day it reached the
  * bank, amount, statement reference, Record).
  */
-export default async function AccountsPostingPage({ searchParams }: { searchParams: Promise<{ method?: string; report?: string; tab?: string }> }) {
+export default async function AccountsPostingPage({ searchParams }: { searchParams: Promise<{ method?: string; report?: string; tab?: string; found?: string }> }) {
   const staff = await requirePermission("cardSettlements");
   const sp = await searchParams;
   const [rows, history, settings, bankRows, ready] = await Promise.all([loadUnsettled(), loadSettlements(), getSettings(), loadBankWaiting(), bankPostingReady()]);
@@ -100,6 +100,8 @@ export default async function AccountsPostingPage({ searchParams }: { searchPara
         <SectionLabel>Upload the settlement report</SectionLabel>
         <ReportUpload action={uploadReportAction} canSave={!staff.viewingAs} />
         {review ? (
+          <>
+          {sp.found && !review.report.recordedAt ? <p className="rounded-control border border-green bg-green-soft px-3 py-2 text-sm font-bold text-green-text" data-report-found>{sp.found.slice(0, 80)}: check each line, then Record.</p> : null}
           <ReportReview
             reportId={review.report.id}
             report={{ ...review.report.parsed, fileName: review.report.fileName }}
@@ -110,6 +112,7 @@ export default async function AccountsPostingPage({ searchParams }: { searchPara
             canSave={!staff.viewingAs}
             action={recordReportAction.bind(null, review.report.id)}
           />
+          </>
         ) : sp.report ? <p className="text-sm text-muted">That report was not found. Upload it again.</p> : null}
       </Card>
 

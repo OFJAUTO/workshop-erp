@@ -165,7 +165,7 @@ export type SettleInput = {
    * returns words when a move is refused. Without it such a receipt is refused as before. */
   moveLate?: (late: { id: string; number: string; day: string }[]) => Promise<string | null>;
 };
-export type SettleResult = { ok: true; id: string; number: string; fee: number; cost: number; count: number; difference: number } | { ok: false; error: string; askAgain?: string; difference?: number };
+export type SettleResult = { ok: true; id: string; number: string; fee: number; cost: number; count: number; difference: number; gross: number } | { ok: false; error: string; askAgain?: string; difference?: number };
 
 /**
  * Records one settlement: the ticked payments (one method, all still unsettled), the net that reached the bank and
@@ -250,7 +250,7 @@ export async function recordSettlement(input: SettleInput, actorId: string): Pro
   }
   await tryEnqueueZoho("settlement", made.id, null, actorId);
   await refreshClosedReports(pays.map((p) => p.job_id));
-  return { ok: true, id: made.id, number: made.number, fee: round2(msf + txn + vat), cost: round2(msf + txn), count: pays.length, difference };
+  return { ok: true, id: made.id, number: made.number, fee: round2(msf + txn + vat), cost: round2(msf + txn), count: pays.length, difference, gross };
 }
 
 /** Closed jobs keep a frozen owner report: rebuilt when their card fee switches between estimate and actual. */

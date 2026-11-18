@@ -48,8 +48,12 @@ export async function readReportFile(name: string, buf: Buffer): Promise<ParsedR
   return parseReportRows(XLSX.utils.sheet_to_json<string[]>(wb.Sheets[wb.SheetNames[0]], { ...REPORT_SHEET_ROWS }), fees);
 }
 
+/** What the bank report upload says (19 November 2026, Section 3): one of three, never "no transactions in it". */
+export const REPORT_FORMATS = "the bank's settlement report as PDF, CSV or Excel (.xlsx, .xls)";
+export const couldNotRead = (name: string) => `Could not read this file (${name}). Accepted: ${REPORT_FORMATS}. Your typed settlement is not affected: record it with "Record the settlement".`;
+
 /** Upload: keep the file, read it, store the reading. Plain words back when the file is not this report. */
-export async function uploadSettlementReport(file: File, actorId: string): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
+export async function uploadSettlementReport(file: File, actorId: string): Promise<{ ok: true; id: string; words: string } | { ok: false; error: string; kind?: "unreadable" | "all_recorded" }> {
   if (!file || !file.size) return { ok: false, error: "Choose the report file (PDF, CSV or Excel)." };
   if (file.size > MAX_BYTES) return { ok: false, error: "The file is larger than 10 MB. Ask the bank for the report of one day or one batch." };
   if (!/\.(pdf|csv|xlsx|xls|txt)$/i.test(file.name)) return { ok: false, error: "The report must be a PDF, a CSV or an Excel file." };
@@ -59,10 +63,20 @@ export async function uploadSettlementReport(file: File, actorId: string): Promi
     parsed = await readReportFile(file.name, buf);
   } catch (e) {
     await logAppError("settlement report: read", e, { staffId: actorId, detail: { name: file.name } });
-    return { ok: false, error: `${file.name} could not be opened. Save it again as PDF, CSV or Excel (.xlsx) and try once more.` };
+    return { ok: false, kind: "unreadable", error: couldNotRead(file.name) };
   }
-  if (parsed.problems.length) return { ok: false, error: parsed.problems.join(" ") };
-  if (!parsed.lines.length) return { ok: false, error: "The report has no transactions in it." };
+  if (parsed.problems.length) return { ok: false, kind: "unreadable", error: `${couldNotRead(file.name)} (${parsed.problems.join(" ")})` };
+  if (!parsed.lines.length) return { ok: false, kind: "unreadable", error: couldNotRead(file.name) };
+  // Every sale already settled (recorded before, e.g. typed by hand): nothing to do - said plainly, with the STL numbers.
+  {
+    const probe: StoredReport = { id: "probe", fileName: file.name, parsed, uploadedAt: new Date().toISOString(), uploadedBy: actorId, settlementIds: [], recordedAt: null };
+    const matches = matchLines(parsed.lines, await reviewPaymentsFor(probe));
+    const sales = matches.filter((m) => parsed.lines.find((l) => l.index === m.index)?.kind === "sale");
+    if (sales.length && sales.every((m) => m.status === "settled")) {
+      const stl = Array.from(new Set(sales.map((m) => (m.why.match(/STL-\d{3,}/) ?? [])[0]).filter((x): x is string => !!x)));
+      return { ok: false, kind: "all_recorded", error: `Every transaction in this report is already recorded${stl.length ? ` (${stl.join(", ")})` : ""}. Nothing more to do for this report.` };
+    }
+  }
   const admin = createAdminClient();
   const id = crypto.randomUUID();
   const path = `${new Date().toISOString().slice(0, 10)}/${id}-${file.name.replace(/[^\w.-]+/g, "_").slice(-80)}`;
@@ -76,7 +90,7 @@ export async function uploadSettlementReport(file: File, actorId: string): Promi
     await logAppError("settlement report: insert", error, { staffId: actorId });
     return { ok: false, error: SAVE_FAILED };
   }
-  return { ok: true, id };
+  return { ok: true, id, words: `${parsed.lines.length} transaction${parsed.lines.length === 1 ? "" : "s"} found` };
 }
 
 export async function loadReport(id: string): Promise<StoredReport | null> {

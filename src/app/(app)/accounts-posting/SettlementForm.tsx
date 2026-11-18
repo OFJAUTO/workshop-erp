@@ -197,12 +197,29 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
           {ask ? <input type="hidden" name="confirmed" value="1" /> : null}
           {!canSave ? <span className="text-sm text-muted">Viewing as someone else: nothing can be recorded.</span> : null}
           {state.error ? <Notice tone={ask ? "info" : "error"}>{state.error}</Notice> : null}
-          {state.success ? <div data-settle-done><Notice tone="success">{state.success}</Notice></div> : null}
         </div>
-      ) : state.success ? (
-        <div data-settle-done><Notice tone="success">{state.success}</Notice></div>
       ) : null}
+      <SettleResult text={state.success ?? null} />
     </form>
+  );
+}
+
+/**
+ * THE result of Record the settlement (19 November 2026, Section 3): a centre window "RECORDED – STL-000xx – AED x",
+ * the details under it, OK closes it. Never a line somewhere on the page that can be missed.
+ */
+function SettleResult({ text }: { text: string | null }) {
+  const [closed, setClosed] = useState<string | null>(null);
+  if (!text || closed === text) return null;
+  const [head, ...rest] = text.split("\n");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/60 p-4" role="dialog" aria-modal="true" aria-label={head} data-settle-recorded>
+      <div className="flex max-h-[calc(100dvh-2rem)] w-full max-w-md flex-col gap-3 overflow-y-auto rounded-card bg-white p-5">
+        <p className="text-lg font-extrabold text-green-text" data-settle-recorded-head>{head}</p>
+        {rest.length ? <p className="text-sm" data-settle-done>{rest.join(" ")}</p> : null}
+        <div><Button type="button" size="md" onClick={() => setClosed(text)} data-settle-recorded-ok>OK</Button></div>
+      </div>
+    </div>
   );
 }
 
