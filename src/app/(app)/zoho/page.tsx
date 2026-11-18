@@ -7,7 +7,8 @@ import { requirePermission } from "@/lib/auth";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { billErpFigures, poForZoho, wentLiveOf, zohoOpenUrl, zohoWriteOrg, type OutboxRow } from "@/lib/zoho-sync";
+import { billGroupFigures, explainBillDiff, wentLiveOf, zohoOpenUrl, zohoWriteOrg, type OutboxRow } from "@/lib/zoho-sync";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { ZOHO_REAL_ORG_ID } from "@/lib/zoho";
 import { outboxDocs } from "@/lib/zoho-docs";
 import { loadRecentRuns, loadRun, pendingNeedsMap, waitingCounts } from "@/lib/zoho-manual";
@@ -119,10 +120,26 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
       .slice(0, 80)
       .map(async (r) => {
         try {
-          const f = await billErpFigures(await poForZoho(r.record_id));
-          billNow.set(r.id, { net: f.expectedNet, vat: f.vat, total: f.gross });
+          // 19 November 2026 (929515897): the bill's GROUP (one supplier invoice over several LPOs is one bill).
+          const f = await billGroupFigures(r.record_id);
+          billNow.set(r.id, { net: f.net, vat: f.vat, total: f.gross });
         } catch {
           /* the row keeps its stored figures */
+        }
+      }),
+  );
+  // 19 November 2026: a "Posted - differs" bill explains itself (its LPOs, what Zoho holds, what changed after posting).
+  const why = new Map<string, string[]>();
+  await Promise.all(
+    rows
+      .filter((r) => r.status === "synced" && r.kind === "bill" && postedDiffers(r.kind, r.zoho_result, billNow.get(r.id)))
+      .slice(0, 20)
+      .map(async (r) => {
+        try {
+          const z = ((r.zoho_result ?? {}) as { zoho?: { net?: number; total?: number } }).zoho ?? {};
+          why.set(r.id, (await explainBillDiff(r.record_id, z, r.synced_at)).lines);
+        } catch {
+          /* no explanation: the red words stay */
         }
       }),
   );
@@ -168,12 +185,30 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
                   </p>
                   {words ? <p className={`text-sm font-semibold ${differs ? "text-muted" : "text-green-text"}`} data-zoho-result><Words text={words} /></p> : null}
                   {differs ? (
-                    <div className="flex flex-wrap items-center gap-2" data-zoho-differs>
+                    <div className="flex flex-col gap-2" data-zoho-differs>
                       <span className="text-sm font-bold text-red"><Words text={differs} /></span>
+                      {why.get(r.id)?.length ? (
+                        <ul className="flex flex-col gap-0.5 rounded-control border border-line bg-white px-3 py-2 text-sm" data-zoho-differs-why>
+                          {why.get(r.id)!.map((w, i) => <li key={i}><Words text={w} /></li>)}
+                        </ul>
+                      ) : null}
                       {maySync && RECHECK_KINDS.includes(r.kind) ? (
-                        <form action={retryZohoRow.bind(null, r.id)}>
+                        <form action={retryZohoRow.bind(null, r.id)} className="flex flex-wrap items-center gap-2">
                           <input type="hidden" name="recheck" value="1" />
-                          <Button type="submit" tone="secondary" size="md" data-zoho-recheck>Check again in Zoho</Button>
+                          {r.kind === "bill" ? (
+                            <ConfirmSubmit
+                              label="Update Zoho to match the ERP"
+                              title="Update the bill in Zoho?"
+                              lines={[...(why.get(r.id) ?? []).slice(0, 2), "Zoho's bill gets the ERP's lines and total now. A bill already paid in Zoho is not changed: you are told to correct it there."]}
+                              confirmLabel="Yes, update Zoho"
+                              tone="secondary"
+                              size="md"
+                              hook="zoho-update-bill"
+                              attrs={{ "data-zoho-recheck": "" }}
+                            />
+                          ) : (
+                            <Button type="submit" tone="secondary" size="md" data-zoho-recheck>Check again in Zoho</Button>
+                          )}
                         </form>
                       ) : null}
                     </div>

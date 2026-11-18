@@ -1,7 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { aed, rowEffect, type EffectFacts, type RowEffect } from "@/lib/zoho-sync-rules";
-import { billErpFigures, poForZoho, type ZohoKind } from "@/lib/zoho-sync";
+import { billBlockOf, billGroupFigures, poForZoho, type ZohoKind } from "@/lib/zoho-sync";
 import { chunks } from "@/lib/page-all";
 import { returnCreditOf } from "@/lib/part-endings";
 import { schemaReady } from "@/lib/schema-ready";
@@ -85,10 +85,10 @@ export async function outboxDocs(rows: { kind: ZohoKind; record_id: string; zoho
   // Supplier bills and their payments. The preview and the results ask for THE bill figure (delivered quantities, the
   // typed invoice amount, VAT by the supplier's standing: a few reads per bill); the long page list needs the name only.
   type PoFacts = { id: string; number: string; kind: string; supplier_name: string; supplier_invoice_number: string | null; supplier_paid_at: string | null; zoho_bill_id: string | null; zoho_billpayment_id: string | null };
-  const putPo = (po: PoFacts, gross: number | null) => {
+  const putPo = (po: PoFacts, gross: number | null, note: string | null = null) => {
     const internal = OUR_STOCK.test(po.supplier_name.trim()) ? "an Our-stock LPO is internal (our own shelf)" : null;
     const money = gross == null ? "" : ` · ${aed(gross)}`;
-    put(`bill:${po.id}`, `${po.supplier_invoice_number ?? po.number} · ${po.supplier_name}${money}`, gross, {
+    put(`bill:${po.id}`, `${po.supplier_invoice_number ?? po.number} · ${po.supplier_name}${money}${note ? ` · ${note}` : ""}`, gross, {
       inZoho: !!po.zoho_bill_id,
       notForZoho: po.kind === "main" ? "a main LPO (the bills sit on its supplier LPOs)" : internal,
     });
@@ -102,7 +102,12 @@ export async function outboxDocs(rows: { kind: ZohoKind; record_id: string; zoho
       poIds.map(async (id) => {
         try {
           const po = await poForZoho(id);
-          putPo(po, (await billErpFigures(po)).gross);
+          // 19 November 2026: the bill's GROUP figure (one invoice over several LPOs is one bill, carried by the lead),
+          // and a bill held back (AED 0.00, or not its invoice's total) says so before the press.
+          const g = await billGroupFigures(id);
+          const isLead = g.leadId === id;
+          const block = isLead ? await billBlockOf(id) : null;
+          putPo(po, isLead ? g.gross : null, block ? `NOT SENT: ${block.reason.split(". Not sent")[0]}` : isLead ? null : `on the one bill of ${g.leadNumber}`);
         } catch {
           // The LPO is gone: the row says so when it is sent; here it simply has no name or amount.
         }

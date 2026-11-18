@@ -357,6 +357,8 @@ export function reasonHref(reason: string | null | undefined, ctx: { kind?: Zoho
   // (LPO-00035-2's bill was typed 28/10/2016): fixed on the LPO page, then Retry.
   if (/tax period/i.test(reason) && (ctx.kind === "bill" || ctx.kind === "billpayment") && ctx.recordId) return { href: `/parts/orders/${ctx.recordId}`, label: "Open the LPO (fix the invoice date, then Retry)" };
   if (/mapping missing/i.test(reason)) return { href: "/settings/zoho/mapping", label: "Open the mapping" };
+  // 19 November 2026: a bill held back at AED 0.00 or against its invoice: fixed on the LPO.
+  if (/Not sent\. Fix/i.test(reason) && ctx.kind === "bill" && ctx.recordId) return { href: `/parts/orders/${ctx.recordId}`, label: "Open the LPO and fix it" };
   if (/not connected|presses Connect/i.test(reason)) return { href: "/settings/zoho", label: "Open Zoho settings" };
   if (/cheque/i.test(reason)) return { href: "/invoices?show=awaiting", label: "Open the money list" };
   return null;

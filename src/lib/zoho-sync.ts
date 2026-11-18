@@ -1635,6 +1635,9 @@ export type BillErpFigures = {
   vat: number;
   /** What the bill totals in Zoho: net + that VAT. */
   gross: number;
+  /** 19 November 2026 (LPO-00089): the supplier invoice is entered but nothing is marked received; the bill counts the
+   * ordered quantities (what the supplier invoiced) and says so. */
+  notReceived: boolean;
 };
 
 /**
@@ -1654,12 +1657,16 @@ export async function billErpFigures(po: PoRow): Promise<BillErpFigures> {
     po.supplier_id ? admin.from("suppliers").select("vat_registered").eq("id", po.supplier_id).maybeSingle() : Promise.resolve({ data: null }),
   ]);
   const fullyReceived = ((poStatusRow as { status?: string } | null)?.status ?? "") !== "partly_received";
+  // 19 November 2026 (VEGA, LPO-00089: a bill at AED 0.00): the supplier's invoice is entered but no part on the LPO is
+  // marked received. The bill is the supplier's paper (what they invoiced): the ordered quantities, flagged as not
+  // received so the parts desk marks them in.
+  const nothingReceived = po.supplier_invoice_status === "received" && (lineRows ?? []).length > 0 && (lineRows ?? []).every((l) => !(Number(l.received_qty) > 0));
   const lines = (lineRows ?? []).map((l) => ({
     description: String(l.description ?? ""),
     partNumber: realPartNumber(l.part_number as string | null),
     listPrice: l.list_price != null ? Number(l.list_price) : null,
     discountPercent: l.discount_percent != null ? Number(l.discount_percent) : null,
-    quantity: l.received_qty != null ? Number(l.received_qty) || 0 : fullyReceived ? Number(l.quantity) || 0 : 0,
+    quantity: nothingReceived ? Number(l.quantity) || 0 : l.received_qty != null ? Number(l.received_qty) || 0 : fullyReceived ? Number(l.quantity) || 0 : 0,
     unit: Number(l.invoice_unit_cost ?? l.unit_cost) || 0,
     lpoUnit: Number(l.unit_cost) || 0,
     check: (l.invoice_check ?? null) as string | null,
@@ -1681,7 +1688,96 @@ export async function billErpFigures(po: PoRow): Promise<BillErpFigures> {
   const typedVat = (poStatusRow as { supplier_invoice_vat_aed?: number | null } | null)?.supplier_invoice_vat_aed;
   const vat = taxed ? (typedVat != null ? roundHalfUp(Number(typedVat)) : roundHalfUp(expectedNet * 0.05)) : 0;
   const gross = roundHalfUp(expectedNet + vat);
-  return { lines, charges, chargesSum, linesTotal, useEntered, expectedNet, partsRate, taxed, vat, gross };
+  return { lines, charges, chargesSum, linesTotal, useEntered, expectedNet, partsRate, taxed, vat, gross, notReceived: nothingReceived };
+}
+
+export type BillGroupFigures = { leadId: string; leadNumber: string; members: { id: string; number: string; net: number; vat: number; gross: number; notReceived: boolean }[]; net: number; vat: number; gross: number };
+
+/**
+ * THE bill as Zoho holds it (19 November 2026, bill 929515897): one supplier invoice covering several LPOs is ONE bill
+ * carried by the oldest LPO with every LPO's lines, so its figures are the GROUP's - comparing that bill with one LPO
+ * alone read "differs +288.00". Used by the sync page, the preview and the read-only checks.
+ */
+export async function billGroupFigures(poId: string): Promise<BillGroupFigures> {
+  const po = await poForZoho(poId);
+  const group = await invoiceGroupOf(po);
+  const lead = (group.length > 1 ? billLeadOf(group) : null) ?? { id: po.id, number: po.number };
+  const ids = group.length > 1 ? group.map((g) => g.id) : [po.id];
+  const members: BillGroupFigures["members"] = [];
+  for (const id of ids) {
+    const p = id === po.id ? po : await poForZoho(id);
+    const f = await billErpFigures(p);
+    members.push({ id, number: p.number, net: f.expectedNet, vat: f.vat, gross: f.gross, notReceived: f.notReceived });
+  }
+  members.sort((a, b) => (a.id === lead.id ? -1 : b.id === lead.id ? 1 : a.number.localeCompare(b.number)));
+  const sum = (k: "net" | "vat" | "gross") => roundHalfUp(members.reduce((a, m) => a + m[k], 0));
+  return { leadId: lead.id, leadNumber: lead.number, members, net: sum("net"), vat: sum("vat"), gross: sum("gross") };
+}
+
+const aedW = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** "LPO-00062-1 AED 2,393.00 + LPO-00062-5 AED 288.00 = AED 2,681.00". */
+export function billGroupWords(g: BillGroupFigures): string {
+  return g.members.length > 1 ? `${g.members.map((m) => `${m.number} ${aedW(m.gross)}`).join(" + ")} = ${aedW(g.gross)}` : `${g.members[0]?.number ?? ""} ${aedW(g.gross)}`;
+}
+
+/**
+ * A bill that must NOT be sent (19 November 2026): AED 0.00, or a total that is not its invoice's. Plain words and the
+ * page that fixes it; null when it may go.
+ */
+export async function billBlockOf(poId: string): Promise<{ reason: string; fixHref: string; fixLabel: string } | null> {
+  const g = await billGroupFigures(poId);
+  if (g.gross <= 0.004) {
+    return { reason: `The bill comes to AED 0.00: nothing on ${g.members.map((m) => m.number).join(" + ")} carries a quantity and an amount. Not sent. Fix: open the LPO, mark the parts received or type the invoice total, then send it again.`, fixHref: `/parts/orders/${poId}`, fixLabel: "Open the LPO and fix it" };
+  }
+  const admin = createAdminClient();
+  const vatCol = (await schemaReady("purchase_orders", "supplier_invoice_vat_aed")) ? ", supplier_invoice_vat_aed" : "";
+  const { data } = await admin.from("purchase_orders").select("id, number, supplier_invoice_amount" + vatCol).in("id", g.members.map((m) => m.id));
+  const typed = (data ?? []) as unknown as { id: string; number: string; supplier_invoice_amount: number | string | null; supplier_invoice_vat_aed?: number | string | null }[];
+  for (const m of g.members) {
+    const t = typed.find((x) => x.id === m.id);
+    if (!t || t.supplier_invoice_amount == null || t.supplier_invoice_vat_aed == null) continue;
+    const paper = roundHalfUp(Number(t.supplier_invoice_amount) + Number(t.supplier_invoice_vat_aed));
+    if (Math.abs(paper - m.gross) > 0.004) return { reason: `${m.number}: the bill would be AED ${m.gross.toFixed(2)} but the invoice typed in the ERP says AED ${paper.toFixed(2)}. Not sent. Fix the invoice on the LPO, then send it again.`, fixHref: `/parts/orders/${m.id}`, fixLabel: "Open the LPO and fix it" };
+  }
+  return null;
+}
+
+/**
+ * Why a POSTED bill differs (19 November 2026, Section 1): the bill's LPOs with their figures now, what Zoho holds, and
+ * every change made in the ERP after it posted - invoice edits, price flags, returned parts, nothing marked received.
+ */
+export async function explainBillDiff(poId: string, zoho: { net?: number | null; total?: number | null }, postedAt: string | null): Promise<{ lines: string[]; erp: BillGroupFigures }> {
+  const g = await billGroupFigures(poId);
+  const out: string[] = [];
+  out.push(g.members.length > 1 ? `This bill covers ${g.members.length} LPOs on one supplier invoice: ${billGroupWords(g)}.` : `The ERP's bill now: ${billGroupWords(g)}.`);
+  if (typeof zoho.total === "number") out.push(`Zoho holds ${aedW(zoho.total)}${Math.abs(zoho.total - g.gross) > 0.004 ? ` (${zoho.total - g.gross > 0 ? "+" : "−"}${aedW(Math.abs(zoho.total - g.gross)).replace("AED ", "")} against the ERP)` : ": the same as the ERP"}.`);
+  const admin = createAdminClient();
+  const ids = g.members.map((m) => m.id);
+  const since = postedAt ?? "1970-01-01";
+  let changes = 0;
+  if (await schemaReady("supplier_invoice_edits", "id, po_id, remark, changes")) {
+    const { data: edits } = await admin.from("supplier_invoice_edits").select("po_id, remark, changes, created_at").in("po_id", ids).eq("is_active", true).gt("created_at", since).order("created_at");
+    for (const e of (edits ?? []) as { po_id: string; remark: string | null; changes: { field?: string; old?: unknown; new?: unknown }[] | null; created_at: string }[]) {
+      const num = g.members.find((m) => m.id === e.po_id)?.number ?? "";
+      const ch = (e.changes ?? []).map((c) => `${c.field}: ${String(c.old ?? "")} → ${String(c.new ?? "")}`).join("; ");
+      out.push(`Edited after posting (${num}, ${new Date(e.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Dubai" })}): ${ch || "the invoice"}${e.remark ? ` – "${e.remark}"` : ""}.`);
+      changes++;
+    }
+  }
+  const { data: flagged } = await admin.from("purchase_order_lines").select("po_id, description, unit_cost, invoice_unit_cost, invoice_check").in("po_id", ids).not("invoice_check", "is", null).neq("invoice_check", "match");
+  for (const l of (flagged ?? []) as { po_id: string; description: string; unit_cost: number | string; invoice_unit_cost: number | string | null; invoice_check: string }[]) {
+    out.push(`Price flag (${g.members.find((m) => m.id === l.po_id)?.number ?? ""}): ${String(l.description).toUpperCase()} – LPO ${Number(l.unit_cost).toFixed(2)}, invoice ${l.invoice_unit_cost == null ? "–" : Number(l.invoice_unit_cost).toFixed(2)} (${l.invoice_check}).`);
+    changes++;
+  }
+  const { data: ret } = await admin.from("part_items").select("po_id, description, disposition").in("po_id", ids).in("disposition", ["returned", "return_pending"]);
+  for (const r of (ret ?? []) as { po_id: string; description: string; disposition: string }[]) {
+    out.push(`Returned to the supplier${r.disposition === "return_pending" ? " (credit awaited)" : ""}: ${String(r.description).toUpperCase()} (${g.members.find((m) => m.id === r.po_id)?.number ?? ""}). It goes as a supplier credit; the bill itself stays.`);
+    changes++;
+  }
+  for (const m of g.members.filter((x) => x.notReceived)) out.push(`${m.number}: nothing is marked received in the ERP; the bill counts the invoiced quantities.`);
+  if (!changes && typeof zoho.total === "number" && Math.abs(zoho.total - g.gross) > 0.004) out.push(`No change was recorded in the ERP after the bill posted: it was changed in Zoho, or posted before a later rule. "Update Zoho to match the ERP" puts the ERP's figures on it.`);
+  return { lines: out, erp: g };
 }
 
 /**
@@ -1741,6 +1837,9 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
     await admin.from("purchase_orders").update({ zoho_bill_id: leadBill.zoho_bill_id, zoho_bill_taxed: leadBill.zoho_bill_taxed }).eq("id", po.id);
     return { zohoId: leadBill.zoho_bill_id, result: { combined: `On the one bill of ${lead.number}: supplier invoice ${po.supplier_invoice_number} covers ${group.map((g) => g.number).join(" + ")}.` } };
   }
+  // 19 November 2026: a bill at AED 0.00, or one whose total is not its invoice's, is never sent (red, with the fix).
+  const blocked = await billBlockOf(po.id);
+  if (blocked) throw new ZohoError(blocked.reason);
   const others = lead ? group.filter((g) => g.id !== po.id) : [];
   const vendor = await poVendor(org, po);
   const taxed = await vendorVatRegistered(org, po, vendor);
@@ -1875,6 +1974,9 @@ async function syncBillRow(org: string, accounts: Resolved, poId: string): Promi
       erp: { net: expectedNet, vat: expectedVat, total: expectedGross, charges: chargesSum },
       ...(Math.abs(vatAdjust) > 0.004 ? { vat_adjustment: vatAdjust } : {}),
       lines: built.items.length,
+      // What was posted, line by line (19 November 2026): "Posted - differs" can name the lines that changed.
+      posted_lines: items.map((i) => { const x = i as unknown as { description?: string; quantity?: number; rate?: number }; return { d: String(x.description ?? "").slice(0, 80), q: Number(x.quantity) || 0, r: Number(x.rate) || 0 }; }).slice(0, 60),
+      ...(others.length ? { group: [po.number, ...others.map((o) => o.number)] } : {}),
       ...(built.roundOff ? { round_off: built.roundOff } : {}),
       ...(relayout ? { relaid: "re-posted with one line per part (total unchanged)" } : {}),
       attached,
