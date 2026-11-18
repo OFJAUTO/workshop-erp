@@ -199,3 +199,11 @@ async function decideCore(kind: ApprovalKind, id: string, decision: "approve" | 
   revalidatePath("/dashboard");
   return answer;
 }
+
+/** "Remind the owner" (18 November 2026, Section 2): the person who asked, once a day per item, a bell and an email. */
+export async function remindOwnerAction(key: string): Promise<{ error?: string; words?: string }> {
+  const staff = await requireStaff();
+  if (staff.viewingAs) return { error: "View as is read-only – use Act as to remind." };
+  const { remindOwner } = await import("@/lib/approval-reminders");
+  return remindOwner(key, { id: staff.id, display_name: staff.display_name });
+}

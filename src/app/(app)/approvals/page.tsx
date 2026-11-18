@@ -9,6 +9,8 @@ import { KIND_WORDS, loadApprovals, type ApprovalKind } from "@/lib/approvals";
 import { autoApprovedList, autoNow } from "@/lib/auto-approve";
 import { activeWords, aed } from "@/lib/auto-approve-rules";
 import { formatDateTime } from "@/lib/format";
+import { ageOf, kindsOldestFirst } from "@/lib/approval-age";
+import { lastDailyReminder } from "@/lib/approval-reminders";
 import { LinkButton } from "@/components/ui";
 
 /**
@@ -26,7 +28,13 @@ export default async function ApprovalsPage() {
   const sCfg = standIn ?? (await loadStandIn());
   const sActive = standInActive(sCfg, dubaiToday());
   const sLog = staff.role_id === "owner" ? (await loadStandInLog()).slice(-30).reverse() : [];
-  const kinds = Array.from(new Set(items.map((i) => i.kind))) as ApprovalKind[];
+  // 18 November 2026 (Section 2): the group holding the oldest item first; each box shows how long it has waited.
+  const kinds = kindsOldestFirst(items) as ApprovalKind[];
+  // eslint-disable-next-line react-hooks/purity
+  const nowMs = Date.now();
+  const oldest = items.reduce<string | null>((a, i) => (i.askedAt && (!a || i.askedAt < a) ? i.askedAt : a), null);
+  const oldestAge = ageOf(oldest, nowMs);
+  const lastReminder = staff.role_id === "owner" ? await lastDailyReminder() : null;
   const [auto, now] = await Promise.all([autoApprovedList({ limit: 100 }), autoNow()]);
   return (
     <div className="flex flex-col gap-4" data-approvals-page={items.length}>
@@ -41,7 +49,12 @@ export default async function ApprovalsPage() {
           {activeWords(now.cfg)}
         </div>
       ) : null}
-      {items.length === 0 ? <Empty title="Nothing waiting for you" /> : null}
+      {items.length === 0 ? <Empty title="Nothing waiting for you" /> : (
+        <div className={`rounded-control border-2 px-3 py-2 text-sm font-bold ${oldestAge?.long ? "border-red-bar bg-red-soft text-red" : "border-line bg-white"}`} data-approvals-oldest={oldestAge?.hours ?? 0}>
+          {items.length} waiting{oldestAge ? ` · the oldest has waited ${oldestAge.words}` : ""}. The oldest are at the top.
+          {lastReminder?.day ? <span className="block text-xs font-semibold text-muted" data-approvals-reminder-last={lastReminder.ok ? "ok" : "failed"}>Daily reminder {formatDateTime(lastReminder.at)}: {lastReminder.words}</span> : null}
+        </div>
+      )}
       {kinds.map((k) => (
         <Card key={k} className="flex flex-col gap-2" data-approvals-group={k}>
           <span className="text-xs font-extrabold uppercase tracking-[0.08em] text-muted">{KIND_WORDS[k]} · {items.filter((i) => i.kind === k).length}</span>

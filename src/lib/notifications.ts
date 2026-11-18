@@ -98,6 +98,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "payment_month_differs", label: "A customer payment is dated in another month than its tax invoice (check the VAT month)", locked: true },
   { type: "tax_invoice_due", label: "A completed job still has no tax invoice after 10 days (due within 14)", locked: true },
   { type: "early_tax_invoice", label: "Accounts ask to issue a tax invoice before the cheque clears", locked: true },
+  { type: "approvals_waiting", label: "Approvals waiting more than a day (one daily reminder) and Remind the owner", locked: true },
   { type: "estimate_carry_mismatch", label: "A job's quotation is not an exact copy of its estimate", locked: true },
   { type: "advisor_question", label: "Parts (or a colleague) asks you about one of your cars", locked: true },
   { type: "advisor_answer", label: "The advisor answered your question about a car", locked: true },

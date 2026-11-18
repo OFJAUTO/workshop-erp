@@ -227,7 +227,7 @@ async function afterBankMoney(pays: Pay[], what: "cleared" | "bounced", actor: B
   }
 }
 
-export type BankWaiting = { id: string; number: string; method: "cheque" | "transfer"; amount: number; receivedAt: string; chequeNumber: string | null; chequeBank: string | null; chequeDate: string | null; notDue: string | null; depositedAt: string | null; depositedTo: string | null; reference: string | null; jobId: string | null; jobNumber: string | null; plate: string; customer: string; late: boolean; proofPath: string | null; /** A share of a combined payment (one cheque for several cars): it clears and bounces with the whole. */ group: { number: string; words: string; total: number } | null; /** 11 November 2026 (Section 5): a void asked of the owner, and the same cheque already on other receipts. */ voidAsked: { by: string | null; reason: string } | null; chequeAlso: string | null; /** 18 November 2026: the other receipts of the same combined cheque that clear with this one. */ clearsWith: { number: string; amount: number }[] };
+export type BankWaiting = { id: string; number: string; method: "cheque" | "transfer"; amount: number; receivedAt: string; chequeNumber: string | null; chequeBank: string | null; chequeDate: string | null; notDue: string | null; depositedAt: string | null; depositedTo: string | null; reference: string | null; jobId: string | null; jobNumber: string | null; plate: string; customer: string; late: boolean; proofPath: string | null; /** A share of a combined payment (one cheque for several cars): it clears and bounces with the whole. */ group: { number: string; words: string; total: number } | null; /** 11 November 2026 (Section 5): a void asked of the owner, and the same cheque already on other receipts. */ voidAsked: { by: string | null; reason: string; at: string | null } | null; chequeAlso: string | null; /** 18 November 2026: the other receipts of the same combined cheque that clear with this one. */ clearsWith: { number: string; amount: number }[] };
 
 /** Cheques and transfers waiting for the bank, oldest first (Accounts posting's Cheque and Bank transfer tabs). */
 export async function loadBankWaiting(opts: { jobIds?: string[]; ids?: string[] } = {}): Promise<BankWaiting[]> {
@@ -259,7 +259,7 @@ export async function loadBankWaiting(opts: { jobIds?: string[]; ids?: string[] 
   const { schemaReady } = await import("./schema-ready");
   const voidCols = await schemaReady("payments", "void_requested_at");
   const { data: vrows } = voidCols && rows.length ? await admin.from("payments").select("id, void_requested_at, void_request_reason, void_requested_by").in("id", rows.map((r) => r.id)).not("void_requested_at", "is", null) : { data: [] };
-  const vMap = new Map(((vrows ?? []) as { id: string; void_request_reason: string | null; void_requested_by: string | null }[]).map((v) => [v.id, v]));
+  const vMap = new Map(((vrows ?? []) as { id: string; void_request_reason: string | null; void_requested_by: string | null; void_requested_at: string | null }[]).map((v) => [v.id, v]));
   const vStaffIds = Array.from(new Set(Array.from(vMap.values()).map((v) => v.void_requested_by).filter((x): x is string => !!x)));
   const { data: vStaff } = vStaffIds.length ? await admin.from("staff").select("id, display_name").in("id", vStaffIds) : { data: [] };
   const vName = new Map(((vStaff ?? []) as { id: string; display_name: string }[]).map((x) => [x.id, x.display_name]));
@@ -298,7 +298,7 @@ export async function loadBankWaiting(opts: { jobIds?: string[]; ids?: string[] 
     late: addWorkingDays(dubaiDay(p.received_at), 3, wt) < today,
     proofPath: p.proof_path,
     group: groups.has(p.id) ? { number: groups.get(p.id)!.number, words: groups.get(p.id)!.words, total: groups.get(p.id)!.amount } : null,
-    voidAsked: vMap.has(p.id) ? { by: vName.get(vMap.get(p.id)!.void_requested_by ?? "") ?? null, reason: vMap.get(p.id)!.void_request_reason ?? "" } : null,
+    voidAsked: vMap.has(p.id) ? { by: vName.get(vMap.get(p.id)!.void_requested_by ?? "") ?? null, reason: vMap.get(p.id)!.void_request_reason ?? "", at: (vMap.get(p.id) as { void_requested_at?: string | null }).void_requested_at ?? null } : null,
     chequeAlso: groups.has(p.id) ? null : alsoOf(p),
     clearsWith: (() => {
       const gid = groupIdOf.get(p.id);

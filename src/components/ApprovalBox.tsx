@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { Words } from "./Words";
 import { useRouter } from "next/navigation";
-import { decideApprovalAction, type ApprovalAnswer } from "@/app/(app)/approvals/actions";
+import { decideApprovalAction, remindOwnerAction, type ApprovalAnswer } from "@/app/(app)/approvals/actions";
+import { ageOf, waitingWords } from "@/lib/approval-age";
 import type { ApprovalItem } from "@/lib/approvals";
 import { Button } from "@/components/ui";
 
@@ -40,7 +41,8 @@ export function ApprovalBox({ item, highlight = false, link = false, extra = nul
         {item.money ? <span className="ml-auto font-extrabold" data-approval-money>{item.money}</span> : null}
       </div>
       {item.what ? <p className="text-sm" data-approval-what><Words text={item.what} /></p> : null}
-      <p className="text-xs text-muted">{item.askedBy ? `Asked by ${item.askedBy}` : "Asked"}{item.askedAt ? ` · ${when(item.askedAt)}` : ""}</p>
+      <p className="text-xs text-muted">{item.askedBy ? `Asked by ${item.askedBy}` : "Asked"}{item.askedAt ? ` · ${when(item.askedAt)}` : ""}{" "}<AgeTag askedAt={item.askedAt} /></p>
+      {item.evidence ? <p className="rounded-control border border-red-bar bg-red-soft px-2 py-1 text-sm font-bold text-red" data-approval-evidence>{item.evidence}</p> : null}
       {extra}
       {done ? (
         <p className="text-sm font-bold text-green-text" data-approval-done>{answer?.message}</p>
@@ -65,11 +67,50 @@ export function ApprovalBox({ item, highlight = false, link = false, extra = nul
   );
 }
 
-/** What everyone else sees while the owner decides: "Waiting for owner approval: …". */
-export function ApprovalWaiting({ item }: { item: ApprovalItem }) {
+/** "waiting 6 days" (red after a day), from the moment it was asked. Drawn in the browser (the clock). */
+function AgeTag({ askedAt }: { askedAt: string | null }) {
+  const [now] = useState(() => Date.now());
+  const a = ageOf(askedAt, now);
+  if (!a) return null;
+  return <span className={`font-bold ${a.long ? "text-red" : "text-amber-text"}`} data-approval-age={a.hours}>· waiting {a.words}</span>;
+}
+
+/**
+ * What everyone else sees while the owner decides (18 November 2026, Section 2): "Waiting for the owner – n days",
+ * and for the person who asked a "Remind the owner" button, once a day per item.
+ */
+export function ApprovalWaiting({ item, canRemind = false, remindedToday = false }: { item: ApprovalItem; canRemind?: boolean; remindedToday?: boolean }) {
+  const [now] = useState(() => Date.now());
+  const [answer, setAnswer] = useState<{ error?: string; words?: string } | null>(null);
+  const [busy, start] = useTransition();
+  const done = remindedToday || !!answer?.words;
   return (
-    <div className="rounded-card border-2 border-amber-bar bg-amber-soft px-4 py-2 text-sm font-semibold text-amber-text" data-approval-waiting={item.key}>
-      Waiting for owner approval: {item.title.replace(/ needs your approval/, "")}{item.money ? ` · ${item.money}` : ""}
+    <div className="flex flex-col gap-1 rounded-card border-2 border-amber-bar bg-amber-soft px-4 py-2 text-sm font-semibold text-amber-text" data-approval-waiting={item.key}>
+      <span>Waiting for owner approval: {item.title.replace(/ needs your approval/, "")}{item.money ? ` · ${item.money}` : ""}</span>
+      <span className={(ageOf(item.askedAt, now)?.long ? "text-red " : "") + "font-bold"} data-approval-waiting-age>{waitingWords(item.askedAt, now)}</span>
+      {item.evidence ? <span className="text-red" data-approval-evidence>{item.evidence}</span> : null}
+      {canRemind ? (
+        <span className="flex flex-wrap items-center gap-2">
+          <Button type="button" size="md" tone="secondary" disabled={busy || done} onClick={() => start(async () => setAnswer(await remindOwnerAction(item.key)))} data-approval-remind>{done ? "Reminded today" : busy ? "…" : "Remind the owner"}</Button>
+          {answer?.words ? <span className="text-green-text" data-approval-reminded>{answer.words}</span> : null}
+          {answer?.error ? <span className="text-red" data-approval-remind-error>{answer.error}</span> : null}
+        </span>
+      ) : null}
     </div>
+  );
+}
+
+/** THE "Remind the owner" button on its own (Accounts posting's cheque rows): once a day per approval item. */
+export function RemindOwnerButton({ itemKey, askedAt }: { itemKey: string; askedAt: string | null }) {
+  const [now] = useState(() => Date.now());
+  const [answer, setAnswer] = useState<{ error?: string; words?: string } | null>(null);
+  const [busy, start] = useTransition();
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      <span className={`font-bold ${ageOf(askedAt, now)?.long ? "text-red" : ""}`} data-approval-waiting-age>{waitingWords(askedAt, now)}</span>
+      <Button type="button" size="md" tone="secondary" disabled={busy || !!answer?.words} onClick={() => start(async () => setAnswer(await remindOwnerAction(itemKey)))} data-approval-remind>{answer?.words ? "Reminded today" : busy ? "…" : "Remind the owner"}</Button>
+      {answer?.words ? <span className="text-green-text" data-approval-reminded>{answer.words}</span> : null}
+      {answer?.error ? <span className="text-red" data-approval-remind-error>{answer.error}</span> : null}
+    </span>
   );
 }

@@ -761,5 +761,15 @@ async function runHousekeeping(): Promise<Record<string, number>> {
   } catch {
     report.taxInvoiceDue = -1;
   }
+
+  // 36. Approvals waiting more than a day: ONE daily reminder to the owner from 9:00 Dubai, a bell and an email
+  // (18 November 2026, Section 2).
+  try {
+    const { approvalsDailyReminder } = await import("@/lib/approval-reminders");
+    const r = await approvalsDailyReminder();
+    report.approvalsReminder = r ? (r.ok ? 1 : 2) : 0;
+  } catch {
+    report.approvalsReminder = -1;
+  }
   return report;
 }

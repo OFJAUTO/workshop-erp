@@ -1,5 +1,6 @@
 "use client";
 
+import { RemindOwnerButton } from "@/components/ApprovalBox";
 import { useActionState, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Button, Input } from "@/components/ui";
 import { MoneyDate } from "@/components/MoneyDate";
@@ -74,7 +75,7 @@ export function BankRow({ row, today, canSave, ready, proofUrl = null, withTick 
         {row.late ? <span className="text-xs font-semibold text-amber-text">older than 3 working days</span> : null}
         {row.group ? <span className="w-full text-xs font-bold" data-bank-group={row.group.number}>{row.group.words} · {row.group.number}: clears and bounces as one</span> : null}
         {row.chequeAlso ? <span className="w-full rounded-control border border-red-bar bg-red-soft px-2 py-1 text-xs font-bold text-red" data-bank-cheque-also>{row.chequeAlso} Is this a duplicate?</span> : null}
-        {row.voidAsked ? <span className="w-full rounded-control border border-amber-bar bg-amber-soft px-2 py-1 text-xs font-bold text-amber-text" data-bank-void-asked>Void asked{row.voidAsked.by ? ` by ${row.voidAsked.by}` : ""}: {row.voidAsked.reason} · waiting for the owner</span> : null}
+        {row.voidAsked ? <span className="flex w-full flex-col gap-1 rounded-control border border-amber-bar bg-amber-soft px-2 py-1 text-xs font-bold text-amber-text" data-bank-void-asked>Void asked{row.voidAsked.by ? ` by ${row.voidAsked.by}` : ""}: {row.voidAsked.reason}{canSave ? <RemindOwnerButton itemKey={`void:${row.id}`} askedAt={row.voidAsked.at} /> : <span>waiting for the owner</span>}</span> : null}
         {proofUrl ? <SlipTile url={proofUrl} path={row.proofPath} label={`${row.number} proof`} hook={row.number} size="h-9 w-9" /> : null}
       </div>
       {canSave && !done ? (

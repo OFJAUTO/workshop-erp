@@ -52,6 +52,8 @@ export type ApprovalItem = {
   /** The words of the two buttons. */
   approveLabel: string;
   refuseLabel: string;
+  /** 18 November 2026: what the system itself found (a duplicate cheque), shown so it can be decided in one look. */
+  evidence?: string | null;
 };
 
 const aed = (n: unknown) => `AED ${(Number(n) || 0).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -163,8 +165,22 @@ export async function loadApprovals(scope: Scope = {}): Promise<ApprovalItem[]> 
     const extraJobs = vr.map((v) => String(v.job_id ?? "")).filter((x) => x && !jobWords.has(x));
     if (extraStaff.length) for (const st of ((await admin.from("staff").select("id, display_name").in("id", extraStaff)).data ?? []) as R[]) who.set(String(st.id), String(st.display_name));
     if (extraJobs.length) for (const j of ((await admin.from("jobs").select("id, job_number").in("id", extraJobs)).data ?? []) as R[]) jobWords.set(String(j.id), String(j.job_number));
+    // 18 November 2026 (RCT-00062): the duplicate the system found, on the item itself ("Cheque 019383 is already
+    // recorded: RCT-00057 AED 2,236.50 (J-00860, cleared)").
+    const vCheques = Array.from(new Set(vr.map((v) => String(v.cheque_number ?? "")).filter(Boolean)));
+    const { data: sibRows } = vCheques.length ? await admin.from("payments").select("id, number, amount_aed, cheque_number, cheque_status, status, job_id").in("cheque_number", vCheques).eq("is_active", true).in("status", ["recorded", "pending_owner"]) : { data: [] };
+    const sibs = (sibRows ?? []) as R[];
+    const sibJobs = sibs.map((s) => String(s.job_id ?? "")).filter((x) => x && !jobWords.has(x));
+    if (sibJobs.length) for (const j of ((await admin.from("jobs").select("id, job_number").in("id", sibJobs)).data ?? []) as R[]) jobWords.set(String(j.id), String(j.job_number));
+    const { chequeAlreadyWords } = await import("./cheque-cap");
+    const evidenceOf = (r: R) => {
+      if (!r.cheque_number) return null;
+      const others = sibs.filter((s) => s.id !== r.id && s.cheque_number === r.cheque_number);
+      const words = chequeAlreadyWords(String(r.cheque_number), others.map((s) => ({ number: String(s.number), amount: Number(s.amount_aed) || 0, jobNumber: s.job_id ? (jobWords.get(String(s.job_id)) ?? null) : null, cleared: s.cheque_status === "cleared", chequeTotal: null })));
+      return words ? `${words} Is this a duplicate?` : null;
+    };
     for (const r of vr) {
-      push({ kind: "void", id: String(r.id), title: `Void receipt ${r.number}${r.cheque_number ? ` · cheque ${r.cheque_number}` : ""}`, what: `${String(r.void_request_reason ?? "")}${r.job_id ? ` · ${jw(r.job_id)}` : ""}`, askedBy: nm(r.void_requested_by), askedAt: (r.void_requested_at as string) ?? null, money: aed(r.amount_aed), href: r.job_id ? `/jobs/${r.job_id}/invoice` : "/accounts-posting?tab=cheque", jobId: (r.job_id as string) ?? null, quotationId: null, poId: null, approveLabel: "Void it", refuseLabel: "Keep the receipt" });
+      push({ evidence: evidenceOf(r), kind: "void", id: String(r.id), title: `Void receipt ${r.number}${r.cheque_number ? ` · cheque ${r.cheque_number}` : ""}`, what: `${String(r.void_request_reason ?? "")}${r.job_id ? ` · ${jw(r.job_id)}` : ""}`, askedBy: nm(r.void_requested_by), askedAt: (r.void_requested_at as string) ?? null, money: aed(r.amount_aed), href: r.job_id ? `/jobs/${r.job_id}/invoice` : "/accounts-posting?tab=cheque", jobId: (r.job_id as string) ?? null, quotationId: null, poId: null, approveLabel: "Void it", refuseLabel: "Keep the receipt" });
     }
   }
   // Lathe bills paid or in Zoho that accounts asked to void (11 November 2026, Section 6).
