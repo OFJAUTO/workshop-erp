@@ -967,7 +967,8 @@ await section("h", "commission approve then pay", async () => {
     await go(page, `${base}/commissions`);
     check("h1: the pending commission is on the owner's page — R2", (await page.locator(`[data-commission-row="${q.number}"]`).count()) === 1);
     await page.locator(`[data-commission-row="${q.number}"] [data-approve-commission]`).click();
-    await sleep(2000);
+    // Wait for the decision itself (a fixed 2 s was too short on a busy test server, 18 Nov).
+    for (let i = 0; i < 60; i++) { if ((await sql("select commission_status from public.quotations where id = $1", [q.id]))[0]?.commission_status === "approved") break; await sleep(500); }
     await shot(page, "h1-owner-approve-actor");
     await browser.close();
   }

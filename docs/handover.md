@@ -1,4 +1,4 @@
-# Handover – list of 18 November 2026 (end checks running; last update 18 Nov, 09:45 Dubai)
+# Handover – list of 18 November 2026 (ALL DONE; last update 18 Nov, 12:00 Dubai)
 
 **NEEDS OMAR (top first):**
 1. Mathew chooses when tax invoices are issued for cheque payments: Accounts posting → Cheque tab → "Tax invoices for cheque payments" (now: when the cheque clears).
@@ -8,7 +8,11 @@
 5. The daily approvals email: the first send shows on the Approvals page. If it says it could not send, the free fix is to add the Google Workspace key to Vercel; WhatsApp would cost about USD 1.50 a month at worst. Details in docs/approvals-wait-18-nov-note.md.
 6. From 17 Nov, still open: SPAY-00023/24/28/29/33 proofs; AL TAYER's one invoice for LPO-00039-1 + -3; Mathew on how Journal Vouchers go to Zoho; Peter's 34 part numbers; "upgrade Next" if wanted; E-00082 AED 8,000; Mathew's Zoho account for stock bills.
 
-**Done:** status fix (bank day before the receipt day + old refused proofs say where to go, 52459f67); S1 cheque pending + Issue tax invoice now + deadline + setting (136fa972); S2 approvals age + reminders (b27a6adb). No database change: nothing waiting for apply.
+**Done:** status fix (bank day before the receipt day + old refused proofs say where to go, 52459f67); S1 cheque pending + Issue tax invoice now + deadline + setting (136fa972, list layout 257c287f); S2 approvals age + reminders (b27a6adb). No database change: nothing waiting for apply.
+
+**End of batch:** unit all pass; security all pass; full layout 178 pages / 1,602 views + 252 pop-ups (18 problems in the new Tax invoices due list, fixed and re-checked clean); simulation 713 of 713 (one fixed-wait flake in path h made to wait for the database, re-run green); check:live 33 of 33.
+
+**Timing:** status fix 35 min, S1 75 min, S2 40 min. Tests, builds and checks about 2 h (two production builds about 10 min, layout 13 min, simulation about 70 min, section tests about 15 min). Deploy waits: none.
 
 ---
 
