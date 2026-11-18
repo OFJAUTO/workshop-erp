@@ -4,6 +4,7 @@ import { useActionState, useMemo, useState } from "react";
 import { Button, Input, Notice } from "@/components/ui";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { MoneyDate } from "@/components/MoneyDate";
+import { showDay } from "@/lib/payment-date-rules";
 import { feesFor, type FeeRule } from "@/lib/bank-fees";
 import { checkFigures, CLEARING_LABEL, preTicked, receivedAfter, splitFigures, vatOnFees, type ClearingMethod } from "@/lib/card-settlement-rules";
 import { initialFormState, type FormState } from "@/lib/form-state";
@@ -59,10 +60,11 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
   const ticked = useMemo(() => picked ?? new Set(settledOn ? mine.filter((r) => preTicked(r.receivedAt, settledOn)).map((r) => r.id) : []), [picked, mine, settledOn]);
   const isAfter = (iso: string) => !!settledOn && receivedAfter(iso, settledOn);
   // A payment taken after the settlement day can never be in it: shown greyed out, never counted.
-  const tickedRows = mine.filter((r) => ticked.has(r.id) && !isAfter(r.receivedAt));
-  // Never earlier than the newest payment it covers (the Dubai day it was received).
-  const earliest = tickedRows.reduce<string | null>((a, r) => { const d = new Date(Date.parse(r.receivedAt) + 4 * 3600000).toISOString().slice(0, 10); return !a || d > a ? d : a; }, null);
-  const dateOk = !!settledOn && settledOn <= today && (!earliest || settledOn >= earliest);
+  // A payment recorded after the bank day can still be in it (18 November 2026: the bank posts the 13th, the receipt
+  // was recorded on the 14th). Never pre-ticked; ticked by hand, its payment date moves to the bank day on Record.
+  const tickedRows = mine.filter((r) => ticked.has(r.id));
+  const moving = tickedRows.filter((r) => isAfter(r.receivedAt));
+  const dateOk = !!settledOn && settledOn <= today;
   const gross = Math.round(tickedRows.reduce((a, r) => a + r.amount, 0) * 100) / 100;
   // The estimate of what the bank will keep, in its own parts (the placeholders).
   const est = tickedRows.reduce((a, r) => { const f = r.est ?? feesFor(r.amount, rule); return { msf: a.msf + f.msf, txn: a.txn + f.txn, vat: a.vat + f.vat }; }, { msf: 0, txn: 0, vat: 0 });
@@ -109,17 +111,17 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
         <ul className="divide-y divide-line rounded-card border border-line bg-white" data-settle-list>
           {mine.map((r) => {
             const after = isAfter(r.receivedAt);
-            const on = ticked.has(r.id) && !after;
+            const on = ticked.has(r.id);
             const share = shares.get(r.id);
             const e = r.est ?? feesFor(r.amount, rule);
             return (
               <li key={r.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2.5 text-sm" data-settle-row={r.number}>
                 <label className="flex min-h-11 cursor-pointer items-center gap-3">
-                  <input type="checkbox" name="ids" value={r.id} checked={on} disabled={after} onChange={() => toggle(r.id)} className="h-5 w-5 accent-ink" data-settle-tick={r.number} />
+                  <input type="checkbox" name="ids" value={r.id} checked={on} onChange={() => toggle(r.id)} className="h-5 w-5 accent-ink" data-settle-tick={r.number} />
                   <span className="font-bold">{r.number}</span>
                 </label>
                 <span className="text-muted">{dayText(r.receivedAt)} · {r.plate}{r.isDeposit ? " · deposit" : ""}{r.authCode ? ` · auth ${r.authCode}` : ""}</span>{r.codeMissing ? <span className="text-xs font-semibold text-amber-bar" data-settle-auth-missing>auth missing</span> : null}
-                {after ? <span className="text-xs font-semibold text-muted" data-settle-after>Taken after this settlement date</span> : null}
+                {after ? <span className={`text-xs font-semibold ${on ? "text-amber-text" : "text-muted"}`} data-settle-after>{on ? `Recorded after the bank day: its payment date moves to ${showDay(settledOn)}` : "Recorded after the bank day – tick it if it is in this amount"}</span> : null}
                 {r.late ? <span className="rounded-full bg-amber-soft px-2 text-xs font-bold text-amber-text" data-settle-late>Not settled after 3 working days</span> : null}
                 <span className="ml-auto font-extrabold">{aed(r.amount)}</span>
                 <span className="w-60 text-right text-xs text-muted">
@@ -155,7 +157,8 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
               <span className="text-xs font-semibold uppercase text-muted">Note</span>
               <Input name="note" value={note} onChange={(e) => setNote(e.target.value)} data-settle-note />
             </label>
-            <MoneyDate name="settled_on" label="In bank on (money in the bank)" value={settledOn} onChange={(v) => { setSettledOn(v); setPicked(null); }} max={today} min={earliest} minWords="the newest ticked payment" hook="data-settle-date" />
+            <MoneyDate name="settled_on" label="In bank on (money in the bank)" value={settledOn} onChange={(v) => { setSettledOn(v); setPicked(null); }} max={today} hook="data-settle-date" />
+            {moving.length ? <input type="hidden" name="move_dates" value="1" /> : null}
             <ConfirmSubmit
               label={pending ? "Saving…" : ask ? "Yes, the figures are right – record it" : differs && override ? "Save anyway" : "Record the settlement"}
               disabled={!canRecord || pending}
@@ -163,6 +166,7 @@ export function SettlementForm({ rows, today, initialMethod, canSave, rules, act
               lines={[
                 `${tickedRows.length} ${CLEARING_LABEL[method].toLowerCase()} payment${tickedRows.length === 1 ? "" : "s"} settled on ${settledOn}: ${aed(gross)}`,
                 `net ${fig(netNum ?? 0)} into the bank, MSF ${fig(msfNum)} + fee ${fig(txnNum)} + VAT ${fig(vatNum)}`,
+                ...(moving.length ? [`${moving.map((r) => r.number).join(", ")}: payment date moves to ${showDay(settledOn)} (paid on or before the bank day)`] : []),
                 ...(differs && override ? [`a difference of AED ${Math.abs(check.difference).toFixed(2)} is saved with the note`] : []),
                 "the jobs' bank fees become the actual ones and it goes to Zoho Books",
               ]}

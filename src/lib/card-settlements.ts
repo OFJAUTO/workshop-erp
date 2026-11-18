@@ -160,6 +160,10 @@ export type SettleInput = {
   /** From the bank's report: each payment's own MSF, fee, VAT and net. */
   exact?: Record<string, { msf: number; txn: number; vat: number; net?: number }>;
   reportId?: string | null;
+  /** A receipt recorded AFTER the bank day it is paid out on (18 November 2026): its payment date moves to the bank day
+   * (the customer paid on or before it). Called once every other check has passed, right before the settlement is saved;
+   * returns words when a move is refused. Without it such a receipt is refused as before. */
+  moveLate?: (late: { id: string; number: string; day: string }[]) => Promise<string | null>;
 };
 export type SettleResult = { ok: true; id: string; number: string; fee: number; cost: number; count: number; difference: number } | { ok: false; error: string; askAgain?: string; difference?: number };
 
@@ -185,7 +189,8 @@ export async function recordSettlement(input: SettleInput, actorId: string): Pro
   const gone = pays.find((p) => p.settlement_id || p.status !== "recorded" || !p.is_active);
   if (gone) return { ok: false, error: `${gone.number} is ${gone.settlement_id ? "already in another settlement" : "voided"}. Reload the page.` };
   // Money cannot leave the clearing account before it came in: a payment taken after the settlement day is refused.
-  const late = pays.find((p) => dubaiDay(p.received_at) > input.settledOn);
+  const lateAll = pays.filter((p) => dubaiDay(p.received_at) > input.settledOn);
+  const late = input.moveLate ? undefined : lateAll[0];
   if (late) return { ok: false, error: `${late.number} was received on ${dubaiDay(late.received_at)}, after the settlement date ${input.settledOn}. Untick it or pick the right date.` };
   const amounts = pays.map((p) => ({ id: p.id, amount: round2(Number(p.amount_aed) || 0) }));
   const gross = round2(amounts.reduce((a, p) => a + p.amount, 0));
@@ -204,6 +209,10 @@ export async function recordSettlement(input: SettleInput, actorId: string): Pro
   const vat = round2(input.vat ?? 0);
   const net = round2(input.net ?? 0);
   const shares = splitFigures(amounts, { msf, txn, vat }, input.exact ?? {});
+  if (lateAll.length && input.moveLate) {
+    const refused = await input.moveLate(lateAll.map((p) => ({ id: p.id, number: p.number, day: dubaiDay(p.received_at) })));
+    if (refused) return { ok: false, error: refused };
+  }
 
   let number = await nextSettlementNumber();
   let made: { id: string; number: string } | null = null;

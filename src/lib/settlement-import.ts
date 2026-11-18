@@ -7,6 +7,7 @@ import { REPORT_SHEET_ROWS, REPORT_XLSX_READ, matchLines, parseReportPdf, parseR
 import { authCodeMissing, realAuthCode } from "./auth-code";
 import { addAuthCode, type Actor } from "./payments";
 import { bankFeesOf, getSettings } from "./settings";
+import { moveLateReceipts } from "./payment-date";
 import { createAdminClient } from "./supabase/admin";
 
 /**
@@ -268,7 +269,7 @@ export async function recordReport(reportId: string, input: RecordReportInput, a
   const ids: string[] = [];
   for (const [method, g] of groups) {
     const sum = (k: "msf" | "txn" | "vat" | "net") => Math.round(g.ids.reduce((a, id) => a + g.exact[id][k], 0) * 100) / 100;
-    const res = await recordSettlement({ method, settledOn: input.settledOn, paymentIds: g.ids, net: sum("net"), msf: sum("msf"), txn: sum("txn"), vat: sum("vat"), statementRef: input.statementRef, note: input.note, confirmed: true, override: false, exact: g.exact, reportId }, actorId);
+    const res = await recordSettlement({ method, settledOn: input.settledOn, paymentIds: g.ids, net: sum("net"), msf: sum("msf"), txn: sum("txn"), vat: sum("vat"), statementRef: input.statementRef, note: input.note, confirmed: true, override: false, exact: g.exact, reportId, moveLate: async (late) => moveLateReceipts(late, input.settledOn, { id: actorId, display_name: String(actor.display_name ?? ""), role_id: String(actor.role_id ?? "") }, await getSettings()) }, actorId);
     if (!res.ok) return { ok: false, error: numbers.length ? `${numbers.join(", ")} recorded; the ${method === "link" ? "payment link" : "card machine"} part was not: ${res.error}` : res.error };
     numbers.push(res.number);
     ids.push(res.id);

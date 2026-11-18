@@ -11,6 +11,14 @@ const ONLY = "Only accounts or the owner add the proof of a supplier payment.";
 
 const poExists = (poId: string) => rowExists("purchase_orders", poId);
 
+/** 18 November 2026: proofs picked on the Supplier payments page before the 17 November fix were tied to the SUPPLIER,
+ * not to an LPO; they wait on the device with "This LPO no longer exists". Say what happened and where it goes now. */
+const STALE_PROOF = "Picked before the 17 Nov fix, so it was never sent. Add it on its payment instead (Supplier payments → Payment history → Correct this payment → Add the proof), then press Remove here.";
+async function noLpo(poId: string) {
+  const supplier = await rowExists("suppliers", poId);
+  return refuse(supplier ? STALE_PROOF : "This LPO no longer exists.", true, 404);
+}
+
 /**
  * The proof of paying a supplier (bank slip, card slip, signed receipt, cheque copy) on an LPO, with the payment or after
  * it. Accounts and the owner. On an LPO already marked paid it lands on the LPO at once (and a payment already in Zoho
@@ -27,7 +35,7 @@ export const supplierProofTarget: TargetSpec = {
     if (staff.viewingAs || !MONEY_ROLES.includes(staff.role_id)) return refuse(ONLY, true);
     const there = await poExists(poId);
     if (there === null) return checkLater();
-    if (!there) return refuse("This LPO no longer exists.", true, 404);
+    if (!there) return noLpo(poId);
     return { staffId: staff.id, roleId: staff.role_id, via: "login" } satisfies Actor;
   },
 
@@ -37,7 +45,7 @@ export const supplierProofTarget: TargetSpec = {
     if (!actor.roleId || !MONEY_ROLES.includes(actor.roleId)) return refuse(ONLY, true);
     const there = await poExists(poId);
     if (there === null) return checkLater();
-    if (!there) return refuse("This LPO no longer exists.", true, 404);
+    if (!there) return noLpo(poId);
     return actor;
   },
 

@@ -7,6 +7,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { terminalList } from "@/lib/bank-fees";
 import { requirePermission } from "@/lib/auth";
 import { recordSettlement, undoSettlement } from "@/lib/card-settlements";
+import { moveLateReceipts } from "@/lib/payment-date";
+import { getSettings } from "@/lib/settings";
 import { formValues, type FormState } from "@/lib/form-state";
 import { reportNumber } from "@/lib/settlement-report";
 
@@ -35,6 +37,7 @@ export async function recordSettlementAction(_prev: FormState, formData: FormDat
       statementRef: blank(formData.get("statement_ref")),
       note: blank(formData.get("note")),
       confirmed: formData.get("confirmed") === "1",
+      ...(formData.get("move_dates") === "1" ? { moveLate: async (late: { id: string; number: string; day: string }[]) => moveLateReceipts(late, String(formData.get("settled_on") ?? "").slice(0, 10), staff, await getSettings()) } : {}),
     },
     staff.id,
   );

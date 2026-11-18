@@ -151,3 +151,17 @@ export async function correctCustomerPayment(
   const month = newDay ? await flagPaymentMonth(p.id) : null;
   return { words: `${words}${zohoWords}${month ? ` ${month}` : ""}` };
 }
+
+/**
+ * The bank paid out on a day BEFORE the day these receipts were recorded (18 November 2026, Mathew: "NETWORK
+ * COLLECTION POSTING ON 13/11" with receipts recorded on 14 Nov): the customer paid on or before the bank day, so each
+ * receipt's payment date moves to it through THE correction (closed months, Zoho re-post and the history included).
+ * Returns words when one is refused (the ones before it stay corrected, each with its own history line).
+ */
+export async function moveLateReceipts(late: { id: string; number: string; day: string }[], bankDay: string, by: { id: string; display_name: string; role_id: string }, settings: Settings): Promise<string | null> {
+  for (const p of late) {
+    const res = await correctCustomerPayment(p.id, { day: bankDay, method: null, reference: null, proof: null, reason: `Paid on or before the bank settlement of ${nice(bankDay)} (the receipt was recorded on ${nice(p.day)})` }, by, settings);
+    if (res.error) return `${p.number}: ${res.error}`;
+  }
+  return null;
+}

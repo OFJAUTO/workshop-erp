@@ -838,6 +838,12 @@ export function startSendRunner(): () => void {
   };
   window.addEventListener("online", back);
   window.addEventListener("erp:send-queued", kick);
+  // 18 November 2026: supplier proofs refused with the old "This LPO no longer exists" ask once more, so the queue shows
+  // the new words saying where the proof goes now (they are refused again at once; nothing is sent twice).
+  void listRecords().then(async (all) => {
+    for (const r of all) if (r.permanent && r.target === "supplier_proof" && r.lastError === "This LPO no longer exists.") await updateRecord(r.id, (cur) => ({ ...cur, permanent: false, nextAt: 0 }));
+    kick();
+  });
   document.addEventListener("visibilitychange", kick);
   bc();
   // Photos go three at a time (12 November 2026: one at a time, 14 photos of an inspection took minutes); big files
