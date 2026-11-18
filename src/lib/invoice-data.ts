@@ -379,6 +379,8 @@ export type DraftInputs = {
   charges: ChargeLineRow[];
   /** 13 November 2026 (back orders): approved lines moved to a follow-up job - a part line whole, a labour line by hours. */
   moves?: LineMove[];
+  /** 19 November 2026 (Section 5): parts taken from an approved provisional amount (job events "provisional_convert"). */
+  provisional?: { lineId: string; partId: string; description: string; qty: number; sell: number; cost: number }[];
 };
 const emptyDraftInputs = (): DraftInputs => ({ job: null, quotes: [], lines: [], parts: [], charges: [], moves: [] });
 
@@ -432,6 +434,18 @@ export async function loadDraftInputs(jobIds: string[]): Promise<Map<string, Dra
     const d = out.get(jobId);
     if (d) d.moves = ms;
   }
+  // 19 November 2026 (Section 5): the parts converted from approved provisional amounts.
+  const conv = await safe(pageAllIn<{ job_id: string; note: string | null }>(ids, (piece, a, b) => admin.from("job_events").select("job_id, note").in("job_id", piece).eq("event_type", "provisional_convert").order("id").range(a, b) as unknown as PromiseLike<{ data: { job_id: string; note: string | null }[] | null; error: { message: string } | null }>));
+  for (const e of conv ?? []) {
+    const d = out.get(e.job_id);
+    if (!d) continue;
+    try {
+      const v = JSON.parse(String(e.note ?? "{}")) as { lineId?: string; partId?: string; description?: string; qty?: number; sell?: number; cost?: number };
+      if (v.lineId && v.partId) (d.provisional ??= []).push({ lineId: v.lineId, partId: v.partId, description: String(v.description ?? ""), qty: Number(v.qty) || 1, sell: Number(v.sell) || 0, cost: Number(v.cost) || 0 });
+    } catch {
+      /* a note that is not a conversion */
+    }
+  }
   return out;
 }
 
@@ -475,7 +489,26 @@ export function draftFrom(inp: DraftInputs, settings: Settings): InvoiceDraft {
     if (d > 0 && !discountLabel) discountLabel = discountLabelOf({ discount_kind: q.discount_kind, discount_value: q.discount_value, discount_percent: Number(q.discount_percent) || 0, discount_scope: q.discount_scope }, { hasPackage: qLines.some((l) => !!l.package_key) });
     discount += d;
     discountBase += base;
-    for (const l of qLines) lines.push(draftLineOf(l, partOf(l.part_item_id)));
+    for (const l of qLines) {
+      if (l.source_key === "provisional") {
+        // 19 November 2026 (Section 5): the provisional amount itself never reaches the tax invoice.
+        const cap = round2(lineTotal(l));
+        let left = cap;
+        let usedNet = 0;
+        for (const c of (inp.provisional ?? []).filter((x) => x.lineId === l.id)) {
+          const amount = round2(Math.min(c.sell, left));
+          if (amount <= 0) break;
+          left = round2(left - amount);
+          usedNet = round2(usedNet + amount);
+          const p = parts.find((x) => x.id === c.partId);
+          lines.push({ section: "parts", description: c.description, details: "From the provisional amount", part_number: null, quantity: c.qty, hours: null, unit_price: round2(amount / (c.qty || 1)), amount_aed: amount, cost_aed: p ? round2((p.final_cost_aed ?? p.cost_aed ?? 0) * (c.qty || 1)) : c.cost, quotation_line_id: l.id, part_item_id: c.partId, takesDiscount: false });
+        }
+        // The quotation's total held the whole provisional amount: the bill holds only what was used.
+        quotedTotal -= round2((cap - usedNet) + round2((cap - usedNet) * (vatPercent / 100)));
+        continue;
+      }
+      lines.push(draftLineOf(l, partOf(l.part_item_id)));
+    }
     // The quotation's own total, rounded when the advisor rounded it on sending.
     const rounded = q.rounded_total_aed;
     if (moves.length) {

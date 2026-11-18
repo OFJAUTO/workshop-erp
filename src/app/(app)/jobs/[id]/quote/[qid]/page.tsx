@@ -1,4 +1,5 @@
 import { ReasonChips } from "@/components/ReasonChips";
+import { ProvisionalConvert } from "@/components/AddPartChoice";
 import { AddPartsHere, type OtherPart } from "@/components/AddPartsHere";
 import { FixIt } from "@/components/FixIt";
 import { remindToFix } from "@/app/(app)/jobs/fix-actions";
@@ -28,7 +29,7 @@ import { dubaiDate, workingTimeOf } from "@/lib/jobs";
 import { installerHistoryFor } from "@/lib/bodyshop";
 import { labourRateFor, loadPartsWait, loadQuotation, loadQuoteChecks, loadServices, minMarkupFor, packageCostingOf, approvalReasonsNow, roundingByOwnerOf } from "@/lib/quote-data";
 import { roundoffLimitsOf } from "@/lib/roundoff";
-import { QUOTE_STATUS_LABELS, aed, approvalCovers, isHidden, estimatedDaysAfterApproval } from "@/lib/quotes";
+import { QUOTE_STATUS_LABELS, aed, approvalCovers, isHidden, estimatedDaysAfterApproval, lineTotal } from "@/lib/quotes";
 import { can, type RoleId } from "@/lib/roles";
 import { getSettings, highestBankCharge } from "@/lib/settings";
 import { getSiteUrl, PRODUCTION_SITE_URL } from "@/lib/site";
@@ -96,6 +97,11 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
   const canEdit = !staff.viewingAs && (q.status === "draft" || q.status === "pending_owner");
   // Approved by the customer: locked for everyone (the database refuses too). Who may make a new version depends on the documents out.
   const lock = quoteLockOf(q, await invoicesForLock(q.job_id), { isOwner });
+  // 19 November 2026 (Section 5): an approved provisional amount, with what is left of it.
+  const provRaw = bundle.lines.filter((l) => l.source_key === "provisional");
+  const { data: provEvents } = provRaw.length && q.job_id ? await createAdminClient().from("job_events").select("note").eq("job_id", q.job_id).eq("event_type", "provisional_convert") : { data: [] as { note: string | null }[] };
+  const usedOf = (id: string) => ((provEvents ?? []) as { note: string | null }[]).map((e) => { try { return JSON.parse(String(e.note ?? "{}")) as { lineId?: string; sell?: number }; } catch { return {}; } }).filter((e) => e.lineId === id).reduce((a, e) => a + (Number(e.sell) || 0), 0);
+  const provLines = provRaw.map((l) => { const cap = Math.round(lineTotal(l) * 100) / 100; return { id: l.id, title: l.title, cap, left: Math.max(0, Math.round((cap - usedOf(l.id)) * 100) / 100) }; });
   // Revise is offered on the newest version only (an older one already has its next version).
   const isNewest = q.version >= Math.max(...bundle.versions.map((v) => v.version), q.version);
   const mayRevise = isNewest && !staff.viewingAs && (lock.locked ? (lock.reviseBy === "owner_or_allowed" ? isOwner || !!q.revision_allowed_at : lock.reviseBy === "owner" ? isOwner : false) : ["sent", "opened", "expired", "declined", "urgent_requested"].includes(q.status));
@@ -372,6 +378,7 @@ export default async function QuotePage({ params, searchParams }: { params: Prom
         </Card>
       ) : null}
 
+      {provLines.length && ["approved", "urgent_requested"].includes(q.status) && (role === "owner" || role === "service_advisor") && !staff.viewingAs ? <ProvisionalConvert quotationId={q.id} lines={provLines} minMarkup={minMarkupFor(settings, vehicle?.make?.name ?? null)} /> : null}
       <QuoteEditor
         partsExtra={canEdit && !lock.locked && ["draft", "pending_owner"].includes(q.status) && otherParts.length ? <AddPartsHere jobId={id} quotationId={q.id} number={q.number} parts={otherParts} /> : null}
         comp={await compJobChoices(q, bundle.job as { comeback_free?: boolean } | null)}

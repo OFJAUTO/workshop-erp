@@ -230,7 +230,8 @@
     "test:s19-1": "node --env-file=.env.test.local tests/browser/test-s19-1-zoho-bills.mjs",
     "test:s19-2": "node --env-file=.env.test.local tests/browser/test-s19-2-cancelled.mjs",
     "test:s19-3": "node --env-file=.env.test.local tests/browser/test-s19-3-settlement.mjs",
-    "test:s19-4": "node --env-file=.env.test.local tests/browser/test-s19-4-returns.mjs"
+    "test:s19-4": "node --env-file=.env.test.local tests/browser/test-s19-4-returns.mjs",
+    "test:s19-5": "node --env-file=.env.test.local tests/browser/test-s19-5-add-part.mjs"
   },
   "dependencies": {
     "@fontsource/plus-jakarta-sans": "^5.3.0",

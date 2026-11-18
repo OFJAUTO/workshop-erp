@@ -28,6 +28,12 @@ export async function approvedPartIds(jobIds: string[]): Promise<Map<string, Set
     if (!out.has(j)) out.set(j, new Set());
     out.get(j)!.add(l.part_item_id);
   }
+  // 19 November 2026 (Section 5): a part converted from a provisional amount the customer approved is approved too.
+  const prov = await pageAllIn<{ id: string; job_id: string }>(jobIds, (ids, a, b) => admin.from("part_items").select("id, job_id").in("job_id", ids).like("client_key", "prov:%").order("id").range(a, b) as unknown as Res<{ id: string; job_id: string }>);
+  for (const p of prov) {
+    if (!out.has(p.job_id)) out.set(p.job_id, new Set());
+    out.get(p.job_id)!.add(p.id);
+  }
   // Replacements inherit the approval of the part they replace (a chain of two at most in practice).
   const reps = await pageAllIn<{ id: string; job_id: string; replaced_part_id: string }>(jobIds, (ids, a, b) => admin.from("part_items").select("id, job_id, replaced_part_id").in("job_id", ids).not("replaced_part_id", "is", null).order("id").range(a, b) as unknown as Res<{ id: string; job_id: string; replaced_part_id: string }>);
   for (let pass = 0; pass < 3; pass++) {

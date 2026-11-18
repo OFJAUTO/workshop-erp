@@ -1,4 +1,5 @@
 "use client";
+import { AddPartChoice } from "@/components/AddPartChoice";
 import { Words } from "@/components/Words";
 
 import type { QuoteLock } from "@/lib/quote-lock";
@@ -481,6 +482,8 @@ export function QuoteEditor({
   const [attempted, setAttempted] = useState(false);
   const [picker, setPicker] = useState<null | { kind: PickerKind; replace?: string; sourceType?: "item" | "tyre" | "request" | null; sourceKey?: string | null; label?: string }>(null);
   const [partPicker, setPartPicker] = useState(false);
+  // 19 November 2026 (Section 5): "+ Add a part" asks how the part is handled first (nothing picked).
+  const [addChoice, setAddChoice] = useState(false);
   /** "Enter price myself" (5 November 2026): the centre pricing window open on a line (estimate, or a job's part).
    *  NEVER a row inside the sideways-scrolling parts table: that opened off-screen on phones and tablets. */
   const [priceFor, setPriceFor] = useState<{ lineId: string; partId: string | null; cost?: string; supplier?: string } | null>(null);
@@ -1657,7 +1660,7 @@ export function QuoteEditor({
             <div className="flex flex-wrap gap-2 border-t border-line pt-3">
               <Button type="button" size="md" onClick={() => setDraft("choose")} disabled={draft === "saving"}>+ Add line</Button>
               {(packages?.length ?? 0) > 0 ? <Button type="button" tone="secondary" size="md" onClick={() => setPackageAsk(true)} data-add-package>+ Add a package</Button> : null}
-              <Button type="button" tone="secondary" size="md" onClick={() => setPartPicker(true)} data-add-part>+ Add a part</Button>
+              <Button type="button" tone="secondary" size="md" onClick={() => setAddChoice(true)} data-add-part>+ Add a part</Button>
               <Button type="button" tone="secondary" size="md" onClick={() => setDiscountOpen(true)} data-labour-discount className={header.discount_kind && Number(header.discount_value) > 0 ? "border-green bg-green-soft text-green-text" : ""}>
                 {header.discount_kind && Number(header.discount_value) > 0 ? `Discount ${header.discount_kind === "percent" ? `${header.discount_value}%` : aed(Number(header.discount_value))}` : "Discount"}
               </Button>
@@ -2208,6 +2211,22 @@ export function QuoteEditor({
           onSaveCustom={async (name) => { const r = await saveCustomService(name, picker.kind === "service" ? "service" : "labour"); if (r.error) setActionError(r.error); else refreshWhenIdle(() => router.refresh()); }}
           editHref={editHref(picker.kind)}
           onClose={() => setPicker(null)}
+        />
+      ) : null}
+      {addChoice ? (
+        <AddPartChoice
+          isEstimate={!isQuotation}
+          minMarkup={settings.minMarkup}
+          onClose={() => setAddChoice(false)}
+          onDesk={() => { setAddChoice(false); setPartPicker(true); }}
+          onOwn={(p) => {
+            setAddChoice(false);
+            if (isQuotation) save({ addOwnPart: { description: p.description, quantity: p.qty, cost: p.cost, supplier: p.supplier, ...(p.sell !== null ? { markupMode: "aed", markupValue: Math.max(0, Math.round((p.sell - p.cost) * 100) / 100) } : { markupMode: "percent", markupValue: settings.minMarkup }) } });
+            else addLine({ line_type: "part", title: p.description, quantity: p.qty });
+          }}
+          onStock={(id, qty) => { setAddChoice(false); save({ addStockPart: { stockItemId: id, quantity: qty } }); }}
+          onCustomer={(name, qty) => { setAddChoice(false); addLine({ line_type: "other", title: name.toUpperCase(), quantity: qty, unit_price: 0, details: "PART SUPPLIED BY CUSTOMER – NO WARRANTY ON THE PART", source_key: "customer_supplied", special: "customer_supplied" } as Partial<QuoteLine>); }}
+          onProvisional={(upTo) => { setAddChoice(false); addLine({ line_type: "other", title: `ADDITIONAL PARTS IF REQUIRED – UP TO AED ${upTo.toLocaleString("en-GB", { minimumFractionDigits: 2 })}`, quantity: 1, unit_price: upTo, details: "Used only if needed; whatever is not used is not charged.", source_key: "provisional", special: "provisional" } as Partial<QuoteLine>); }}
         />
       ) : null}
       {partPicker ? (

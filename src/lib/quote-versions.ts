@@ -430,7 +430,8 @@ export async function missingPricedParts(jobId: string, quotationId: string): Pr
   }
   const others = Array.from(newest.entries()).filter(([n]) => n !== me?.number).map(([, v]) => v.id);
   const [{ data: parts }, { data: lines }] = await Promise.all([
-    admin.from("part_items").select(`id, description, cost_aed, confirm_status, is_active, removed_at, not_needed_at, replaced_part_id${(await schemaReady("part_items", "refused_at")) ? ", refused_at" : ""}`).eq("job_id", jobId).eq("is_active", true).not("cost_aed", "is", null),
+    // 19 November 2026 (Section 5): a part converted from an approved provisional amount ("prov:" key) has its home there.
+    admin.from("part_items").select(`id, description, cost_aed, confirm_status, is_active, removed_at, not_needed_at, replaced_part_id${(await schemaReady("part_items", "refused_at")) ? ", refused_at" : ""}`).eq("job_id", jobId).eq("is_active", true).not("cost_aed", "is", null).or("client_key.is.null,client_key.not.like.prov:%"),
     admin.from("quotation_lines").select("part_item_id").in("quotation_id", [quotationId, ...others]).eq("is_active", true).not("part_item_id", "is", null),
   ]);
   const have = new Set((lines ?? []).map((l) => String(l.part_item_id)));
