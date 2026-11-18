@@ -140,7 +140,10 @@ export async function runPopups() {
   await goto(p, qUrl);
   await check(p, "Quotation line menu", "[data-floating-menu]", () => click(p, 'button[aria-label="More for this line"]'), findings, shots);
   await goto(p, qUrl);
-  await check(p, "Add a part (quotation)", "[data-part-picker]", () => p.getByRole("button", { name: "+ Add a part" }).first().click(), findings, shots);
+  // 19 November 2026 (Section 5): "+ Add a part" asks how the part is handled first; the desk choice opens the picker.
+  await check(p, "Add a part: the choice (quotation)", "[data-add-part-choice]", () => p.getByRole("button", { name: "+ Add a part" }).first().click(), findings, shots);
+  await goto(p, qUrl);
+  await check(p, "Add a part (quotation)", "[data-part-picker]", async () => { await p.getByRole("button", { name: "+ Add a part" }).first().click(); await p.locator("[data-add-part-mode=\"desk\"]").check(); await p.locator("[data-add-part-go]").click(); }, findings, shots);
   await goto(p, qUrl);
   await check(p, "Round off (quotation)", "[data-roundoff-dialog]", () => click(p, "[data-roundoff-open]"), findings, shots);
   await goto(p, qUrl);

@@ -1,6 +1,19 @@
-# Handover – second list of 18 November 2026 (in progress; last update 18 Nov, 16:40 Dubai)
+# Handover – second list of 18 November 2026 (ALL DONE; last update 18 Nov, 21:40 Dubai)
 
-Done and live: S1 Zoho bills (77ec8a8e), S2 cancelled documents leave the queue (76e9ebc0), S3 settlement result (f18e194a). Next: S4 purchase returns and supplier credit notes, then S5 advisors' "+ Add a part".
+**NEEDS OMAR (top first):**
+1. Parts: mark LPO-00089 (VEGA, BOSCH BRAKE FLUID) received, so the stock counts it. Its Zoho bill is now AED 16.80 (it read 0.00 because nothing was marked received).
+2. Mathew: Sync to Zoho once. RCT-00091 then leaves the queue as "Not sent – cancelled before sync"; the VEGA bill posts at 16.80 before SPAY-00041.
+3. Nothing to redo for the AED 45,229.00 settlement: it is STL-00032 (recorded 18 Nov, 11:03). The red line came from the bank report upload, which could not read that file.
+4. When merging the two Sparein supplier records, keep SPAREIN AUTOMOTIVE L.L.C (the name on their invoices).
+5. Advisors convert their "OFJ Additional" parts: Q-00001 v1 (J-00016, 31 parts, ADARSH), Q-00030 (J-00609, ANAS), Q-00039 (J-00969, Omar), Q-00045 (J-00343, ADARSH).
+6. Optional: one Zoho supplier credit per credit note (with several lines) instead of one per part needs a small database change. Reply "credit note lines" if wanted.
+7. From the first 18 Nov list: Mathew's cheque tax invoice setting, Mark cleared on cheque 018315, Issue tax invoice now on J-00981 and J-00860, 24 approvals waiting.
+
+**Done:** S1 Zoho bills (77ec8a8e), S2 cancelled documents leave the queue (76e9ebc0), S3 settlement result (f18e194a), S4 purchase returns and credit notes (9fa283f8), S5 + Add a part with a choice (b2e5ef9f). No database change: nothing waiting for apply.
+
+**End of batch:** unit all pass; security all pass; full layout 178 pages / 1,602 views clean; pop-ups 258 all fit (the pop-up check now opens the Add a part choice first; one timing flake re-run clean); simulation 713 of 713; check:live 33 of 33.
+
+**Timing:** S1 75 min, S2 50 min, S3 35 min, S4 85 min, S5 70 min. Tests, builds and checks about 2 h (one production build 10 min, layout 14 min, pop-ups twice 12 min, simulation 70 min, section tests about 20 min). Deploy waits: none.
 
 ---
 
