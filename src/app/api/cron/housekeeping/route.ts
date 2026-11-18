@@ -752,5 +752,14 @@ async function runHousekeeping(): Promise<Record<string, number>> {
   } catch {
     report.pnFlagsDaily = -1;
   }
+
+  // 35. A completed job with no tax invoice after 10 days: accounts and the owner are told once, "TAX INVOICE DUE BY …"
+  // (18 November 2026, Section 1; due 14 days after completion).
+  try {
+    const { taxInvoiceDueHourly } = await import("@/lib/tax-invoice-due");
+    report.taxInvoiceDue = await taxInvoiceDueHourly();
+  } catch {
+    report.taxInvoiceDue = -1;
+  }
   return report;
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { balanceBlockWords } from "@/lib/still-due";
 import { useState } from "react";
 import { ReasonChips } from "@/components/ReasonChips";
 import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
@@ -8,7 +9,7 @@ import { FinalMileage } from "@/components/FinalMileage";
 import type { MileageUnit } from "@/lib/mileage";
 import { Button, ChoiceButtons, Field, Input, Notice } from "@/components/ui";
 
-export type BalanceInfo = { state: "paid" | "part_paid" | "unpaid" | "cheque_pending" | "no_invoice" | "nothing"; balance: number; invoiceNumber: string | null };
+export type BalanceInfo = { state: "paid" | "part_paid" | "unpaid" | "cheque_pending" | "no_invoice" | "nothing"; balance: number; invoiceNumber: string | null; /** Cheques and transfers still clearing (18 November 2026). */ pending?: number };
 
 /** A driver saved on the customer (customer_contacts). */
 export type SavedContact = { id: string; name: string; phone: string | null; relationship: string | null };
@@ -118,7 +119,7 @@ export function GateOutForm({
   const declinedFree = declinedOut && balance.balance <= 0 && (balance.state === "no_invoice" || balance.state === "nothing");
   const blocked = ((balance.state === "no_invoice" && !declinedFree) || balance.balance > 0) && !onCredit;
   // 11 November 2026 (Section 11): the gate-in desk never sees an amount.
-  const blockedText = noAmounts ? "Payment not complete: call accounts." : balance.state === "no_invoice" ? "No invoice has been issued for this job." : `Balance due AED ${balance.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}${balance.invoiceNumber ? ` on ${balance.invoiceNumber}` : ""}.`;
+  const blockedText = noAmounts ? "Payment not complete: call accounts." : balance.state === "no_invoice" ? "No invoice has been issued for this job." : balanceBlockWords(balance);
 
   return (
     <ActionForm action={action}>

@@ -5,6 +5,7 @@ import { ActionForm, SubmitButton, type FormAction } from "@/components/forms";
 import { ReasonChips } from "@/components/ReasonChips";
 import { Field, Input, Notice } from "@/components/ui";
 import type { BalanceInfo } from "./GateOutForm";
+import { balanceBlockWords } from "@/lib/still-due";
 
 type Item = { id: string; label: string; collected: boolean };
 
@@ -14,7 +15,7 @@ export function CollectItemsForm({ action, items, canApproveRelease, balance, re
   const [ticked, setTicked] = useState<Record<string, boolean>>(Object.fromEntries(left.map((i) => [i.id, true])));
   const count = left.filter((i) => ticked[i.id]).length;
   const blocked = balance.state === "no_invoice" || balance.balance > 0;
-  const blockedText = balance.state === "no_invoice" ? "No invoice has been issued for this job." : `Balance due AED ${balance.balance.toLocaleString("en-GB", { minimumFractionDigits: 2 })}${balance.invoiceNumber ? ` on ${balance.invoiceNumber}` : ""}.`;
+  const blockedText = balance.state === "no_invoice" ? "No invoice has been issued for this job." : balanceBlockWords(balance);
   return (
     <ActionForm action={action}>
       {(v) => (

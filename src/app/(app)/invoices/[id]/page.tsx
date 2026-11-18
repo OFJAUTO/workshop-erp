@@ -1,4 +1,9 @@
 import { awaitsBank, duplicateWords } from "@/lib/bank-status";
+import { TaxInvoiceDue } from "@/components/TaxInvoiceDue";
+import { missingTaxInvoices, taxDueViewOf } from "@/lib/tax-invoice-due";
+import { issueTaxInvoiceNowAction } from "@/app/(app)/invoices/tax-due-actions";
+import { BalanceHeadline } from "@/components/BalanceHeadline";
+import { stillDueOf, waitingWordOf } from "@/lib/still-due";
 import { CorrectCustomerPayment, PaymentCorrections } from "@/components/CorrectCustomerPayment";
 import { paymentCorrections } from "@/lib/payment-date";
 import { dubaiDayOf } from "@/lib/payment-date-rules";
@@ -53,6 +58,8 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
   // 3 November 2026: what credit notes took off a tax invoice is not owed (less any refund paid out on them).
   const creditOff = invoice.kind === "tax_invoice" ? ((await creditsOnDocs([invoice.id])).get(invoice.id) ?? 0) : 0;
   const bal = invoiceBalance(invoice, live, creditOff);
+  // 18 November 2026 (Section 1): the tax invoice deadline on a proforma of a completed job.
+  const taxDue = invoice.kind === "proforma" && invoice.job_id && !invoice.converted_to ? taxDueViewOf((await missingTaxInvoices({ jobIds: [invoice.job_id] }))[0]) : null;
   const pendingBank = duplicateWords(live.filter((p) => p.status === "recorded" && awaitsBank(p)).map((p) => ({ method: p.method, number: p.number, amount: p.amount_aed })), bal.balance);
   const canPay = can(role, "recordPayments") && !staff.viewingAs && invoice.kind === "tax_invoice" && invoice.status === "issued";
   const canVoid = (role === "owner" || (role === "accounts" && staff.is_head_accountant)) && !staff.viewingAs;
@@ -104,13 +111,17 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      {taxDue && invoice.job_id ? <TaxInvoiceDue v={taxDue} mayIssue={(role === "owner" || role === "accounts") && !staff.viewingAs} isOwner={role === "owner"} action={issueTaxInvoiceNowAction.bind(null, invoice.job_id)} /> : null}
       {payable ? (
         <Card className={`flex flex-wrap items-center gap-x-8 gap-y-2 ${bal.state === "paid" ? "border-green" : "border-ink"}`}>
           <span className="text-lg font-extrabold">Invoice AED {m(invoice.total_aed)}</span>
           <span className="text-lg font-extrabold">Paid AED {m(bal.paid)}</span>
           {bal.credited ? <span className="text-sm font-semibold text-muted" data-credit-note-off>Credit notes AED {m(bal.credited)} off</span> : null}
-          <span className={`text-lg font-extrabold ${bal.balance > 0 ? "text-red" : "text-green-text"}`}>Balance AED {m(bal.balance)}</span>
-          {bal.pendingAmount ? <span className="text-sm font-semibold text-amber-text">Cheque of AED {m(bal.pendingAmount)} pending clearance</span> : null}
+          {bal.pendingAmount > 0.005 && bal.balance > 0.005 ? (
+            <span data-balance><BalanceHeadline due={stillDueOf({ total: invoice.total_aed, paid: bal.paid, balance: bal.balance, pending: bal.pendingAmount })} word={waitingWordOf(live.filter((p) => p.status === "recorded" && awaitsBank(p)).map((p) => p.method))} /></span>
+          ) : (
+            <span className={`text-lg font-extrabold ${bal.balance > 0 ? "text-red" : "text-green-text"}`} data-balance>{bal.balance > 0.005 ? `BALANCE DUE AED ${m(bal.balance)}` : "Paid in full"}</span>
+          )}
           {pendingOwner.length ? <span className="text-sm font-semibold text-amber-text">{pendingOwner.length} payment{pendingOwner.length === 1 ? "" : "s"} waiting for the owner</span> : null}
         </Card>
       ) : null}

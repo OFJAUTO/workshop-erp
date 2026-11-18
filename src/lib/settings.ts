@@ -198,6 +198,7 @@ const DEFAULTS = {
   money_undo_minutes: 10,
   /** 17 November 2026 (Section 3): customer payments dated in a month up to and including this one ("YYYY-MM") need the owner; "" = none closed. */
   books_closed_through: "",
+  cheque_tax_invoice_when: "cleared",
   pending_charges_reminder_days: 7,
   /** The workshop dictionary for the pre-send spelling check (car words the owner adds; see src/lib/spell.ts). */
   spell_words: [] as string[],

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { BalanceHeadline } from "@/components/BalanceHeadline";
 import { Card, SectionLabel } from "@/components/ui";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { jobMoneyMany } from "@/lib/customer-money";
@@ -29,16 +30,20 @@ export async function OutWithBalance({ settings }: { settings: Settings }) {
   if (!owing.length) return null;
   const { data: cust } = await admin.from("customers").select("id, full_name").in("id", Array.from(new Set(owing.map((x) => x.j.customer_id).filter((x): x is string => !!x))));
   const nameOf = new Map(((cust ?? []) as { id: string; full_name: string }[]).map((c) => [c.id, c.full_name]));
-  const total = owing.reduce((a, x) => a + (x.m?.balance ?? 0), 0);
+  // 18 November 2026: a car covered by a cheque still clearing is "cheque pending", never unpaid; the red total is
+  // only money nobody has paid in any form.
+  const dueOf = (m: (typeof owing)[number]["m"]) => Math.max(0, Math.round(((m?.balance ?? 0) - (m?.pendingCheque ?? 0)) * 100) / 100);
+  const total = owing.reduce((a, x) => a + dueOf(x.m), 0);
+  const pendingTotal = owing.reduce((a, x) => a + Math.min(x.m?.balance ?? 0, x.m?.pendingCheque ?? 0), 0);
   return (
     <Card className="flex flex-col gap-2 !border-red-bar" data-out-with-balance>
-      <SectionLabel right={<span className="whitespace-nowrap text-red">{aed(total)}</span>}>Out with balance due · {owing.length}</SectionLabel>
+      <SectionLabel right={<span className="flex flex-wrap justify-end gap-x-2 whitespace-nowrap">{total > 0.005 ? <span className="text-red">{aed(total)} due</span> : null}{pendingTotal > 0.005 ? <span className="text-amber-text" data-out-pending-total>{aed(pendingTotal)} cheque pending</span> : null}</span>}>Out with balance due · {owing.length}</SectionLabel>
       <ul className="flex flex-col divide-y divide-line">
         {owing.map(({ j, m }) => (
           <li key={j.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm" data-out-owing={j.id}>
             <Link href={`/jobs/${j.id}/invoice`} className="min-w-0 flex-1 font-semibold underline-offset-4 hover:underline">{j.job_number} · {j.vehicle ? formatPlate(j.vehicle) : ""}{j.customer_id && nameOf.get(j.customer_id) ? ` · ${nameOf.get(j.customer_id)}` : ""}</Link>
             <span className="text-xs text-muted">left {formatDate(j.gated_out_at)}</span>
-            <span className="whitespace-nowrap font-extrabold text-red">{aed(m?.balance ?? 0)}</span>
+            {(m?.pendingCheque ?? 0) > 0.005 ? <BalanceHeadline size="sm" money={m} className="items-end" /> : <span className="whitespace-nowrap font-extrabold text-red">{aed(m?.balance ?? 0)}</span>}
           </li>
         ))}
       </ul>

@@ -1,4 +1,8 @@
 import { awaitsBank, duplicateWords, pendingLine } from "@/lib/bank-status";
+import { TaxInvoiceDue } from "@/components/TaxInvoiceDue";
+import { missingTaxInvoices, taxDueViewOf } from "@/lib/tax-invoice-due";
+import { issueTaxInvoiceNowAction } from "@/app/(app)/invoices/tax-due-actions";
+import { BalanceHeadline } from "@/components/BalanceHeadline";
 import { CorrectCustomerPayment, PaymentCorrections } from "@/components/CorrectCustomerPayment";
 import { paymentCorrections } from "@/lib/payment-date";
 import { dubaiDayOf } from "@/lib/payment-date-rules";
@@ -236,6 +240,8 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
     { key: "released", label: "Gate-out", state: barState("released"), info: "After full payment, or on the customer's credit terms. The advisor or accounts gate the car out." },
   ];
 
+  // 18 November 2026 (Section 1): the tax invoice deadline and "Issue tax invoice now" (accounts and the owner).
+  const taxDue = proforma && !taxInvoice && can(role, "viewInvoices") ? taxDueViewOf((await missingTaxInvoices({ jobIds: [id] }))[0]) : null;
   const totalDue = live ? live.total_aed : draft.totals.total;
   const paidSoFar = live ? (bal?.paid ?? 0) : (jobMoney?.paid ?? 0);
   const balanceDue = live ? (bal?.balance ?? 0) : (jobMoney?.balance ?? 0);
@@ -317,6 +323,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
             </div>
           </Card>
 
+          {taxDue ? <TaxInvoiceDue v={taxDue} mayIssue={(role === "owner" || role === "accounts") && !staff.viewingAs} isOwner={role === "owner"} action={issueTaxInvoiceNowAction.bind(null, id)} /> : null}
           <Card className="flex flex-col gap-2" data-money-summary>
             <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-3" data-money-figures>
               <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Total incl. VAT</span><span className="text-xl sm:text-2xl font-extrabold whitespace-nowrap">AED {m(totalDue)}</span></div>
@@ -324,7 +331,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                 <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Deposit</span><span className="text-xl sm:text-2xl font-extrabold whitespace-nowrap">AED {m(dep.received)}</span><span className="text-sm font-semibold text-muted whitespace-nowrap">of {m(dep.required)}</span></div>
               ) : null}
               <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Paid so far</span><span className="text-xl sm:text-2xl font-extrabold whitespace-nowrap">AED {m(paidSoFar)}</span></div>
-              <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Balance due</span><span className={`text-xl sm:text-2xl font-extrabold whitespace-nowrap ${balTone}`} data-balance>{live && !unpaid ? "Paid in full" : `AED ${m(balanceDue)}`}</span></div>
+              <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{chequeClearing > 0.005 && balanceDue > 0.005 ? "Balance" : "Balance due"}</span>{chequeClearing > 0.005 && balanceDue > 0.005 ? <span data-balance><BalanceHeadline due={stillDueOf({ total: totalDue, paid: paidSoFar, balance: balanceDue, pending: chequeClearing })} word={pendingWord === "Transfer" ? "transfer" : "cheque"} /></span> : <span className={`text-xl sm:text-2xl font-extrabold whitespace-nowrap ${balTone}`} data-balance>{live && !unpaid ? "Paid in full" : `AED ${m(balanceDue)}`}</span>}</div>
             </div>
             {bankLine ? <p className="text-sm font-semibold text-amber-text" data-bank-pending-line>{bankLine}</p> : chequeClearing ? <p className="text-sm font-semibold text-amber-text">Cheque of AED {m(chequeClearing)} pending clearance.</p> : null}
             {bal?.credited ? <p className="text-sm font-semibold text-muted" data-credit-note-off>Credit notes AED {m(bal.credited)} taken off the balance.</p> : null}

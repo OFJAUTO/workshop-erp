@@ -1,4 +1,7 @@
 import { Badge, Card, PageHeader, SectionLabel } from "@/components/ui";
+import { ChequeTaxWhenBox } from "@/components/TaxInvoiceDue";
+import { saveChequeTaxWhenAction } from "@/app/(app)/invoices/tax-due-actions";
+import { chequeTaxWhenOf } from "@/lib/tax-invoice-due-rules";
 import { requirePermission } from "@/lib/auth";
 import { dubaiToday, loadSettlements, loadUnsettled } from "@/lib/card-settlements";
 import { formatDate, formatDayTime } from "@/lib/format";
@@ -78,6 +81,12 @@ export default async function AccountsPostingPage({ searchParams }: { searchPara
           <SectionLabel>{tab === "cheque" ? "Cheques waiting to clear" : "Bank transfers waiting for the statement"}</SectionLabel>
           {tab === "cheque" ? <p className="text-xs text-muted">Received → Mark deposited (date, bank account) → Mark cleared on the day it shows on the statement, or Bounced. A post-dated cheque cannot be deposited before its date.{ready ? "" : " Mark deposited and the Zoho move from Undeposited Funds switch on with the database update of 9 November (WAITING FOR APPLY)."}</p> : <p className="text-xs text-muted">Confirmed in bank with the amount that actually arrived: less keeps the balance open, more becomes an advance.</p>}
           <BankPostingPanel method={tab} rows={bank[tab]} today={today} canSave={!staff.viewingAs} ready={ready} proofUrls={proofUrls} />
+        </Card>
+      ) : null}
+      {tab === "cheque" && (staff.role_id === "owner" || staff.role_id === "accounts") && !staff.viewingAs ? (
+        <Card className="flex flex-col gap-2" id="cheque-tax" data-cheque-tax-card>
+          <SectionLabel>Tax invoices for cheque payments</SectionLabel>
+          <ChequeTaxWhenBox current={chequeTaxWhenOf(settings.cheque_tax_invoice_when)} action={saveChequeTaxWhenAction} />
         </Card>
       ) : null}
 

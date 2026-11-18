@@ -96,6 +96,7 @@ export function BankRow({ row, today, canSave, ready, proofUrl = null, withTick 
       {open === "clear" && !clr?.message ? (
         <form action={clrAction} className="flex flex-wrap items-end gap-2 rounded-control border border-line bg-white p-3" data-bank-form="clear">
           <input type="hidden" name="ids" value={row.id} />
+          {row.clearsWith.length ? <p className="w-full text-sm font-bold text-amber-text" data-bank-clears-with>This also clears {row.clearsWith.map((x) => `${x.number} (AED ${x.amount.toLocaleString("en-GB", { minimumFractionDigits: 2 })})`).join(", ")}.</p> : null}
           <MoneyDate name="settled_on" label={cheque ? "Cleared on (the day on the statement)" : "Reached the bank on"} defaultValue="" max={today} min={row.depositedAt ?? received} minWords={row.depositedAt ? "the day it was deposited" : "the day it was received"} hook="data-bank-clear-date" />
           <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">{cheque ? "Amount" : "Amount actually received"}</span><Input name="amount" inputMode="decimal" required defaultValue={(row.group?.total ?? row.amount).toFixed(2)} className="w-36" data-bank-clear-amount /></label>
           <label className="flex flex-col gap-1"><span className="text-xs font-semibold uppercase text-muted">Statement reference</span><Input name="statement_ref" className="w-48" data-bank-clear-ref /></label>

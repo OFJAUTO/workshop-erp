@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { TaxInvoicesDueList } from "@/components/TaxInvoicesDueList";
 import { InvoicesNotReceivedCard } from "@/components/InvoicesNotReceivedCard";
 import { OutWithBalance } from "@/components/OutWithBalance";
 import { HrExpiringTile } from "@/components/HrExpiringTile";
@@ -73,6 +74,7 @@ export async function AccountsDashboard({ staff, settings }: { staff: CurrentSta
       <MoneyTilesRow t={tiles} />
       <WaitingPanel staff={staff} extra={await accountsWaitingExtra()} />
       <InvoicesNotReceivedCard role="accounts" />
+      <TaxInvoicesDueList />
       <OutWithBalance settings={settings} />
       {/* 2 November 2026: the advisors' payments to record (where the old counter-payments card was; advisors never record). */}
       <PaymentReportsCard staff={staff} settings={settings} />

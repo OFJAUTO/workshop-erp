@@ -21,6 +21,7 @@ export const AUTO_TYPES: AutoType[] = [
   { key: "quote_discount", group: "Quotations and estimates", label: "Discount above the advisor's limit", preTicked: false, figure: "the discount (AED)" },
   { key: "quote_roundoff", group: "Quotations and estimates", label: "Round-off down above the limit", preTicked: false, figure: "the round-off (AED)" },
   { key: "quote_total", group: "Quotations and estimates", label: "Total above the approval amount", preTicked: false, figure: "the quotation total (AED)" },
+  { key: "early_tax_cheque", group: "Money", label: "Tax invoice before the cheque clears (the job is done, a cheque or transfer covers it)", preTicked: false, figure: "the invoice total (AED)" },
   { key: "back_order", group: "Back orders", label: "Back order - fit a part on a later visit (customer pays for it now)", preTicked: false, figure: "the part and labour moved (AED)" },
 ];
 

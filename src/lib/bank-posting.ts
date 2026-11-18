@@ -211,10 +211,15 @@ async function afterBankMoney(pays: Pay[], what: "cleared" | "bounced", actor: B
           await afterEstimatePayment(p.invoice_id, { id: actor.id, display_name: actor.display_name }, settings).catch(() => null);
         }
       } else {
-        const body = `${money(Number(p.amount_aed))} reversed (${p.number}). The balance is due again.${charge ? ` Bank charge ${money(charge)}.` : ""}`;
-        const title = `${p.method === "cheque" ? "Cheque bounced" : "Transfer never arrived"} · ${p.number}`;
+        // 18 November 2026 (Section 1): a cheque that bounces after its tax invoice was issued (early, or by the setting):
+        // the tax invoice STAYS (a credit note only if the job itself is cancelled); the balance is due again.
+        const { data: taxRow } = p.job_id ? await admin.from("invoices").select("number").eq("job_id", p.job_id).eq("kind", "tax_invoice").eq("status", "issued").eq("is_active", true).is("deposit_for_quotation_id", null).limit(1).maybeSingle() : { data: null };
+        const taxWords = taxRow?.number ? ` The tax invoice ${taxRow.number} stays as issued; ${money(Number(p.amount_aed))} is due again on it. A credit note is used only if the job itself is cancelled.` : "";
+        const body = `${money(Number(p.amount_aed))} reversed (${p.number}). The balance is due again.${charge ? ` Bank charge ${money(charge)}.` : ""}${taxWords}`;
+        const title = `${p.method === "cheque" ? "Cheque bounced" : "Transfer never arrived"} · ${p.number}${taxRow?.number ? ` · tax invoice ${taxRow.number} already issued` : ""}`;
         if (p.job_id) await notifyStaff(await jobAdvisorIds(p.job_id), { type: "cheque_bounced", title, body, jobId: p.job_id, href: `/jobs/${p.job_id}/invoice` });
-        await notifyRoles(["owner"], { type: "cheque_bounced", title, body, jobId: p.job_id, href: p.job_id ? `/jobs/${p.job_id}/invoice` : "/accounts-posting?tab=cheque" });
+        await notifyRoles(taxRow?.number ? ["owner", "accounts"] : ["owner"], { type: "cheque_bounced", title, body, jobId: p.job_id, href: p.job_id ? `/jobs/${p.job_id}/invoice` : "/accounts-posting?tab=cheque" });
+        if (p.job_id && taxRow?.number) await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment", note: `${p.number} bounced after ${taxRow.number} was issued: the tax invoice stays, ${money(Number(p.amount_aed))} is due again.`, created_by: actor.id });
       }
     } catch (e) {
       await logAppError("bank-posting: after", e, { staffId: actor.id, jobId: p.job_id });
@@ -222,7 +227,7 @@ async function afterBankMoney(pays: Pay[], what: "cleared" | "bounced", actor: B
   }
 }
 
-export type BankWaiting = { id: string; number: string; method: "cheque" | "transfer"; amount: number; receivedAt: string; chequeNumber: string | null; chequeBank: string | null; chequeDate: string | null; notDue: string | null; depositedAt: string | null; depositedTo: string | null; reference: string | null; jobId: string | null; jobNumber: string | null; plate: string; customer: string; late: boolean; proofPath: string | null; /** A share of a combined payment (one cheque for several cars): it clears and bounces with the whole. */ group: { number: string; words: string; total: number } | null; /** 11 November 2026 (Section 5): a void asked of the owner, and the same cheque already on other receipts. */ voidAsked: { by: string | null; reason: string } | null; chequeAlso: string | null };
+export type BankWaiting = { id: string; number: string; method: "cheque" | "transfer"; amount: number; receivedAt: string; chequeNumber: string | null; chequeBank: string | null; chequeDate: string | null; notDue: string | null; depositedAt: string | null; depositedTo: string | null; reference: string | null; jobId: string | null; jobNumber: string | null; plate: string; customer: string; late: boolean; proofPath: string | null; /** A share of a combined payment (one cheque for several cars): it clears and bounces with the whole. */ group: { number: string; words: string; total: number } | null; /** 11 November 2026 (Section 5): a void asked of the owner, and the same cheque already on other receipts. */ voidAsked: { by: string | null; reason: string } | null; chequeAlso: string | null; /** 18 November 2026: the other receipts of the same combined cheque that clear with this one. */ clearsWith: { number: string; amount: number }[] };
 
 /** Cheques and transfers waiting for the bank, oldest first (Accounts posting's Cheque and Bank transfer tabs). */
 export async function loadBankWaiting(opts: { jobIds?: string[]; ids?: string[] } = {}): Promise<BankWaiting[]> {
@@ -258,6 +263,12 @@ export async function loadBankWaiting(opts: { jobIds?: string[]; ids?: string[] 
   const vStaffIds = Array.from(new Set(Array.from(vMap.values()).map((v) => v.void_requested_by).filter((x): x is string => !!x)));
   const { data: vStaff } = vStaffIds.length ? await admin.from("staff").select("id, display_name").in("id", vStaffIds) : { data: [] };
   const vName = new Map(((vStaff ?? []) as { id: string; display_name: string }[]).map((x) => [x.id, x.display_name]));
+  // The receipts of one combined cheque clear together: each row names the others ("This also clears RCT-00096 …").
+  const { data: gRows } = groups.size ? await admin.from("payments").select("id, group_id").in("id", Array.from(groups.keys())).not("group_id", "is", null) : { data: [] };
+  const groupIdOf = new Map(((gRows ?? []) as { id: string; group_id: string }[]).map((g) => [g.id, g.group_id]));
+  const gids = Array.from(new Set(Array.from(groupIdOf.values())));
+  const { data: mateRows } = gids.length ? await admin.from("payments").select("id, number, amount_aed, group_id").in("group_id", gids).eq("is_active", true).eq("status", "recorded").eq("cheque_status", "pending").order("number") : { data: [] };
+  const groupMates = (mateRows ?? []) as { id: string; number: string; amount_aed: number | string; group_id: string }[];
   const chequeNums = Array.from(new Set(rows.map((r) => r.cheque_number).filter((x): x is string => !!x)));
   const { data: sibRows } = chequeNums.length ? await admin.from("payments").select("id, number, amount_aed, cheque_number, cheque_bank, cheque_status, job:jobs!payments_job_id_fkey(job_number)").in("cheque_number", chequeNums).eq("is_active", true).in("status", ["recorded", "pending_owner"]) : { data: [] };
   const { chequeAlreadyWords } = await import("./cheque-cap");
@@ -289,6 +300,10 @@ export async function loadBankWaiting(opts: { jobIds?: string[]; ids?: string[] 
     group: groups.has(p.id) ? { number: groups.get(p.id)!.number, words: groups.get(p.id)!.words, total: groups.get(p.id)!.amount } : null,
     voidAsked: vMap.has(p.id) ? { by: vName.get(vMap.get(p.id)!.void_requested_by ?? "") ?? null, reason: vMap.get(p.id)!.void_request_reason ?? "" } : null,
     chequeAlso: groups.has(p.id) ? null : alsoOf(p),
+    clearsWith: (() => {
+      const gid = groupIdOf.get(p.id);
+      return gid ? groupMates.filter((x) => x.group_id === gid && x.id !== p.id).map((x) => ({ number: x.number, amount: round2(Number(x.amount_aed) || 0) })) : [];
+    })(),
   }));
 }
 

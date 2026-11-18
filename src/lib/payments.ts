@@ -70,8 +70,18 @@ export async function settleJob(jobId: string, invoiceId: string, by: string | n
     admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", invoiceId).eq("is_active", true),
     admin.from("jobs").select("status, is_open").eq("id", jobId).maybeSingle(),
   ]);
-  if (!inv || !job || !job.is_open) return;
+  if (!inv || !job) return;
   const invoice = toInvoice(inv as Record<string, unknown>);
+  // 18 November 2026 (J-00981, J-00860): money that clears AFTER the car left still turns the paid proforma into the
+  // tax invoice (it used to stop here for a closed job, so the tax invoice was never made). Nothing else moves on a
+  // closed job.
+  if (!job.is_open) {
+    if (invoice.kind === "proforma" && !invoice.converted_to) {
+      const bal0 = invoiceBalance(invoice, ((pays ?? []) as Record<string, unknown>[]).map(toPayment), 0);
+      if (bal0.balance <= 0.005) await convertProformaIfPaid(jobId, by, settings ?? (await getSettings()));
+    }
+    return;
+  }
   // 3 November 2026: credit notes on a tax invoice lower what is owed (the one money rule).
   const credit = invoice.kind === "tax_invoice" ? ((await creditsOnDocs([invoice.id])).get(invoice.id) ?? 0) : 0;
   const bal = invoiceBalance(invoice, ((pays ?? []) as Record<string, unknown>[]).map(toPayment), credit);
@@ -82,6 +92,11 @@ export async function settleJob(jobId: string, invoiceId: string, by: string | n
       if (job.status === "pending_payment") await admin.from("job_events").insert({ job_id: jobId, event_type: "status_change", from_status: "pending_payment", to_status: "ready", note: "Proforma paid in full", created_by: by });
       return;
     }
+  }
+  // 18 November 2026: Settings "For cheque payments, issue the tax invoice when the cheque is received / at completion".
+  if (invoice.kind === "proforma" && !invoice.converted_to) {
+    const { chequeTaxInvoiceNow } = await import("./tax-invoice-due");
+    await chequeTaxInvoiceNow(jobId, "received", by, settings ?? (await getSettings()));
   }
   if (job.status === "pending_payment" && bal.balance <= 0) {
     await admin.from("jobs").update({ status: "ready" }).eq("id", jobId);

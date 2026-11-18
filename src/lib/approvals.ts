@@ -10,7 +10,7 @@ import { schemaReady } from "@/lib/schema-ready";
  * Approve and Refuse go through ONE dispatcher (src/app/(app)/approvals/actions.ts) to each kind's own decision, so
  * the rules of each decision stay where they are.
  */
-export const APPROVAL_KINDS = ["quote", "revision", "commission", "lpo", "discount", "fee", "price", "free_charge", "inspection_change", "stock_reversal", "comeback", "overpayment", "void", "lathe_void", "inspection_type", "part_change", "back_order"] as const;
+export const APPROVAL_KINDS = ["quote", "revision", "commission", "lpo", "discount", "fee", "price", "free_charge", "inspection_change", "stock_reversal", "comeback", "overpayment", "void", "lathe_void", "inspection_type", "part_change", "back_order", "early_tax"] as const;
 export type ApprovalKind = (typeof APPROVAL_KINDS)[number];
 
 export const KIND_WORDS: Record<ApprovalKind, string> = {
@@ -31,6 +31,7 @@ export const KIND_WORDS: Record<ApprovalKind, string> = {
   inspection_type: "Inspection type downgrade",
   part_change: "Part supplier or price change",
   back_order: "Back order - fit on a later visit",
+  early_tax: "Tax invoice before the cheque clears",
 };
 
 export type ApprovalItem = {
@@ -198,6 +199,13 @@ export async function loadApprovals(scope: Scope = {}): Promise<ApprovalItem[]> 
     const { backOrderApprovals } = await import("./back-orders");
     for (const b of await backOrderApprovals().catch(() => [])) {
       push({ kind: "back_order", id: b.id, title: `Back order · ${b.part} · ${b.jobNumber}`, what: `Fit on a later visit (a follow-up job continues ${b.jobNumber})${b.hours > 0 ? `, ${b.hours.toFixed(1)} h of labour moves with it` : ""}. Reason: ${b.reason}${b.payMode === "when_fitted" ? ". The customer pays when it is fitted (not now)" : ". The customer pays for the part now"}`, askedBy: b.askedBy, askedAt: b.askedAt, money: null, href: `/jobs/${b.jobId}#back-orders`, jobId: b.jobId, quotationId: null, poId: null, approveLabel: "Approve the back order", refuseLabel: "Keep it on this visit" });
+    }
+  }
+  // 18 November 2026: accounts ask to issue the tax invoice of a completed job before its cheque clears.
+  {
+    const { missingTaxInvoices } = await import("./tax-invoice-due");
+    for (const m of (await missingTaxInvoices(scope.jobId ? { jobIds: [scope.jobId] } : {}).catch(() => [])).filter((x) => x.asked)) {
+      push({ kind: "early_tax", id: m.jobId, title: `Tax invoice before the cheque clears · ${m.jobNumber} · ${m.plate}`, what: `${m.proforma.number}${m.customer ? ` · ${m.customer}` : ""}: ${m.asked!.note}. ${m.due.words}.`, askedBy: m.asked!.by, askedAt: m.asked!.at, money: aed(m.proforma.total), href: `/jobs/${m.jobId}/invoice#tax-due`, jobId: m.jobId, quotationId: null, poId: null, approveLabel: "Issue the tax invoice now", refuseLabel: "Wait for the cheque to clear" });
     }
   }
   for (const extra of await moreApprovals(scope)) out.push(extra);

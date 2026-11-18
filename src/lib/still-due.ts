@@ -73,3 +73,41 @@ export function readyTemplateFor(template: string, d: StillDue): string {
   }
   return template;
 }
+
+/**
+ * THE balance headline of a job or document (18 November 2026, J-00493: a cheque of AED 12,600.00 waiting to clear and
+ * the page said "BALANCE DUE AED 12,600.00" in red). Red BALANCE DUE only for money nobody has paid in any form:
+ * - covered: "COVERED BY CHEQUE - WAITING TO CLEAR" in amber, "Balance once cleared: AED 0.00";
+ * - part: "Cheque pending AED x" (amber) and "Balance due AED y" (red);
+ * - due: "BALANCE DUE AED x" (red); paid: "Paid in full" (green).
+ * The word is "transfer" ("waiting to confirm") when every waiting payment is a bank transfer.
+ */
+export type BalanceWordsKind = "none" | "paid" | "covered" | "part_pending" | "due";
+export type BalanceWords = { kind: BalanceWordsKind; headline: string; tone: "green" | "amber" | "red" | "muted"; pendingLine: string | null; dueLine: string | null; after: string | null; due: number; pending: number };
+
+const aedText = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+export function balanceWordsOf(d: StillDue, word: "cheque" | "transfer" = "cheque"): BalanceWords {
+  const W = word === "transfer" ? "Transfer" : "Cheque";
+  const base = { due: d.due, pending: d.pending };
+  if (d.state === "none") return { ...base, kind: "none", headline: "No approved total yet", tone: "muted", pendingLine: d.pending > 0.005 ? `${W} pending ${aedText(d.pending)}` : null, dueLine: null, after: null };
+  if (d.state === "paid") return { ...base, kind: "paid", headline: "Paid in full", tone: "green", pendingLine: null, dueLine: null, after: null };
+  if (d.state === "waiting_clear") return { ...base, kind: "covered", headline: word === "transfer" ? "COVERED BY TRANSFER – WAITING TO CONFIRM" : "COVERED BY CHEQUE – WAITING TO CLEAR", tone: "amber", pendingLine: `${W} pending ${aedText(d.pending)}`, dueLine: null, after: `Balance once cleared: ${aedText(0)}` };
+  if (d.pending > 0.005) return { ...base, kind: "part_pending", headline: `BALANCE DUE ${aedText(d.due)}`, tone: "red", pendingLine: `${W} pending ${aedText(d.pending)}`, dueLine: `Balance due ${aedText(d.due)}`, after: null };
+  return { ...base, kind: "due", headline: `BALANCE DUE ${aedText(d.due)}`, tone: "red", pendingLine: null, dueLine: `Balance due ${aedText(d.due)}`, after: null };
+}
+
+/** The word of the waiting money: "transfer" when every waiting payment is a bank transfer, else "cheque". */
+export function waitingWordOf(methods: string[]): "cheque" | "transfer" {
+  return methods.length && methods.every((m) => m === "transfer") ? "transfer" : "cheque";
+}
+
+/** What holds the car at the gate, in THE balance words (18 November 2026): money waiting to clear is never "Balance due". */
+export function balanceBlockWords(b: { balance: number; invoiceNumber: string | null; pending?: number }): string {
+  const aed = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2 });
+  const on = b.invoiceNumber ? ` on ${b.invoiceNumber}` : "";
+  const pend = b.pending ?? 0;
+  if (pend > 0.005 && pend + 0.005 >= b.balance) return `Covered by cheque – waiting to clear (AED ${aed(b.balance)}${on}). The car leaves once it clears, or on the customer's credit terms.`;
+  if (pend > 0.005) return `Cheque pending AED ${aed(pend)} · Balance due AED ${aed(Math.max(0, b.balance - pend))}${on}.`;
+  return `Balance due AED ${aed(b.balance)}${on}.`;
+}

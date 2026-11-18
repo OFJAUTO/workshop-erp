@@ -88,7 +88,9 @@ check("advance words: paid in full, and no total yet", advanceWords(500, 0) === 
 
 // The one line, and the search.
 const line = paidSoFarParts({ total: 67930, paid: 30000, balance: 37930, pendingCheque: 500 });
-check("Paid so far · Balance in the one wording", line.total === "Total AED 67,930.00" && line.paid === "Paid so far AED 30,000.00" && line.balance === "Balance AED 37,930.00" && line.balanceTone === "due" && line.cheque === "cheque AED 500.00 clearing");
+check("Paid so far · Balance in the one wording", line.total === "Total AED 67,930.00" && line.paid === "Paid so far AED 30,000.00" && line.balance === "Balance due AED 37,430.00" && line.balanceTone === "due" && line.cheque === "cheque pending AED 500.00");
+const cov = paidSoFarParts({ total: 12600, paid: 0, balance: 12600, pendingCheque: 12600 });
+check("a cheque waiting to clear that covers it is never \"Balance AED x\" (J-00493)", cov.balance === "Covered by cheque – waiting to clear" && cov.balanceTone === "pending" && cov.cheque === "cheque pending AED 12,600.00 · balance once cleared AED 0.00", JSON.stringify(cov));
 check("Paid in full / No approved total yet", paidSoFarParts({ total: 500, paid: 500, balance: 0 }).balance === "Paid in full" && paidSoFarParts({ total: null, paid: 100, balance: null }).balance === "No approved total yet");
 check("the search finds a plate written either way, a job and a document number", rowMatches(j969, "dubai s 30303") && rowMatches(j969, "s30303") && rowMatches(j969, "J-00969") && rowMatches(sentPart, "pro-1") && !rowMatches(j969, "zzz"));
 

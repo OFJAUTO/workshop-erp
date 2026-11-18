@@ -1,4 +1,6 @@
 import { DamageSection } from "@/components/DamageSection";
+import { BalanceHeadline } from "@/components/BalanceHeadline";
+import { stillDueOf } from "@/lib/still-due";
 import { RecordPaymentButton } from "@/components/RecordPaymentHost";
 import { FixIt } from "@/components/FixIt";
 import { WarrantyFixPanel } from "@/components/WarrantyFixPanel";
@@ -132,7 +134,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
             />
           ) : loose ? (
             <Card>
-              <CollectItemsForm fixPay={fixPay} action={collectItems.bind(null, id)} items={items.map((it) => ({ id: it.id, label: `${it.quantity > 1 ? `${it.quantity} × ` : ""}${it.item_type}${it.description ? ` · ${it.description}` : ""}`, collected: !!it.collected_at }))} canApproveRelease={role === "owner"} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
+              <CollectItemsForm fixPay={fixPay} action={collectItems.bind(null, id)} items={items.map((it) => ({ id: it.id, label: `${it.quantity > 1 ? `${it.quantity} × ` : ""}${it.item_type}${it.description ? ` · ${it.description}` : ""}`, collected: !!it.collected_at }))} canApproveRelease={role === "owner"} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null, pending: bal.pending }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
             </Card>
           ) : (
             <Card>
@@ -143,7 +145,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
             fixSignoff={fixSignoff}
             mileage={mileage}
             drivers={drivers}
-            lastPin={lastPin} customer={card.customer ? { name: card.customer.full_name, phone: card.customer.phone } : null} contacts={contacts} recoveryCompanies={(settings.recovery_companies ?? []) as string[]} finalCheck={finalCheck} creditDays={creditDays} declinedOut={declinedOut} jobId={id} signoffLock={signoff && signoff.hasStages && !signoff.complete ? `Release sign-off still needed from ${signoff.waitingOn.map((k) => SIGNOFF_LABELS[k]).join(", ")}. The handover stays locked until all have signed on the bodyshop page.` : null} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={role === "owner"} ownerRelease={role === "owner" && !staff.viewingAs} noAmounts={gateInRole} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
+            lastPin={lastPin} customer={card.customer ? { name: card.customer.full_name, phone: card.customer.phone } : null} contacts={contacts} recoveryCompanies={(settings.recovery_companies ?? []) as string[]} finalCheck={finalCheck} creditDays={creditDays} declinedOut={declinedOut} jobId={id} signoffLock={signoff && signoff.hasStages && !signoff.complete ? `Release sign-off still needed from ${signoff.waitingOn.map((k) => SIGNOFF_LABELS[k]).join(", ")}. The handover stays locked until all have signed on the bodyshop page.` : null} action={gateOutJob.bind(null, id)} keysCount={g!.keys_count} keychain={g!.keys_keychain} dashCam={g!.dash_cam} oldParts={g!.old_parts_return} canOverride={can(role, "overrideKeys")} canApproveRelease={role === "owner"} ownerRelease={role === "owner" && !staff.viewingAs} noAmounts={gateInRole} balance={{ state: bal.state, balance: bal.balance, invoiceNumber: bal.invoice?.number ?? null, pending: bal.pending }} reasons={{ keys: reasonsFor(settings, "override_keys"), release: reasonsFor(settings, "release") }} />
             </Card>
           )}
         </div>
@@ -157,7 +159,7 @@ export default async function GateOutPage({ params, searchParams }: { params: Pr
           <Card className="flex flex-col gap-2">
             <SectionLabel>{gateInRole ? "Payment" : "Balance"}</SectionLabel>
             {gateInRole ? <p className={`text-sm font-semibold ${blocked ? "text-red" : "text-green-text"}`} data-gateout-payment-words>{blocked ? "Payment not complete: call accounts." : "Paid, or credit approved."}</p> : bal.state === "nothing" ? <p className="text-sm text-muted">Nothing to invoice on this job.</p> : bal.state === "no_invoice" ? <p className="text-sm font-semibold text-red">No invoice issued yet.</p> : (
-              <DescriptionList items={[{ label: "Invoice", value: bal.invoice?.number ?? null }, { label: "Paid", value: `AED ${m(bal.paid)}` }, { label: "Balance due", value: <span className={bal.balance > 0 ? "font-bold text-red" : "font-bold text-green-text"}>AED {m(bal.balance)}</span> }, { label: "Cheques pending", value: bal.pending ? `AED ${m(bal.pending)}` : null }]} />
+              <DescriptionList items={[{ label: "Invoice", value: bal.invoice?.number ?? null }, { label: "Paid", value: `AED ${m(bal.paid)}` }, { label: bal.pending > 0.005 && bal.balance > 0.005 ? "Balance" : "Balance due", value: bal.pending > 0.005 && bal.balance > 0.005 ? <span data-gateout-balance><BalanceHeadline size="sm" due={stillDueOf({ total: bal.invoice?.total_aed ?? null, paid: bal.paid, balance: bal.balance, pending: bal.pending })} /></span> : <span className={bal.balance > 0 ? "font-bold text-red" : "font-bold text-green-text"} data-gateout-balance>{bal.balance > 0.005 ? `AED ${m(bal.balance)}` : "Paid in full"}</span> }]} />
             )}
             {!gateInRole && bal.invoice ? <LinkButton href={`/invoices/${bal.invoice.id}`} tone="secondary" size="md">Open the invoice</LinkButton> : can(role, "issueInvoices") && bal.state === "no_invoice" ? <LinkButton href={`/jobs/${id}/invoice`} size="md">Issue the invoice</LinkButton> : null}
             {blocked && role !== "owner" && job.status !== "in_delivery" ? (

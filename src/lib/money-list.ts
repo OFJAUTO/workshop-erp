@@ -248,8 +248,16 @@ export function rowMatches(r: MoneyRowData, needle: string): boolean {
  * note on the tax invoice reads "credit note AED 1,050.00 off" (3 November 2026), so a balance below the total less the
  * money paid is never a mystery.
  */
-export function paidSoFarParts(m: { total: number | null; paid: number; balance: number | null; pendingCheque?: number; credited?: number }): { total: string | null; paid: string; balance: string | null; balanceTone: "due" | "paid" | null; cheque: string | null; credit: string | null } {
+export function paidSoFarParts(m: { total: number | null; paid: number; balance: number | null; pendingCheque?: number; credited?: number }): { total: string | null; paid: string; balance: string | null; balanceTone: "due" | "paid" | "pending" | null; cheque: string | null; credit: string | null } {
   const aed = (n: number) => `AED ${n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const pend = Math.round((m.pendingCheque ?? 0) * 100) / 100;
+  // 18 November 2026 (J-00493): money waiting to clear is never "Balance AED x" - covered, or the two figures apart.
+  if (m.balance !== null && m.balance > 0.005 && pend > 0.005) {
+    const left = Math.max(0, Math.round((m.balance - pend) * 100) / 100);
+    const credit = m.credited && m.credited > 0.005 ? `credit note ${aed(m.credited)} off` : null;
+    if (left <= 0.005) return { total: m.total !== null ? `Total ${aed(m.total)}` : null, paid: `Paid so far ${aed(m.paid)}`, balance: "Covered by cheque – waiting to clear", balanceTone: "pending", cheque: `cheque pending ${aed(pend)} · balance once cleared ${aed(0)}`, credit };
+    return { total: m.total !== null ? `Total ${aed(m.total)}` : null, paid: `Paid so far ${aed(m.paid)}`, balance: `Balance due ${aed(left)}`, balanceTone: "due", cheque: `cheque pending ${aed(pend)}`, credit };
+  }
   return {
     total: m.total !== null ? `Total ${aed(m.total)}` : null,
     paid: `Paid so far ${aed(m.paid)}`,

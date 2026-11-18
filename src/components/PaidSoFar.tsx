@@ -16,7 +16,7 @@ export function PaidSoFar({ m, showTotal = true, className = "text-xs text-muted
       {p.balance ? (
         <>
           {" · "}
-          <span className={p.balanceTone === "due" ? "font-bold text-ink" : p.balanceTone === "paid" ? "font-bold text-green-text" : ""} data-balance-left>
+          <span className={p.balanceTone === "due" ? "font-bold text-ink" : p.balanceTone === "paid" ? "font-bold text-green-text" : p.balanceTone === "pending" ? "font-bold text-amber-text" : ""} data-balance-left>
             <Words text={p.balance} />
           </span>
         </>

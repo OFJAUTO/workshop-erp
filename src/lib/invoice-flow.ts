@@ -105,6 +105,11 @@ export async function ensureProforma(jobId: string, actor: Actor, settings: Sett
   await notifyStaff(await advisorsOf(jobId, job.gated_in_by), { type: "invoice_issued", title: `Proforma ready to send · ${job.job_number}`, body: `${number}, ${money(draft.totals.total)}. Send it to the customer: the bank details and Pay now are on the page.`, jobId, href: `/jobs/${jobId}` });
   // Deposits may already cover it: then the tax invoice follows at once.
   const converted = await convertProformaIfPaid(jobId, by, settings);
+  if (!converted) {
+    // 18 November 2026: Settings may issue the tax invoice at completion for a cheque payment.
+    const { chequeTaxInvoiceNow } = await import("./tax-invoice-due");
+    await chequeTaxInvoiceNow(jobId, "completed", by, settings);
+  }
   return converted ?? toInvoice(inv as unknown as Record<string, unknown>);
 }
 

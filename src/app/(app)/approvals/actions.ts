@@ -180,6 +180,13 @@ async function decideCore(kind: ApprovalKind, id: string, decision: "approve" | 
       answer = r.error ? { error: r.error } : { ok: true, message: r.words ?? "Done." };
       break;
     }
+    case "early_tax": {
+      // 18 November 2026: the tax invoice of a completed job before its cheque clears.
+      const { decideEarlyTax } = await import("@/lib/tax-invoice-due");
+      const { getSettings } = await import("@/lib/settings");
+      answer = await decideEarlyTax(id, yes, note, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id }, await getSettings());
+      break;
+    }
     default:
       answer = await runMoreDecision(kind, id, yes, note, staff);
   }
