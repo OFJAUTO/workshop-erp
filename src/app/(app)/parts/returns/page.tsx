@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { CreditNoteEntry } from "@/components/SupplierReturns";
+import { creditNoteOptions } from "@/lib/supplier-returns";
+import { enterCreditNoteAction } from "@/app/(app)/parts/supplier-return-actions";
 import { refuse } from "@/lib/refusal";
 import { requireStaff } from "@/lib/auth";
 import { can, type RoleId } from "@/lib/roles";
@@ -34,6 +37,7 @@ export default async function PurchaseReturnsPage({ searchParams }: { searchPara
       <LiveRefresh tables={["part_items"]} />
       <PageHeader title="Purchase returns" subtitle="Parts going back to their supplier, from the return note to the credit. The supplier balance only moves when accounts record the credit or the refund." />
       {!ready ? <Notice tone="info">Purchase returns switch on with the database update (waiting for apply). Returns made meanwhile are still tracked on Returns and leftovers.</Notice> : null}
+      {canMoney && ready ? <div className="flex flex-wrap gap-2" data-return-credit-entry><CreditNoteEntry invoices={await creditNoteOptions()} action={enterCreditNoteAction} /></div> : null}
       <Card className="flex flex-col gap-3">
         <div className="flex flex-wrap gap-1 text-xs font-bold" data-return-tabs>
           {RETURN_TABS.map((t) => (

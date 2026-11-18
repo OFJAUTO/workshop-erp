@@ -1,4 +1,7 @@
 import { latheV2Ready } from "@/lib/lathe";
+import { ReturnToSupplier, CreditNoteEntry } from "@/components/SupplierReturns";
+import { creditNoteOptions, lpoReturnSummary, returnableParts } from "@/lib/supplier-returns";
+import { enterCreditNoteAction, startReturnsAction } from "@/app/(app)/parts/supplier-return-actions";
 import { madeUpWords } from "@/lib/part-number-check";
 import { LpoShareButton } from "@/components/LpoShareButton";
 import { draftSuppliersOf, lpoShareStamps } from "@/lib/lpo-share";
@@ -113,6 +116,12 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const canApprove = can(role, "approvePurchaseOrders") && (role === "owner" || staff.is_head_accountant) && !staff.viewingAs;
   const canManage = can(role, "managePurchaseOrders") && !staff.viewingAs;
   const canPay = (role === "owner" || role === "accounts") && !staff.viewingAs;
+  // 19 November 2026 (Section 4): purchase returns and supplier credit notes on this LPO.
+  const [returnParts, creditOptions, returnSummary] = await Promise.all([
+    can(role, "managePurchaseOrders") && !staff.viewingAs ? returnableParts(id).catch(() => []) : Promise.resolve([]),
+    canPay ? creditNoteOptions({ poIds: [id] }).catch(() => []) : Promise.resolve([]),
+    lpoReturnSummary(id).catch(() => null),
+  ]);
   // Supplier payments are for the owner and accounts only (10 November 2026, Section 5): the parts desk sees nothing about payments.
   const seesPay = role === "owner" || role === "accounts";
   // Supplier invoice edit (5 November 2026, the Gargash case): the typed VAT, the Edit button and the who/when record.
@@ -405,9 +414,28 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             </Card>
           ) : null}
 
+          {returnSummary ? (
+            <Card className="flex flex-col gap-1" data-lpo-net>
+              <SectionLabel>After returns</SectionLabel>
+              <div className="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-3 text-sm">
+                <span className="flex flex-col"><span className="text-xs font-semibold uppercase text-muted">Invoiced</span><span className="font-extrabold" data-lpo-net-invoiced>AED {returnSummary.invoiced.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span></span>
+                <span className="flex flex-col"><span className="text-xs font-semibold uppercase text-muted">Credited</span><span className="font-extrabold text-green-text" data-lpo-net-credited>− AED {returnSummary.credited.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span></span>
+                <span className="flex flex-col"><span className="text-xs font-semibold uppercase text-muted">Re-invoiced (replacements)</span><span className="font-extrabold" data-lpo-net-reinvoiced>AED {returnSummary.reinvoiced.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span></span>
+                <span className="flex flex-col"><span className="text-xs font-semibold uppercase text-muted">Net owed on this LPO</span><span className="text-lg font-extrabold" data-lpo-net-total>AED {returnSummary.net.toLocaleString("en-GB", { minimumFractionDigits: 2 })}</span></span>
+              </div>
+              {returnSummary.creditNotes.length ? <span className="text-xs text-muted">Credit note{returnSummary.creditNotes.length === 1 ? "" : "s"} {returnSummary.creditNotes.join(", ")}</span> : null}
+            </Card>
+          ) : null}
           {!isMain ? (
             <Card className="flex flex-col gap-2">
               <SectionLabel right={`${lines.length} line${lines.length === 1 ? "" : "s"}`}>Lines</SectionLabel>
+              {/* 19 November 2026 (Section 4): received parts go back from here; accounts enter the supplier's credit note. */}
+              {(canManage && returnParts.length) || (canPay && creditOptions.length) ? (
+                <div className="flex flex-wrap gap-2" data-lpo-returns-actions>
+                  {canManage && returnParts.length ? <ReturnToSupplier parts={returnParts} action={startReturnsAction.bind(null, po.id)} isOwner={role === "owner"} /> : null}
+                  {canPay && creditOptions.length ? <CreditNoteEntry invoices={creditOptions} action={enterCreditNoteAction} presetPoId={po.id} label="Enter the supplier's credit note" /> : null}
+                </div>
+              ) : null}
               <ul className="divide-y divide-line text-sm">
                 {lines.map((l) => {
                   const part = parts.find((p) => p.id === l.part_item_id);

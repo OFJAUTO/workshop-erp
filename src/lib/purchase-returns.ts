@@ -229,3 +229,15 @@ export async function returnCostsForJobs(jobIds: string[]): Promise<Map<string, 
   }
   return out;
 }
+
+/** Supplier credit notes recorded against each LPO (credit + VAT), for what is still owed on it (19 November 2026). */
+export async function creditedOnPos(poIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (!poIds.length || !(await purchaseReturnsReady())) return out;
+  const { data } = await createAdminClient().from("purchase_returns").select("po_id, credit_net_aed, credit_vat_aed").in("po_id", poIds).eq("is_active", true).eq("status", "credited");
+  for (const r of (data ?? []) as { po_id: string | null; credit_net_aed: number | string | null; credit_vat_aed: number | string | null }[]) {
+    if (!r.po_id) continue;
+    out.set(r.po_id, round2((out.get(r.po_id) ?? 0) + (Number(r.credit_net_aed) || 0) + (Number(r.credit_vat_aed) || 0)));
+  }
+  return out;
+}

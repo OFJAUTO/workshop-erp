@@ -80,7 +80,7 @@ export async function openInvoicesOf(supplierId: string | null, supplierName: st
   const pos = ((data ?? []) as PoRow[]).map((p) => ({ ...p, total_cost_aed: Number(p.total_cost_aed) || 0, supplier_invoice_amount: p.supplier_invoice_amount === null ? null : Number(p.supplier_invoice_amount) }));
   const lathe = await latheOpenOf(supplierId, supplierName);
   if (!pos.length) return lathe;
-  const [amounts, paidMap] = await Promise.all([lpoAmounts(pos, { withFurther: false }), paidOnPos(pos.map((p) => p.id))]);
+  const [amounts, paidMap, creditMap] = await Promise.all([lpoAmounts(pos, { withFurther: false }), paidOnPos(pos.map((p) => p.id)), (await import("./purchase-returns")).creditedOnPos(pos.map((p) => p.id))]);
   // 10 November 2026 (Section 3): each further supplier invoice on an LPO is paid on its own (key "<po>~<invoice>").
   const extrasMap = await loadLpoInvoices(pos.map((p) => p.id));
   const vatOf = extrasMap.size ? await supplierVatLookup() : null;
@@ -97,7 +97,9 @@ export async function openInvoicesOf(supplierId: string | null, supplierName: st
       const gross = amounts.get(p.id)?.gross ?? 0;
       // The old one-LPO "Paid to supplier" (before payments were recorded with their amount) counts as paid in full.
       const paid = p.supplier_paid_at && !p.supplier_payment_id && !(paidMap.get(p.id) ?? 0) ? gross : (paidMap.get(p.id) ?? 0);
-      return { poId: p.id, label: `${p.supplier_invoice_number ?? p.number} · ${p.number}`, date: p.supplier_invoice_date, due: r2(gross - paid), gross, paid: r2(paid), jobId: p.job_id };
+      // 19 November 2026 (Section 4): a supplier credit note against the invoice lowers what is still owed on it.
+      const credit = creditMap.get(p.id) ?? 0;
+      return { poId: p.id, label: `${p.supplier_invoice_number ?? p.number} · ${p.number}${credit > 0.004 ? ` · less credit AED ${credit.toFixed(2)}` : ""}`, date: p.supplier_invoice_date, due: r2(gross - paid - credit), gross, paid: r2(paid), jobId: p.job_id };
     }), ...extraOpen, ...lathe]
     .filter((i) => i.due > 0.004)
     .sort((a, b) => String(a.date ?? "9999").localeCompare(String(b.date ?? "9999")));

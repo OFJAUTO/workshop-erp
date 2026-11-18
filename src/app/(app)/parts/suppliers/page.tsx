@@ -1,4 +1,7 @@
 import Link from "next/link";
+import { ReturnRulesBox } from "@/components/SupplierReturns";
+import { returnRulesOf } from "@/lib/supplier-return-rules";
+import { saveReturnRulesAction } from "@/app/(app)/parts/supplier-return-actions";
 import { SupplierInvoiceLater } from "@/components/SupplierInvoiceLater";
 import { supplierInvoiceLaterAction } from "../receipt-actions";
 import { receiptsReady } from "@/lib/receipts";
@@ -184,6 +187,8 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Pr
                   <SupplierFields s={s} types={types} canDiscount={canDiscount} contactOn={contactOn} />
                   <div className="flex flex-wrap gap-2"><Button type="submit" size="md">Save</Button></div>
                 </form>
+                {/* 19 November 2026 (Section 4): the supplier's return window. */}
+                <ReturnRulesBox rules={returnRulesOf((settings as unknown as Record<string, unknown>).supplier_return_rules, s.id)} action={saveReturnRulesAction.bind(null, s.id)} />
                 <form action={setSupplierActive.bind(null, s.id)} className="mt-2">
                   <input type="hidden" name="active" value={s.is_active ? "no" : "yes"} />
                   <Button type="submit" tone="ghost" size="md">{s.is_active ? "Take off the list" : "Put back on the list"}</Button>

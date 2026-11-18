@@ -94,10 +94,11 @@ export async function recordReturnCredit(id: string, formData: FormData): Promis
   if (!on || on > today()) return { error: "Pick the credit note's date (not in the future)." };
   if (net === null || net <= 0) return { error: "Type the credit before VAT, as printed." };
   if (vat < 0 || fee < 0) return { error: "The VAT and the restocking fee cannot be below 0." };
-  // THE 3 November credit note path: the part's ending becomes "returned" and the Zoho vendor credit is queued.
+  // THE 3 November credit note path: the part's ending becomes "returned" and the Zoho vendor credit is queued. The
+  // amount is BEFORE VAT (19 November 2026: the Zoho supplier credit adds the 5% itself; it was given the total).
   const { data: part } = await createAdminClient().from("part_items").select("job_id, disposition").eq("id", r.part_item_id).maybeSingle();
   if (part?.disposition !== "returned") {
-    const done = await recordCreditNote(String(part?.job_id ?? r.job_id ?? ""), String(r.part_item_id), { number, path: scan, amount: round2(net + vat), date: on }, staff);
+    const done = await recordCreditNote(String(part?.job_id ?? r.job_id ?? ""), String(r.part_item_id), { number, path: scan, amount: round2(net), date: on }, staff);
     if (done.error && !/already recorded/i.test(done.error)) return { error: done.error };
   }
   const { data, error } = await createAdminClient().from("purchase_returns").update({ status: "credited", credit_number: number, credit_date: on, credit_net_aed: net, credit_vat_aed: vat, credit_scan_path: scan, restock_fee_aed: fee, cost_to: fee > 0 ? (text(formData.get("cost_to"), 10) === "job" ? "job" : "overhead") : null, closed_at: new Date().toISOString(), closed_by: staff.id, updated_by: staff.id }).eq("id", id).in("status", ["sent", "requested"]).select("id");

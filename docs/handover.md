@@ -1,3 +1,9 @@
+# Handover – second list of 18 November 2026 (in progress; last update 18 Nov, 16:40 Dubai)
+
+Done and live: S1 Zoho bills (77ec8a8e), S2 cancelled documents leave the queue (76e9ebc0), S3 settlement result (f18e194a). Next: S4 purchase returns and supplier credit notes, then S5 advisors' "+ Add a part".
+
+---
+
 # Handover – list of 18 November 2026 (ALL DONE; last update 18 Nov, 12:00 Dubai)
 
 **NEEDS OMAR (top first):**
