@@ -284,6 +284,7 @@ export async function voidLatheBill(billId: string, reason: string, actor: Actor
   if ((paidLines ?? []).length) return { error: `Bill ${b.bill_number} has a supplier payment on it: void that payment (Supplier payments) first.` };
   const { error } = await admin.from("lathe_bills").update({ voided_at: new Date().toISOString(), voided_by: actor.id, void_reason: reason, void_requested_at: null, is_active: false, updated_by: actor.id }).eq("id", billId).is("voided_at", null);
   if (error) { await logAppError("lathe: void", error, { staffId: actor.id }); return { error: SAVE_FAILED }; }
+  await (await import("@/lib/zoho-cancelled")).withdrawCancelled({ kind: "lathebill", recordId: billId }, { id: actor.id, name: actor.display_name }).catch(() => 0);
   const { data: parts } = await admin.from("part_items").select("id, job_id, lathe_ticket").eq("lathe_bill_id", billId);
   for (const p of (parts ?? []) as { id: string; job_id: string; lathe_ticket: string }[]) {
     await admin.from("part_items").update({ lathe_bill_id: null, lathe_bill_amount_aed: null, final_cost_aed: null, updated_by: actor.id }).eq("id", p.id);

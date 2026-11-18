@@ -295,6 +295,8 @@ export async function undoSettlement(settlementId: string, reason: string, actor
   await tryEnqueueZoho("settlement", st.id, null, actorId);
   await reopenZoho("settlement", st.id);
   await refreshClosedReports(((payRows ?? []) as { job_id: string | null }[]).map((p) => p.job_id));
+  // 19 November 2026: not in Zoho yet = it leaves the queue at once; in Zoho = its row takes it back out.
+  if (!(st.zoho_transfer_id || st.zoho_fee_id)) await (await import("./zoho-cancelled")).withdrawCancelled({ kind: "settlement", recordId: st.id }).catch(() => 0);
   return { ok: true, number: st.number, posted: !!(st.zoho_transfer_id || st.zoho_fee_id) };
 }
 

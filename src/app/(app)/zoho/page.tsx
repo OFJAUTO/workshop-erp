@@ -42,6 +42,8 @@ const OUTBOX_LIST_SELECT = "id, kind, record_id, job_id, status, attempts, last_
 export default async function ZohoSyncPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; show?: string; run?: string; q?: string; type?: string; from?: string; to?: string }> }) {
   const staff = await requirePermission("zohoSync");
   const { message, error, show: showRaw, run: runParam, q: qRaw = "", type: typeRaw = "", from: fromRaw = "", to: toRaw = "" } = await searchParams;
+  // 19 November 2026 (Section 2): cancelled documents leave the queue before the page reads it.
+  await (await import("@/lib/zoho-cancelled")).withdrawCancelled().catch(() => 0);
   // 13 November 2026 (Section 9): ONE search box above the documents, with the type, date and status filters.
   const needle = qRaw.trim().toLowerCase();
   const typeKey = ZOHO_KINDS.includes(typeRaw as never) ? typeRaw : "";
@@ -175,7 +177,7 @@ export default async function ZohoSyncPage({ searchParams }: { searchParams: Pro
                     <Badge tone="outline">{kindWord(r.kind)}</Badge>
                     <Words className="min-w-0 font-bold" text={name} />
                     <span className="flex-1" />
-                    {r.status === "synced" ? (differs ? <Badge tone="red">Posted · differs</Badge> : <Badge tone="green">Posted ✓</Badge>) : r.status === "failed" ? <Badge tone="red">Failed</Badge> : <Badge tone="amber">Waiting</Badge>}
+                    {r.status === "synced" ? (differs ? <Badge tone="red">Posted · differs</Badge> : typeof (r.zoho_result as { skipped?: unknown } | null)?.skipped === "string" ? <Badge tone="neutral" data-zoho-not-sent>Not sent</Badge> : <Badge tone="green">Posted ✓</Badge>) : r.status === "failed" ? <Badge tone="red">Failed</Badge> : <Badge tone="amber">Waiting</Badge>}
                     {maySync && r.status === "pending" ? <SyncThisButton id={r.id} /> : null}
                   </div>
                   <p className="text-xs text-muted">

@@ -179,6 +179,8 @@ async function bounceOne(paymentId: string, input: { charge?: number | null; not
   const { data: upd, error } = await admin.from("payments").update({ cheque_status: "bounced", status: "reversed", reversed_at: now, reversed_reason: `${why}${input.note?.trim() ? `: ${input.note.trim().slice(0, 200)}` : ""}`, ...(ready && charge > 0 ? { bounce_charge_aed: charge } : {}), updated_by: actor.id }).eq("id", p.id).eq("cheque_status", "pending").select("id");
   if (error) { await logAppError("bank-posting: bounce", error, { staffId: actor.id, jobId: p.job_id }); return { error: SAVE_FAILED }; }
   if (!upd?.length) return { error: "Someone else changed it at the same time. Reload the page." };
+  // 19 November 2026: a bounced cheque not yet in Zoho leaves the queue at once; one already there is reversed below.
+  if (!p.zoho_payment_id) await (await import("@/lib/zoho-cancelled")).withdrawCancelled({ recordId: p.id }, { id: actor.id, name: actor.display_name }).catch(() => 0);
   // Zoho: once posted into Undeposited Funds, the worker takes it back out (THE reversal of a voided payment).
   if (p.zoho_payment_id) {
     const { reopenZoho } = await import("./zoho-sync");

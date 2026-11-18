@@ -109,6 +109,8 @@ export async function voidSupplierPaymentAction(paymentId: string, _prev: PaySta
   const latheIds = ((latheLines ?? []) as { lathe_bill_id: string | null }[]).map((l) => l.lathe_bill_id).filter((x): x is string => !!x);
   if (latheIds.length) await admin.from("lathe_bills").update({ paid_at: null, paid_by: null, paid_reference: null, updated_by: staff.id }).in("id", latheIds);
   await tryEnqueueZoho("supplierpay", paymentId, null, staff.id);
+  // 19 November 2026: not in Zoho yet = it leaves the queue at once; in Zoho = its row runs and removes it there.
+  await (await import("@/lib/zoho-cancelled")).withdrawCancelled({ kind: "supplierpay", recordId: paymentId }, { id: staff.id, name: staff.display_name }).catch(() => 0);
   revalidatePath("/parts/orders", "layout");
   revalidatePath("/supplier-invoices");
   revalidatePath("/parts-accounts");

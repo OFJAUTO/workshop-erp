@@ -365,6 +365,8 @@ export async function voidPayment(paymentId: string, actor: Actor, reason: strin
     return { error: `${p.number} is part of the bank settlement ${(st as { number: string } | null)?.number ?? ""}. Undo that settlement on Accounts posting first, then void the receipt.` };
   }
   await admin.from("payments").update({ status: "voided", void_reason: clean, voided_by: actor.id, voided_at: new Date().toISOString(), updated_by: actor.id }).eq("id", paymentId);
+  // 19 November 2026: not in Zoho yet = it leaves the queue at once (NOT SENT – CANCELLED BEFORE SYNC).
+  await (await import("@/lib/zoho-cancelled")).withdrawCancelled({ recordId: paymentId }, { id: actor.id, name: actor.display_name }).catch(() => 0);
   // A receipt that already reached a Zoho book cannot be unposted from here: the row turns red for accounts to fix
   // by hand — including, after go-live, one that sits in the REAL book's opening balances.
   const where = (raw as Record<string, unknown>).zoho_payment_id ? "current" : await zohoPostedSomewhere(["deposit", "payment"], paymentId, p.method === "cheque" ? (p.cleared_at ?? p.received_at) : p.received_at);
@@ -439,8 +441,9 @@ export async function undoPayment(paymentId: string, actor: Actor, settings: Set
     if (inv?.kind === "tax_invoice" && inv.converted_from && String(inv.created_at) >= createdAt) return { error: `${p.number} completed the payment and made tax invoice ${inv.number}: it cannot be undone. The owner or the head accountant reverse it with a reason.` };
   }
   await admin.from("payments").update({ status: "voided", void_reason: `Undone within ${minutes} minutes by ${actor.display_name}`, voided_by: actor.id, voided_at: new Date().toISOString(), updated_by: actor.id }).eq("id", paymentId);
-  // Held back during the window: the Zoho row never left, so it is simply dropped.
-  await admin.from("zoho_outbox").delete().in("kind", ["payment", "deposit"]).eq("record_id", paymentId).eq("status", "pending").is("zoho_id", null);
+  // Held back during the window: the Zoho row never left, so it leaves the queue and stays in the history (19 November
+  // 2026: no hard deletes - "NOT SENT – CANCELLED BEFORE SYNC").
+  await (await import("@/lib/zoho-cancelled")).withdrawCancelled({ recordId: paymentId }, { id: actor.id, name: actor.display_name }).catch(() => 0);
   if (p.job_id) await admin.from("job_events").insert({ job_id: p.job_id, event_type: "payment_void", note: `${p.number} (${money(p.amount_aed)}) undone by ${actor.display_name} within ${minutes} minutes`, created_by: actor.id });
   if (p.job_id && p.invoice_id) await settleJob(p.job_id, p.invoice_id, actor.id);
   // A receipt made from an advisor's payment report: the report waits for accounts again (2 November 2026, section 3).

@@ -172,6 +172,8 @@ async function freshRunningRun(): Promise<{ id: string; name: string; startedAt:
 export async function loadSyncPreview(onlyIds: string[] | null = null): Promise<SyncPreview> {
   // 16 November 2026: stock usage is not synced while the switch is off - waiting entries close as NOT SENT first.
   await (await import("./zoho-sync")).cancelStockUsageRows(null).catch(() => null);
+  // 19 November 2026: cancelled documents leave the queue before anything is shown or sent.
+  await (await import("./zoho-cancelled")).withdrawCancelled().catch(() => 0);
   const [state, all, minutes, running, { count: red }] = await Promise.all([
     sendState(),
     loadPendingRows(true),
@@ -475,6 +477,8 @@ export async function loadRun(id: string): Promise<{ run: SyncRunRow; now: Map<s
 export async function zohoCronTick(limit: number): Promise<{ words: string; pushed: number; failed: number; waiting: number; recon: { day: string; status: string }[] }> {
   // 16 November 2026: stock usage is not synced while the switch is off - waiting entries close as NOT SENT first.
   await (await import("./zoho-sync")).cancelStockUsageRows(null).catch(() => null);
+  // 19 November 2026: cancelled documents leave the queue (NOT SENT – CANCELLED BEFORE SYNC).
+  await (await import("./zoho-cancelled")).withdrawCancelled().catch(() => 0);
   const reconWords = (days: { day: string; status: string }[]) => (days.length ? ` · reconciled ${days.map((d) => `${d.day}: ${d.status}`).join(", ")}` : "");
   const books = await zohoBooksNow();
   if (books.auto) {

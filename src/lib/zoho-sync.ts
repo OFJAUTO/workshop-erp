@@ -2680,7 +2680,20 @@ async function syncSettlementRow(org: string, accounts: Resolved, settlementId: 
   const st = data as { id: string; number: string; method: "card" | "link" | "cheque" | "transfer"; settled_on: string; payment_count: number; gross_aed: number | string; received_aed: number | string; fee_aed: number | string; statement_ref: string | null; is_active: boolean; zoho_transfer_id: string | null; zoho_fee_id: string | null } | null;
   if (!st) throw new ZohoError("The settlement no longer exists in the ERP.");
   if (!st.is_active) {
-    if (st.zoho_transfer_id || st.zoho_fee_id) throw new ZohoError(`${st.number} was undone in the ERP after it reached Zoho: the accountant removes the transfer and the fee in Zoho by hand.`);
+    if (st.zoho_transfer_id || st.zoho_fee_id) {
+      // 19 November 2026 (Section 2): undone after it reached Zoho = the reversal is queued and done here, never by hand.
+      const gone = async (path: string) => {
+        try {
+          await zohoFetch(path, { org, method: "DELETE" });
+        } catch (e) {
+          if (!(e instanceof ZohoError && /not exist|not found|does not exist/i.test(e.message))) throw e;
+        }
+      };
+      if (st.zoho_fee_id) await gone(`/expenses/${encodeURIComponent(st.zoho_fee_id)}`);
+      if (st.zoho_transfer_id) await gone(`/banktransactions/${encodeURIComponent(st.zoho_transfer_id)}`);
+      await admin.from("card_settlements").update({ zoho_transfer_id: null, zoho_fee_id: null }).eq("id", st.id);
+      return { result: { reversed: `${st.number} was undone in the ERP: its transfer and bank fee were taken back out of Zoho.` } };
+    }
     return { result: { skipped: "Undone in the ERP before it was posted. Nothing went to Zoho." } };
   }
   const gate = await startDateSkip(String(st.settled_on).slice(0, 10), "settlement", st.id);
@@ -2821,6 +2834,11 @@ type RowDone = { outcome: "posted" | "removed" | "skipped" | "failed" | "waiting
  */
 async function processOutboxRow(row: WorkRow, ctx: RunCtx): Promise<RowDone> {
   if (heldForUndo(row.kind, row.enqueued_at, ctx.undoMinutes)) return { outcome: "held", words: `Recorded in the last ${ctx.undoMinutes} minutes: it can still be undone, so it goes with the next sync.` };
+  // 19 November 2026 (Section 2): a document cancelled before it reached Zoho is never sent - withdrawn, kept in the history.
+  {
+    const { withdrawCancelled, CANCELLED_WORDS } = await import("./zoho-cancelled");
+    if (await withdrawCancelled({ kind: row.kind, recordId: row.record_id }).catch(() => 0)) return { outcome: "skipped", words: `${CANCELLED_WORDS}: cancelled in the ERP before it reached Zoho. Nothing was sent.` };
+  }
   const admin = createAdminClient();
   // A claim older than ten minutes belongs to a worker that died: the row may be taken again.
   const cutoff = new Date(Date.now() - CLAIM_FRESH_MS).toISOString();

@@ -273,6 +273,7 @@ export async function voidVoucher(id: string, reason: string, by: Actor): Promis
   const admin = createAdminClient();
   const { data: v } = await admin.from("journal_vouchers").update({ status: "void", void_reason: reason.trim(), updated_by: by.id }).eq("id", id).neq("status", "void").select("id, number").maybeSingle();
   if (!v) return { error: "This voucher is already voided." };
+  await (await import("@/lib/zoho-cancelled")).withdrawCancelled({ kind: "jv", recordId: id }, { id: by.id, name: by.display_name }).catch(() => 0);
   await admin.from("journal_voucher_lines").update({ is_active: false, updated_by: by.id }).eq("voucher_id", id);
   await reopenZoho("jv", id);
   return { number: v.number as string };
