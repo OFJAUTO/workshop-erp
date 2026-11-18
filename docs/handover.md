@@ -1,3 +1,17 @@
+# Handover – list of 18 November 2026 (end checks running; last update 18 Nov, 09:45 Dubai)
+
+**NEEDS OMAR (top first):**
+1. Mathew chooses when tax invoices are issued for cheque payments: Accounts posting → Cheque tab → "Tax invoices for cheque payments" (now: when the cheque clears).
+2. Mathew presses Mark cleared on cheque 018315 once the bank shows it. It clears RCT-00096 and RCT-00097 together; the page now says so first.
+3. Tax invoices not made yet, though the jobs are paid in full: J-00981 (PRO-00007, AED 2,325.75) and J-00860 (PRO-00015, AED 2,236.50). Mathew presses "Issue tax invoice now" on each job's Payments and invoice page. J-00493 is due by 20 Nov; J-00460 is 17 days old (due 14 Nov).
+4. Approvals: 24 are waiting for you, the oldest 17 days (mostly revisions). The RCT-00062 void (a duplicate, the evidence is on the item) has waited 6 days.
+5. The daily approvals email: the first send shows on the Approvals page. If it says it could not send, the free fix is to add the Google Workspace key to Vercel; WhatsApp would cost about USD 1.50 a month at worst. Details in docs/approvals-wait-18-nov-note.md.
+6. From 17 Nov, still open: SPAY-00023/24/28/29/33 proofs; AL TAYER's one invoice for LPO-00039-1 + -3; Mathew on how Journal Vouchers go to Zoho; Peter's 34 part numbers; "upgrade Next" if wanted; E-00082 AED 8,000; Mathew's Zoho account for stock bills.
+
+**Done:** status fix (bank day before the receipt day + old refused proofs say where to go, 52459f67); S1 cheque pending + Issue tax invoice now + deadline + setting (136fa972); S2 approvals age + reminders (b27a6adb). No database change: nothing waiting for apply.
+
+---
+
 # Handover – list of 17 November 2026 (ALL DONE; last update 17 Nov, 13:25 Dubai)
 
 **NEEDS OMAR (top first):**

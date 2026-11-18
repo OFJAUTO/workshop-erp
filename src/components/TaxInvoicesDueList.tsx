@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Words } from "@/components/Words";
 import { Card, SectionLabel } from "@/components/ui";
 import { missingTaxInvoices } from "@/lib/tax-invoice-due";
 
@@ -17,11 +18,11 @@ export async function TaxInvoicesDueList() {
       <SectionLabel>Tax invoices due · {list.length}</SectionLabel>
       <ul className="flex flex-col divide-y divide-line">
         {list.map((m) => (
-          <li key={m.jobId} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm" data-tax-due-row={m.jobNumber}>
-            <Link href={`/jobs/${m.jobId}/invoice#tax-due`} className="min-w-0 flex-1 font-semibold underline-offset-4 hover:underline">{m.jobNumber} · {m.plate}{m.customer ? ` · ${m.customer}` : ""}</Link>
-            <span className={`text-xs font-extrabold ${m.due.warn ? "text-red" : "text-amber-text"}`}>{m.due.words}</span>
-            <span className="text-xs text-muted">completed {m.due.daysSince} day{m.due.daysSince === 1 ? "" : "s"} ago · {m.proforma.number} {aed(m.proforma.total)}</span>
-            <span className={`text-xs font-bold ${m.state === "due" ? "text-red" : m.state === "covered" ? "text-amber-text" : "text-green-text"}`}>{m.asked ? "waiting for the owner" : m.state === "paid" ? "paid in full – issue now" : m.state === "covered" ? "cheque pending – issue now (owner approves)" : `${aed(Math.max(0, m.balance - m.pending))} still due`}</span>
+          <li key={m.jobId} className="flex flex-col gap-0.5 py-2 text-sm" data-tax-due-row={m.jobNumber}>
+            <Link href={`/jobs/${m.jobId}/invoice#tax-due`} className="font-semibold underline-offset-4 hover:underline"><Words text={`${m.jobNumber} · ${m.plate}${m.customer ? ` · ${m.customer}` : ""}`} /></Link>
+            <span className={`text-xs font-extrabold ${m.due.warn ? "text-red" : "text-amber-text"}`}><Words text={m.due.words} /></span>
+            <span className="text-xs text-muted"><Words text={`completed ${m.due.daysSince} day${m.due.daysSince === 1 ? "" : "s"} ago · ${m.proforma.number} ${aed(m.proforma.total)}`} /></span>
+            <span className={`text-xs font-bold ${m.state === "due" ? "text-red" : m.state === "covered" ? "text-amber-text" : "text-green-text"}`}><Words text={m.asked ? "waiting for the owner" : m.state === "paid" ? "paid in full – issue now" : m.state === "covered" ? "cheque pending – issue now (owner approves)" : `${aed(Math.max(0, m.balance - m.pending))} still due`} /></span>
           </li>
         ))}
       </ul>
