@@ -112,6 +112,11 @@ export function SupplierInvoiceBox({
               <span className="text-xs font-semibold text-muted">Total before VAT (optional)</span>
               <Input name="invoice_amount" value={amount} onChange={(e) => { setAmount(e.target.value); setConfirmed(false); }} inputMode="decimal" data-invoice-amount />
             </label>
+            {/* 20 November 2026 (Section 3): the rounding line some suppliers print (e.g. -0.10), as printed. */}
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-semibold text-muted">Rounding on the invoice (optional, as printed, e.g. -0.10)</span>
+              <Input name="invoice_rounding" inputMode="decimal" spell={false} placeholder="0.00" data-invoice-rounding />
+            </label>
           </div>
           {amountOff ? (
             <label className="flex items-start gap-2 rounded-control border border-amber-bar bg-amber-soft px-3 py-2 text-sm font-semibold" data-amount-check>

@@ -62,6 +62,7 @@ export async function recordSupplierPaymentAction(_prev: PayState, formData: For
       proofPath: /^supplier-payments\/[\w./-]+$/.test(String(formData.get("proof_path") ?? "")) ? String(formData.get("proof_path")) : null,
       note: String(formData.get("note") ?? "").trim().slice(0, 500) || null,
       advanceUses,
+      difference: ["rounding", "owed", "discount"].includes(String(formData.get("diff_kind") ?? "")) ? { poId: String(formData.get("diff_po") ?? ""), kind: String(formData.get("diff_kind")) as "rounding" | "owed" | "discount", reason: String(formData.get("diff_reason") ?? "").slice(0, 300) } : null,
     },
     staff,
   );
@@ -151,4 +152,31 @@ export async function correctSupplierPaymentAction(paymentId: string, _prev: Pay
   revalidatePath("/supplier-invoices");
   revalidatePath("/parts-accounts");
   return { ok: true, message: r.words };
+}
+
+/** "Correct this payment" (20 November 2026, Section 3): close what it left owing as rounding or a supplier discount. */
+export async function closeDifferenceAction(paymentId: string, poId: string, _prev: PayState, formData: FormData): Promise<PayState> {
+  const staff = await requireStaff();
+  if (staff.viewingAs) return { error: "View as is read-only." };
+  const { closePaymentDifference } = await import("@/lib/supplier-payments");
+  const r = await closePaymentDifference(paymentId, poId, String(formData.get("diff_kind") ?? ""), String(formData.get("diff_reason") ?? ""), { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+  if (r.error) return { error: r.error };
+  await reopenZoho("supplierpay", paymentId).catch(() => null);
+  revalidatePath("/parts/orders", "layout");
+  revalidatePath("/supplier-payments");
+  revalidatePath("/supplier-invoices");
+  revalidatePath("/parts-accounts");
+  return { ok: true, message: r.words };
+}
+
+/** The rounding limit (owner and accounts): the most a payment closes as rounding. */
+export async function saveRoundingLimitAction(_prev: PayState, formData: FormData): Promise<PayState> {
+  const staff = await requireStaff();
+  if (staff.viewingAs || !["owner", "accounts"].includes(staff.role_id)) return { error: "Only accounts or the owner set the rounding limit." };
+  const n = Number(String(formData.get("limit") ?? "").replace(",", ".").trim());
+  if (!Number.isFinite(n) || n < 0 || n > 100) return { error: "The rounding limit is 0 to 100 AED." };
+  const { error } = await createAdminClient().from("settings").upsert({ key: "supplier_rounding_limit_aed", value: Math.round(n * 100) / 100, label: "Rounding on a supplier payment: the most that closes an invoice as rounding (AED)", updated_by: staff.id }, { onConflict: "key" });
+  if (error) return { error: dbWords(error, "parts/supplier-payment") };
+  revalidatePath("/supplier-invoices");
+  return { ok: true, message: `Rounding limit: AED ${(Math.round(n * 100) / 100).toFixed(2)}.` };
 }

@@ -5,7 +5,7 @@ import { lpoAmounts, supplierVatLookup } from "./supplier-vat";
 import { loadLpoInvoices, lpoInvoiceGross, lpoInvoicesReady } from "./lpo-invoices";
 import { payKeyOf, splitPayKey } from "./lpo-invoice-rules";
 import { schemaReady } from "./schema-ready";
-import { advanceLeft, checkAdvanceUses, checkAllocations, type AdvanceUse, type Allocation, type OpenInvoice, type SupplierPayMethod, SUPPLIER_PAY_METHOD_KEYS, SUPPLIER_PAY_METHOD_LABELS } from "./supplier-payment-rules";
+import { advanceLeft, checkAdvanceUses, checkAllocations, type AdvanceUse, type Allocation, type OpenInvoice, type SupplierPayMethod, SUPPLIER_PAY_METHOD_KEYS, SUPPLIER_PAY_METHOD_LABELS , checkDifference, DEFAULT_ROUNDING_LIMIT, type DifferenceKind } from "./supplier-payment-rules";
 
 /**
  * SUPPLIER PAYMENTS, the server half (6 November 2026, Section 4). THE supplier balance and its open invoices, the
@@ -80,7 +80,7 @@ export async function openInvoicesOf(supplierId: string | null, supplierName: st
   const pos = ((data ?? []) as PoRow[]).map((p) => ({ ...p, total_cost_aed: Number(p.total_cost_aed) || 0, supplier_invoice_amount: p.supplier_invoice_amount === null ? null : Number(p.supplier_invoice_amount) }));
   const lathe = await latheOpenOf(supplierId, supplierName);
   if (!pos.length) return lathe;
-  const [amounts, paidMap, creditMap] = await Promise.all([lpoAmounts(pos, { withFurther: false }), paidOnPos(pos.map((p) => p.id)), (await import("./purchase-returns")).creditedOnPos(pos.map((p) => p.id))]);
+  const [amounts, paidMap, creditMap, offMap, roundMap] = await Promise.all([lpoAmounts(pos, { withFurther: false }), paidOnPos(pos.map((p) => p.id)), (await import("./purchase-returns")).creditedOnPos(pos.map((p) => p.id)), writtenOffOnPos(pos.map((p) => p.id)), invoiceRoundingOf(pos.map((p) => p.id))]);
   // 10 November 2026 (Section 3): each further supplier invoice on an LPO is paid on its own (key "<po>~<invoice>").
   const extrasMap = await loadLpoInvoices(pos.map((p) => p.id));
   const vatOf = extrasMap.size ? await supplierVatLookup() : null;
@@ -94,12 +94,13 @@ export async function openInvoicesOf(supplierId: string | null, supplierName: st
   );
   return [...pos
     .map((p) => {
-      const gross = amounts.get(p.id)?.gross ?? 0;
+      // 20 November 2026 (Section 3): the supplier's own rounding line on the invoice is part of what it asks.
+      const gross = r2((amounts.get(p.id)?.gross ?? 0) + (roundMap.get(p.id) ?? 0));
       // The old one-LPO "Paid to supplier" (before payments were recorded with their amount) counts as paid in full.
       const paid = p.supplier_paid_at && !p.supplier_payment_id && !(paidMap.get(p.id) ?? 0) ? gross : (paidMap.get(p.id) ?? 0);
       // 19 November 2026 (Section 4): a supplier credit note against the invoice lowers what is still owed on it.
       const credit = creditMap.get(p.id) ?? 0;
-      return { poId: p.id, label: `${p.supplier_invoice_number ?? p.number} · ${p.number}${credit > 0.004 ? ` · less credit AED ${credit.toFixed(2)}` : ""}`, date: p.supplier_invoice_date, due: r2(gross - paid - credit), gross, paid: r2(paid), jobId: p.job_id };
+      return { poId: p.id, label: `${p.supplier_invoice_number ?? p.number} · ${p.number}${credit > 0.004 ? ` · less credit AED ${credit.toFixed(2)}` : ""}`, date: p.supplier_invoice_date, due: r2(gross - paid - credit - (offMap.get(p.id) ?? 0)), gross, paid: r2(paid), jobId: p.job_id };
     }), ...extraOpen, ...lathe]
     .filter((i) => i.due > 0.004)
     .sort((a, b) => String(a.date ?? "9999").localeCompare(String(b.date ?? "9999")));
@@ -120,6 +121,32 @@ export async function paidOnPos(poIds: string[]): Promise<Map<string, number>> {
     const key = payKeyOf(l.po_id, l.lpo_invoice_id ?? null);
     out.set(key, r2((out.get(key) ?? 0) + Number(l.amount_aed)));
   }
+  return out;
+}
+
+/** 20 November 2026 (Section 3): ready once the rounding migration is applied. */
+export const roundingReady = () => schemaReady("supplier_payment_lines", "write_off_aed,write_off_kind");
+const invoiceRoundingReady = () => schemaReady("purchase_orders", "supplier_invoice_rounding_aed");
+
+/** What recorded payments wrote off on each LPO (rounding, or a discount from the supplier): it closes the invoice. */
+export async function writtenOffOnPos(poIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (!poIds.length || !(await roundingReady())) return out;
+  const admin = createAdminClient();
+  const lines = await pageAllIn<{ po_id: string; write_off_aed: number; payment_id: string }>(poIds, (chunk, a, b) => admin.from("supplier_payment_lines").select("po_id, write_off_aed, payment_id").in("po_id", chunk).eq("is_active", true).gt("write_off_aed", 0).order("id").range(a, b).abortSignal(fresh()) as unknown as PromiseLike<{ data: { po_id: string; write_off_aed: number; payment_id: string }[] | null; error: { message: string } | null }>);
+  if (!lines.length) return out;
+  const { data: pays } = await admin.from("supplier_payments").select("id, status").in("id", Array.from(new Set(lines.map((l) => l.payment_id)))).abortSignal(fresh());
+  const live = new Set((pays ?? []).filter((p) => p.status === "recorded").map((p) => p.id as string));
+  for (const l of lines) if (live.has(l.payment_id)) out.set(l.po_id, r2((out.get(l.po_id) ?? 0) + Number(l.write_off_aed)));
+  return out;
+}
+
+/** The supplier's own rounding line on each LPO's invoice (signed, e.g. -0.10). */
+export async function invoiceRoundingOf(poIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (!poIds.length || !(await invoiceRoundingReady())) return out;
+  const { data } = await createAdminClient().from("purchase_orders").select("id, supplier_invoice_rounding_aed").in("id", poIds).not("supplier_invoice_rounding_aed", "is", null).abortSignal(fresh());
+  for (const p of (data ?? []) as { id: string; supplier_invoice_rounding_aed: number | string }[]) out.set(p.id, r2(Number(p.supplier_invoice_rounding_aed) || 0));
   return out;
 }
 
@@ -169,6 +196,46 @@ const lpoAdvanceColumnReady = () => schemaReady("supplier_payments", "advance_fo
 
 let readyCache: { at: number; ok: boolean } | null = null;
 /** The tables exist (asked again every minute until they do). */
+/**
+ * "Correct this payment" (20 November 2026, Section 3): what a recorded payment left owing on an invoice is closed as
+ * ROUNDING (within the limit) or a DISCOUNT FROM THE SUPPLIER (with a reason). The invoice is never changed; the
+ * payment's line keeps the written-off part, Zoho writes it off when the payment posts again.
+ */
+export async function closePaymentDifference(paymentId: string, poId: string, kind: string, reason: string, by: { id: string; display_name: string; role_id: string }): Promise<{ error?: string; words?: string }> {
+  if (!["owner", "accounts"].includes(by.role_id)) return { error: "Only accounts or the owner close a difference." };
+  if (!(await roundingReady())) return { error: "Rounding and supplier discounts switch on once the database change is applied (WAITING FOR APPLY)." };
+  if (kind !== "rounding" && kind !== "discount") return { error: "Pick rounding or a discount from the supplier." };
+  const admin = createAdminClient();
+  const { data: pay } = await admin.from("supplier_payments").select("id, number, supplier_id, supplier_name, status, method, edit_history").eq("id", paymentId).maybeSingle();
+  if (!pay || pay.status !== "recorded") return { error: "That payment is not recorded any more." };
+  const { data: line } = await admin.from("supplier_payment_lines").select("id, write_off_aed").eq("payment_id", paymentId).eq("po_id", poId).eq("is_active", true).limit(1).maybeSingle();
+  if (!line) return { error: "This payment is not on that invoice." };
+  const inv = (await openInvoicesOf(pay.supplier_id as string | null, String(pay.supplier_name))).find((i) => i.poId === poId);
+  if (!inv) return { error: "Nothing is owed on that invoice any more." };
+  const diff = r2(inv.due);
+  const bad = checkDifference(kind, diff, await roundingLimit(), reason);
+  if (bad) return { error: bad };
+  const now = new Date().toISOString();
+  const { error } = await admin.from("supplier_payment_lines").update({ write_off_aed: r2((Number(line.write_off_aed) || 0) + diff), write_off_kind: kind, write_off_reason: reason.trim() || null, write_off_at: now, write_off_by: by.id, updated_by: by.id }).eq("id", line.id);
+  if (error) {
+    const { logAppError, SAVE_FAILED } = await import("./app-errors");
+    await logAppError("supplier-payments: close difference", error, { staffId: by.id });
+    return { error: SAVE_FAILED };
+  }
+  const label = kind === "rounding" ? "rounding" : "discount from the supplier";
+  const hist = [...(Array.isArray(pay.edit_history) ? pay.edit_history : []), { at: now, by: by.display_name, remark: reason.trim() || label, changes: [{ field: label, old: `AED ${diff.toFixed(2)} owed on ${inv.label}`, new: "closed" }] }];
+  await admin.from("supplier_payments").update({ edit_history: hist, updated_by: by.id }).eq("id", paymentId);
+  await markSettled(pay.supplier_id as string | null, String(pay.supplier_name), [poId], paymentId, String(pay.method ?? "transfer"), by);
+  return { words: `${pay.number}: AED ${diff.toFixed(2)} ${label} on ${inv.label} – the invoice is closed.` };
+}
+
+/** The most a payment may write off as rounding (owner and accounts set it; default AED 1.00). */
+export async function roundingLimit(): Promise<number> {
+  const { data } = await createAdminClient().from("settings").select("value").eq("key", "supplier_rounding_limit_aed").maybeSingle();
+  const n = Number(data?.value);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_ROUNDING_LIMIT;
+}
+
 export async function supplierPaymentsReadyNow(): Promise<boolean> {
   if (readyCache && (readyCache.ok || Date.now() - readyCache.at < 60_000)) return readyCache.ok;
   const { error } = await createAdminClient().from("supplier_payments").select("id").limit(1);
@@ -193,6 +260,8 @@ export type SupplierPaymentInput = {
   note: string | null;
   /** Advances to apply (11 November 2026, Section 3): which advance, on which invoice, how much - as accounts typed it. */
   advanceUses?: AdvanceUse[];
+  /** 20 November 2026 (Section 3): a payment that pays less than an invoice says what the difference is. */
+  difference?: { poId: string; kind: DifferenceKind; reason: string } | null;
 };
 
 /**
@@ -229,11 +298,29 @@ export async function recordSupplierPayment(input: SupplierPaymentInput, by: { i
   if (twice) return { error: `Not recorded: ${twice}` };
   const put = r2(lines.reduce((a, l) => a + l.amount, 0));
   const excess = r2(amount - put);
+  // The difference on an invoice paid short: rounding (within the limit) or a discount closes it; still owed leaves it open.
+  let writeOff: { poId: string; amount: number; kind: "rounding" | "discount"; reason: string } | null = null;
+  let owedNote: string | null = null;
+  if (input.difference) {
+    const d = input.difference;
+    const inv = open.find((o) => o.poId === d.poId);
+    const line = lines.find((l) => l.poId === d.poId);
+    if (!inv || !line) return { error: "Tick the invoice the difference is on." };
+    const diff = r2(inv.due - line.amount);
+    const limit = await roundingLimit();
+    const bad = checkDifference(d.kind, diff, limit, d.reason);
+    if (bad) return { error: bad };
+    if (d.kind === "owed") owedNote = `Still owed AED ${diff.toFixed(2)} on ${inv.label}${d.reason.trim() ? `: ${d.reason.trim()}` : ""}`;
+    else {
+      if (!(await roundingReady())) return { error: "Rounding and supplier discounts switch on once the database change is applied (WAITING FOR APPLY). Record it as still owed for now." };
+      writeOff = { poId: d.poId, amount: diff, kind: d.kind, reason: d.reason.trim() };
+    }
+  }
   if (excess > 0.004 && !input.excessKind) return { error: `AED ${excess.toFixed(2)} is more than the invoices: choose "Advance with the supplier" or "Fee / charge".` };
   const admin = createAdminClient();
   const { data: pay, error } = await admin
     .from("supplier_payments")
-    .insert({ ...(input.id ? { id: input.id } : {}), supplier_id: input.supplierId, supplier_name: input.supplierName, paid_on: input.paidOn, method: input.method, reference: input.reference, amount_aed: amount, excess_kind: excess > 0.004 ? input.excessKind : null, fee_aed: excess > 0.004 && input.excessKind === "fee" ? excess : 0, proof_path: input.proofPath, note: input.note, created_by: by.id, updated_by: by.id })
+    .insert({ ...(input.id ? { id: input.id } : {}), supplier_id: input.supplierId, supplier_name: input.supplierName, paid_on: input.paidOn, method: input.method, reference: input.reference, amount_aed: amount, excess_kind: excess > 0.004 ? input.excessKind : null, fee_aed: excess > 0.004 && input.excessKind === "fee" ? excess : 0, proof_path: input.proofPath, note: [input.note, owedNote].filter(Boolean).join(" · ") || null, created_by: by.id, updated_by: by.id })
     .select("id, number")
     .single();
   if (error || !pay) return { error: error?.message ?? "Couldn't save – nothing was recorded." };
@@ -254,6 +341,13 @@ export async function recordSupplierPayment(input: SupplierPaymentInput, by: { i
     if (lErr) {
       await admin.from("supplier_payments").update({ status: "void", void_reason: "Its invoices could not be saved", updated_by: by.id }).eq("id", pay.id);
       return { error: lErr.message };
+    }
+  }
+  if (writeOff) {
+    const { error: wErr } = await admin.from("supplier_payment_lines").update({ write_off_aed: writeOff.amount, write_off_kind: writeOff.kind, write_off_reason: writeOff.reason || null, write_off_at: new Date().toISOString(), write_off_by: by.id, updated_by: by.id }).eq("payment_id", pay.id).eq("po_id", splitPayKey(writeOff.poId).poId).eq("is_active", true);
+    if (wErr) {
+      const { logAppError } = await import("./app-errors");
+      await logAppError("supplier-payments: write-off", wErr, { staffId: by.id });
     }
   }
   // Advances from earlier payments, applied exactly as accounts typed them (each a line on the advance it came from).
@@ -278,7 +372,7 @@ export async function recordSupplierPayment(input: SupplierPaymentInput, by: { i
   for (const poId of Array.from(new Set(touched.filter((k) => !isLatheKey(k)).map((k) => splitPayKey(k).poId))).filter((id) => !owingPos.has(id))) {
     await admin.from("purchase_orders").update({ supplier_paid_at: now, supplier_paid_by: by.id, supplier_paid_method: input.method === "link" ? "card" : input.method, supplier_paid_reference: [pay.number, input.reference].filter(Boolean).join(" · ").slice(0, 120), supplier_payment_id: pay.id, ...(input.proofPath ? { supplier_paid_proof_path: input.proofPath, supplier_paid_proof_at: now, supplier_paid_proof_by: by.id } : {}), updated_by: by.id }).eq("id", poId).is("supplier_paid_at", null);
   }
-  const words = [`${pay.number}: AED ${amount.toFixed(2)} to ${input.supplierName}`, lines.length ? `on ${lines.length} invoice${lines.length === 1 ? "" : "s"}` : null, excess > 0.004 ? (input.excessKind === "fee" ? `AED ${excess.toFixed(2)} as a fee` : `AED ${excess.toFixed(2)} kept as an advance`) : null, applied.length ? applied.join("; ") : null].filter(Boolean).join(" · ");
+  const words = [`${pay.number}: AED ${amount.toFixed(2)} to ${input.supplierName}`, lines.length ? `on ${lines.length} invoice${lines.length === 1 ? "" : "s"}` : null, writeOff ? `AED ${writeOff.amount.toFixed(2)} ${writeOff.kind === "rounding" ? "rounding" : "discount from the supplier"}: invoice closed` : null, owedNote, excess > 0.004 ? (input.excessKind === "fee" ? `AED ${excess.toFixed(2)} as a fee` : `AED ${excess.toFixed(2)} kept as an advance`) : null, applied.length ? applied.join("; ") : null].filter(Boolean).join(" · ");
   return { id: pay.id as string, number: pay.number as string, words, advancesUsed: Array.from(new Set(uses.map((u) => u.paymentId))) };
 }
 

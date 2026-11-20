@@ -4,6 +4,8 @@ import { LinkButton, PageHeader } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { can, type RoleId } from "@/lib/roles";
 import { invoiceFilterParams } from "@/lib/supplier-invoice-rows";
+import { RoundingLimitBox } from "@/components/RoundingLimitBox";
+import { roundingLimit } from "@/lib/supplier-payments";
 import { SupplierInvoicesView, type SiSearch } from "./SupplierInvoicesView";
 
 /**
@@ -34,6 +36,7 @@ export default async function SupplierInvoicesPage({ searchParams }: { searchPar
           </>
         }
       />
+      {["owner", "accounts"].includes(staff.role_id) && !staff.viewingAs ? <RoundingLimitBox limit={await roundingLimit()} /> : null}
       <SupplierInvoicesView sp={sp} staff={staff} place="supplier-invoices" />
     </>
   );

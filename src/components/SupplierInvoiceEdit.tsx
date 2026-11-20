@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Button, Input, Textarea } from "./ui";
 import { dubaiToday, invoiceNumberLooksReal } from "@/lib/supplier-invoice";
+import { invoiceDateWarning } from "@/lib/supplier-payment-rules";
 
 /**
  * EDIT an entered supplier invoice (5 November 2026, the Gargash case LPO-00037-2): the owner and accounts
@@ -30,7 +31,12 @@ export function SupplierInvoiceEditButton({
   paid,
   label = "Edit invoice",
   chargesVat = true,
+  lpoDate = null,
+  rounding = null,
 }: {
+  /** 20 November 2026 (Section 3): the LPO's own date (an invoice dated before it is flagged) and the invoice's rounding line. */
+  lpoDate?: string | null;
+  rounding?: number | null;
   action: (formData: FormData) => void | Promise<void>;
   /** Where the answer lands (the page this button sits on). */
   back: string;
@@ -55,14 +61,21 @@ export function SupplierInvoiceEditButton({
   const [amt, setAmt] = useState(amount === null ? "" : amount.toFixed(2));
   const [vatText, setVatText] = useState(vat === null ? "" : vat.toFixed(2));
   const [confirmed, setConfirmed] = useState(false);
-
-  const amountNum = Number(amt.replace(/[^\d.]/g, "")) || 0;
+  // 20 November 2026 (Section 3, LPO-00111-2 showed "Total with VAT: AED 0.00"): the line prices are followed as they
+  // are typed; with no before-VAT total typed, the total is worked out from them.
+  const [prices, setPrices] = useState<Record<string, string>>(() => Object.fromEntries(lines.map((l) => [l.id, l.price ? l.price.toFixed(2) : ""])));
+  const [roundText, setRoundText] = useState(rounding === null ? "" : rounding.toFixed(2));
+  const linesSum = r2(lines.reduce((a, l) => a + (Number(String(prices[l.id] ?? "").replace(/[^\d.]/g, "")) || 0) * (l.quantity || 0), 0));
+  const typedAmount = Number(amt.replace(/[^\d.]/g, "")) || 0;
+  const amountNum = typedAmount > 0 ? typedAmount : linesSum;
+  const roundNum = Number(roundText.replace(/[^\d.-]/g, "")) || 0;
+  const dateWarn = lpoDate && day ? invoiceDateWarning(day, lpoDate, dubaiToday()) : null;
   const fivePct = chargesVat ? r2(amountNum * 0.05) : 0;
   const vatNum = vatText.trim() === "" ? fivePct : Number(vatText.replace(/[^\d.]/g, "")) || 0;
   // Suppliers round VAT per line: allow a fil per line before warning (and the warning never blocks).
   const vatTolerance = Math.max(0.01, 0.01 * Math.max(1, lines.length));
   const vatOff = amountNum > 0 && Math.abs(vatNum - fivePct) > vatTolerance + 0.0001;
-  const total = r2(amountNum + vatNum);
+  const total = r2(amountNum + vatNum + roundNum);
   const diff = r2(amountNum - lpoTotal);
   const amountOff = amountNum > 0 && lpoTotal > 0 && Math.abs(amountNum - lpoTotal) / lpoTotal > 0.05;
   const numberBad = num.trim().length > 0 && !invoiceNumberLooksReal(num);
@@ -90,6 +103,7 @@ export function SupplierInvoiceEditButton({
         <label className="flex flex-col gap-1">
           <span className="text-xs font-semibold text-muted">Date on the invoice</span>
           <Input name="invoice_date" type="date" value={day} onChange={(e) => setDay(e.target.value)} max={dubaiToday()} required data-edit-date />
+          {dateWarn ? <span className="text-xs font-semibold text-amber-text" data-edit-date-warning>{dateWarn} Check the paper.</span> : null}
         </label>
       </div>
       {lines.length ? (
@@ -100,7 +114,7 @@ export function SupplierInvoiceEditButton({
               <li key={l.id} className="flex flex-wrap items-center gap-2 py-1.5 text-sm" data-edit-line={l.id}>
                 <span className="min-w-0 flex-1 font-semibold uppercase">{l.description}</span>
                 <span className="text-muted">× {l.quantity}</span>
-                <Input name={`price__${l.id}`} defaultValue={l.price ? l.price.toFixed(2) : ""} inputMode="decimal" className="!w-28 text-right" aria-label={`Invoice price for ${l.description}`} />
+                <Input name={`price__${l.id}`} value={prices[l.id] ?? ""} onChange={(e) => setPrices((p) => ({ ...p, [l.id]: e.target.value }))} inputMode="decimal" className="!w-28 text-right" aria-label={`Invoice price for ${l.description}`} />
               </li>
             ))}
           </ul>
@@ -115,13 +129,17 @@ export function SupplierInvoiceEditButton({
           <span className="text-xs font-semibold text-muted">VAT on the invoice (empty = 5%)</span>
           <Input name="invoice_vat" value={vatText} onChange={(e) => setVatText(e.target.value)} inputMode="decimal" data-edit-vat />
         </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-semibold text-muted">Rounding on the invoice (as printed, e.g. -0.10)</span>
+          <Input name="invoice_rounding" value={roundText} onChange={(e) => setRoundText(e.target.value)} inputMode="decimal" spell={false} placeholder="0.00" data-edit-rounding />
+        </label>
       </div>
       {vatOff ? (
         <p className="rounded-control border border-amber-bar bg-amber-soft px-3 py-2 text-sm font-semibold" data-vat-warning>
           {chargesVat ? <>VAT typed is not 5% of the amount (5% = AED {money(fivePct)}). Suppliers round per line – you can still save.</> : <>This supplier is not VAT-registered (no TRN on file): VAT is not counted for it. If the invoice really shows VAT, add the supplier&apos;s TRN on Parts &gt; Suppliers first.</>}
         </p>
       ) : null}
-      <p className="text-sm font-bold" data-edit-total>Total with VAT: AED {money(total)}</p>
+      <p className="text-sm font-bold" data-edit-total>Total with VAT: AED {money(total)}{typedAmount <= 0 && linesSum > 0 ? <span className="font-normal text-muted"> (from the line prices)</span> : null}</p>
       {Math.abs(diff) > 0.005 && amountNum > 0 ? (
         <p className="text-sm font-semibold" data-invoice-vs-approved>
           Approved {money(lpoTotal)} → Invoiced {money(amountNum)} ({diff < 0 ? "−" : "+"}{money(Math.abs(diff))})

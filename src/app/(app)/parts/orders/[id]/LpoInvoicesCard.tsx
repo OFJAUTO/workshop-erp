@@ -185,7 +185,7 @@ function ExtraInvoice({ e, canPay, coverage }: { e: LpoInvExtra; canPay: boolean
 function NotOnFirst({ poId, first, lines }: { poId: string; first: { number: string | null }; lines: LpoInvCoverage[] }) {
   return (
     <details className="rounded-control border border-line p-3" data-not-on-first>
-      <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold">Some lines are not on {first.number} yet</summary>
+      <summary className="cursor-pointer min-h-11 flex items-center text-sm font-bold underline underline-offset-4" data-not-on-first-open>A line is missing from {first.number}? Mark it here</summary>
       <ActionForm action={notOnFirstAction.bind(null, poId)} className="flex flex-col gap-3 pt-2">
         {() => (
           <>

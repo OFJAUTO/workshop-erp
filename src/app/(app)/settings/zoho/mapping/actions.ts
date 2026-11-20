@@ -53,6 +53,11 @@ export async function saveZohoMapping(formData: FormData) {
   if (adv) map.advances = adv.slice(0, 200);
   if (advRefund) map.advancesRefund = advRefund.slice(0, 200);
   if (undeposited) map.undeposited = undeposited.slice(0, 200);
+  // 20 November 2026 (Section 3): supplier payment rounding and discounts.
+  const rounding = String(formData.get("map__rounding") ?? "").trim();
+  const supDiscount = String(formData.get("map__supplier_discount") ?? "").trim();
+  if (rounding) map.rounding = rounding.slice(0, 200);
+  if (supDiscount) map.supplierDiscount = supDiscount.slice(0, 200);
   const missing = [
     ...INCOME_TYPES.filter((t) => !map.income[t.key]).map((t) => t.label),
     ...DEPOSIT_METHODS.filter((m) => !map.depositTo[m.key]).map((m) => `Deposit-to for ${m.label}`),
@@ -89,6 +94,8 @@ export async function useSuggestedMapping() {
     advances: stored.advances || SUGGESTED_MAP.advances,
     advancesRefund: stored.advancesRefund || SUGGESTED_MAP.advancesRefund,
     undeposited: stored.undeposited || SUGGESTED_MAP.undeposited,
+    rounding: stored.rounding || SUGGESTED_MAP.rounding,
+    supplierDiscount: stored.supplierDiscount || SUGGESTED_MAP.supplierDiscount,
     // 17 November 2026: the Journal Voucher accounts are kept (their own defaults fill any gap at sync time).
     jv: stored.jv ?? {},
   };

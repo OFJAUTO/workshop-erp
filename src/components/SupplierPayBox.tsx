@@ -6,6 +6,7 @@ import { SupplierPayProof } from "@/components/SupplierPayProof";
 import { newUuid } from "@/lib/uuid";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { ChoiceButtons, Field, Input, controlClass } from "@/components/ui";
+import { differenceChoices, DEFAULT_ROUNDING_LIMIT, type DifferenceKind } from "@/lib/supplier-payment-rules";
 import { advanceLeftAfter, advanceLeftWords, likelyInvoiceOf, splitOldestFirst, suggestAdvanceUses, SUPPLIER_PAY_METHOD_KEYS, SUPPLIER_PAY_METHOD_LABELS, type AdvanceHeld, type AdvanceUse } from "@/lib/supplier-payment-rules";
 import { MoneyDate } from "@/components/MoneyDate";
 
@@ -21,7 +22,7 @@ const numOf = (t: string) => Number(String(t).replace(/,/g, "")) || 0;
  * Only what the advances leave unpaid needs a new payment: the amount and how it was paid show for that remainder
  * alone. Advances covering everything = "Apply advance", no new payment, nothing red to fill in.
  */
-export function SupplierPayBox({ supplierId, supplierName, invoices, advances, preselect, today, paidFromWords, linkable = [] }: { supplierId: string | null; supplierName: string; invoices: Inv[]; advances: AdvanceHeld[]; preselect?: string | null; today: string; paidFromWords?: string; /** LPOs of this supplier still waiting for their invoice: an advance MAY name one (always optional). */ linkable?: { id: string; number: string }[] }) {
+export function SupplierPayBox({ supplierId, supplierName, invoices, advances, preselect, today, paidFromWords, linkable = [], roundingLimit = DEFAULT_ROUNDING_LIMIT }: { roundingLimit?: number; supplierId: string | null; supplierName: string; invoices: Inv[]; advances: AdvanceHeld[]; preselect?: string | null; today: string; paidFromWords?: string; /** LPOs of this supplier still waiting for their invoice: an advance MAY name one (always optional). */ linkable?: { id: string; number: string }[] }) {
   const [state, action] = useActionState<PayState, FormData>(recordSupplierPaymentAction, null);
   // 17 November 2026 (Section 1): the payment is saved under this id, made here, so its proof (picked before or after
   // Record) belongs to the PAYMENT. A new id after every saved payment: the next payment is a new record.
@@ -76,6 +77,12 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
   const put = r2(tickedInv.reduce((a, i) => a + allocOf(i.poId), 0));
   const excess = r2(amount - put);
   const short = r2(dueTicked - advTotal - put);
+  // 20 November 2026 (Section 3): the invoice paid short and the difference on it (nothing is picked for you).
+  const shortInv = tickedInv.find((i) => r2(i.due - advOn(i.poId) - allocOf(i.poId)) > 0.004) ?? null;
+  const shortOn = shortInv ? r2(shortInv.due - advOn(shortInv.poId) - allocOf(shortInv.poId)) : 0;
+  const [diffKind, setDiffKind] = useState<DifferenceKind | "">("");
+  const diffChoices = differenceChoices(shortOn, roundingLimit);
+  const needsReason = !!diffChoices.find((c) => c.key === diffKind)?.needsReason;
   // A new payment only when the advances leave something, or accounts typed an amount (or there is no advance at all).
   const newMoney = remainder > 0.004 || amount > 0.004 || !usedAdv.length;
   const overAdvance = Array.from(leftAfter.values()).some((v) => v < -0.004);
@@ -182,7 +189,21 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
               ) : null}
             </div>
           ) : null}
-          {short > 0.004 && excess <= 0.004 ? <p className="text-sm font-semibold text-amber-text" data-supplier-pay-short>Part paid · balance AED {fmt(short)} stays owed.</p> : null}
+          {short > 0.004 && excess <= 0.004 && shortInv ? (
+            <div className="flex flex-col gap-2 rounded-control border-2 border-amber-bar bg-amber-soft px-3 py-2" data-supplier-pay-short>
+              <span className="text-sm font-bold">AED {fmt(shortOn)} less than {shortInv.label}. What is the difference?</span>
+              <input type="hidden" name="diff_po" value={shortInv.poId} />
+              <div className="flex flex-col gap-1.5" data-pay-diff-options>
+                {diffChoices.map((c) => (
+                  <label key={c.key} className={`flex min-h-11 items-start gap-2 rounded-control border bg-white px-3 py-2 text-sm ${diffKind === c.key ? "border-ink" : "border-line"} ${c.allowed ? "cursor-pointer" : "cursor-not-allowed opacity-55"}`} data-pay-diff={c.key} data-allowed={c.allowed ? "yes" : "no"}>
+                    <input type="radio" name="diff_kind" value={c.key} required disabled={!c.allowed} checked={diffKind === c.key} onChange={() => setDiffKind(c.key)} className="mt-1 h-4 w-4" />
+                    <span className="flex flex-col"><span className="font-bold">{c.label}</span><span className="text-xs text-muted">{c.allowed ? c.help : c.why}</span></span>
+                  </label>
+                ))}
+              </div>
+              {diffKind ? <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Why{needsReason ? " (compulsory)" : " (optional)"}<Input name="diff_reason" required={needsReason} minLength={needsReason ? 5 : undefined} data-pay-diff-reason /></label> : null}
+            </div>
+          ) : null}
         </>
       ) : (
         <>
@@ -203,7 +224,7 @@ export function SupplierPayBox({ supplierId, supplierName, invoices, advances, p
           lines={[
             ...usedAdv.map((a) => `${a.number}: AED ${fmt(r2(a.left - (leftAfter.get(a.paymentId) ?? 0)))} used · ${advanceLeftWords(leftAfter.get(a.paymentId) ?? 0)}`),
             newMoney ? `${ticked.size} invoice${ticked.size === 1 ? "" : "s"} · new payment AED ${fmt(put)}` : "No new payment",
-            short > 0.004 && excess <= 0.004 ? `Part paid: AED ${fmt(short)} still owed` : excess > 0.004 ? `AED ${fmt(excess)} over the invoices` : "Settles them in full",
+            short > 0.004 && excess <= 0.004 ? (diffKind === "rounding" ? `AED ${fmt(shortOn)} rounding: the invoice closes` : diffKind === "discount" ? `AED ${fmt(shortOn)} discount from the supplier: the invoice closes` : `Part paid: AED ${fmt(short)} still owed`) : excess > 0.004 ? `AED ${fmt(excess)} over the invoices` : "Settles them in full",
           ]}
           live={newMoney ? [{ field: "method" }, { label: "ref", field: "reference" }, { field: "proof_path", proof: true }] : []}
           confirmLabel={newMoney ? "YES, RECORD" : "Yes, apply it"}

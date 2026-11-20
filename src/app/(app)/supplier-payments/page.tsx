@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { roundingLimit as roundingLimitOf } from "@/lib/supplier-payments";
 import { refuse } from "@/lib/refusal";
 import { PayFirstList } from "@/components/LpoAdvanceCard";
 import { Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel } from "@/components/ui";
@@ -120,7 +121,7 @@ export default async function SupplierPaymentsPage({ searchParams }: { searchPar
       {pick && box ? (
         <Card className="flex flex-col gap-3 scroll-mt-4" id="pay" data-sp-pay-card={pick.supplier}>
           <SectionLabel right={<Link href="/supplier-payments" className="text-sm font-bold underline underline-offset-4">Close</Link>}>Pay {pick.supplier}</SectionLabel>
-          <SupplierPayBox key={`${pick.supplier}-${box.invoices.length}`} supplierId={pick.supplierId} supplierName={pick.supplier} invoices={box.invoices} advances={box.advances} today={today} paidFromWords={paidFromWords} linkable={box.linkable} />
+          <SupplierPayBox roundingLimit={await roundingLimitOf()} key={`${pick.supplier}-${box.invoices.length}`} supplierId={pick.supplierId} supplierName={pick.supplier} invoices={box.invoices} advances={box.advances} today={today} paidFromWords={paidFromWords} linkable={box.linkable} />
         </Card>
       ) : null}
 

@@ -38,7 +38,8 @@ const w = invoiceDateWarning("2026-05-11", "2026-11-04", "2026-11-11");
 check("2026-05-11 on an LPO of 4 Nov is flagged with the swap", !!w && /days before the LPO/.test(w) && /Did you mean 5 Nov 2026/.test(w), w ?? "");
 check("a future date is flagged", /in the future/.test(invoiceDateWarning("2026-12-01", "2026-11-04", "2026-11-11") ?? ""));
 check("a normal date passes", invoiceDateWarning("2026-11-06", "2026-11-04", "2026-11-11") === null);
-check("a date a little before the LPO passes (quotation invoices)", invoiceDateWarning("2026-10-20", "2026-11-04", "2026-11-11") === null);
+// 20 November 2026 (Section 3, LPO-00111-2): the owner wants ANY invoice dated before its LPO flagged (a warning, never a block).
+check("a date before the LPO is flagged (it never blocks)", /15 days before the LPO/.test(String(invoiceDateWarning("2026-10-20", "2026-11-04", "2026-11-11"))));
 
 if (failed) { console.log(`${failed} failed`); process.exit(1); }
 console.log("all passed");

@@ -340,6 +340,7 @@ async function OpenInvoice({ row, acts, seesPay, queryOn, place, outcome, role, 
                     paid={!!p?.supplier_paid_at}
                     label={row.shares.length > 1 ? `Edit invoice · ${s.poNumber}` : "Edit invoice"}
                     chargesVat={row.vatCharged}
+                    lpoDate={row.lpoDate ?? null}
                   />
                 );
               })

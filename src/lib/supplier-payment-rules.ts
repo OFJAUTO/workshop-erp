@@ -48,6 +48,35 @@ export function checkAllocations(amount: number, lines: Allocation[], invoices: 
 }
 
 /** What one invoice shows after the payments: paid, part paid with the balance, or still to pay. */
+/* ROUNDING ON SUPPLIER PAYMENTS (20 November 2026, Section 3; LPO-00111-2: AED 243.60 invoiced, 243.50 paid in cash).
+ * The invoice is never changed. A payment that pays an invoice short says what the difference is (nothing picked):
+ * ROUNDING closes it (up to the limit, AED 1.00 by default), STILL OWED leaves it open, a DISCOUNT FROM THE SUPPLIER
+ * closes it with a reason. Above the limit rounding is greyed: discount or still owed, with a reason. */
+export type DifferenceKind = "rounding" | "owed" | "discount";
+export const DIFFERENCE_KINDS: DifferenceKind[] = ["rounding", "owed", "discount"];
+export const DIFFERENCE_LABELS: Record<DifferenceKind, string> = { rounding: "ROUNDING", owed: "STILL OWED", discount: "DISCOUNT FROM THE SUPPLIER" };
+export const DEFAULT_ROUNDING_LIMIT = 1;
+
+export function differenceChoices(diff: number, limit: number): { key: DifferenceKind; label: string; help: string; allowed: boolean; why: string | null; needsReason: boolean }[] {
+  const d = r2(diff);
+  const over = d > limit + 0.004;
+  return [
+    { key: "rounding", label: DIFFERENCE_LABELS.rounding, help: `AED ${d.toFixed(2)} closes the invoice as rounding (booked to the rounding account).`, allowed: !over, why: over ? `More than the rounding limit (AED ${limit.toFixed(2)}): a discount or still owed.` : null, needsReason: false },
+    { key: "owed", label: DIFFERENCE_LABELS.owed, help: `AED ${d.toFixed(2)} stays open on the invoice, to pay later.`, allowed: true, why: null, needsReason: over },
+    { key: "discount", label: DIFFERENCE_LABELS.discount, help: `The supplier gave AED ${d.toFixed(2)} off: the invoice closes, the discount is booked.`, allowed: true, why: null, needsReason: true },
+  ];
+}
+
+/** The server's check of the choice: null when it may be saved. */
+export function checkDifference(kind: string, diff: number, limit: number, reason: string): string | null {
+  const c = differenceChoices(diff, limit).find((x) => x.key === kind);
+  if (!(diff > 0.004)) return "There is no difference on that invoice.";
+  if (!c) return "Say what the difference is: rounding, still owed, or a discount from the supplier.";
+  if (!c.allowed) return c.why;
+  if (c.needsReason && reason.trim().length < 5) return `Write why (${c.label.toLowerCase()}, 5 characters at least).`;
+  return null;
+}
+
 export function invoicePaidWords(due: number, paid: number): { state: "paid" | "part" | "open"; words: string } {
   const left = r2(due - paid);
   if (left <= 0.004) return { state: "paid", words: "Paid" };
@@ -156,7 +185,8 @@ export function invoiceDateWarning(invoiceDate: string | null | undefined, lpoDa
   const fmt = (x: string) => new Date(`${x}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
   const hint = (alt: string | null) => (alt && alt <= today && (!lpoDate || Math.abs(daysBetween(alt, lpoDate.slice(0, 10))) <= INVOICE_DATE_BEFORE_LPO_DAYS) ? ` Did you mean ${fmt(alt)}? (day and month swapped)` : "");
   if (d > today) return `The invoice date ${fmt(d)} is in the future.${hint(swapped)}`;
-  if (lpoDate && daysBetween(d, lpoDate.slice(0, 10)) < -INVOICE_DATE_BEFORE_LPO_DAYS) return `The invoice date ${fmt(d)} is ${Math.round(-daysBetween(d, lpoDate.slice(0, 10)))} days before the LPO (${fmt(lpoDate.slice(0, 10))}).${hint(swapped)}`;
+  // 20 November 2026 (Section 3, LPO-00111-2): ANY invoice dated before its LPO is flagged (it never blocks).
+  if (lpoDate && daysBetween(d, lpoDate.slice(0, 10)) < 0) return `The invoice date ${fmt(d)} is ${Math.round(-daysBetween(d, lpoDate.slice(0, 10)))} day${Math.round(-daysBetween(d, lpoDate.slice(0, 10))) === 1 ? "" : "s"} before the LPO (${fmt(lpoDate.slice(0, 10))}).${hint(swapped)}`;
   return null;
 }
 

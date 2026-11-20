@@ -72,6 +72,7 @@ export default async function ZohoMappingPage({ searchParams }: { searchParams: 
   const income = chart.filter((a) => a.account_type === "income").map((a) => a.account_name);
   const depositable = chart.filter((a) => ["bank", "cash", "other_current_asset"].includes(a.account_type)).map((a) => a.account_name);
   const expense = chart.filter((a) => a.account_type === "expense").map((a) => a.account_name);
+  const everyAccount = chart.filter((a) => ["expense", "other_expense", "income", "other_income"].includes(a.account_type)).map((a) => a.account_name);
   // Option B (13 November 2026): the stock VALUE is an Other Current Asset; Zoho's own inventory accounts want a Zoho item per line.
   // 16 November 2026: the stock stays in the ERP; its purchase bills go to the account Mathew picks (an asset or an expense, never Zoho's inventory).
   const stockAccounts = chart.filter((a) => a.account_type === "other_current_asset" || a.account_type === "expense").map((a) => a.account_name);
@@ -187,6 +188,12 @@ export default async function ZohoMappingPage({ searchParams }: { searchParams: 
             </Field>
             <Field label="Bank transaction fee (payment link AED 1.00 each)" hint="Usually the same account as the bank charges; a separate one when the accountant wants it apart.">
               {box("map__bank_txn_fees", bestMatch(map.bankTxnFees || map.bankCharges, SUGGESTED_MAP.bankTxnFees, expense, MATCH_WORDS.bank_charges), expense)}
+            </Field>
+            <Field label="Rounding on supplier payments" hint="A supplier invoice paid a few fils short (e.g. AED 243.60 paid 243.50) and closed as rounding: the difference is written off here. The bill keeps the invoice amount.">
+              {box("map__rounding", bestMatch(map.rounding, SUGGESTED_MAP.rounding, everyAccount, ["rounding", "round off"]), everyAccount)}
+            </Field>
+            <Field label="Discount received from suppliers" hint="A supplier who gives money off when paid: the invoice closes and the discount is booked here.">
+              {box("map__supplier_discount", bestMatch(map.supplierDiscount, SUGGESTED_MAP.supplierDiscount, everyAccount, ["discount received", "discount"]), everyAccount)}
             </Field>
             <Field label="Cheques and transfers before they clear" hint="Received cheques and bank transfers wait here (Zoho's Undeposited Funds) until Accounts posting records them cleared; then they move to the bank they went into, on that day.">
               {box("map__undeposited", bestMatch(map.undeposited, SUGGESTED_MAP.undeposited, depositable, ["undeposited"]), depositable)}

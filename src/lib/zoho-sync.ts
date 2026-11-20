@@ -103,6 +103,10 @@ export type ZohoAccountMap = {
   bankCharges?: string;
   /** The bank's fixed fee per transaction (payment link AED 1.00); empty = the bank charges account. */
   bankTxnFees?: string;
+  /** 20 November 2026 (Section 3): a supplier payment's rounding is written off here. */
+  rounding?: string;
+  /** 20 November 2026 (Section 3): a discount the supplier gave on payment is booked here. */
+  supplierDiscount?: string;
   advances?: string;
   /** Reference only (no ERP refund records yet): where a credit-note refund would be paid from. */
   advancesRefund?: string;
@@ -115,7 +119,7 @@ export type ZohoAccountMap = {
 /** THE suggested stock VALUE account (13 November 2026, Section 2, option B): an Other Current Asset, made in OFJ TEST by itself. */
 export const STOCK_VALUE_ACCOUNT = "Parts stock (ERP count)";
 /** The pre-fill when the live chart has no better match; also what "Create the suggested accounts" makes in OFJ TEST. */
-export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Record<MethodKey, string>; purchases: Record<PurchaseKey, string>; expense: Record<ExpenseKey, string>; paidFrom: string; paidFromBy: Record<SupplierPayKey, string>; bankCharges: string; bankTxnFees: string; advances: string; advancesRefund: string; undeposited: string } = {
+export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Record<MethodKey, string>; purchases: Record<PurchaseKey, string>; expense: Record<ExpenseKey, string>; paidFrom: string; paidFromBy: Record<SupplierPayKey, string>; bankCharges: string; bankTxnFees: string; rounding: string; supplierDiscount: string; advances: string; advancesRefund: string; undeposited: string } = {
   income: {
     labour: "Mechanical labour income",
     parts: "Spare parts income",
@@ -145,6 +149,8 @@ export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Reco
   paidFromBy: { transfer: "Bank - AED", card: "Company card", cash: "Petty Cash", cheque: "Bank - AED", link: "Bank - AED" },
   bankCharges: "Bank Fees and Charges",
   bankTxnFees: "Bank Fees and Charges",
+  rounding: "Rounding Off",
+  supplierDiscount: "Discount Received",
   advances: "Customer advances",
   advancesRefund: "Bank - AED",
   undeposited: "Undeposited Funds",
@@ -152,7 +158,7 @@ export const SUGGESTED_MAP: { income: Record<IncomeKey, string>; depositTo: Reco
 
 export function readZohoMap(settings: Settings): ZohoAccountMap {
   const raw = (settings.zoho_account_map ?? {}) as ZohoAccountMap;
-  return { income: raw.income ?? {}, depositTo: raw.depositTo ?? {}, purchases: raw.purchases ?? {}, expense: raw.expense ?? {}, paidFrom: raw.paidFrom, paidFromBy: raw.paidFromBy ?? {}, bankCharges: raw.bankCharges, bankTxnFees: raw.bankTxnFees, advances: raw.advances, advancesRefund: raw.advancesRefund, undeposited: raw.undeposited, jv: raw.jv ?? {} };
+  return { income: raw.income ?? {}, depositTo: raw.depositTo ?? {}, purchases: raw.purchases ?? {}, expense: raw.expense ?? {}, paidFrom: raw.paidFrom, paidFromBy: raw.paidFromBy ?? {}, bankCharges: raw.bankCharges, bankTxnFees: raw.bankTxnFees, rounding: raw.rounding, supplierDiscount: raw.supplierDiscount, advances: raw.advances, advancesRefund: raw.advancesRefund, undeposited: raw.undeposited, jv: raw.jv ?? {} };
 }
 
 /** True once the books have EVER gone live (the switch runs once; OFJ TEST is never written again after it). */
@@ -274,6 +280,11 @@ type Resolved = {
   /** Card/link settlements: the fee per transaction (default the bank charges account). */
   bankTxnFees?: string;
   bankTxnFeesError?: string;
+  /** Supplier payments: rounding and supplier discounts written off (resolved softly). */
+  rounding?: string;
+  roundingError?: string;
+  supplierDiscount?: string;
+  supplierDiscountError?: string;
   /** Cheques and transfers before they clear (resolved softly; empty mapping = "Undeposited Funds"). */
   undeposited?: string;
   undepositedError?: string;
@@ -403,6 +414,16 @@ async function resolveZohoAccountsFresh(org: string, map: ZohoAccountMap, create
     out.bankTxnFees = await resolve(map.bankTxnFees || map.bankCharges, "Bank transaction fees (payment link, per transaction)", "expense");
   } catch (e) {
     out.bankTxnFeesError = e instanceof Error ? e.message : String(e);
+  }
+  try {
+    out.rounding = await resolve(map.rounding || SUGGESTED_MAP.rounding, "Rounding (supplier payments)", "expense");
+  } catch (e) {
+    out.roundingError = e instanceof Error ? e.message : String(e);
+  }
+  try {
+    out.supplierDiscount = await resolve(map.supplierDiscount || SUGGESTED_MAP.supplierDiscount, "Discount received from suppliers", "income");
+  } catch (e) {
+    out.supplierDiscountError = e instanceof Error ? e.message : String(e);
   }
   try {
     out.undeposited = await resolve(map.undeposited || SUGGESTED_MAP.undeposited, "Undeposited Funds (cheques and transfers before they clear)", "cash");
@@ -2125,6 +2146,35 @@ async function syncSupplierPayRow(org: string, accounts: Resolved, paymentId: st
     feeId = ex.expense_id;
     await admin.from("supplier_payments").update({ zoho_fee_expense_id: feeId }).eq("id", pay.id);
   }
+  // 20 November 2026 (Section 3): what the payment left as ROUNDING or a SUPPLIER DISCOUNT is written off in Zoho: one
+  // supplier credit per invoice on the mapped account, applied to that bill (the bill keeps the invoice amount).
+  const writeOffs: { po: string; amount: number; kind: string }[] = [];
+  if (await schemaReady("supplier_payment_lines", "write_off_aed,write_off_kind")) {
+    const { data: wo } = await admin.from("supplier_payment_lines").select("po_id, write_off_aed, write_off_kind, write_off_reason").eq("payment_id", pay.id).eq("is_active", true).gt("write_off_aed", 0);
+    const { data: payNow } = await admin.from("supplier_payments").select("zoho_writeoffs").eq("id", pay.id).maybeSingle();
+    const done = { ...(((payNow as { zoho_writeoffs?: Record<string, string> } | null)?.zoho_writeoffs) ?? {}) };
+    for (const w of (wo ?? []) as { po_id: string; write_off_aed: number | string; write_off_kind: string | null; write_off_reason: string | null }[]) {
+      const amt = round2(Number(w.write_off_aed) || 0);
+      if (amt <= 0.004 || done[w.po_id]) { writeOffs.push({ po: w.po_id, amount: amt, kind: String(w.write_off_kind) }); continue; }
+      const po = await poForZoho(w.po_id);
+      if (!po.zoho_bill_id) { await ensureQueued("bill", po.id, po.job_id); return { wait: `Waiting for the bill of ${po.number} to reach Zoho first (for the ${w.write_off_kind} write-off).` }; }
+      const discount = w.write_off_kind === "discount";
+      const account = discount ? needAccounts(accounts.supplierDiscount, accounts.supplierDiscountError) : needAccounts(accounts.rounding, accounts.roundingError);
+      const ref = cut(`WO-${pay.number}-${po.number}`, 50);
+      let vcId: string | null = null;
+      const found = await zohoFetch<{ vendorcredits?: { vendor_credit_id: string; reference_number?: string }[] }>(`/vendorcredits?reference_number=${encodeURIComponent(ref)}`, { org });
+      vcId = found.vendorcredits?.find((x) => x.reference_number === ref)?.vendor_credit_id ?? null;
+      if (!vcId) {
+        const made = await zohoFetch<{ vendor_credit?: { vendor_credit_id: string } }>("/vendorcredits?ignore_auto_number_generation=true", { org, method: "POST", body: { vendor_id: vendorId, vendor_credit_number: ref, reference_number: ref, date: pay.paid_on, notes: cut(`${discount ? "Discount from the supplier" : "Rounding"} on ${pay.number}${w.write_off_reason ? `: ${w.write_off_reason}` : ""}`, 500), line_items: [{ account_id: account, name: discount ? "Discount from the supplier" : "Rounding", rate: amt, quantity: 1 }] } });
+        vcId = made.vendor_credit?.vendor_credit_id ?? null;
+        if (!vcId) throw new ZohoError(`Zoho did not return the ${discount ? "discount" : "rounding"} credit for ${po.number}.`);
+        await zohoFetch(`/vendorcredits/${encodeURIComponent(vcId)}/bills`, { org, method: "POST", body: { bills: [{ bill_id: po.zoho_bill_id, amount_applied: amt }] } });
+      }
+      done[w.po_id] = vcId;
+      await admin.from("supplier_payments").update({ zoho_writeoffs: done }).eq("id", pay.id);
+      writeOffs.push({ po: po.number, amount: amt, kind: String(w.write_off_kind) });
+    }
+  }
   // The true check: what Zoho holds for the payment equals the ERP to the fils.
   const vp = await zohoFetch<{ vendorpayment?: { amount?: number } }>(`/vendorpayments/${zid}`, { org });
   const zAmount = round2(Number(vp.vendorpayment?.amount) || 0);
@@ -2133,7 +2183,7 @@ async function syncSupplierPayRow(org: string, accounts: Resolved, paymentId: st
     const next = history.map((h, i) => (i === repostAt ? { ...h, reposted_at: new Date().toISOString() } : h));
     await admin.from("supplier_payments").update({ edit_history: next }).eq("id", pay.id);
   }
-  return { zohoId: zid, result: { payment: pay.number, amount, applied, bills: bills.length, excess: round2(amount - applied), fee, method: SUPPLIER_PAY_METHODS.find((m) => m.key === method)?.label ?? method, ...(reposted ? { reposted: "taken back and posted again after a correction" } : {}) } };
+  return { zohoId: zid, result: { payment: pay.number, amount, applied, bills: bills.length, excess: round2(amount - applied), fee, method: SUPPLIER_PAY_METHODS.find((m) => m.key === method)?.label ?? method, ...(writeOffs.length ? { written_off: writeOffs.map((w) => `AED ${w.amount.toFixed(2)} ${w.kind}`).join(", ") } : {}), ...(reposted ? { reposted: "taken back and posted again after a correction" } : {}) } };
 }
 
 async function syncBillPaymentRow(org: string, accounts: Resolved, poId: string): Promise<HandlerOut> {

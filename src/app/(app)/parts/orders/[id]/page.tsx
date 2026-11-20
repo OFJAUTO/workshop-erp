@@ -1,4 +1,8 @@
 import { latheV2Ready } from "@/lib/lathe";
+import { invoiceRoundingOf } from "@/lib/supplier-payments";
+import { invoiceDateWarning } from "@/lib/supplier-payment-rules";
+const todayDubaiStr = () => new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10);
+import { roundingLimit as roundingLimitOf } from "@/lib/supplier-payments";
 import { ReturnToSupplier, CreditNoteEntry } from "@/components/SupplierReturns";
 import { creditNoteOptions, lpoReturnSummary, returnableParts } from "@/lib/supplier-returns";
 import { enterCreditNoteAction, startReturnsAction } from "@/app/(app)/parts/supplier-return-actions";
@@ -230,6 +234,9 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   // Lines whose part was given its ending (3 November 2026): cancelled ones are off the LPO, returned or kept ones stay on it.
   const endedByPo = await endedLinesOf([po.id, ...children.map((s) => s.po.id)]);
   const returnedBeforeInvoice = await returnedBeforeInvoiceOn(po.id);
+  // 20 November 2026 (Section 3): the supplier's rounding line, and an invoice dated before its LPO is flagged.
+  const invoiceRounding = (await invoiceRoundingOf([po.id])).get(po.id) ?? null;
+  const invoiceBeforeLpo = po.supplier_invoice_status === "received" && po.supplier_invoice_date ? invoiceDateWarning(String(po.supplier_invoice_date).slice(0, 10), String(po.approved_at ?? po.created_at ?? "").slice(0, 10) || null, todayDubaiStr()) : null;
   const endedHere = endedByPo.get(po.id) ?? [];
   const endedOfLine = new Map(endedHere.filter((e) => e.onLpo).map((e) => [e.lineId, e]));
   const cancelledHere = endedHere.filter((e) => !e.onLpo);
@@ -286,6 +293,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             <Badge tone={po.status === "pending_approval" ? "amber" : po.status === "received" ? "green" : po.status === "cancelled" ? "neutral" : "ink"}>{isMain && po.status === "approved" ? "Approved" : PO_STATUS_LABELS[po.status]}</Badge>
             {po.supplier_invoice_status === "to_follow" ? <Badge tone="amber">Invoice missing</Badge> : null}
             {po.supplier_invoice_status === "not_expected" ? <Badge tone="neutral" data-lpo-not-expected>{NOT_EXPECTED_WORDS}</Badge> : null}
+            {invoiceBeforeLpo ? <span title={invoiceBeforeLpo}><Badge tone="amber" data-invoice-before-lpo>Invoice dated before the LPO – check the date</Badge></span> : null}
             {seesPay && po.supplier_paid_at ? <Badge tone="green">Paid to supplier</Badge> : null}
             {!isMain && (po.supplier_invoice_status === "received" || po.supplier_invoice_status === "to_follow") && ["owner", "accounts", "parts"].includes(role) ? <Link href={invoiceHref(po)} className="text-sm font-bold underline underline-offset-4" data-lpo-invoice-link>{po.supplier_invoice_number ? `INV ${po.supplier_invoice_number}` : "Invoice"} in Supplier invoices</Link> : null}
           </span>
@@ -657,6 +665,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 lines={firstEdit ? firstEdit.lines : lines.map((l) => ({ id: l.id, description: l.description, quantity: Number(l.quantity) || 0, price: Number(l.invoice_unit_cost ?? l.unit_cost) || 0 }))}
                 paid={!!po.supplier_paid_at}
                 chargesVat={chargesVat}
+                lpoDate={String(po.approved_at ?? po.created_at ?? "").slice(0, 10) || null}
+                rounding={invoiceRounding}
               />
             ) : null}
             <InvoiceEditHistory entries={invoiceEdits} />
@@ -667,7 +677,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {seesPay && !isMain && po.status !== "pending_approval" && po.status !== "cancelled" && (po.supplier_invoice_status !== "none" || invoiceFiles.length > 0 || po.status === "received") ? (
             <Card className="flex flex-col gap-3 scroll-mt-4" id="paid" data-supplier-pay>
               <SectionLabel>{po.job_id ? <>Invoice files &amp; payment</> : "Payment"}</SectionLabel>
-              <SupplierPaymentHistory rows={payHistory} canChange={canPay} today={todayDubai} poId={po.id} />
+              <SupplierPaymentHistory rows={payHistory} canChange={canPay} today={todayDubai} poId={po.id} roundingLimit={await roundingLimitOf()} owed={(payNew?.invoices ?? []).find((i: { poId: string }) => i.poId === po.id) ?? null} />
               {po.job_id ? <InvoiceFiles jobId={po.job_id} poId={po.id} files={invoiceFiles} canEdit={canPay} /> : <p className="text-xs text-muted" data-stock-order-pay>Stock order (no car): the supplier invoice is the one entered when the order was received.</p>}
               {po.supplier_paid_at ? (
                 <div className="flex flex-col gap-2">
@@ -701,7 +711,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
                 payMissing.length ? (
                   <p className="text-sm font-semibold text-amber-bar" data-pay-blocked>Cannot be marked paid yet: {payMissing.join(", ")} first. No payment without the full invoice on file.</p>
                 ) : payNew ? (
-                  <SupplierPayBox key={payHistory.length} supplierId={po.supplier_id ?? null} supplierName={po.supplier_name} invoices={payNew.invoices} advances={payNew.advances} preselect={po.id} today={todayDubai} paidFromWords={paidFromWords} />
+                  <SupplierPayBox roundingLimit={await roundingLimitOf()} key={payHistory.length} supplierId={po.supplier_id ?? null} supplierName={po.supplier_name} invoices={payNew.invoices} advances={payNew.advances} preselect={po.id} today={todayDubai} paidFromWords={paidFromWords} />
                 ) : (
                   <form action={markSupplierPaid.bind(null, po.id)} className="flex flex-col gap-3" data-pay-form>
                     <div data-pay-method>

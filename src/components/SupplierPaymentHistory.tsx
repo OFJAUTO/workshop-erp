@@ -11,7 +11,7 @@ type Row = { id: string; number: string; paidOn: string; method: string; referen
 const fmt = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** The payments on one supplier invoice (6 November 2026): who, when, how, how much; Void with a remark (owner, accounts). */
-export function SupplierPaymentHistory({ rows, canChange, today = "" }: { rows: Row[]; canChange: boolean; /** 15 November 2026: for "Correct this payment". */ today?: string; /** No longer used (the proof belongs to the payment, 17 November 2026). */ poId?: string | null }) {
+export function SupplierPaymentHistory({ rows, canChange, today = "", owed = null, roundingLimit = 1 }: { owed?: { poId: string; label: string; due: number } | null; roundingLimit?: number; rows: Row[]; canChange: boolean; /** 15 November 2026: for "Correct this payment". */ today?: string; /** No longer used (the proof belongs to the payment, 17 November 2026). */ poId?: string | null }) {
   if (!rows.length) return null;
   return (
     <ul className="flex flex-col gap-2" data-supplier-pay-history>
@@ -21,7 +21,7 @@ export function SupplierPaymentHistory({ rows, canChange, today = "" }: { rows: 
             {r.number} · {r.paidOn} · {SUPPLIER_PAY_METHOD_LABELS[r.method as SupplierPayMethod] ?? r.method}{r.reference ? ` · ${r.reference}` : ""} · AED {fmt(r.onThis)} on this invoice{Math.abs(r.amount - r.onThis) > 0.004 ? ` (payment AED ${fmt(r.amount)})` : ""}{r.laterAdvance ? " · from an advance" : ""}
           </span>
           {(r.edits ?? []).map((e, i) => <span key={i} className="text-xs text-muted" data-pay-edit>Corrected {e.at.slice(0, 10)} by {e.by}: {e.changes.map((c) => `${c.field} ${c.old || "—"} → ${c.new || "—"}`).join("; ")} ({e.remark})</span>)}
-          {r.status === "void" ? <span className="text-xs no-underline">Voided: {r.voidReason}</span> : canChange && r.laterAdvance && r.lineId ? <UndoAdvanceForm lineId={r.lineId} number={r.number} amount={r.onThis} /> : canChange ? <><CorrectSupplierPayment id={r.id} number={r.number} method={r.method} paidOn={r.paidOn.slice(0, 10)} reference={r.reference} today={today} /><VoidForm id={r.id} number={r.number} /></> : null}
+          {r.status === "void" ? <span className="text-xs no-underline">Voided: {r.voidReason}</span> : canChange && r.laterAdvance && r.lineId ? <UndoAdvanceForm lineId={r.lineId} number={r.number} amount={r.onThis} /> : canChange ? <><CorrectSupplierPayment owed={owed} roundingLimit={roundingLimit} id={r.id} number={r.number} method={r.method} paidOn={r.paidOn.slice(0, 10)} reference={r.reference} today={today} /><VoidForm id={r.id} number={r.number} /></> : null}
         </li>
       ))}
     </ul>

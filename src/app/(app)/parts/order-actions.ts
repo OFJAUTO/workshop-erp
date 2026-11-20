@@ -1,5 +1,6 @@
 "use server";
 import { after as afterResponse } from "next/server";
+import { schemaReady } from "@/lib/schema-ready";
 
 import { supplierMoney } from "@/lib/supplier-money";
 import { supplierChargesVat } from "@/lib/supplier-rules";
@@ -399,6 +400,13 @@ async function applySupplierInvoice(po: PurchaseOrderRow, lines: PoLineRow[], fo
     ? { supplier_invoice_vat_aed: vatValue !== null && Number.isFinite(vatValue) && vatValue >= 0 ? vatValue : null, supplier_invoice_checked_at: null }
     : {};
   const shares = covers.length && Number.isFinite(amount) && amount > 0 ? sharesFor(amount, po, covers) : null;
+  // 20 November 2026 (Section 3): the supplier's own rounding line on the invoice (the invoice is never changed).
+  if (formData.has("invoice_rounding") && (await schemaReady("purchase_orders", "supplier_invoice_rounding_aed"))) {
+    const rt = String(formData.get("invoice_rounding") ?? "").replace(/,/g, "").trim();
+    const rv = rt === "" ? null : Number(rt);
+    if (rv !== null && (!Number.isFinite(rv) || Math.abs(rv) > 5)) return { error: "The rounding on the invoice is a few fils (at most AED 5.00, minus when the supplier rounds down)." };
+    await admin.from("purchase_orders").update({ supplier_invoice_rounding_aed: rv === null ? null : Math.round(rv * 100) / 100 }).eq("id", po.id);
+  }
   await admin.from("purchase_orders").update({ supplier_invoice_status: "received", supplier_invoice_number: number.slice(0, 80), supplier_invoice_date: invoiceDate, supplier_invoice_path: path ?? po.supplier_invoice_path, supplier_invoice_amount: shares ? (shares.get(po.id) ?? null) : Number.isFinite(amount) && amount > 0 ? amount : null, supplier_invoice_at: now, supplier_invoice_by: staff.id, ...editCols, ...((await siQueryReady()) ? { supplier_invoice_query: null, supplier_invoice_query_at: null, supplier_invoice_query_by: null } : {}), updated_by: staff.id }).eq("id", po.id);
   if (po.job_id) await admin.from("job_events").insert({ job_id: po.job_id, event_type: "supplier_invoice", note: `${po.number}: supplier invoice ${number} entered by ${staff.display_name}${diffs.length ? `. Price differences, job cost corrected: ${diffs.join("; ")}` : ""}`, created_by: staff.id });
   // Zoho Books phase 2: the entered invoice becomes the supplier's bill. An invoice CHANGED after the bill
