@@ -36,6 +36,9 @@ import { AddLpoToInvoice } from "@/components/AddLpoToInvoice";
 import { coverOptionsFor, invoiceGroupOf } from "@/lib/invoice-cover";
 import { requirePermission } from "@/lib/auth";
 import { endedLinesOf } from "@/lib/part-endings-server";
+import { ReturnEndingsCard } from "../../ReturnEndingsCard";
+import { NOT_EXPECTED_WORDS, returnedOnInvoiceWarning } from "@/lib/return-ending-rules";
+import { returnedBeforeInvoiceOn } from "@/lib/return-endings";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { PAYMENT_SELECT, toPayment } from "@/lib/invoice-data";
 import { loadJobLpos, lpoDiff, lpoProblemsFor, mainSupplierStates, refusalReasonOf, refusalsReady } from "@/lib/lpo";
@@ -226,6 +229,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
   const refusedBy = new Map(((refusedRows ?? []).length ? (await admin.from("staff").select("id, display_name").in("id", (refusedRows ?? []).map((r) => r.refused_by as string).filter(Boolean))).data ?? [] : []).map((s) => [s.id as string, s.display_name as string]));
   // Lines whose part was given its ending (3 November 2026): cancelled ones are off the LPO, returned or kept ones stay on it.
   const endedByPo = await endedLinesOf([po.id, ...children.map((s) => s.po.id)]);
+  const returnedBeforeInvoice = await returnedBeforeInvoiceOn(po.id);
   const endedHere = endedByPo.get(po.id) ?? [];
   const endedOfLine = new Map(endedHere.filter((e) => e.onLpo).map((e) => [e.lineId, e]));
   const cancelledHere = endedHere.filter((e) => !e.onLpo);
@@ -281,6 +285,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
             {po.job_id ? <JobTechnicianTag jobId={po.job_id} technicians={technicians} /> : null}
             <Badge tone={po.status === "pending_approval" ? "amber" : po.status === "received" ? "green" : po.status === "cancelled" ? "neutral" : "ink"}>{isMain && po.status === "approved" ? "Approved" : PO_STATUS_LABELS[po.status]}</Badge>
             {po.supplier_invoice_status === "to_follow" ? <Badge tone="amber">Invoice missing</Badge> : null}
+            {po.supplier_invoice_status === "not_expected" ? <Badge tone="neutral" data-lpo-not-expected>{NOT_EXPECTED_WORDS}</Badge> : null}
             {seesPay && po.supplier_paid_at ? <Badge tone="green">Paid to supplier</Badge> : null}
             {!isMain && (po.supplier_invoice_status === "received" || po.supplier_invoice_status === "to_follow") && ["owner", "accounts", "parts"].includes(role) ? <Link href={invoiceHref(po)} className="text-sm font-bold underline underline-offset-4" data-lpo-invoice-link>{po.supplier_invoice_number ? `INV ${po.supplier_invoice_number}` : "Invoice"} in Supplier invoices</Link> : null}
           </span>
@@ -426,6 +431,8 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
               {returnSummary.creditNotes.length ? <span className="text-xs text-muted">Credit note{returnSummary.creditNotes.length === 1 ? "" : "s"} {returnSummary.creditNotes.join(", ")}</span> : null}
             </Card>
           ) : null}
+          {/* 20 November 2026 (Section 1): every returned part with THE "how did this return end?" box. */}
+          {!isMain ? <ReturnEndingsCard poId={po.id} role={role} /> : null}
           {!isMain ? (
             <Card className="flex flex-col gap-2">
               <SectionLabel right={`${lines.length} line${lines.length === 1 ? "" : "s"}`}>Lines</SectionLabel>
@@ -580,6 +587,7 @@ export default async function PurchaseOrderPage({ params, searchParams }: { para
           {!isMain && po.status === "received" && po.supplier_invoice_status !== "received" ? (
             <Card className={`flex flex-col gap-2 ${po.supplier_invoice_status === "to_follow" ? "!border-amber-bar" : ""}`}>
               <SectionLabel>Supplier invoice{po.supplier_invoice_status === "to_follow" ? " · with accounts" : ""}</SectionLabel>
+              {returnedBeforeInvoice.length ? <p className="rounded-control bg-amber-soft px-3 py-2 text-sm font-semibold" data-invoice-returned-warning>{returnedOnInvoiceWarning(returnedBeforeInvoice)}</p> : null}
               {po.supplier_invoice_status === "to_follow" ? <p className="text-sm font-semibold text-amber-bar" data-invoice-missing>{canPay ? `Collect the supplier's invoice from Parts, scan it and enter it here (or on the Supplier invoices page).` : `Invoice with accounts: they collect the supplier's paper from the desk and scan it. Keep it ready for them.`}</p> : null}
               {canPay ? <SupplierInvoiceForm jobId={po.job_id} poId={po.id} lines={formLines} action={supplierInvoice.bind(null, po.id)} poTotal={po.total_cost_aed} lpoDate={String(po.approved_at ?? po.created_at ?? "").slice(0, 10) || null} noCarUploads={!po.job_id && (await latheV2Ready())} alsoCovers={await coverOptionsFor(po.id)} poNumber={po.number} /> : null}
             </Card>

@@ -144,7 +144,7 @@ try {
   /* ---------- E. the migration's backfill (inside a transaction that is rolled back) ---------- */
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const ref = url.replace(/^https:\/\//, "").replace(/\.supabase\.co\/?$/, "");
-  const c = new pg.Client({ host: `db.${ref}.supabase.co`, port: 5432, user: "postgres", password: process.env.SUPABASE_DB_PASSWORD, database: "postgres", ssl: { rejectUnauthorized: false } });
+  const c = new pg.Client({ ...(process.env.SUPABASE_POOLER_HOST ? { host: process.env.SUPABASE_POOLER_HOST, port: 5432, user: `postgres.${ref}` } : { host: `db.${ref}.supabase.co`, port: 5432, user: "postgres" }), password: process.env.SUPABASE_DB_PASSWORD, database: "postgres", ssl: { rejectUnauthorized: false } });
   await c.connect();
   try {
     await c.query("begin");

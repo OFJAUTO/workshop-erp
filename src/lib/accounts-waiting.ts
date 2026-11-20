@@ -166,6 +166,14 @@ export async function accountsWaitingExtra(): Promise<ExtraWaiting[]> {
     }
   }
 
+  // 20 November 2026 (Section 1): a returned, paid part the parts desk says stays with the supplier as an advance.
+  {
+    const { advancesToConfirm } = await import("./return-endings");
+    for (const a of await advancesToConfirm().catch(() => [])) {
+      out.push({ jobId: `radv:${a.partId}`, plate: a.poNumber ?? "LPO", car: a.supplier ?? "Supplier", what: `${a.name} went back after it was paid, with no invoice: confirm the advance with ${a.supplier ?? "the supplier"}`, amount: aed(a.amount), actionLabel: "Confirm", href: a.poId ? `/parts/orders/${a.poId}#returns` : "/parts/returns", always: true, urgency: "amber" });
+    }
+  }
+
   // 4b. Commissions approved by the owner whose customer invoice is settled: payable today.
   {
     for (const c of payable) {

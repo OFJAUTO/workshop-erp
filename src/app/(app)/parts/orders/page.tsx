@@ -179,6 +179,7 @@ export default async function PurchaseOrdersPage({ searchParams }: { searchParam
                     {supplierStatesOf.get(p.id)?.length ? <span className="text-xs font-semibold" data-lpo-row-suppliers>{supplierStatesOf.get(p.id)!.map((x) => `${x.supplier} ${x.state === "approved" ? "✓" : x.state === "refused" ? "refused" : "waiting"}`).join(" · ")}</span> : null}
                     {late && p.status !== "cancelled" ? <Badge tone="red">{late} line{late === 1 ? "" : "s"} late</Badge> : null}
                     {p.supplier_invoice_status === "to_follow" ? <Badge tone={invoiceAge >= redDays ? "red" : "amber"}>Invoice missing · {invoiceAge} day{invoiceAge === 1 ? "" : "s"}</Badge> : null}
+                    {p.supplier_invoice_status === "not_expected" ? <Badge tone="neutral">No invoice expected</Badge> : null}
                     {mismatch ? <Badge tone="red">{mismatch} price{mismatch === 1 ? "" : "s"} to check</Badge> : null}
                     {p.emailed_at ? <Badge tone="green">Emailed</Badge> : p.sent_at ? <Badge tone="green">Sent</Badge> : null}
                     <span className="ml-auto" data-lpo-row-amount>{amounts.get(p.id) ? <SupplierAmount money={amounts.get(p.id)!} cancelled={amounts.get(p.id)!.cancelled} size="sm" /> : null}</span>

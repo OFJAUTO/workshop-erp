@@ -18,7 +18,7 @@ export const PO_STATUS_LABELS: Record<PoStatus, string> = {
   received: "Received",
   cancelled: "Cancelled",
 };
-export type SupplierInvoiceStatus = "none" | "to_follow" | "received";
+export type SupplierInvoiceStatus = "none" | "to_follow" | "received" | "not_expected";
 
 export type PurchaseOrderRow = {
   id: string;

@@ -22,7 +22,7 @@ if (liveRef !== LIVE_REF) throw new Error("Run with --env-file=.env.local (the l
 if (testEnv.ERP_ENV !== "test" || !testRef || testRef === LIVE_REF) throw new Error(".env.test.local must point at the TEST project.");
 
 const connect = async (ref, password) => {
-  const c = new pg.Client({ host: `db.${ref}.supabase.co`, port: 5432, user: "postgres", password, database: "postgres", ssl: { rejectUnauthorized: false } });
+  const c = new pg.Client({ ...(process.env.SUPABASE_POOLER_HOST ? { host: process.env.SUPABASE_POOLER_HOST, port: 5432, user: `postgres.${ref}` } : { host: `db.${ref}.supabase.co`, port: 5432, user: "postgres" }), password, database: "postgres", ssl: { rejectUnauthorized: false } });
   await c.connect();
   return c;
 };

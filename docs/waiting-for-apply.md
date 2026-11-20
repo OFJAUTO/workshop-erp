@@ -11,7 +11,11 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-Nothing is waiting.
+**From your phone:** open Claude, reply **"apply"** (auto mode off). I take a fresh backup, run each file below in order, record it and run the read-only live check. Nothing else is needed from you.
+
+| # | What | What it does on live | Size |
+|---|---|---|---|
+| 1 | `supabase/migrations/20261220090000_return_endings.sql` (20 Nov, Section 1: every way a purchase return ends; backup `backups/2026-11-20T10-41-54`, 137 tables, 311,210 rows) | Adds nine columns to `part_items` (how the return ended, the advance asked and confirmed, the correction history), lets an LPO's invoice state be "not expected", and lets a purchase return close as an advance or "returned before invoicing". **Already live without it:** a part returned with no supplier invoice no longer asks for a credit note and no longer queues a Zoho supplier credit; a credit note is refused when there is no invoice. **Switched on by the apply:** the "How did this return end?" box on the LPO (Returned before invoicing, advance, exchange, refund, credit note), "Correct how this return was settled" with the history, and "No invoice expected" instead of "Invoice missing". | 9 columns + 2 rules |
 
 ## Applied on 17 November 2026, afternoon
 

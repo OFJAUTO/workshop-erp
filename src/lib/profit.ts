@@ -186,7 +186,7 @@ export async function jobProfits(settings: Settings, filter: { from?: string; to
     const bankChargesActual = recorded.length > 0 && unsettledCards === 0;
     const credited = round2(((credits ?? []) as { credit_of: string; taxable_aed: number | string }[]).filter((c) => c.credit_of === invoice.id).reduce((a, c) => a + Number(c.taxable_aed), 0));
     const revenue = round2(invoice.taxable_aed - credited);
-    const openPos = ((pos ?? []) as { job_id: string; supplier_invoice_status: string; status: string }[]).filter((p) => p.job_id === invoice.job_id && p.status !== "cancelled" && p.supplier_invoice_status !== "received");
+    const openPos = ((pos ?? []) as { job_id: string; supplier_invoice_status: string; status: string }[]).filter((p) => p.job_id === invoice.job_id && p.status !== "cancelled" && p.supplier_invoice_status !== "received" && p.supplier_invoice_status !== "not_expected");
     const pending = pays.filter((p) => p.status === "recorded" && awaitsBank(p));
     const why: string[] = [];
     if (openPos.length) why.push(`${openPos.length} supplier invoice${openPos.length === 1 ? "" : "s"} to follow`);

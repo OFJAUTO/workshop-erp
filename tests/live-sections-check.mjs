@@ -9,7 +9,7 @@ const pg = require("pg");
 const SITE = "https://erp.ofjauto.com";
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const ref = url.replace(/^https:\/\//, "").replace(/\.supabase\.co\/?$/, "");
-const db = new pg.Client({ host: `db.${ref}.supabase.co`, port: 5432, user: "postgres", password: process.env.SUPABASE_DB_PASSWORD, database: "postgres", ssl: { rejectUnauthorized: false } });
+const db = new pg.Client({ ...(process.env.SUPABASE_POOLER_HOST ? { host: process.env.SUPABASE_POOLER_HOST, port: 5432, user: `postgres.${ref}` } : { host: `db.${ref}.supabase.co`, port: 5432, user: "postgres" }), password: process.env.SUPABASE_DB_PASSWORD, database: "postgres", ssl: { rejectUnauthorized: false } });
 await db.connect();
 await db.query("begin transaction read only");
 const one = async (sql, params = []) => (await db.query(sql, params)).rows[0] ?? {};

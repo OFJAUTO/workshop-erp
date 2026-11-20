@@ -9,7 +9,7 @@ import path from "node:path";
 const { billLines } = await import(pathToFileURL(path.resolve("src/lib/zoho-bill-lines.ts")).href);
 const numbers = process.argv.slice(2);
 const ref = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/^https:\/\//, "").replace(/\.supabase\.co\/?$/, "");
-const client = new pg.Client({ host: `db.${ref}.supabase.co`, port: 5432, user: "postgres", password: process.env.SUPABASE_DB_PASSWORD, database: "postgres", ssl: { rejectUnauthorized: false } });
+const client = new pg.Client({ ...(process.env.SUPABASE_POOLER_HOST ? { host: process.env.SUPABASE_POOLER_HOST, port: 5432, user: `postgres.${ref}` } : { host: `db.${ref}.supabase.co`, port: 5432, user: "postgres" }), password: process.env.SUPABASE_DB_PASSWORD, database: "postgres", ssl: { rejectUnauthorized: false } });
 await client.connect();
 await client.query("set session characteristics as transaction read only");
 const money = (n) => Number(n).toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });

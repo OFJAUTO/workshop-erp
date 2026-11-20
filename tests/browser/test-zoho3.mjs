@@ -366,7 +366,7 @@ await section("7d done by hand on an invoice", async () => {
 await section("8 switch simulation (rolled back)", async () => {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
   const ref = url.replace(/^https:\/\//, "").replace(/\.supabase\.co\/?$/, "");
-  const db = new pg.Client({ host: `db.${ref}.supabase.co`, port: 5432, user: "postgres", password: process.env.SUPABASE_DB_PASSWORD, database: "postgres", ssl: { rejectUnauthorized: false } });
+  const db = new pg.Client({ ...(process.env.SUPABASE_POOLER_HOST ? { host: process.env.SUPABASE_POOLER_HOST, port: 5432, user: `postgres.${ref}` } : { host: `db.${ref}.supabase.co`, port: 5432, user: "postgres" }), password: process.env.SUPABASE_DB_PASSWORD, database: "postgres", ssl: { rejectUnauthorized: false } });
   await db.connect();
   const q = async (text, params = []) => (await db.query(text, params)).rows;
   const SIM = "SIM-NOT-AN-ORG";

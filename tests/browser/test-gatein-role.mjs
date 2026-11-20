@@ -12,7 +12,7 @@ const { check, summary } = makeChecks();
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 if (process.env.ERP_ENV !== "test" || !url) throw new Error("TEST only (ERP_ENV=test).");
 const ref = url.replace(/^https:\/\//, "").replace(/\.supabase\.co\/?$/, "");
-const db = new pg.Client({ host: `db.${ref}.supabase.co`, port: 5432, user: "postgres", password: process.env.SUPABASE_DB_PASSWORD, database: "postgres", ssl: { rejectUnauthorized: false } });
+const db = new pg.Client({ ...(process.env.SUPABASE_POOLER_HOST ? { host: process.env.SUPABASE_POOLER_HOST, port: 5432, user: `postgres.${ref}` } : { host: `db.${ref}.supabase.co`, port: 5432, user: "postgres" }), password: process.env.SUPABASE_DB_PASSWORD, database: "postgres", ssl: { rejectUnauthorized: false } });
 await db.connect();
 const settingRole = (await db.query("select value from public.settings where key = 'database_role'")).rows[0]?.value;
 if (String(settingRole).replace(/"/g, "") !== "test") throw new Error("This database is not the TEST database.");

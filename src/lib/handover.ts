@@ -216,7 +216,15 @@ export async function setDisposition(jobId: string, partId: string, actor: Actor
   const p = await fullPart(partId, jobId);
   if (!p) return { error: "Part not found." };
   if (!hasNoHome(p)) return { error: "This part has a home already." };
-  if (input.disposition === "returned" && !(input.note || input.creditNotePath)) return { error: "Type the credit note number, or attach its scan." };
+  let invoicedReturn = true;
+  if (input.disposition === "returned") {
+    const { returnFactsOf } = await import("./return-endings");
+    {
+      const { data: full } = await admin.from("part_items").select("*").eq("id", partId).maybeSingle();
+      invoicedReturn = full ? (await returnFactsOf(full as Record<string, unknown>)).facts.invoiced : true;
+    }
+  }
+  if (input.disposition === "returned" && invoicedReturn && !(input.note || input.creditNotePath)) return { error: "Type the credit note number, or attach its scan." };
   if (input.disposition === "scrap" && !input.note) return { error: "Write why it is scrapped." };
   // A return goes against the LPO it came on; a part kept goes onto the shelf as real stock.
   const { data: po } = p.po_id ? await admin.from("purchase_orders").select("number").eq("id", p.po_id).maybeSingle() : { data: null };
@@ -231,11 +239,16 @@ export async function setDisposition(jobId: string, partId: string, actor: Actor
   const patch: Record<string, unknown> = { disposition: input.disposition, disposition_at: now, disposition_by: actor.id, disposition_note: input.note, credit_note_path: input.creditNotePath ?? p.credit_note_path, updated_by: actor.id };
   if (input.disposition === "returned" && (p.exchange_status === "needed" || p.exchange_status === "ordered")) patch.exchange_status = "done";
   await admin.from("part_items").update(patch).eq("id", p.id);
-  const label = input.disposition === "returned" ? `returned to the supplier${po?.number ? ` against ${po.number}` : ""} with a credit note` : input.disposition === "stock" ? `moved to stock${stockNote}` : input.disposition === "scrap" ? "scrapped" : "to be fitted on this car, waiting for the owner's approval";
+  const label = input.disposition === "returned" ? `returned to the supplier${po?.number ? ` against ${po.number}` : ""}${invoicedReturn ? " with a credit note" : " (no supplier invoice: the ending is chosen on the LPO)"}` : input.disposition === "stock" ? `moved to stock${stockNote}` : input.disposition === "scrap" ? "scrapped" : "to be fitted on this car, waiting for the owner's approval";
   await admin.from("job_events").insert({ job_id: jobId, event_type: "part_disposition", note: `${p.description} ${label} (${actor.display_name})${input.note ? `: ${input.note}` : ""}`, created_by: actor.id });
   if (input.disposition === "fit_pending") await notifyRoles(["owner"], { type: "parts_no_home", title: `Fit a part as goodwill? · ${job?.job_number ?? ""}`, body: `${p.description} was marked not needed; Parts ask to fit it on this car anyway. Approve it under "Parts with no home".`, jobId, href: "/parts/no-home" });
   // Zoho Books phase 3: a part returned to the supplier becomes a vendor credit against their bill.
-  if (input.disposition === "returned") await tryEnqueueZoho("vendorcredit", p.id, jobId, actor.id);
+  // 20 November 2026 (Section 1): only an invoiced part becomes a supplier credit; one never invoiced picks its ending.
+  if (input.disposition === "returned" && invoicedReturn) await tryEnqueueZoho("vendorcredit", p.id, jobId, actor.id);
+  if (input.disposition === "returned" && !invoicedReturn) {
+    await admin.from("part_items").update({ disposition_note: input.note ? `Supplier's reference: ${input.note}` : null }).eq("id", p.id);
+    return { ok: true, message: `${p.description}: returned to the supplier${po?.number ? ` (${po.number})` : ""}. There is no supplier invoice for it: choose how the return ended on the LPO (Returned before invoicing, or an advance if it was paid).` };
+  }
   return { ok: true, message: `${p.description}: ${label}.` };
 }
 

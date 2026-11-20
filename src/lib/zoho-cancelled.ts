@@ -30,6 +30,8 @@ const CHECKS: Record<string, Check> = {
   settlement: { table: "card_settlements", select: "id, number, is_active", why: (r) => (r.is_active === false ? `${r.number} was undone` : null) },
   lathebill: { table: "lathe_bills", select: "id, bill_number, voided_at, is_active", why: (r) => (r.voided_at ? `lathe bill ${r.bill_number} was voided` : r.is_active === false ? `lathe bill ${r.bill_number} was removed` : null) },
   paygroup: { table: "payment_groups", select: "id, number, is_active", why: (r) => (r.is_active === false ? `${r.number} was voided` : null) },
+  // 20 November 2026 (Section 1): a part that went back before invoicing, as an advance, or exchanged never becomes a supplier credit.
+  vendorcredit: { table: "part_items", select: "*", why: (r) => (r.return_ending === "before_invoice" ? `${String(r.description ?? "").toUpperCase()} went back before invoicing (nothing to credit)` : r.return_ending === "advance" ? `${String(r.description ?? "").toUpperCase()} stays with the supplier as an advance` : r.return_ending === "exchange" ? `${String(r.description ?? "").toUpperCase()} was exchanged on the same LPO` : null) },
   commission: { table: "commission_payments", select: "id, number, is_active", why: (r) => (r.is_active === false ? `${r.number} was voided` : null) },
 };
 

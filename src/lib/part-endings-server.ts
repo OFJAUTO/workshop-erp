@@ -5,6 +5,7 @@ import { round2 } from "./money";
 import { jobAdvisorIds, notifyManagers, notifyRoles, notifyStaff } from "./notifications";
 import { PART_FULL_SELECT, toPartFull, type PartFull } from "./parts-data";
 import { realPartNumber } from "./parts-rows";
+import { RETURN_LINE_WORDS } from "./return-ending-rules";
 import { ENDING_LABEL, LINE_ENDING_LABEL, deliveredQty, endingOf, endingRefusal, endingWords, fromOurShelf, notDeliveredQty, poAfterEnding, returnCreditOf, stateOfChoice, storedDisposition, supplierMessage, type EndingKey, type EndingPart, type EndingState } from "./part-endings";
 import { schemaReady } from "./schema-ready";
 import { addPartToStock, recordStockMovement } from "./stock";
@@ -423,6 +424,14 @@ export async function recordCreditNote(jobId: string, partId: string, input: Cre
     }
     if (!raw) return { error: "This part is not on this job any more." };
     if (endingOf(raw) !== "return_pending") return { error: endingOf(raw) === "returned" ? "Its credit note is already recorded." : "This part is not waiting for a credit note." };
+    // 20 November 2026 (Section 1): no supplier invoice = nothing to credit (RETURNED BEFORE INVOICING, or an advance).
+    {
+      const { returnFactsOf } = await import("./return-endings");
+      {
+        const { data: full } = await admin.from("part_items").select("*").eq("id", partId).maybeSingle();
+        if (full && !(await returnFactsOf(full as Record<string, unknown>)).facts.invoiced) return { error: "There is no supplier invoice for this part, so there is no credit note: choose how the return ended (Returned before invoicing, or an advance if it was paid)." };
+      }
+    }
     const now = new Date().toISOString();
     let q = admin
       .from("part_items")
@@ -526,7 +535,7 @@ export async function endedLinesOf(poIds: string[]): Promise<Map<string, EndedLi
   const ids = Array.from(new Set(poIds.filter(Boolean)));
   if (!ids.length) return out;
   const admin = createAdminClient();
-  const { data: parts, error } = await admin.from("part_items").select("id, po_id, po_line_id, description, disposition, disposition_at, disposition_by, return_status").in("po_id", ids).not("disposition_at", "is", null);
+  const { data: parts, error } = await admin.from("part_items").select("*").in("po_id", ids).not("disposition_at", "is", null);
   if (error) {
     await logAppError("ended_lines", error);
     return out;
@@ -543,7 +552,7 @@ export async function endedLinesOf(poIds: string[]): Promise<Map<string, EndedLi
     const l = lineOf.get(p.po_line_id as string);
     if (!l) continue;
     const state = endingOf(p as EndingPart) as EndingState;
-    const row: EndedLine = { lineId: String(l.id), poId: String(l.po_id), partId: String(p.id), description: String(l.description ?? p.description), partNumber: realPartNumber((l.part_number as string | null) ?? null), quantity: Number(l.quantity) || 0, unitCost: Number(l.unit_cost) || 0, state, words: `${LINE_ENDING_LABEL[state]} · ${nameOf.get(String(p.disposition_by ?? "")) ?? "Parts"}`, onLpo: !!l.is_active };
+    const row: EndedLine = { lineId: String(l.id), poId: String(l.po_id), partId: String(p.id), description: String(l.description ?? p.description), partNumber: realPartNumber((l.part_number as string | null) ?? null), quantity: Number(l.quantity) || 0, unitCost: Number(l.unit_cost) || 0, state, words: `${(p as { return_ending?: string | null }).return_ending && (p as { return_ending: string }).return_ending in RETURN_LINE_WORDS ? RETURN_LINE_WORDS[(p as { return_ending: string }).return_ending as keyof typeof RETURN_LINE_WORDS] : LINE_ENDING_LABEL[state]} · ${nameOf.get(String(p.disposition_by ?? "")) ?? "Parts"}`, onLpo: !!l.is_active };
     out.set(row.poId, [...(out.get(row.poId) ?? []), row]);
   }
   return out;

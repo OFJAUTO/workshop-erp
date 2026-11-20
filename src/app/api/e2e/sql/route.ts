@@ -12,7 +12,7 @@ export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as { sql?: string; params?: unknown[] };
   if (!body.sql) return NextResponse.json({ error: "No sql." }, { status: 400 });
   const ref = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").hostname.split(".")[0];
-  const client = new Client({ host: `db.${ref}.supabase.co`, port: 5432, user: "postgres", password: process.env.SUPABASE_DB_PASSWORD, database: "postgres", ssl: { rejectUnauthorized: false } });
+  const client = new Client({ ...(process.env.SUPABASE_POOLER_HOST ? { host: process.env.SUPABASE_POOLER_HOST, port: 5432, user: `postgres.${ref}` } : { host: `db.${ref}.supabase.co`, port: 5432, user: "postgres" }), password: process.env.SUPABASE_DB_PASSWORD, database: "postgres", ssl: { rejectUnauthorized: false } });
   await client.connect();
   try {
     const r = await client.query(body.sql, body.params ?? []);
