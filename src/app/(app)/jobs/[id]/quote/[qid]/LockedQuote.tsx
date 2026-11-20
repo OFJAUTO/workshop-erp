@@ -6,7 +6,7 @@ import { PositionsLine } from "@/components/PositionsLine";
 import { Badge, Card, SectionLabel } from "@/components/ui";
 import type { QuoteLock } from "@/lib/quote-lock";
 import { qtyWithUnit, unitOf } from "@/lib/part-units";
-import { HOURS_MISSING_WORDS, aed, markupBoth, blockOf, discountLabelOf, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, type QuoteLine, type QuoteRow, type QuoteTotals , hasPackageLine } from "@/lib/quotes";
+import { HOURS_MISSING_WORDS, aed, markupBoth, blockOf, isProvisional, provisionalProfitWords, discountLabelOf, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, type QuoteLine, type QuoteRow, type QuoteTotals , hasPackageLine } from "@/lib/quotes";
 
 /**
  * A locked quotation (approved by the customer, replaced, or invoiced): every figure as plain text, no boxes, no
@@ -82,7 +82,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
                         <td className="py-2 pr-2 align-top text-xs font-bold text-muted">{i + 1}</td>
                         <td className="py-2 pr-2 align-top"><Words text={l.title} className="font-semibold uppercase" /><PositionsLine positions={l.positions} />{l.left_off ? <Badge tone="neutral">Left off</Badge> : null}{isHidden(l) ? <Badge tone="neutral">Internal cost only</Badge> : null}{l.option_group && l.chosen === false ? <Badge tone="neutral">Not chosen</Badge> : null}</td>
                         <td className="py-2 pr-2 align-top text-right whitespace-nowrap">{qtyWithUnit(Number(l.quantity) || 1, unitOf(l.unit))}</td>
-                        {showProfit ? <><td className="py-2 pr-2 align-top text-right whitespace-nowrap text-muted">{aed(l.unit_cost)}</td><td className="py-2 pr-2 align-top text-right whitespace-nowrap text-muted">{markupBoth(l).percent === null ? "—" : `${markupBoth(l).percent!.toFixed(2)}%`}</td><td className="py-2 pr-2 align-top text-right whitespace-nowrap text-muted">{aed(markupBoth(l).aed)}</td></> : null}
+                        {showProfit && isProvisional(l) ? <td colSpan={3} className="py-2 pr-2 align-top text-right text-xs font-semibold text-amber-text" data-provisional-row>Provisional, not yet costed</td> : showProfit ? <><td className="py-2 pr-2 align-top text-right whitespace-nowrap text-muted">{aed(l.unit_cost)}</td><td className="py-2 pr-2 align-top text-right whitespace-nowrap text-muted">{markupBoth(l).percent === null ? "—" : `${markupBoth(l).percent!.toFixed(2)}%`}</td><td className="py-2 pr-2 align-top text-right whitespace-nowrap text-muted">{aed(markupBoth(l).aed)}</td></> : null}
                         <td className="py-2 pr-2 align-top text-right whitespace-nowrap">{off ? "" : aed(lineUnitPrice(l))}</td>
                         <td className="py-2 align-top text-right whitespace-nowrap font-bold">{off ? aed(0) : aed(lineTotal(l))}</td>
                       </tr>
@@ -130,6 +130,7 @@ export function LockedQuote({ quotation, lock, lines, totals, showProfit, action
               <dt className="font-extrabold">Grand total</dt><dd className="text-right text-lg font-extrabold" data-locked-total>{aed(totals.total)}</dd>
               {totals.deposit ? <><dt className="text-muted">Deposit required</dt><dd className="text-right font-semibold">{aed(totals.deposit)}</dd></> : null}
             </dl>
+            {showProfit && totals.provisionalSell > 0.004 ? <p className="text-xs font-semibold text-amber-text" data-provisional-profit>{provisionalProfitWords(totals.net - totals.provisionalSell > 0 ? (totals.profit / (totals.net - totals.provisionalSell)) * 100 : null, totals.provisionalSell)}</p> : null}
             {showProfit ? <p className="border-t border-line pt-2 text-xs text-muted">Internal: profit <span className={hoursMissing.length ? "font-bold text-red" : undefined} data-locked-profit>{aed(totals.profit)} ({margin.toFixed(0)}% of the net)</span>{totals.commissionPending ? <span className="ml-1 font-semibold text-amber-text" data-profit-commission-pending>(commission counted, pending owner approval)</span> : null}.{hoursMissing.length ? <span className="block font-bold text-red" data-hours-missing={hoursMissing.length}>{HOURS_MISSING_WORDS}: {hoursMissing.join(", ")} {hoursMissing.length === 1 ? "has" : "have"} no hours.</span> : null}</p> : null}
             {showProfit && commissionLine ? <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-0.5 border-t border-line pt-2 text-xs" data-internal-box>{commissionLine}</dl> : null}
             {quotation.customer_note ? <p className="border-t border-line pt-2 text-xs text-muted">Note to the customer: {quotation.customer_note}</p> : null}

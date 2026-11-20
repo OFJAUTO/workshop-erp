@@ -38,7 +38,7 @@ import { PackageItemsToggle } from "@/components/PackageItemsToggle";
 import { damagePartSuggestions } from "@/lib/body-parts";
 import { compApprovalReason, compCost, compLinesOf, compProblem } from "@/lib/complimentary";
 import { NOT_PRICE_KEYS, belowCostAll, belowCostChangesIn, belowCostWords, type BelowCost } from "@/lib/quotes";
-import { HOURS_MISSING_WORDS, hoursMissingLines, INTERNAL_ONLY_LABEL, profitLines, approvalCovers, discountAgainstLimit, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
+import { HOURS_MISSING_WORDS, hoursMissingLines, INTERNAL_ONLY_LABEL, profitLines, approvalCovers, discountAgainstLimit, positionsWarningOf, effectiveMarkupPercent, markupBoth, markupFromSell, minimumMarkupAed, marginToneOf, aed, blockOf, isProvisional, provisionalProfitWords, complimentaryWord, discountLabelOf, estimateLineSuspect, floorPrice, isComplimentary, isFixedService, labourDiscountOf, pinnedRank, hasCostFloor, hoursText, isHidden, isUnchosen, lineCost, lineTotal, lineUnitPrice, ownerApprovalReasons, partTypeText, quoteTotals, recoveryTitle, round2, sendBlockers, type LineType, type PartItem, type QuoteLine, type QuoteRow, type Service, type ServiceCategory , hasPackageLine } from "@/lib/quotes";
 import type { WorkingTime } from "@/lib/working-time";
 import { DEFAULT_COST_LIMITS, markupTooHigh, markupTooHighWords } from "@/lib/part-cost-check";
 import { addMissingParts,completeQuotation, escalateParts, keepUrgentOnly, remindParts, reopenQuotation, roundQuotation, saveCustomService, setCustomerPartName, setPartWarranty } from "@/app/(app)/quotes/actions";
@@ -978,7 +978,9 @@ export function QuoteEditor({
     labour_services: labourDiscountOf(countedForDiscount, { discount_percent: 0, vat_percent: 5, discount_kind: "percent", discount_value: 0, discount_scope: "labour_services" }).base,
   };
   const labourLines = lines.filter((l) => l.is_active && blockOf(l) === "labour");
-  const partLines = lines.filter((l) => l.is_active && blockOf(l) === "parts");
+  const partLines = lines.filter((l) => l.is_active && blockOf(l) === "parts" && !isProvisional(l));
+  // 20 November 2026 (Section 4): the provisional amount sits in the PARTS block (it counts as parts), shown as its own row.
+  const provLines = lines.filter((l) => l.is_active && isProvisional(l));
   // An estimate's own parts (30 October 2026): what still has no price, and what can go to the parts desk now.
   const estParts = isQuotation ? [] : partLines.filter((l) => isEstimatePart(l) && !l.left_off);
   // Job parts priced here a moment ago that the server copy does not show as priced yet: counted at once (the
@@ -1969,6 +1971,12 @@ export function QuoteEditor({
             </div>
           ) : null}
           {partLines.some((l) => l.left_off) ? <p className="text-xs text-muted">A part left off stays on the car&apos;s list, counts for nothing here and is not ordered. Put back with one tap.</p> : null}
+          {provLines.length ? (
+            <div className="flex flex-col gap-2 border-t border-line pt-2" data-provisional-in-parts>
+              <span className="text-xs font-semibold uppercase text-muted">Provisional (counts as parts; costed when used)</span>
+              {provLines.map((l, i) => otherRow(l, partLines.length + i))}
+            </div>
+          ) : null}
         </Card>
 
         {/* Block 3: other charges */}
@@ -2122,6 +2130,7 @@ export function QuoteEditor({
                 )}
                 <dt className="font-semibold border-t border-line pt-1">= Total cost</dt><dd className="text-right font-semibold border-t border-line pt-1" data-profit-total-cost>{aed(totals.totalCost)}</dd>
                 <dt className="font-bold">PROFIT{totals.commissionPending ? <span className="ml-1 font-semibold text-amber-text" data-profit-commission-pending>(commission counted, pending owner approval)</span> : null}</dt><dd className={"text-right font-bold " + marginTone} data-profit-total>{aed(totals.profit)} · {margin.toFixed(1)}%</dd>
+                {totals.provisionalSell > 0.004 ? <dd className="col-span-2 text-right text-xs font-semibold text-amber-text" data-provisional-profit>{provisionalProfitWords(totals.net - totals.provisionalSell > 0 ? (totals.profit / (totals.net - totals.provisionalSell)) * 100 : null, totals.provisionalSell)}</dd> : null}
                 {hoursMissing.length ? <dd className="col-span-2 text-right font-bold text-red" data-hours-missing={hoursMissing.length}>{HOURS_MISSING_WORDS}<span className="block text-xs font-semibold">{hoursMissing.length} line{hoursMissing.length === 1 ? "" : "s"} without hours: {hoursMissing.map((x) => x.title || "untitled line").join(", ")}. Type the hours in each line&apos;s &quot;Hours&quot; or &quot;our hours&quot; box.</span></dd> : null}
                 <dt className="text-muted">{hasPackageLine(lines) ? "Package margin" : "Labour margin"}</dt><dd className="text-right" data-labour-margin>{aed(totals.labourMargin)}</dd>
                 <dt className="text-muted">Parts margin</dt><dd className="text-right">{aed(totals.partsMargin)}{totals.partsUnpriced ? <span className="block text-xs font-semibold text-amber-text" data-margin-incomplete>{totals.partsUnpriced} part{totals.partsUnpriced === 1 ? "" : "s"} not priced yet, margin incomplete</span> : null}</dd>

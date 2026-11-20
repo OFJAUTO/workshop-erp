@@ -907,6 +907,8 @@ export type QuoteTotals = {
   total: number;
   partsCost: number;
   partsSell: number;
+  /** 20 November 2026 (Section 4): the provisional amount inside partsSell, costed at its own price (zero profit). */
+  provisionalSell: number;
   partsMargin: number;
   /** Part lines still without a price from Parts: the parts margin is incomplete while any remain. */
   partsUnpriced: number;
@@ -962,10 +964,21 @@ export type QuoteTotals = {
 };
 
 /** Which block of the quotation a line sits in: labour and services, parts, or other charges. */
-export function blockOf(l: Pick<QuoteLine, "line_type">): "labour" | "parts" | "other" {
+export function blockOf(l: Pick<QuoteLine, "line_type"> & { source_key?: string | null }): "labour" | "parts" | "other" {
   if (l.line_type === "labour" || l.line_type === "package") return "labour";
   if (l.line_type === "part") return "parts";
+  // 20 November 2026 (Section 4): the provisional "additional parts if required" amount is PARTS (quote, documents, totals).
+  if (isProvisional(l)) return "parts";
   return "other";
+}
+
+/** THE provisional amount ("ADDITIONAL PARTS IF REQUIRED – UP TO AED X"): approved up front, costed only when converted. */
+export const isProvisional = (l: { source_key?: string | null }) => l.source_key === "provisional";
+
+/** "Profit 31% – plus AED 370.00 provisional, not yet costed" (the provisional amount counts as zero profit until converted). */
+export function provisionalProfitWords(profitPercent: number | null, provisional: number): string | null {
+  if (!(provisional > 0.004)) return null;
+  return `${profitPercent !== null ? `Profit ${Math.round(profitPercent)}% – ` : ""}plus AED ${provisional.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} provisional, not yet costed`;
 }
 
 /** A fixed-price service of our own (minor service, major service...): a service line with no "our cost" typed on it. Outside work carries its cost. */
@@ -1041,9 +1054,10 @@ export function quoteTotals(
     rounding = round2(net - (subtotal - discount));
   }
   const parts = counted.filter((l) => blockOf(l) === "parts");
-  const partsCost = round2(parts.reduce((a, l) => a + lineCost(l), 0));
+  const provisionalSell = round2(parts.filter((l) => isProvisional(l)).reduce((a, l) => a + lineTotal(l), 0));
+  const partsCost = round2(parts.reduce((a, l) => a + (isProvisional(l) ? lineTotal(l) : lineCost(l)), 0));
   const partsSell = round2(parts.reduce((a, l) => a + lineTotal(l), 0));
-  const partsUnpriced = parts.filter((l) => l.unit_cost === null || l.unit_cost === undefined).length;
+  const partsUnpriced = parts.filter((l) => !isProvisional(l) && (l.unit_cost === null || l.unit_cost === undefined)).length;
   const labour = counted.filter((l) => blockOf(l) === "labour");
   const labourLines = labour.filter((l) => l.line_type === "labour");
   const labourHours = round2(labourLines.reduce((a, l) => a + (l.hours ?? 0), 0));
@@ -1089,7 +1103,8 @@ export function quoteTotals(
   // costs the moment it is set (shown as "pending owner approval"); it leaves the costs only when the
   // owner declines it. The profit, the team target and the advisor bonus all see the same figure.
   const cv = Number(q.commission_value) || 0;
-  const commissionAsked = q.commission_kind === "percent" ? round2(net * (Math.max(0, cv) / 100)) : q.commission_kind === "aed" ? round2(Math.max(0, cv)) : 0;
+  // 20 November 2026 (Section 4): the provisional amount never counts toward a commission (it is not costed work).
+  const commissionAsked = q.commission_kind === "percent" ? round2(Math.max(0, net - provisionalSell) * (Math.max(0, cv) / 100)) : q.commission_kind === "aed" ? round2(Math.max(0, cv)) : 0;
   const commissionPending = commissionAsked > 0 && q.commission_status === "pending";
   const commission = q.commission_status === "declined" ? 0 : commissionAsked;
   const materialsCost = round2(Math.max(0, Number(q.materials_cost_aed) || 0));
@@ -1104,7 +1119,7 @@ export function quoteTotals(
   const deposit = round2(Math.min(total, Math.max(0, depositRaw)));
   return {
     subtotal, lineDiscounts, discountBase, discount, rounding, net, vat, total,
-    partsCost, partsSell, partsMargin: round2(partsSell - partsCost), partsUnpriced,
+    partsCost, partsSell, provisionalSell, partsMargin: round2(partsSell - partsCost), partsUnpriced,
     labourSell, labourHours, labourEstimateHours, labourEstimateEntered, estimateSuspectLineIds, estimateTotalSuspect, labourCostHours, labourCostBasis: clocked !== null ? "clocked" : "estimate", labourCost, outsideCost,
     otherSell, otherCost, hiddenCost: otherCost, recoveryCost, bankCharge, commission, commissionPending, materialsCost, supplierCharges, ownServiceCost, installerHours, bodyshopLabourCost, totalCost, profit,
     packageMaterials, packageSell,
