@@ -51,7 +51,6 @@ import { backOrdersReady } from "@/lib/back-orders";
 import { CarHeaderThumb } from "@/components/CarHeaderThumb";
 import { PAST_QUOTE, partsSteps, stepPartOf, noPartsNeeded } from "@/lib/parts-steps";
 import { loadPartsChanges } from "@/lib/parts-changes-data";
-import { redirect } from "next/navigation";
 import { Collapsible } from "@/components/Collapsible";
 import { PriorityBadge, TimingBadge } from "@/components/JobBadges";
 import { LiveRefresh } from "@/components/LiveRefresh";
@@ -116,6 +115,9 @@ import { loadJobTechnicians } from "@/lib/job-technicians";
 import { JobSummaryCard } from "./JobSummaryCard";
 import { ItemsCard } from "./ItemsCard";
 import { LOOSE_SKIP_STAGES, loadJobItems } from "@/lib/loose-items";
+import { LOOSE_TAG } from "@/lib/booked-job-rules";
+import { BookedCard } from "./BookedCard";
+import { LooseFlowCard } from "./LooseFlowCard";
 import { ComebackCard } from "./ComebackCard";
 import { ApprovalSendControl, ReportSendControl, type ReportLinkRow } from "./SendControls";
 import { pendingForInspection } from "@/lib/upload-pending";
@@ -175,7 +177,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // A bodyshop quotation before the car arrives has no gate-in yet: its page is the bodyshop one.
   // 13 November 2026 (back orders): a follow-up job (a part fitted on a later visit) is not a bodyshop booking: it stays here.
   const continuesId = card.job.status === "booked" && (await backOrdersReady()) ? (((await createAdminClient().from("jobs").select("continues_job_id").eq("id", id).maybeSingle()).data?.continues_job_id as string | null | undefined) ?? null) : null;
-  if (card.job.status === "booked" && !continuesId) redirect(`/bodyshop/${id}`);
+  // 20 November 2026 (Section 2): the job card opens for every booked car (it shows the booking card); the bodyshop page stays one tap away.
+  void continuesId;
   const { job, vehicle, customer, customerPublic, vip, gateIn, requests, media, mediaUrls, events, approvals, gateOut } = card;
   // 11 November 2026 (Section 16, speed): the reads further down that need only the job start now, together; each is
   // still awaited where it was used (they ran one after another: about 45 round trips in a row on the job card).
@@ -578,7 +581,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
             <PriorityBadge priority={job.priority} />
             {inspection && inspectionDangerous(inspection).length ? <Badge tone="red">DANGEROUS TO DRIVE</Badge> : null}
             {isVip ? <Badge tone="ink">VIP</Badge> : null}
-            {loose ? <Badge tone="ink">Loose items</Badge> : null}
+            {loose ? <Badge tone="ink" data-loose-tag>{LOOSE_TAG}</Badge> : null}
             {gateIn?.dash_cam ? <Badge tone="red">Dash cam fitted</Badge> : null}
             {gateIn && gateIn.condition !== "runs_drives" ? <Badge tone="red">{labelOf(CONDITIONS, gateIn.condition)}</Badge> : null}
             {job.department ? <Badge tone="outline">{JOB_DEPARTMENTS.find((d) => d.value === job.department)?.label}</Badge> : null}
@@ -627,6 +630,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
           </>
         }
       />
+      {job.status === "booked" ? <BookedCard jobId={id} vehicleId={job.vehicle_id} isBodyshop={job.department === "bodyshop"} canStart={!staff.viewingAs && ["owner", "service_advisor", "gate_in"].includes(role)} canGateIn={!staff.viewingAs && can(role, "gateIn")} /> : null}
+      {loose && job.status !== "booked" ? <LooseFlowCard jobId={id} job={{ status: job.status, is_open: job.is_open, gated_out_at: (job as { gated_out_at?: string | null }).gated_out_at ?? null }} canAct={!staff.viewingAs && ["owner", "service_advisor", "gate_in", "parts"].includes(role)} /> : null}
       {/* 13 November 2026 (Section 4): someone who may not set the advisor reminds the advisors. */}
       {!inChargeName && !(role === "service_advisor" || role === "owner") && !staff.viewingAs && job.is_open ? <FixIt hook="advisor" message="Advisor in charge: not set – the car cannot be assigned until it is set." remind={{ label: "Remind the advisors", action: remindToFix.bind(null, id, "the advisor in charge", "advisor", `/jobs/${id}`) }} /> : null}
       {(role === "service_advisor" || role === "owner") && !staff.viewingAs && job.is_open ? (

@@ -1,4 +1,5 @@
 import { JobsToDo } from "@/components/JobsToDo";
+import { JobCardButton } from "@/components/JobCardButton";
 import { loadJobsToDo, viewerSideOf } from "@/lib/jobs-to-do-data";
 import { VinCopy } from "@/components/VinCopy";
 import { advanceSplit } from "@/lib/estimate-money-rules";
@@ -9,6 +10,7 @@ import { LiveRefresh } from "@/components/LiveRefresh";
 import { Avatar, Badge, Button, Card, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
 import { requireStaff } from "@/lib/auth";
 import { PanelMarker } from "@/components/PanelMarker";
+import { bookedQuoteWords, showsPreworkCheck } from "@/lib/booked-job-rules";
 import { cleanPanelMarks } from "@/lib/car-outline";
 import { markPreworkChecked, savePreworkCheck } from "@/app/(app)/jobs/damage-actions";
 import { loadBodyshopJob, type StageRow } from "@/lib/bodyshop";
@@ -129,6 +131,11 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
     updateStates.push({ kind, title: kind === "arrived" ? "Your car has arrived" : kind === "film" ? "Film is going on" : "Your car is ready for collection", photoId: u?.photo_id ?? null, token: seesCust ? (u?.token ?? null) : null, sentAt: u?.sent_at ?? null, message: link ? fill(tpl, link) : null });
   }
   const booked = job.status === "booked";
+  // 20 November 2026 (Section 2): before a quotation, an approved estimate or ordered parts are not "not started".
+  const bookedEstimateId = ((await admin.from("jobs").select("estimate_id").eq("id", jobId).maybeSingle()).data?.estimate_id as string | null | undefined) ?? null;
+  const { data: bookedEstimate } = bookedEstimateId ? await admin.from("quotations").select("number, status").eq("id", bookedEstimateId).maybeSingle() : { data: null };
+  const { count: bookedPartsOrdered0 } = await admin.from("part_items").select("id", { count: "exact", head: true }).eq("job_id", jobId).eq("is_active", true).in("order_status", ["to_order", "ordered", "partly_received", "received"]);
+  const bookedPartsOrdered = bookedPartsOrdered0 ?? 0;
   const statusLabel = booked ? "Booked, not arrived" : job.status === "in_work" ? "In the bodyshop" : job.status === "ready" || job.status === "pending_payment" ? "Ready, waiting for the handover" : job.status === "closed" ? "Handed over" : job.status.replaceAll("_", " ");
   const openClockBy = new Set(clockings.filter((c) => !c.ended_at).map((c) => c.staff_id));
   const stripOrRefit = stages.some((s) => s.key === "strip" || s.key === "refit" || s.key === "repair");
@@ -188,7 +195,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
         actions={
           <>
             <LinkButton href="/bodyshop" tone="secondary" size="lg">Board</LinkButton>
-            {!booked && can(role, "viewJobs") ? <LinkButton href={`/jobs/${jobId}`} tone="secondary" size="lg">Job card</LinkButton> : null}
+            {can(role, "viewJobs") ? <JobCardButton jobId={jobId} booked={booked} /> : null}
             {latestQuote && (isOwner || role === "service_advisor") ? <LinkButton href={`/jobs/${jobId}/quote/${latestQuote.id}`} tone="secondary" size="lg">Quotation {latestQuote.number}</LinkButton> : null}
           </>
         }
@@ -203,7 +210,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
           <Card className="flex flex-col gap-3" data-booking-card>
             <SectionLabel>Before the car arrives</SectionLabel>
             <ol className="flex flex-col gap-2 text-sm">
-              <li className="flex items-center gap-2"><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${approvedQuote ? "bg-green text-on-dark" : latestQuote?.status === "sent" || latestQuote?.status === "opened" ? "bg-amber-bar text-on-dark" : "border border-line-strong"}`}>1</span><span>Quotation {latestQuote ? <>{latestQuote.number}: <span className="font-semibold">{approvedQuote ? `approved ${formatDate(latestQuote.responded_at)}` : latestQuote.status === "draft" ? "being built" : latestQuote.status === "sent" || latestQuote.status === "opened" ? "sent, waiting for the customer" : latestQuote.status}</span></> : "not started"}</span></li>
+              <li className="flex items-center gap-2"><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${approvedQuote ? "bg-green text-on-dark" : latestQuote?.status === "sent" || latestQuote?.status === "opened" ? "bg-amber-bar text-on-dark" : "border border-line-strong"}`}>1</span><span>Quotation {latestQuote ? <>{latestQuote.number}: <span className="font-semibold">{approvedQuote ? `approved ${formatDate(latestQuote.responded_at)}` : latestQuote.status === "draft" ? "being built" : latestQuote.status === "sent" || latestQuote.status === "opened" ? "sent, waiting for the customer" : latestQuote.status}</span></> : <span className="font-semibold" data-booked-quote-words>{bookedQuoteWords({ quoteNumber: null, quoteStatus: null, estimateNumber: bookedEstimate?.number ?? null, estimateStatus: bookedEstimate?.status ?? null, partsOrdered: bookedPartsOrdered }).words}</span>}</span></li>
               <li className="flex items-center gap-2"><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${job.booked_arrival_at ? "bg-green text-on-dark" : "border border-line-strong"}`}>2</span><span>Arrival {job.booked_arrival_at ? <span className="font-semibold">{formatDateTime(job.booked_arrival_at)}</span> : "not booked"} · handover {job.promised_at ? <span className="font-semibold">{formatDate(job.promised_at)}</span> : "not set"}</span></li>
               <li className="flex items-center gap-2"><span className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-xs font-extrabold ${deposits.length ? "bg-green text-on-dark" : "border border-line-strong"}`}>3</span><span>Deposit {deposits.length ? <span className="font-semibold">{deposits[0].number}{seesMoney ? ` for ${aed(deposits[0].total_aed)}` : " requested"}</span> : "optional"}</span></li>
             </ol>
@@ -264,7 +271,7 @@ export default async function BodyshopJobPage({ params, searchParams }: { params
         />
       ) : null}
       {/* Section 7 (23 October 2026): the pre-work check before PPF on the same car outline as the inspection. */}
-      {recheck ? null : <PanelMarker noteForCustomer={false} hook="prework" title="Pre-work check (before PPF)" hint="Before the film goes on: mark every panel with existing damage (stone chips, scratches, previous repairs), so it is on record before the work starts." initial={cleanPanelMarks(prework?.prework_panels)} save={savePreworkCheck.bind(null, jobId)} canEdit={canLead} footer={prework?.prework_checked_at ? <p className="text-xs font-semibold text-green-text" data-prework-done>Pre-work check done {formatDateTime(String(prework.prework_checked_at))}</p> : canLead ? <form action={markPreworkChecked.bind(null, jobId)}><Button type="submit" tone="secondary" size="md" data-prework-mark>Pre-work check done</Button></form> : null} />}
+      {recheck || !showsPreworkCheck(kinds) ? null : <PanelMarker noteForCustomer={false} hook="prework" title="Pre-work check (before PPF)" hint="Before the film goes on: mark every panel with existing damage (stone chips, scratches, previous repairs), so it is on record before the work starts." initial={cleanPanelMarks(prework?.prework_panels)} save={savePreworkCheck.bind(null, jobId)} canEdit={canLead} footer={prework?.prework_checked_at ? <p className="text-xs font-semibold text-green-text" data-prework-done>Pre-work check done {formatDateTime(String(prework.prework_checked_at))}</p> : canLead ? <form action={markPreworkChecked.bind(null, jobId)}><Button type="submit" tone="secondary" size="md" data-prework-mark>Pre-work check done</Button></form> : null} />}
 
       {stages.length ? (
         <Card id="stages" className="flex flex-col gap-3" data-stages-card>

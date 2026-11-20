@@ -771,5 +771,13 @@ async function runHousekeeping(): Promise<Record<string, number>> {
   } catch {
     report.approvalsReminder = -1;
   }
+
+  // 37. A booked car past its booked arrival: its advisor is told once ("ARRIVAL WAS DUE ...", 20 November 2026, Section 2).
+  try {
+    const { overdueArrivalsHourly } = await import("@/lib/loose-start");
+    report.arrivalOverdue = await overdueArrivalsHourly();
+  } catch {
+    report.arrivalOverdue = -1;
+  }
   return report;
 }

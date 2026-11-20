@@ -49,6 +49,7 @@ import { EstimateMoneyCard, type MoneyCardFacts } from "./EstimateMoneyCard";
 import { DeskPartsCard } from "./DeskPartsCard";
 import { deskPartsOf } from "@/lib/desk-parts";
 import { OrderPartsNow } from "./OrderPartsNow";
+import { StartLooseJob } from "@/components/StartLooseJob";
 import { AdvancePaymentsBox } from "@/components/AdvancePaymentsBox";
 import { advancePaymentsFor } from "@/lib/advance-payments";
 
@@ -187,12 +188,13 @@ export default async function EstimatePage({ params, searchParams }: { params: P
       {accepted ? (
         <Card className="flex flex-col gap-2 border-green">
           <SectionLabel>Accepted by {q.approver_name} · {formatDateTime(q.responded_at)}</SectionLabel>
-          {attached ? (
+          {attachedReal ? (
             <p className="text-sm">
-              Attached to job <Link href={`/jobs/${attached.id}`} className="font-bold underline underline-offset-4">{attached.job_number}</Link>.
+              Attached to job <Link href={`/jobs/${attachedReal.id}`} className="font-bold underline underline-offset-4">{attachedReal.job_number}</Link>.
             </p>
           ) : (
             <>
+              {attached ? <p className="text-sm" data-held-job>Parts are ordered on <Link href={`/jobs/${attached.id}`} className="font-bold underline underline-offset-4">{attached.job_number}</Link>, waiting for the car (booked, not arrived).</p> : null}
               <p className="text-sm text-muted">Book the car in. At gate-in every open estimate of the car carries over to the job and opens as its own quotation, pre-filled.</p>
               <div className="flex flex-wrap gap-2">
                 <LinkButton href={`/calendar/new?customer=${q.customer_id}&vehicle=${q.vehicle_id ?? ""}`} size="md">Book the car into the calendar</LinkButton>
@@ -200,6 +202,8 @@ export default async function EstimatePage({ params, searchParams }: { params: P
                 {/* Part 4 (4 November 2026): the priced parts can be ordered before the car arrives. */}
                 {emPricedParts > 0 && ["owner", "service_advisor"].includes(role) && !staff.viewingAs ? <OrderPartsNow estimateId={q.id} pricedCount={emPricedParts} /> : null}
               </div>
+              {/* 20 November 2026 (Section 2): no car coming - the job card at once, no gate-in. */}
+              {q.status === "approved" && ["owner", "service_advisor", "gate_in"].includes(role) && !staff.viewingAs ? <StartLooseJob estimateId={q.id} estimateNumber={q.number} back={`/estimates/${q.id}`} /> : null}
             </>
           )}
         </Card>

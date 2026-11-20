@@ -41,6 +41,7 @@ type JobLite = {
   promised_at: string | null;
   gated_out_at: string | null;
   department: string | null;
+  job_kind?: string | null;
   vehicle: { has_plate: boolean; plate_country: string; plate_emirate: string | null; plate_code: string | null; plate_number: string | null; vin: string | null; make: { name: string } | null; model: { name: string } | null } | null;
 };
 
@@ -66,8 +67,8 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
   const supabase = await createClient();
   const [{ data: appts }, { data: due }, { data: out }, { data: reminders }] = await Promise.all([
     supabase.from("appointments").select(APPOINTMENT_SELECT).eq("is_active", true).gte("starts_at", dayStartIso(from)).lt("starts_at", dayStartIso(to)).order("starts_at"),
-    supabase.from("jobs").select(`id, job_number, promised_at, gated_out_at, department, ${VEHICLE}`).eq("is_open", true).gte("promised_at", from).lt("promised_at", to).order("promised_at"),
-    supabase.from("jobs").select(`id, job_number, promised_at, gated_out_at, department, ${VEHICLE}`).gte("gated_out_at", dayStartIso(from)).lt("gated_out_at", dayStartIso(to)).order("gated_out_at"),
+    supabase.from("jobs").select(`id, job_number, promised_at, gated_out_at, department, job_kind, ${VEHICLE}`).eq("is_open", true).gte("promised_at", from).lt("promised_at", to).order("promised_at"),
+    supabase.from("jobs").select(`id, job_number, promised_at, gated_out_at, department, job_kind, ${VEHICLE}`).gte("gated_out_at", dayStartIso(from)).lt("gated_out_at", dayStartIso(to)).order("gated_out_at"),
     supabase.from("appointments").select(APPOINTMENT_SELECT).eq("is_active", true).eq("status", "booked").gte("starts_at", dayStartIso(tomorrow)).lt("starts_at", dayStartIso(addDays(tomorrow, 1))).order("starts_at"),
   ]);
   const mine = (a: AppointmentFull) => who === "all" || a.advisor_id === staff.id || a.created_by === staff.id;
@@ -291,6 +292,7 @@ function JobItem({ j, kind, compact = false }: { j: JobLite; kind: "due" | "out"
       {/* "Due" and the plate (or job number) on their own lines: a narrow day cell with large text never pushes a code out. */}
       <span className="block text-xs font-bold">{kind === "due" ? "Due" : `Left ${j.gated_out_at ? dubaiTimeOf(j.gated_out_at) : ""}`}</span>
       <Words className="block text-xs font-bold" text={j.vehicle ? formatPlate(j.vehicle) : j.job_number} />
+      {j.job_kind === "loose" ? <span className="block text-[10px] font-extrabold uppercase" data-loose-tag>LOOSE ITEMS – NO CAR</span> : null}
       {/* The car and the job number - the number only when the line above shows the plate, never twice. */}
       {!compact && (j.vehicle || j.vehicle === undefined) ? <span className="block text-xs text-muted truncate">{[[j.vehicle?.make?.name, j.vehicle?.model?.name].filter(Boolean).join(" "), j.vehicle ? j.job_number : null].filter(Boolean).join(" · ")}</span> : null}
     </Link>

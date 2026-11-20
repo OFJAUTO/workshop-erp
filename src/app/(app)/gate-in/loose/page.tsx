@@ -5,6 +5,8 @@ import { ITEM_TYPES } from "@/lib/loose-items";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createLooseGateIn } from "../loose-actions";
 import { LooseItemsForm } from "./LooseItemsForm";
+import { StartLooseJob } from "@/components/StartLooseJob";
+import { approvedEstimatesOf } from "@/lib/loose-start";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +14,8 @@ type CustomerRow = { id: string; full_name: string; company_name: string | null;
 
 /** Gate-in without a car: find or add the customer, then list the items. */
 export default async function LooseGateInPage({ searchParams }: { searchParams: Promise<{ q?: string; customer?: string; new?: string }> }) {
-  await requirePermission("gateIn");
+  const staff = await requirePermission("gateIn");
+  const seesMoney = staff.role_id !== "gate_in";
   const { q = "", customer: customerId, new: isNew } = await searchParams;
   let chosen: CustomerRow | null = null;
   if (customerId) {
@@ -30,6 +33,8 @@ export default async function LooseGateInPage({ searchParams }: { searchParams: 
     results = (data ?? []) as CustomerRow[];
   }
   const showForm = !!chosen || isNew === "1";
+  // 20 November 2026 (Section 2): the customer's approved estimates start the job at once (nothing typed twice).
+  const estimates = chosen ? await approvedEstimatesOf(chosen.id) : [];
   return (
     <>
       <PageHeader title="Gate in loose items" subtitle="Wheels, an engine, a bumper: items that arrive without a car. No inspection report and no wash; the quotation is the approval." actions={<LinkButton href="/gate-in" tone="secondary" size="lg">Gate in a car instead</LinkButton>} />
@@ -57,6 +62,21 @@ export default async function LooseGateInPage({ searchParams }: { searchParams: 
           ) : null}
         </Card>
       ) : (
+        <>
+        {estimates.length ? (
+          <Card className="flex flex-col gap-3 max-w-3xl" data-loose-estimates>
+            <SectionLabel>From an approved estimate</SectionLabel>
+            <p className="text-sm text-muted">The estimate is picked up as it is: the job card opens now, nothing is typed twice.</p>
+            <ul className="divide-y divide-line">
+              {estimates.map((e) => (
+                <li key={e.id} className="flex flex-wrap items-center justify-between gap-3 py-2.5" data-loose-estimate={e.number}>
+                  <span className="flex flex-col"><span className="font-bold">{e.number}</span><span className="text-xs text-muted">{e.car ?? "No car"}{seesMoney ? ` · AED ${e.total.toLocaleString("en-GB", { minimumFractionDigits: 2 })}` : ""}</span></span>
+                  <StartLooseJob estimateId={e.id} estimateNumber={e.number} back={`/gate-in/loose?customer=${chosen?.id ?? ""}`} compact />
+                </li>
+              ))}
+            </ul>
+          </Card>
+        ) : null}
         <Card className="flex flex-col gap-4 max-w-3xl">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <SectionLabel>The items</SectionLabel>
@@ -64,6 +84,7 @@ export default async function LooseGateInPage({ searchParams }: { searchParams: 
           </div>
           <LooseItemsForm action={createLooseGateIn} itemTypes={ITEM_TYPES} customer={chosen ? { id: chosen.id, name: chosen.company_name ?? chosen.full_name, phone: chosen.phone } : null} />
         </Card>
+        </>
       )}
     </>
   );

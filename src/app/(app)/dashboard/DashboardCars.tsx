@@ -257,7 +257,7 @@ export function DashboardCars({ rows, initialPending, advisorView = false }: { r
               chips={
                 <>
                   {j.vip ? <Badge tone="ink">VIP</Badge> : null}
-                  {j.loose ? <Badge tone="ink">Loose items</Badge> : null}
+                  {j.loose ? <Badge tone="ink" data-loose-tag>LOOSE ITEMS – NO CAR</Badge> : null}
                   <PriorityBadge priority={j.priority} />
                   <TimingBadge timing={j.timing} />
                   {j.inspectionLabel && j.timing.tone !== "red" ? <Badge tone="neutral">{j.inspectionLabel}</Badge> : null}

@@ -1,4 +1,5 @@
 import { RecordPaymentButton } from "@/components/RecordPaymentHost";
+import { JobCardButton } from "@/components/JobCardButton";
 import { UnallocatedList } from "@/components/UnallocatedList";
 import { unallocatedOf } from "@/lib/customer-money";
 import Link from "next/link";
@@ -69,6 +70,7 @@ export default async function VehiclePage({
     createAdminClient().from("customers").select("full_name, company_name").eq("is_active", true).eq("id", v.customer_id).maybeSingle(),
     supabase.from("jobs").select("id, job_number, status, gated_in_at, gated_out_at, is_open").eq("vehicle_id", id).order("gated_in_at", { ascending: false }),
   ]);
+  const currentJob = ((visitRows ?? []) as { id: string; job_number: string; status: string; is_open: boolean }[]).find((j) => j.is_open || j.status === "booked") ?? null;
   const visits = (visitRows ?? []) as { id: string; job_number: string; status: JobStatus; gated_in_at: string; gated_out_at: string | null; is_open: boolean }[];
   // 13 November 2026 (Section 8): each visit's profit (THE calculation), for the owner, accounts and the job's own
   // advisor; the car's lifetime profit for the owner and accounts only. Decided here, on the server.
@@ -106,6 +108,7 @@ export default async function VehiclePage({
             {!v.is_active ? <Badge tone="red">Inactive</Badge> : null}
           </span>
         }
+        views={currentJob && can(role, "viewJobs") ? <JobCardButton jobId={currentJob.id} jobNumber={currentJob.job_number} booked={currentJob.status === "booked"} /> : undefined}
         actions={canEdit || mayPay || viewPay ? <>{(mayPay || viewPay) && v.customer ? <RecordPaymentButton vehicleId={v.id} customerId={v.customer.id} readOnly={viewPay} size="lg" tone="secondary" /> : null}{canEdit ? <LinkButton href={`/vehicles/${v.id}/edit`}>Edit</LinkButton> : null}</> : undefined}
       />
 

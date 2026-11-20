@@ -140,7 +140,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
                 sub={[j.job_number, closed ? `Out ${formatDate(j.gated_out_at)}` : `In ${formatDate(j.gated_in_at ?? j.created_at)}`]}
                 chips={
                   <>
-                    {j.job_kind === "loose" ? <Badge tone="ink">Loose items</Badge> : null}
+                    {j.job_kind === "loose" ? <Badge tone="ink" data-loose-tag>LOOSE ITEMS – NO CAR</Badge> : null}
                     <PriorityBadge priority={j.priority} />
                     <TimingBadge timing={timing} />
                     {!j.is_open ? <Badge>Closed</Badge> : null}
