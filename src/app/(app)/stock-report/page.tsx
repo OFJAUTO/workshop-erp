@@ -1,4 +1,6 @@
 import { Badge, Button, Card, Input, LinkButton, PageHeader, SectionLabel } from "@/components/ui";
+import { countsBetween } from "@/lib/stock-manage";
+import { valueWords } from "@/lib/stock-rules";
 import { requireStaff } from "@/lib/auth";
 import { refuse } from "@/lib/refusal";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -27,6 +29,8 @@ export default async function StockReportPage({ searchParams }: { searchParams: 
   const to = isDay(sp.to) ? sp.to! : day;
   const [stock, moves, snapshots, snapOn] = await Promise.all([stockAsOfDay(day), stockMovementsBetween(from, to), listStockSnapshots(), stockSnapshotsReady()]);
   const q = new URLSearchParams({ asof: day, from, to }).toString();
+  // 20 November 2026 (Section 5): the approved stock counts of the period ("OPENING COUNT <date>"), with their change in value.
+  const counts = await countsBetween(from, to);
   const inValue = moves.filter((m) => m.value > 0).reduce((a, m) => a + m.value, 0);
   const outValue = moves.filter((m) => m.value < 0).reduce((a, m) => a + m.value, 0);
   return (
@@ -65,6 +69,14 @@ export default async function StockReportPage({ searchParams }: { searchParams: 
         ) : <p className="text-sm text-muted">Nothing on the shelf on that day.</p>}
       </Card>
 
+      {counts.length ? (
+        <Card className="flex flex-col gap-2" data-stock-report-counts>
+          <SectionLabel right={`${counts.length}`}>Stock counts {formatDate(from)} – {formatDate(to)}</SectionLabel>
+          <ul className="divide-y divide-line text-sm">
+            {counts.map((c) => <li key={c.id} className="flex flex-wrap justify-between gap-2 py-2" data-stock-report-count={c.label}><span className="font-semibold">{c.label}</span><span>{c.counted} items · {c.changed} changed · {c.notFound} not found · {valueWords(c.value)}</span></li>)}
+          </ul>
+        </Card>
+      ) : null}
       <Card className="flex flex-col gap-2" data-stock-movements>
         <SectionLabel right={`${moves.length}`}>Movements {formatDate(from)} – {formatDate(to)}</SectionLabel>
         <p className="text-sm">In {aed(inValue)} · out {aed(Math.abs(outValue))}</p>

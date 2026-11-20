@@ -1,9 +1,12 @@
 import { notFound } from "next/navigation";
+import { CanViewStockSwitch } from "@/components/CanViewStockSwitch";
+import { schemaReady } from "@/lib/schema-ready";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { placeWords, roleTitleOf } from "@/lib/teams";
 import { Avatar, Badge, Button, Card, ChoiceButtons, DescriptionList, Notice, PageHeader, SectionLabel } from "@/components/ui";
 import { requirePermission } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
-import { ROLE_LABELS, type RoleId } from "@/lib/roles";
+import { ROLE_LABELS, can, type RoleId } from "@/lib/roles";
 import { createClient } from "@/lib/supabase/server";
 import type { DeviceRow, StaffPrivateRow, StaffRow } from "@/lib/types";
 import { createSetupLink, resetPin, setLoginType, setStaffActive, updateStaff, uploadStaffPhoto } from "../actions";
@@ -52,6 +55,7 @@ export default async function StaffDetailPage({
   }
 
   const isSelf = staff.id === owner.id;
+  const canViewStock = (await schemaReady("staff", "can_view_stock")) ? !!((await createAdminClient().from("staff").select("can_view_stock").eq("id", id).maybeSingle()).data as { can_view_stock?: boolean } | null)?.can_view_stock : false;
   const usesPassword = staff.login_type !== "pin";
   const usesPin = staff.login_type !== "password";
 
@@ -176,6 +180,14 @@ export default async function StaffDetailPage({
             ) : null}
             {usesPin || !priv?.pin_hash ? <PinResetForm action={resetPin.bind(null, staff.id)} /> : null}
           </Card>
+
+          {/* 20 November 2026 (Section 5): a personal view-only access to the Stock page. */}
+          {!can(staff.role_id as RoleId, "manageStock") ? (
+            <Card className="flex flex-col gap-2" data-team-stock-access>
+              <SectionLabel>Stock</SectionLabel>
+              <CanViewStockSwitch staffId={staff.id} on={canViewStock} />
+            </Card>
+          ) : null}
 
           {pkReady ? (
             <Card className="flex flex-col gap-4" id="sign-in" data-team-sign-in>

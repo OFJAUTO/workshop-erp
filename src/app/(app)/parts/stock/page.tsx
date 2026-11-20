@@ -3,7 +3,16 @@ import Link from "next/link";
 import { loadReversals, reversalsReady, reversible } from "@/lib/stock-reversals";
 import { archiveStockItemAction, askReversalAction, decideReversalAction } from "./reversal-actions";
 import { Badge, Button, Card, ChoiceButtons, Empty, Input, LinkButton, Notice, PageHeader, SectionLabel, Select } from "@/components/ui";
-import { requirePermission } from "@/lib/auth";
+import { requireStaff } from "@/lib/auth";
+import { refuse } from "@/lib/refusal";
+import { STOCK_EXTRA_SELECT, loadCategories, loadCount, openCount, stockAccessOf, stockCountsReady, stockRedesignReady } from "@/lib/stock-manage";
+import { STOCK_SORTS, filterStock, isPlaceholderStockNumber, pageOf, sortStock, stockStatusOf, stockTiles, valueWords, type StockFilter, type StockSort } from "@/lib/stock-rules";
+import { signJobFiles } from "@/lib/work-data";
+import { StockList, type StockRow } from "./StockList";
+import { StockCountForm } from "./StockCountForm";
+import { CategoriesBox, LabelsPicker } from "./StockExtras";
+import { archiveItemAction, mergeItemsAction, saveStockPhotoAction, startCountFromPage } from "./manage-actions";
+import { STOCK_UNITS as STOCK_UNIT_LIST } from "@/lib/stock-rules";
 import { formatDate, formatDayTime } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { ITEM_TYPE_LABELS, STOCK_ITEM_SELECT, isLow, toStockItem } from "@/lib/stock";
@@ -27,13 +36,16 @@ const KIND_LABEL: Record<string, string> = { in: "In", out: "Issued", count: "Co
  * turns red with Reorder; a stock order is an LPO with no job; the monthly count replaces the figures; every
  * movement is listed. Issuing to a job stays as it was (by quantity, the technician's PIN above the limit).
  */
-export default async function StockPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; count?: string; order?: string; reorder?: string; approval?: string }> }) {
-  const staff = await requirePermission("manageStock");
-  const { message, error, count, order, reorder, approval } = await searchParams;
+export default async function StockPage({ searchParams }: { searchParams: Promise<{ message?: string; error?: string; count?: string; order?: string; reorder?: string; approval?: string; q?: string; status?: string; cat?: string; brand?: string; sort?: string; dir?: string; page?: string; item?: string; view?: string }> }) {
+  const staff = await requireStaff();
+  const access = await stockAccessOf(staff);
+  if (!access.view) return refuse("no_permission");
+  const sp = await searchParams;
+  const { message, error, count, order, reorder, approval } = sp;
   const admin = createAdminClient();
   const settings = await getSettings();
   const [{ data: itemsRaw }, { data: jobs }, { data: techs }, { data: suppliers }, { data: moves }, { data: openOrders }] = await Promise.all([
-    admin.from("stock_items").select(STOCK_ITEM_SELECT).eq("is_active", true).order("name"),
+    admin.from("stock_items").select((STOCK_ITEM_SELECT + ((await stockRedesignReady()) ? STOCK_EXTRA_SELECT : "")) as typeof STOCK_ITEM_SELECT).eq("is_active", true).order("name"),
     admin.from("jobs").select("id, job_number, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("is_open", true).in("status", ["in_work", "waiting_parts", "pending_qc"]).order("job_number"),
     pickablePeople(settings, ["mechanical", "bodyshop"]).then((data) => ({ data })),
     admin.from("suppliers").select("id, name").eq("is_active", true).order("name"),
@@ -50,33 +62,66 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
   const moveJobs = (allOpen ?? []) as unknown as OpenJob[];
   const pendingReversals = reversals.filter((r) => r.status === "pending");
   const openJobs = (jobs ?? []) as unknown as OpenJob[];
-  const supplierName = new Map((suppliers ?? []).map((s) => [s.id, s.name]));
   const itemName = new Map(items.map((i) => [i.id, i.name]));
   const low = items.filter(isLow);
   const countMode = count === "1";
   const orderMode = order === "1" || !!reorder;
   const reorderItem = reorder ? items.find((i) => i.id === reorder) ?? null : null;
   const lastCount = items.map((i) => i.last_counted_at).filter((x): x is string => !!x).sort().at(-1) ?? null;
+  // 20 November 2026 (Section 5): THE stock page - four tiles, search and filters, one row per item, a side panel.
+  const manage = access.manage && !staff.viewingAs;
+  const categories = await loadCategories();
+  const catName = new Map(categories.map((c) => [c.id, c.name]));
+  const view = sp.view === "categories" || sp.view === "labels" ? sp.view : "items";
+  const statusRaw = String(sp.status ?? "all");
+  const filter: StockFilter = { q: String(sp.q ?? ""), status: (["in", "low", "out", "nomin", "placeholder"].includes(statusRaw) ? statusRaw : "all") as StockFilter["status"], category: String(sp.cat ?? ""), brand: String(sp.brand ?? "") };
+  const sortKey: StockSort = (STOCK_SORTS as readonly string[]).includes(String(sp.sort)) && (access.seesCost || sp.sort !== "cost") ? (sp.sort as StockSort) : "name";
+  const desc = sp.dir === "desc";
+  const lite = items.map((i) => ({ ...i, category_id: ((i as unknown as Record<string, unknown>).category_id as string | null) ?? null, brand: ((i as unknown as Record<string, unknown>).brand as string | null) ?? null, photo_path: ((i as unknown as Record<string, unknown>).photo_path as string | null) ?? null }));
+  const tiles = stockTiles(lite);
+  const shownAll = sortStock(filterStock(lite, filter), sortKey, desc, (id) => (id ? catName.get(id) ?? "" : ""));
+  const paged = pageOf(shownAll, Number(sp.page) || 1);
+  const photos = await signJobFiles(paged.rows.map((r) => r.photo_path).filter((x): x is string => !!x));
+  const rows: StockRow[] = paged.rows.map((i) => ({ id: i.id, name: i.name, partNumber: i.part_number, placeholder: isPlaceholderStockNumber(i.part_number), categoryId: i.category_id, categoryName: i.category_id ? catName.get(i.category_id) ?? null : null, brand: i.brand, quantity: i.quantity, unit: i.unit, minimum: i.minimum_level, reorderQty: i.reorder_quantity, status: stockStatusOf(i), itemType: i.item_type, supplierId: i.supplier_id, photoUrl: i.photo_path ? photos[i.photo_path] ?? null : null, ...(access.seesCost ? { cost: i.unit_cost } : {}) }));
+  const brands = Array.from(new Set(lite.map((i) => i.brand).filter((x): x is string => !!x))).sort();
+  const qs = (over: Record<string, string | null>) => {
+    const p = new URLSearchParams();
+    const cur: Record<string, string> = { q: filter.q, status: filter.status === "all" ? "" : filter.status, cat: filter.category, brand: filter.brand, sort: sortKey === "name" ? "" : sortKey, dir: desc ? "desc" : "", view: view === "items" ? "" : view };
+    for (const [k, v] of Object.entries({ ...cur, ...over })) if (v) p.set(k, v);
+    const s = p.toString();
+    return `/parts/stock${s ? `?${s}` : ""}`;
+  };
+  const sortHrefs = Object.fromEntries((["name", "qty", "cost", "status", "category"] as const).map((c) => [c, qs({ sort: c === "name" ? null : c, dir: sortKey === c && !desc ? "desc" : null, page: null })]));
+  const tile = (key: string, label: string, n: number, tone = "") => (
+    <a href={qs({ status: key === "all" ? null : key, page: null })} className={`flex min-h-16 flex-col justify-center rounded-card border bg-white px-4 py-3 ${filter.status === key || (key === "all" && filter.status === "all") ? "border-ink" : "border-line"}`} data-stock-tile={key}>
+      <span className="text-xs font-semibold uppercase text-muted">{label}</span>
+      <span className={`text-2xl font-extrabold ${tone}`} data-stock-tile-count>{n}</span>
+    </a>
+  );
+  // The stock count (applied only when the owner approves the batch).
+  const countsOn = await stockCountsReady();
+  const current = countsOn ? await openCount() : null;
+  const countView = !countsOn ? null : count && count !== "1" ? await loadCount(count) : current ? await loadCount(current.id) : null;
+  const countLines = countView ? new Map(countView.lines.map((l) => [l.itemId, l])) : new Map();
+  const techGroups = groupByTeam(techs ?? [], ["mechanical", "bodyshop"]).map((g) => ({ label: g.team.label, members: g.members.map((t) => ({ id: t.id, name: t.display_name })) }));
 
   return (
     <>
-      <ApprovalsHere staff={staff} highlight={approval ?? null} kinds={["stock_reversal"]} />
+      <ApprovalsHere staff={staff} highlight={approval ?? null} kinds={["stock_reversal", "stock_count"]} />
       <PageHeader
         title="Stock"
-        subtitle={`${items.length} item${items.length === 1 ? "" : "s"}${low.length ? ` · ${low.length} below minimum` : ""}${lastCount ? ` · last count ${formatDate(lastCount)}` : " · never counted"}`}
-        actions={<><LinkButton href="/parts/stock?order=1" size="lg" data-new-workshop-order>New workshop order</LinkButton><LinkButton href="/parts/stock?count=1" tone="secondary" size="lg">Monthly count</LinkButton>{["owner", "accounts"].includes(staff.role_id) ? <LinkButton href="/stock-report" tone="ghost" size="lg" data-stock-report-link>Stock report</LinkButton> : null}<LinkButton href="/parts" tone="secondary" size="lg">Parts desk</LinkButton></>}
+        subtitle={`${items.length} item${items.length === 1 ? "" : "s"}${low.length ? ` · ${low.length} low` : ""}${lastCount ? ` · last count ${formatDate(lastCount)}` : " · never counted"}${manage ? "" : " · view only"}`}
+        actions={manage ? <><LinkButton href="/parts/stock?view=items&add=1#add" size="lg" data-add-stock-open>+ Add stock item</LinkButton><LinkButton href={qs({ view: "categories" })} tone="secondary" size="lg" data-manage-categories>Manage categories</LinkButton><LinkButton href={countsOn ? `/parts/stock?count=${current?.id ?? "1"}` : "/parts/stock?count=1"} tone="secondary" size="lg" data-stock-count-open>{current ? "Continue the count" : "Stock count"}</LinkButton><LinkButton href="/parts/stock?order=1" tone="secondary" size="lg" data-new-workshop-order>New workshop order</LinkButton><LinkButton href={qs({ view: "labels" })} tone="ghost" size="lg" data-stock-labels-tab>Labels</LinkButton>{["owner", "accounts"].includes(staff.role_id) ? <LinkButton href="/stock-report" tone="ghost" size="lg">Stock report</LinkButton> : null}</> : undefined}
       />
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
-      {low.length ? <Notice tone="error">Below minimum: {low.map((i) => `${i.name} (${i.quantity} ${i.unit}, minimum ${i.minimum_level})`).join(" · ")}. Raise a stock order.</Notice> : null}
-      {(openOrders ?? []).length ? (
+      {manage && (openOrders ?? []).length ? (
         <Card className="flex flex-col gap-1" data-open-stock-orders>
           <SectionLabel right={`${(openOrders ?? []).length}`}>Stock orders on the go</SectionLabel>
-          {(openOrders ?? []).map((o) => <p key={o.id} className="text-sm flex flex-wrap items-center gap-2"><Link href={`/parts/orders/${o.id}`} className="font-semibold underline underline-offset-4">{o.number}</Link><span className="text-muted">{o.supplier_name}</span><Badge tone={o.status === "pending_approval" ? "amber" : "ink"}>{o.status === "pending_approval" ? "Waiting for approval" : o.status === "approved" ? "Approved, to send" : o.status === "ordered" ? "Ordered" : "Partly received"}</Badge><span className="ml-auto text-muted">{money(Number(o.total_cost_aed) || 0)}</span></p>)}
+          {(openOrders ?? []).map((o) => <p key={o.id} className="text-sm flex flex-wrap items-center gap-2"><Link href={`/parts/orders/${o.id}`} className="font-semibold underline underline-offset-4">{o.number}</Link><span className="text-muted">{o.supplier_name} · {o.status.replace(/_/g, " ")}</span></p>)}
         </Card>
       ) : null}
-
-      {orderMode ? (
+      {manage && orderMode ? (
         <Card className="flex flex-col gap-3 border-ink" data-stock-order-form>
           <SectionLabel>New workshop order</SectionLabel>
           <p className="text-xs text-muted">One supplier, what kind of goods, the items and quantities. It goes to the owner or the head accountant for approval like any LPO; stock parts and consumables land on the shelf at delivery with the cost averaged in; tools and equipment at or above AED {(Number(settings.fixed_asset_threshold_aed) || 2000).toLocaleString("en-GB")} are flagged for accounts as a fixed asset.</p>
@@ -110,7 +155,9 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
         </Card>
       ) : null}
 
-      {countMode ? (
+
+      {manage && countMode && !countsOn ? (
+        <>
         <Card className="flex flex-col gap-3 border-ink" data-stock-count-form>
           <SectionLabel>Monthly count</SectionLabel>
           <p className="text-xs text-muted">Type what is on the shelf for each item. The figure replaces the stock figure and the difference is written as a count. Leave an item empty to skip it.</p>
@@ -126,68 +173,99 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
             <div className="flex flex-wrap gap-2"><Button type="submit" size="lg" data-save-count>Save the count</Button><LinkButton href="/parts/stock" tone="secondary" size="lg">Cancel</LinkButton></div>
           </form>
         </Card>
+              </>
+      ) : null}
+      {manage && countsOn && (countMode || (count && count !== "1")) ? (
+        <Card className="flex flex-col gap-3 border-ink scroll-mt-4" id="count" data-stock-count>
+          <SectionLabel right={countView ? countView.status : undefined}>{countView?.label ?? "Stock count"}</SectionLabel>
+          {!countView ? (
+            <form action={startCountFromPage} className="flex flex-wrap items-center gap-2"><Button type="submit" size="lg" data-count-start>Start the count</Button><span className="text-xs text-muted">Enter item by item; save and continue another day. Nothing changes until the owner approves it.</span></form>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 text-sm" data-count-summary>
+                <span className="flex flex-col"><span className="text-xs font-semibold uppercase text-muted">Counted</span><span className="font-extrabold">{countView.diff.counted}</span></span>
+                <span className="flex flex-col"><span className="text-xs font-semibold uppercase text-muted">Change</span><span className="font-extrabold">{countView.diff.changed}</span></span>
+                <span className="flex flex-col"><span className="text-xs font-semibold uppercase text-muted">Not found</span><span className="font-extrabold">{countView.diff.notFound}</span></span>
+                <span className="flex flex-col"><span className="text-xs font-semibold uppercase text-muted">Total change</span><span className="font-extrabold" data-count-total>{valueWords(countView.diff.totalValue)}</span></span>
+              </div>
+              {countView.diff.lines.filter((l) => Math.abs(l.diff) > 0.0005).length ? (
+                <ul className="divide-y divide-line text-sm" data-count-diffs>
+                  {countView.diff.lines.filter((l) => Math.abs(l.diff) > 0.0005).map((l) => <li key={l.itemId} className="flex flex-wrap justify-between gap-2 py-1" data-count-diff={l.itemId}><span className="font-semibold uppercase">{l.name}</span><span>{l.notFound ? "not found (archived)" : `${l.systemQty} → ${l.countedQty} ${l.unit}`} · {l.diff > 0 ? "+" : ""}{l.diff} · {valueWords(l.value)}</span></li>)}
+                </ul>
+              ) : null}
+              <StockCountForm countId={countView.id} submitted={countView.status !== "draft"} lines={items.map((i) => { const c = countLines.get(i.id); return { id: i.id, name: i.name, unit: i.unit, partNumber: i.part_number, systemQty: i.quantity, counted: c && c.countedQty !== null ? String(c.countedQty) : "", notFound: !!c?.notFound }; })} />
+            </>
+          )}
+        </Card>
       ) : null}
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="xl:col-span-2 flex flex-col gap-4">
-          <Card className="flex flex-col gap-3">
-            <SectionLabel right={`${items.length}`}>Items</SectionLabel>
-            {items.length === 0 ? <Empty title="No stock items yet" /> : null}
-            <ul className="divide-y divide-line">
-              {items.map((i) => (
-                <li key={i.id} className={`py-2 flex flex-col gap-1 ${isLow(i) ? "bg-red-soft/40 -mx-2 px-2 rounded-control" : ""}`} data-stock-item={i.id} data-low={isLow(i) ? "1" : undefined}>
-                  <div className="flex flex-wrap items-center gap-3 text-sm">
-                    <span className="font-semibold">{i.name}</span>
-                    {i.item_type === "consumable" ? <Badge tone="outline">Consumable</Badge> : null}
-                    {i.part_number ? <span className="text-xs text-muted">{i.part_number}</span> : null}
-                    <span className={`font-extrabold ${isLow(i) ? "text-red" : ""}`} data-stock-qty>{i.quantity} {i.unit}</span>
-                    <span className="text-xs text-muted">minimum {i.minimum_level} · reorder {i.reorder_quantity || "–"} · avg cost {money(i.unit_cost)} · worth {money(i.quantity * i.unit_cost)}</span>
-                    {i.supplier_id ? <span className="text-xs text-muted">{supplierName.get(i.supplier_id)}</span> : null}
-                    {isLow(i) ? <Badge tone="red">Below minimum</Badge> : null}
-                    {isLow(i) ? <LinkButton href={`/parts/stock?reorder=${i.id}`} size="md" data-reorder={i.id}>Reorder</LinkButton> : null}
-                    {Math.abs(i.quantity) < 0.0005 && !staff.viewingAs ? <form action={archiveStockItemAction.bind(null, i.id)}><Button type="submit" tone="ghost" size="md" data-archive-item={i.id}>Archive</Button></form> : null}
-                  </div>
-                  <details className="text-xs">
-                    <summary className="cursor-pointer min-h-9 flex items-center font-semibold text-muted">Edit the item or adjust the figure</summary>
-                    <div className="flex flex-col gap-2 pt-1">
-                      <form action={saveStockItemDetails} className="flex flex-wrap items-end gap-2">
-                        <input type="hidden" name="id" value={i.id} />
-                        <label className="flex flex-col gap-1 flex-1 min-w-40"><span className="font-semibold text-muted">Item</span><Input name="name" defaultValue={i.name} /></label>
-                        <label className="flex flex-col gap-1"><span className="font-semibold text-muted">Part number</span><Input name="part_number" defaultValue={i.part_number ?? ""} className="w-36" textCase="upper" /></label>
-                        <label className="flex flex-col gap-1"><span className="font-semibold text-muted">Kind</span><Select name="item_type" defaultValue={i.item_type} className="w-36">{(["part", "consumable"] as const).map((t) => <option key={t} value={t}>{ITEM_TYPE_LABELS[t]}</option>)}</Select></label>
-                        <label className="flex flex-col gap-1"><span className="font-semibold text-muted">Unit</span><Input name="unit" defaultValue={i.unit} className="w-16" /></label>
-                        <label className="flex flex-col gap-1"><span className="font-semibold text-muted">Minimum</span><Input name="minimum_level" defaultValue={String(i.minimum_level)} inputMode="decimal" className="w-20" /></label>
-                        <label className="flex flex-col gap-1"><span className="font-semibold text-muted">Reorder qty</span><Input name="reorder_quantity" defaultValue={String(i.reorder_quantity)} inputMode="decimal" className="w-20" /></label>
-                        <label className="flex flex-col gap-1"><span className="font-semibold text-muted">Supplier</span><Select name="supplier_id" defaultValue={i.supplier_id ?? ""} className="w-40"><option value="">–</option>{(suppliers ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></label>
-                        <Button type="submit" tone="secondary" size="md">Save</Button>
-                      </form>
-                      <form action={adjustStock} className="flex flex-wrap items-end gap-2">
-                        <input type="hidden" name="id" value={i.id} />
-                        <label className="flex flex-col gap-1"><span className="font-semibold text-muted">Change (minus takes off)</span><Input name="delta" inputMode="decimal" placeholder="-2" className="w-24" /></label>
-                        <label className="flex flex-col gap-1 flex-1 min-w-48"><span className="font-semibold text-muted">Why</span><Input name="note" placeholder="Spilled, miscounted, …" /></label>
-                        <Button type="submit" tone="secondary" size="md">Adjust</Button>
-                      </form>
-                    </div>
-                  </details>
-                </li>
-              ))}
-            </ul>
-          </Card>
-          <Card className="flex flex-col gap-3">
-            <SectionLabel>New item</SectionLabel>
-            <form action={saveStockItemDetails} className="flex flex-wrap items-end gap-2">
-              <label className="flex flex-col gap-1 flex-1 min-w-48"><span className="text-xs font-semibold text-muted">Item</span><Input name="name" required placeholder="For example: Engine oil 5W-40, 1 L" /></label>
-              <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Part number</span><Input name="part_number" className="w-36" textCase="upper" /></label>
-              <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Kind</span><Select name="item_type" defaultValue="part" className="w-36" data-new-item-type>{(["part", "consumable"] as const).map((t) => <option key={t} value={t}>{ITEM_TYPE_LABELS[t]}</option>)}</Select></label>
-              <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Unit</span><Input name="unit" defaultValue="pc" className="w-16" /></label>
-              <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Opening qty</span><Input name="quantity" defaultValue="0" inputMode="decimal" className="w-24" /></label>
-              <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cost each</span><Input name="unit_cost" defaultValue="0" inputMode="decimal" className="w-24" /></label>
-              <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Minimum</span><Input name="minimum_level" defaultValue="0" inputMode="decimal" className="w-20" /></label>
-              <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Reorder qty</span><Input name="reorder_quantity" defaultValue="0" inputMode="decimal" className="w-20" /></label>
-              <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Supplier</span><Select name="supplier_id" defaultValue="" className="w-40"><option value="">–</option>{(suppliers ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></label>
-              <Button type="submit" size="md" data-add-stock-item>Add item</Button>
-            </form>
-          </Card>
+      {view === "categories" ? (
+        <Card className="flex flex-col gap-3" data-categories>
+          <SectionLabel right={`${categories.length}`}>Categories</SectionLabel>
+          {categories.length ? <CategoriesBox categories={categories.map((c) => ({ id: c.id, name: c.name }))} canEdit={manage && (staff.role_id === "owner" || staff.role_id === "parts")} /> : <p className="text-sm text-muted">Categories switch on once the database change is applied (WAITING FOR APPLY).</p>}
+        </Card>
+      ) : null}
+      {view === "labels" && manage ? (
+        <Card className="flex flex-col gap-3" data-labels>
+          <SectionLabel>Shelf labels</SectionLabel>
+          <LabelsPicker items={shownAll.map((i) => ({ id: i.id, name: i.name, partNumber: i.part_number }))} />
+        </Card>
+      ) : null}
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" data-stock-tiles>
+        {tile("all", "Total items", tiles.total)}
+        {tile("in", "In stock", tiles.in, "text-green-text")}
+        {tile("low", "Low stock", tiles.low, "text-amber-text")}
+        {tile("out", "Out of stock", tiles.out, "text-red")}
+      </div>
+      <Card className="flex flex-col gap-3">
+        <form action="/parts/stock" className="flex flex-wrap items-end gap-2" data-stock-filters>
+          {filter.status !== "all" ? <input type="hidden" name="status" value={filter.status} /> : null}
+          <label className="flex min-w-48 flex-1 flex-col gap-1"><span className="text-xs font-semibold text-muted">Search</span><Input name="q" defaultValue={filter.q} placeholder="Name or part number" spell={false} data-stock-search /></label>
+          <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Category</span><Select name="cat" defaultValue={filter.category} className="w-48" data-stock-filter-cat><option value="">All</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></label>
+          <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Brand</span><Select name="brand" defaultValue={filter.brand} className="w-40" data-stock-filter-brand><option value="">All</option>{brands.map((b) => <option key={b} value={b}>{b}</option>)}</Select></label>
+          <Button type="submit" size="md">Show</Button>
+          <Link href="/parts/stock" className="inline-flex min-h-11 items-center text-sm font-bold underline underline-offset-4">Clear</Link>
+        </form>
+        <div className="flex flex-wrap gap-2 text-sm" data-stock-cleanup>
+          <a href={qs({ status: "nomin", page: null })} className={`rounded-control border px-3 py-1.5 font-semibold ${filter.status === "nomin" ? "border-ink" : "border-line"}`} data-stock-filter-nomin>No minimum set ({lite.filter((i) => !(i.minimum_level > 0)).length})</a>
+          <a href={qs({ status: "placeholder", page: null })} className={`rounded-control border px-3 py-1.5 font-semibold ${filter.status === "placeholder" ? "border-ink" : "border-line"}`} data-stock-filter-placeholder>Placeholder part numbers ({lite.filter((i) => isPlaceholderStockNumber(i.part_number)).length})</a>
+        </div>
+        <span className="text-xs text-muted" data-stock-paging>{paged.words}</span>
+        {rows.length ? (
+          <StockList rows={rows} manage={manage} seesCost={access.seesCost} categories={categories.map((c) => ({ id: c.id, name: c.name }))} suppliers={(suppliers ?? []).map((s) => ({ id: s.id as string, name: s.name as string }))} jobs={openJobs.map((j) => ({ id: j.id, label: `${j.job_number} · ${j.vehicle ? formatPlate(j.vehicle) : ""}` }))} techs={techGroups} others={items.map((i) => ({ id: i.id, name: i.name }))} pinAbove={Number(settings.pin_needed_above_aed) || 0} openId={sp.item ?? null} sortHrefs={sortHrefs} issue={issueStock} adjust={adjustStock} saveItem={saveStockItemDetails} archive={archiveItemAction} merge={mergeItemsAction} photo={saveStockPhotoAction} quickArchive={archiveStockItemAction} />
+        ) : <Empty title="No stock item matches" />}
+        {paged.pages > 1 ? (
+          <div className="flex flex-wrap items-center gap-2" data-stock-pages>
+            {paged.page > 1 ? <LinkButton href={qs({ page: String(paged.page - 1) })} tone="secondary" size="md">Previous</LinkButton> : null}
+            <span className="text-sm">Page {paged.page} of {paged.pages}</span>
+            {paged.page < paged.pages ? <LinkButton href={qs({ page: String(paged.page + 1) })} tone="secondary" size="md">Next</LinkButton> : null}
+          </div>
+        ) : null}
+      </Card>
+
+      {manage ? (
+        <Card className="flex flex-col gap-3 scroll-mt-4" id="add">
+          <SectionLabel>+ Add stock item</SectionLabel>
+          <form action={saveStockItemDetails} className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1 flex-1 min-w-48"><span className="text-xs font-semibold text-muted">Item</span><Input name="name" required placeholder="For example: Engine oil 5W-40, 1 L" /></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Part number</span><Input name="part_number" className="w-36" textCase="upper" /></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Brand</span><Input name="brand" className="w-32" spell={false} /></label>
+            {categories.length ? <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Category</span><Select name="category_id" defaultValue="" className="w-48"><option value="">–</option>{categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select></label> : null}
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Kind</span><Select name="item_type" defaultValue="part" className="w-36" data-new-item-type>{(["part", "consumable"] as const).map((t) => <option key={t} value={t}>{ITEM_TYPE_LABELS[t]}</option>)}</Select></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Unit</span><Select name="unit" defaultValue="pc" className="w-24" data-new-item-unit>{STOCK_UNIT_LIST.map((u) => <option key={u} value={u}>{u}</option>)}</Select></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Opening qty</span><Input name="quantity" defaultValue="0" inputMode="decimal" className="w-24" /></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Cost each</span><Input name="unit_cost" defaultValue="0" inputMode="decimal" className="w-24" /></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Minimum</span><Input name="minimum_level" defaultValue="0" inputMode="decimal" className="w-20" /></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Reorder qty</span><Input name="reorder_quantity" defaultValue="0" inputMode="decimal" className="w-20" /></label>
+            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Supplier</span><Select name="supplier_id" defaultValue="" className="w-40"><option value="">–</option>{(suppliers ?? []).map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</Select></label>
+            <Button type="submit" size="md" data-add-stock-item>Add item</Button>
+          </form>
+        </Card>
+      ) : null}
+
+      {manage ? (
+        <div className="flex flex-col gap-4">
           {reversalsOn ? (
             <Card className={`flex flex-col gap-2 scroll-mt-4 ${pendingReversals.length ? "border-2 border-amber-bar" : ""}`} id="reversals" data-stock-reversals>
               <SectionLabel right={pendingReversals.length ? `${pendingReversals.length} waiting` : undefined}>Reversed entries</SectionLabel>
@@ -241,24 +319,7 @@ export default async function StockPage({ searchParams }: { searchParams: Promis
             </ul>
           </Card>
         </div>
-        <Card className="flex flex-col gap-3 border-ink">
-          <SectionLabel>Issue to a job (parts and consumables)</SectionLabel>
-          <form action={issueStock} className="flex flex-col gap-3">
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Item</span>
-              <Select name="stock_item" required><option value="">Choose…</option>{items.map((i) => <option key={i.id} value={i.id}>{i.name} ({i.quantity} {i.unit})</option>)}</Select>
-            </label>
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Job</span>
-              <Select name="job" required><option value="">Choose…</option>{openJobs.map((j) => <option key={j.id} value={j.id}>{j.job_number} · {j.vehicle ? formatPlate(j.vehicle) : ""}</option>)}</Select>
-            </label>
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Quantity</span><Input name="quantity" inputMode="decimal" required /></label>
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Technician</span>
-              <Select name="technician" required><option value="">Choose…</option>{groupByTeam(techs ?? [], ["mechanical", "bodyshop"]).map((g) => <optgroup key={`${g.side}-${g.team.key}`} label={g.team.label}>{g.members.map((t) => <option key={t.id} value={t.id}>{t.display_name}{t.isLeader ? " (leader)" : ""}</option>)}</optgroup>)}</Select>
-            </label>
-            <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Technician&apos;s PIN <span className="font-medium">(needed above AED {Number(settings.pin_needed_above_aed) || 0})</span></span><Input name="pin" inputMode="numeric" maxLength={4} className="max-w-32" /></label>
-            <Button type="submit" size="md">Issue</Button>
-          </form>
-        </Card>
-      </div>
+      ) : null}
     </>
   );
 }

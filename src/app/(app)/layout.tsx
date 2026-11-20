@@ -93,6 +93,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     lposPending = a.count ?? 0;
     invoicesToCheck = (b.count ?? 0) + (c.count ?? 0);
   }
+  const stockViewer = !can(role, "manageStock") && (await (await import("@/lib/stock-manage")).stockAccessOf(staff)).view;
   const partsManagementItems: (NavItem & { show: boolean })[] = [
     { href: "/parts/orders", label: "LPOs", show: can(role, "viewPurchaseOrders") && role !== "service_advisor", badge: lposPending || undefined },
     { href: "/supplier-invoices", label: "Supplier invoices", show: ["owner", "accounts", "parts"].includes(role), badge: invoicesToCheck || undefined },
@@ -131,7 +132,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { href: "/jobs", label: "Jobs", show: can(role, "viewJobs") && role !== "accounts" },
     { href: "/parts", label: "Parts", show: can(role, "priceParts"), badge: role === "parts" ? partsPending : undefined },
     { ...partsManagement, show: partsManagement.items.length > 0 },
-    { href: "/parts/stock", label: "Stock", show: can(role, "manageStock") },
+    // 20 November 2026 (Section 5): also for a person with the personal "Can view stock" switch (view only).
+    { href: "/parts/stock", label: "Stock", show: can(role, "manageStock") || stockViewer },
     { href: "/labels", label: "Labels", show: can(role, "printStickers") },
     { href: "/qc", label: "Cars for QC", show: can(role, "doQc") },
     { href: "/wash", label: "Car wash", show: can(role, "washCars") },

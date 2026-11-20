@@ -12,6 +12,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSettings } from "@/lib/settings";
 import { LINE_TEXT_MAX, tooLongWords } from "@/lib/text-limits";
 import { partNumberProblem, realPartNumber } from "@/lib/parts-rows";
+import { cleanStockUnit, STOCK_UNITS } from "@/lib/stock-rules";
+import { stockRedesignReady } from "@/lib/stock-manage";
 
 const enc = encodeURIComponent;
 const back = (msg: { error?: string; message?: string }, extra = "") => redirect(`/parts/stock${extra}${extra ? "&" : "?"}${msg.error ? `error=${enc(msg.error)}` : `message=${enc(msg.message ?? "Done.")}`}`);
@@ -31,7 +33,11 @@ export async function saveStockItemDetails(formData: FormData) {
   const num = (k: string) => Number(String(formData.get(k) ?? "0").replace(",", ".")) || 0;
   const pnProblem = partNumberProblem(String(formData.get("part_number") ?? ""));
   if (pnProblem) back({ error: pnProblem });
-  const row = { item_type: formData.get("item_type") === "consumable" ? "consumable" : "part", name: name!.slice(0, 120), unit: (blankToNull(formData.get("unit")) ?? "pc").slice(0, 20), part_number: realPartNumber(blankToNull(formData.get("part_number"))?.slice(0, 60) ?? null), minimum_level: Math.max(0, num("minimum_level")), reorder_quantity: Math.max(0, num("reorder_quantity")), supplier_id: blankToNull(formData.get("supplier_id")), updated_by: staff.id };
+  // 20 November 2026 (Section 5): one unit per item from the fixed list; the category and the brand.
+  const unit = cleanStockUnit(String(formData.get("unit") ?? ""));
+  if (!unit) back({ error: `Pick the unit from the list: ${STOCK_UNITS.join(", ")}.` });
+  const extra = (await stockRedesignReady()) ? { ...(formData.has("category_id") ? { category_id: blankToNull(formData.get("category_id")) } : {}), ...(formData.has("brand") ? { brand: blankToNull(formData.get("brand"))?.toUpperCase().slice(0, 60) ?? null } : {}) } : {};
+  const row = { ...extra, item_type: formData.get("item_type") === "consumable" ? "consumable" : "part", name: name!.slice(0, 120), unit: unit!, part_number: realPartNumber(blankToNull(formData.get("part_number"))?.slice(0, 60) ?? null), minimum_level: Math.max(0, num("minimum_level")), reorder_quantity: Math.max(0, num("reorder_quantity")), supplier_id: blankToNull(formData.get("supplier_id")), updated_by: staff.id };
   const admin = createAdminClient();
   if (id) {
     const { error } = await admin.from("stock_items").update(row).eq("id", id);

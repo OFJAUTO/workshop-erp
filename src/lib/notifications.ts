@@ -22,6 +22,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "supplier_invoice_mismatch", label: "A supplier invoice price differs from the LPO (accounts)", locked: true },
   { type: "supplier_invoice_missing", label: "A supplier invoice is still missing (accounts, daily)", locked: true },
   { type: "arrival_overdue", label: "A booked car has not arrived at its booked time (the advisor)", locked: true },
+  { type: "stock_count", label: "A stock count waits for the owner's approval", locked: true },
   { type: "return_advance", label: "A returned, paid part stays with the supplier as an advance: confirm the amount (accounts)", locked: true },
   { type: "supplier_invoice_received", label: "A supplier invoice arrived with the parts: check it (accounts)", locked: true },
   { type: "task_overdue", label: "A red task waited over 30 minutes (one bell)", locked: true },

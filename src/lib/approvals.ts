@@ -10,7 +10,7 @@ import { schemaReady } from "@/lib/schema-ready";
  * Approve and Refuse go through ONE dispatcher (src/app/(app)/approvals/actions.ts) to each kind's own decision, so
  * the rules of each decision stay where they are.
  */
-export const APPROVAL_KINDS = ["quote", "revision", "commission", "lpo", "discount", "fee", "price", "free_charge", "inspection_change", "stock_reversal", "comeback", "overpayment", "void", "lathe_void", "inspection_type", "part_change", "back_order", "early_tax"] as const;
+export const APPROVAL_KINDS = ["quote", "revision", "commission", "lpo", "discount", "fee", "price", "free_charge", "inspection_change", "stock_reversal", "comeback", "overpayment", "void", "lathe_void", "inspection_type", "part_change", "back_order", "early_tax", "stock_count"] as const;
 export type ApprovalKind = (typeof APPROVAL_KINDS)[number];
 
 export const KIND_WORDS: Record<ApprovalKind, string> = {
@@ -32,6 +32,7 @@ export const KIND_WORDS: Record<ApprovalKind, string> = {
   part_change: "Part supplier or price change",
   back_order: "Back order - fit on a later visit",
   early_tax: "Tax invoice before the cheque clears",
+  stock_count: "Stock count",
 };
 
 export type ApprovalItem = {
@@ -222,6 +223,13 @@ export async function loadApprovals(scope: Scope = {}): Promise<ApprovalItem[]> 
     const { missingTaxInvoices } = await import("./tax-invoice-due");
     for (const m of (await missingTaxInvoices(scope.jobId ? { jobIds: [scope.jobId] } : {}).catch(() => [])).filter((x) => x.asked)) {
       push({ kind: "early_tax", id: m.jobId, title: `Tax invoice before the cheque clears · ${m.jobNumber} · ${m.plate}`, what: `${m.proforma.number}${m.customer ? ` · ${m.customer}` : ""}: ${m.asked!.note}. ${m.due.words}.`, askedBy: m.asked!.by, askedAt: m.asked!.at, money: aed(m.proforma.total), href: `/jobs/${m.jobId}/invoice#tax-due`, jobId: m.jobId, quotationId: null, poId: null, approveLabel: "Issue the tax invoice now", refuseLabel: "Wait for the cheque to clear" });
+    }
+  }
+  // 20 November 2026 (Section 5): a stock count is applied only when the owner approves the batch.
+  if (!scope.jobId && !scope.quotationId && !scope.poId) {
+    const { countApprovals } = await import("./stock-manage");
+    for (const c of await countApprovals().catch(() => [])) {
+      push({ kind: "stock_count", id: c.id, title: `Stock count · ${c.label}`, what: c.words, askedBy: c.submittedBy, askedAt: c.submittedAt, money: `${c.value < 0 ? "− " : c.value > 0 ? "+ " : ""}${aed(Math.abs(c.value))}`, href: `/parts/stock?count=${c.id}`, jobId: null, quotationId: null, poId: null, approveLabel: "Approve the count", refuseLabel: "Refuse" });
     }
   }
   for (const extra of await moreApprovals(scope)) out.push(extra);

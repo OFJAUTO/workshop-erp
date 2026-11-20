@@ -235,6 +235,7 @@
     "test:s20-2": "node --env-file=.env.test.local tests/browser/test-s20-2-loose-jobs.mjs",
     "test:s20-3": "node --env-file=.env.test.local tests/browser/test-s20-3-rounding.mjs",
     "test:s20-4": "node --env-file=.env.test.local tests/browser/test-s20-4-provisional.mjs",
+    "test:s20-5": "node --env-file=.env.test.local tests/browser/test-s20-5-stock.mjs",
     "test:s19-5": "node --env-file=.env.test.local tests/browser/test-s19-5-add-part.mjs"
   },
   "dependencies": {

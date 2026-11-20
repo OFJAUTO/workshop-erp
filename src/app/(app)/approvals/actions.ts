@@ -187,6 +187,12 @@ async function decideCore(kind: ApprovalKind, id: string, decision: "approve" | 
       answer = await decideEarlyTax(id, yes, note, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id }, await getSettings());
       break;
     }
+    case "stock_count": {
+      // 20 November 2026 (Section 5): the stock count, one batch.
+      const { decideCount } = await import("@/lib/stock-manage");
+      answer = await decideCount(id, yes, note, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+      break;
+    }
     default:
       answer = await runMoreDecision(kind, id, yes, note, staff);
   }
