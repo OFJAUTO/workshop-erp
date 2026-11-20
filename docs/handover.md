@@ -1,6 +1,6 @@
-# Handover – list of 20 November 2026 (ALL FIVE SECTIONS LIVE; last update 20 Nov, 19:30 Dubai)
+# Handover – list of 20 November 2026 (ALL DONE AND APPLIED 21 Nov night; nothing waiting)
 
-**WAITING FOR APPLY (reply "apply" from your phone; I back up, run, record and check):** #1 return endings (`20261220090000`), #2 supplier rounding (`20261220100000`), #3 stock redesign (`20261220110000`). Backup `backups/2026-11-20T10-41-54`.
+**WAITING FOR APPLY:** nothing. The three changes were applied on 21 Nov (backup `backups/2026-11-20T20-24-40`), check:live 33/33.
 
 **NEEDS OMAR:**
 1. Reply "apply". Then Mathew corrects LPO-00103-1 (BLEEDING SCREW): Correct how this return was settled → RETURNED BEFORE INVOICING → reason → Save.

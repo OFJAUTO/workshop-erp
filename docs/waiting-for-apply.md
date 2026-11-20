@@ -11,13 +11,18 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
-**From your phone:** open Claude, reply **"apply"** (auto mode off). I take a fresh backup, run each file below in order, record it and run the read-only live check. Nothing else is needed from you.
+Nothing is waiting.
+
+## Applied on 21 November 2026, night
+
+The owner replied "apply". A fresh backup was taken first: `backups/2026-11-20T20-24-40` (137 tables, 312,425 rows). The three files were run with `scripts/db-sql.mjs` in order without an error and recorded with `scripts/db-record-migration.mjs`. Checked on live: the 23 new columns exist, 10 stock categories are seeded, `stock_categories`, `stock_counts` and `stock_count_lines` have RLS on and no grants to anon or the login role, the rounding limit is AED 1.00. `npm run check:live`: 33 passed, 0 failed.
 
 | # | What | What it does on live | Size |
 |---|---|---|---|
 | 1 | `supabase/migrations/20261220090000_return_endings.sql` (20 Nov, Section 1: every way a purchase return ends; backup `backups/2026-11-20T10-41-54`, 137 tables, 311,210 rows) | Adds nine columns to `part_items` (how the return ended, the advance asked and confirmed, the correction history), lets an LPO's invoice state be "not expected", and lets a purchase return close as an advance or "returned before invoicing". **Already live without it:** a part returned with no supplier invoice no longer asks for a credit note and no longer queues a Zoho supplier credit; a credit note is refused when there is no invoice. **Switched on by the apply:** the "How did this return end?" box on the LPO (Returned before invoicing, advance, exchange, refund, credit note), "Correct how this return was settled" with the history, and "No invoice expected" instead of "Invoice missing". | 9 columns + 2 rules |
 | 2 | `supabase/migrations/20261220100000_supplier_rounding.sql` (20 Nov, Section 3: rounding on supplier payments; backup `backups/2026-11-20T10-41-54`) | Adds five columns to `supplier_payment_lines` (the part written off as rounding or a supplier discount, why, who, when), one to `supplier_payments` (the Zoho write-off ids), one to `purchase_orders` (the rounding line printed on the supplier invoice), and the setting `supplier_rounding_limit_aed` (AED 1.00). **Already live without it:** the pay box asks what a short payment is (STILL OWED works now), the invoice dated before its LPO is flagged, the edit panel works out its total, one true statement on invoice coverage. **Switched on by the apply:** ROUNDING and DISCOUNT FROM THE SUPPLIER closing the invoice, Correct this payment closing what is left, Rounding on the invoice, the Zoho write-off. | 7 columns + 1 setting |
 | 3 | `supabase/migrations/20261220110000_stock_redesign.sql` (20 Nov, Section 5: stock page redesign, view access, the stock count; backup `backups/2026-11-20T10-41-54`) | Adds three server-only tables (`stock_categories` with the ten starting categories, `stock_counts`, `stock_count_lines`; RLS on, no grants to logins, audit + no-delete triggers), seven columns on `stock_items` (category, brand, photo, archived when/by/why, merged into) and `staff.can_view_stock`. **Already live without it:** the new stock page (tiles, search, filters, sorting, paging, the side panel, units from the list, placeholder part numbers, no-minimum list, shelf labels). **Switched on by the apply:** categories, brand and photo, Merge, the Can view stock switch, and the stock count that the owner approves in the approval box. | 3 tables + 8 columns |
+
 
 ## Applied on 17 November 2026, afternoon
 
