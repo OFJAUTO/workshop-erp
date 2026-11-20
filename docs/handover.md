@@ -1,15 +1,20 @@
-# Handover – list of 20 November 2026 (IN PROGRESS: sections 1–4 live, section 5 being built; last update 20 Nov, 16:00 Dubai)
+# Handover – list of 20 November 2026 (ALL FIVE SECTIONS LIVE; last update 20 Nov, 19:30 Dubai)
 
-**WAITING FOR APPLY (reply "apply" from your phone; I back up, run, record and check):** #1 return endings (`20261220090000`), #2 supplier rounding (`20261220100000`). Backup `backups/2026-11-20T10-41-54`.
+**WAITING FOR APPLY (reply "apply" from your phone; I back up, run, record and check):** #1 return endings (`20261220090000`), #2 supplier rounding (`20261220100000`), #3 stock redesign (`20261220110000`). Backup `backups/2026-11-20T10-41-54`.
 
-**NEEDS OMAR so far:**
-1. Reply "apply". Then Mathew corrects LPO-00103-1 (BLEEDING SCREW): **Correct how this return was settled** → RETURNED BEFORE INVOICING → reason → Save.
-2. J-01034: the advisor opens the job card → **START THE JOB – LOOSE ITEMS** → the quotation from E-00102 opens → **Nothing to receive** on the job card → parts, invoice and payment, Gate out.
-3. After "apply": Mathew records AED 243.50 on LPO-00111-2 and picks **ROUNDING**. With the accountant, check the two new Zoho mapping accounts (Rounding Off, Discount Received).
+**NEEDS OMAR:**
+1. Reply "apply". Then Mathew corrects LPO-00103-1 (BLEEDING SCREW): Correct how this return was settled → RETURNED BEFORE INVOICING → reason → Save.
+2. J-01034: the advisor opens the job card → START THE JOB – LOOSE ITEMS → the quotation from E-00102 opens → Nothing to receive → parts, invoice and payment, Gate out.
+3. After "apply": Mathew records AED 243.50 on LPO-00111-2 → ROUNDING. With the accountant, check the two new Zoho mapping accounts (Rounding Off, Discount Received).
+4. After "apply": approve the opening stock count in Approvals when the parts desk sends it.
+5. Tell me if Deepak should also be able to issue stock (today: view only; Team → Deepak → Stock → Can view stock).
+6. Advisors convert their OFJ Additional parts: Q-00001 v1 (J-00016, 31 parts), Q-00030 (J-00609), Q-00039 (J-00969).
 
-**Live:** S1 return endings (48663372), S2 loose-items jobs and the JOB CARD button (fe006ef6), S3 supplier rounding (307e1d2e), S4 provisional parts (9760fe95).
+**Live:** S1 return endings (48663372), S2 loose-items jobs + JOB CARD (fe006ef6), S3 supplier rounding (307e1d2e), S4 provisional parts (9760fe95), S5 stock page (6ea8257a).
 
-**Note:** the PC lost IPv6 today, so the database scripts now use the Supabase pooler when `SUPABASE_POOLER_HOST` is set (added to `.env.local` and `.env.test.local`; no secret).
+**End of batch:** unit all pass; security all pass; full layout 178 pages / 1,602 views clean; pop-ups 258 all fit; check:live 33/33; simulation 713 of 713.
+
+**Note:** this PC lost IPv6 today; the database scripts use the Supabase pooler when SUPABASE_POOLER_HOST is set (in .env.local and .env.test.local; not a secret). test-p's stock steps are written for the old stock layout.
 
 ---
 

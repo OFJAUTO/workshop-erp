@@ -10,6 +10,15 @@
 import fs, { mkdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+
+/** 20 November 2026 (Section 3): a payment that pays an invoice short asks what the difference is; the sim's part payments are STILL OWED. */
+async function answerShort(box) {
+  const short = box.locator("[data-supplier-pay-short]");
+  if (!(await short.count())) return;
+  await short.locator('[data-pay-diff="owed"] input').evaluate((el) => el.click()).catch(() => null);
+  const why = short.locator("[data-pay-diff-reason]");
+  if (await why.count()) await why.fill("The rest is paid later").catch(() => null);
+}
 import { MANAGER_MECH, api, base, browserFor, browserForId, cleanupDb, cookieHeader, freeTech, go, makeChecks, setPin, settle, sleep, sql, submitted, pickPerson, sendLpo, confirmMoney, pressRecord, typeReceiptNumber, confirmCheck, confirmCheckIfShown } from "./pw-lib.mjs";
 
 const { check, summary } = makeChecks();
@@ -2016,6 +2025,7 @@ await section("r", "supplier payments: exact, less, advance, fee, two invoices, 
     await box.locator(`input[name="method"][value="${method ?? "transfer"}"]`).evaluate((el) => el.click()).catch(() => null);
     if (await box.locator('input[name="excess_kind"]').count()) await box.locator(`input[name="excess_kind"][value="${fee ? "fee" : "advance"}"]`).evaluate((el) => el.click());
     await sleep(500);
+    await answerShort(box);
     await box.locator("[data-supplier-pay-save]").click();
     await page.locator("[data-confirm-yes-money]").click({ timeout: 8000 });
     const ok = await until(async () => Number((await sql("select count(*)::int as n from public.supplier_payments where supplier_id = $1", [sup.id]))[0].n) > before, 60, 500);
@@ -3226,6 +3236,7 @@ await section("sec8", "outsourced lathe work", async () => {
       const box = acc.page.locator("[data-sp-pay-card] [data-supplier-pay-box]");
       await box.locator(`[data-supplier-pay-invoice="lathe:${bill?.id}"]`).waitFor({ timeout: 20000 });
       await box.locator('input[name="method"][value="transfer"]').evaluate((el) => el.click()).catch(() => null);
+      await answerShort(box);
       await box.locator("[data-supplier-pay-save]").click();
       await acc.page.locator("[data-confirm-yes-money]").click({ timeout: 8000 });
     } else {
@@ -4125,6 +4136,7 @@ await section("e3", "apply supplier advance without a new payment", async () => 
   check(`a2: Left on this advance: AED 570.94 (${leftWords})`, left === "570.94" && /Left on this advance: AED 570\.94/.test(leftWords));
   check("a2: no Amount paid and no How it was paid when the advance covers everything", (await box.locator("[data-supplier-pay-amount]").count()) === 0 && (await box.locator("[data-pay-method]").count()) === 0 && (await box.locator("[data-supplier-pay-covered]").count()) === 1);
   await ap.screenshot({ path: `${proof}/e3-apply-advance-1440.png` }).catch(() => null);
+  await answerShort(box);
   await box.locator("[data-supplier-pay-save]").click();
   await ap.locator("[data-confirm-yes-money]").click({ timeout: 8000 });
   const line = await until(async () => (await sql("select id, amount_aed::float8 as a from public.supplier_payment_lines where payment_id = $1 and po_id = $2 and is_active and applied_later", [adv, po]))[0], 60, 500);
