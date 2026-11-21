@@ -7,9 +7,26 @@ import { MoneyDate } from "@/components/MoneyDate";
 import { ProofFileInput } from "@/components/ProofFileInput";
 import { ChoiceButtons, Input, controlClass } from "@/components/ui";
 import { JV_PAID_BY, JV_TYPES, jvTypeLabel, type JvType } from "@/lib/jv-rules";
-import { manualJvAction, payJvAction, payLaterJvAction, recordJvAction, reimburseJvAction, voidJvAction, type JvState } from "./actions";
+import { askReceiptAction, manualJvAction, payJvAction, payLaterJvAction, recordJvAction, reimburseJvAction, voidJvAction, type JvState } from "./actions";
+import { ProviderPicker, type ProviderOption } from "@/components/ProviderPicker";
+import { cleanTrn, vatCheckWords } from "@/lib/charge-edit-rules";
 
-export type ToRecordView = { id: string; jobId: string | null; jobNumber: string | null; car: string | null; type: JvType; description: string; provider: string | null; amount: number; vat: number; trn: string | null; date: string; enteredBy: string | null; receiptUrl: string | null };
+type Bill = { supplierId: string | null; name: string; trn: string; invoiceNumber: string; invoiceDate: string };
+
+/** "Ask <advisor> for the receipt" on a row with no receipt photo (21 November 2026): the answer shows on the row. */
+function AskReceipt({ id, who, askedAt }: { id: string; who: string | null; askedAt: string | null }) {
+  const [state, action] = useActionState<JvState, FormData>(askReceiptAction.bind(null, id), null);
+  return (
+    <form action={action} className="flex flex-wrap items-center gap-2" data-jv-ask-receipt={id}>
+      <button type="submit" className="inline-flex min-h-11 items-center rounded-control border border-line-strong px-3 text-xs font-bold" data-jv-ask-receipt-send>Ask {who ?? "the advisor"} for the receipt</button>
+      {askedAt && !state ? <span className="text-xs text-muted" data-jv-receipt-asked>asked {new Date(askedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}</span> : null}
+      {state?.ok ? <span className="text-xs font-semibold text-green-text" data-jv-ask-done>{state.message}</span> : null}
+      {state?.error ? <span className="text-xs font-semibold text-red" data-jv-ask-error>{state.error}</span> : null}
+    </form>
+  );
+}
+
+export type ToRecordView = { id: string; jobId: string | null; jobNumber: string | null; car: string | null; type: JvType; description: string; provider: string | null; amount: number; vat: number; trn: string | null; date: string; enteredBy: string | null; receiptUrl: string | null; supplierId: string | null; enteredById: string | null; receiptAskedAt: string | null };
 type Staff = { id: string; name: string };
 
 const fmt = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -46,15 +63,27 @@ function PaidBy({ staff }: { staff: Staff[] }) {
 }
 
 /** TO RECORD: tick the charges, check each amount against the receipt, then Record (paid) or Pay later. */
-export function ToRecordList({ rows, staff }: { rows: ToRecordView[]; staff: Staff[] }) {
+export function ToRecordList({ rows, staff, providers = [] }: { rows: ToRecordView[]; staff: Staff[]; providers?: ProviderOption[] }) {
   const [ticked, setTicked] = useState<Set<string>>(new Set());
   const [amounts, setAmounts] = useState<Record<string, { amount: string; vat: string }>>({});
+  // 21 November 2026 (Section 2): each ticked charge's own provider and invoice (all optional).
+  const [bills, setBills] = useState<Record<string, Bill>>({});
+  const [copies, setCopies] = useState(0);
+  const billOf = (r: ToRecordView): Bill => bills[r.id] ?? { supplierId: r.supplierId, name: r.provider ?? "", trn: r.trn ?? "", invoiceNumber: "", invoiceDate: "" };
+  const setBill = (id: string, b: Bill) => setBills((x) => ({ ...x, [id]: b }));
   const [today] = useState(todayIso);
   const [rec, recAction] = useActionState<JvState, FormData>(recordJvAction, null);
   const [later, laterAction] = useActionState<JvState, FormData>(payLaterJvAction, null);
   const val = (r: ToRecordView) => amounts[r.id] ?? { amount: r.amount.toFixed(2), vat: r.vat.toFixed(2) };
   const picked = rows.filter((r) => ticked.has(r.id));
-  const lines = JSON.stringify(picked.map((r) => ({ id: r.id, amount: val(r).amount, vat: val(r).vat })));
+  const lines = JSON.stringify(picked.map((r) => { const b = billOf(r); return { id: r.id, amount: val(r).amount, vat: val(r).vat, bill: { supplierId: b.supplierId, newProvider: b.supplierId ? null : b.name || null, trn: b.trn || null, invoiceNumber: b.invoiceNumber || null, invoiceDate: b.invoiceDate || null } }; }));
+  const sameForAll = () => {
+    const first = picked[0];
+    if (!first) return;
+    const b = billOf(first);
+    setBills((x) => { const n = { ...x }; for (const r of picked) n[r.id] = { ...b }; return n; });
+    setCopies((c) => c + 1);
+  };
   const total = useMemo(() => picked.reduce((a, r) => a + numOf(val(r).amount) + numOf(val(r).vat), 0), [picked, amounts]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!rows.length) return <p className="text-sm text-muted" data-jv-nothing>Nothing to record: every charge cost entered on a job is on a voucher.</p>;
   return (
@@ -70,15 +99,50 @@ export function ToRecordList({ rows, staff }: { rows: ToRecordView[]; staff: Sta
             {r.jobId ? <Link href={`/jobs/${r.jobId}`} className="font-semibold underline underline-offset-4">{r.jobNumber}{r.car ? ` · ${r.car}` : ""}</Link> : null}
             {r.enteredBy ? <span className="text-xs text-muted">entered by {r.enteredBy}</span> : null}
             {r.receiptUrl ? <a href={r.receiptUrl} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4" data-jv-receipt>Receipt</a> : <span className="text-xs font-semibold text-amber-text" data-jv-no-receipt>No receipt photo</span>}
+            {!r.receiptUrl && r.enteredById ? <AskReceipt id={r.id} who={r.enteredBy} askedAt={r.receiptAskedAt} /> : null}
             <span className="ml-auto flex items-center gap-1.5">
               <label className="flex items-center gap-1 text-xs text-muted">AED <input value={val(r).amount} onChange={(e) => setAmounts({ ...amounts, [r.id]: { ...val(r), amount: e.target.value.replace(/[^0-9.,]/g, "") } })} inputMode="decimal" aria-label={`Amount for ${r.description}`} className="h-11 rounded-control border border-line-strong px-2 text-right text-sm" style={{ width: "6.5rem" }} data-jv-amount={r.id} data-spell="" /></label>
               <label className="flex items-center gap-1 text-xs text-muted">VAT <input value={val(r).vat} onChange={(e) => setAmounts({ ...amounts, [r.id]: { ...val(r), vat: e.target.value.replace(/[^0-9.,]/g, "") } })} inputMode="decimal" aria-label={`VAT for ${r.description}`} className="h-11 rounded-control border border-line-strong px-2 text-right text-sm" style={{ width: "5rem" }} data-jv-vat={r.id} data-spell="" /></label>
             </span>
             {numOf(val(r).amount) !== r.amount ? <span className="basis-full text-xs font-semibold text-amber-text" data-jv-corrected={r.id}>Cost corrected from the receipt: {fmt(r.amount)} → {fmt(numOf(val(r).amount))} (the job&apos;s cost follows when it is recorded)</span> : null}
+            {ticked.has(r.id) ? (() => {
+              const b = billOf(r);
+              const vat = numOf(val(r).vat);
+              const vatWarn = vatCheckWords(numOf(val(r).amount), vat);
+              const noTrn = vat > 0 && !cleanTrn(b.trn);
+              return (
+                <div className="basis-full flex flex-col gap-2 rounded-control border border-line bg-white p-3" data-jv-bill={r.id}>
+                  <span className="text-xs font-bold uppercase tracking-[0.06em] text-muted">Provider and invoice for this charge (optional)</span>
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                    <ProviderPicker key={`${r.id}-${copies}`} providers={providers} initial={{ id: b.supplierId, name: b.name, trn: b.trn }} prefix={`bill_${r.id}_`} label="Provider name" hook={`jv-${r.id}`} onPick={(p) => setBill(r.id, { ...billOf(r), supplierId: p.id, name: p.name, trn: p.trn })} />
+                    <div className="flex flex-col gap-2">
+                      <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Invoice number<input value={b.invoiceNumber} onChange={(e) => setBill(r.id, { ...b, invoiceNumber: e.target.value })} className={controlClass} spellCheck={false} data-jv-bill-number={r.id} /></label>
+                      <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Invoice date<input type="date" value={b.invoiceDate} max={today} onChange={(e) => setBill(r.id, { ...b, invoiceDate: e.target.value })} className={controlClass} data-jv-bill-date={r.id} /></label>
+                    </div>
+                  </div>
+                  {noTrn ? (
+                    <span className="flex flex-wrap items-center gap-2 text-xs font-semibold text-red" data-jv-vat-no-trn={r.id}>
+                      VAT can be reclaimed only on a tax invoice with the provider&apos;s TRN. Add the TRN, or
+                      <button type="button" className="min-h-11 rounded-control border border-red px-3 font-bold" onClick={() => setAmounts({ ...amounts, [r.id]: { amount: (numOf(val(r).amount) + vat).toFixed(2), vat: "0.00" } })} data-jv-vat-fold={r.id}>record it with no VAT ({fmt(numOf(val(r).amount) + vat)})</button>
+                    </span>
+                  ) : null}
+                  {vatWarn && !noTrn ? (
+                    <span className="flex flex-wrap items-center gap-2 text-xs font-semibold text-amber-text" data-jv-vat-warning={r.id}>
+                      {vatWarn}
+                      <button type="button" className="min-h-11 rounded-control border border-amber-bar px-3 font-bold" onClick={() => setAmounts({ ...amounts, [r.id]: { ...val(r), vat: (Math.round(numOf(val(r).amount) * 5) / 100).toFixed(2) } })} data-jv-vat-fix={r.id}>Use 5% ({fmt(Math.round(numOf(val(r).amount) * 5) / 100)})</button>
+                    </span>
+                  ) : null}
+                  {!r.receiptUrl ? <span className="text-xs font-semibold text-amber-text">No receipt: it can still be recorded; the voucher is tagged &quot;No receipt&quot;.</span> : null}
+                </div>
+              );
+            })() : null}
           </li>
         ))}
       </ul>
-      <p className="text-sm font-semibold" data-jv-ticked>{picked.length} ticked · AED {fmt(total)} with VAT</p>
+      <p className="flex flex-wrap items-center gap-3 text-sm font-semibold" data-jv-ticked>
+        {picked.length} ticked · AED {fmt(total)} with VAT
+        {picked.length > 1 ? <button type="button" onClick={sameForAll} className="min-h-11 rounded-control border border-line-strong px-3 text-xs font-bold" data-jv-same-invoice>Same invoice for all ticked (copy from {picked[0].description.slice(0, 30)})</button> : null}
+      </p>
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <form action={recAction} className="flex flex-col gap-3 rounded-control border-2 border-ink p-3" data-jv-record-form>
           <span className="text-sm font-extrabold uppercase tracking-[0.06em]">Record as paid</span>
@@ -95,13 +159,12 @@ export function ToRecordList({ rows, staff }: { rows: ToRecordView[]; staff: Sta
           <span className="text-sm font-extrabold uppercase tracking-[0.06em]">Pay later (the provider bills monthly)</span>
           <p className="text-xs text-muted">Every ticked charge on the provider&apos;s ONE invoice: one voucher, paid later from the &quot;Pay later&quot; list.</p>
           <input type="hidden" name="lines" value={lines} />
-          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Provider<Input name="provider" required textCase="upper" defaultValue={picked[0]?.provider ?? ""} key={picked[0]?.id ?? "none"} data-jv-later-provider /></label>
+          <ProviderPicker key={picked[0]?.id ?? "none"} providers={providers} initial={picked[0] ? { id: picked[0].supplierId, name: picked[0].provider, trn: picked[0].trn } : null} label="Provider" hook="jv-later" />
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Invoice number<Input name="invoice_number" required spell={false} data-jv-later-number /></label>
             <MoneyDate name="invoice_date" label="Invoice date" max={today} hook="data-jv-later-date" />
           </div>
-          <label className="flex flex-col gap-1 text-xs font-semibold text-muted">Provider TRN (optional)<Input name="trn" spell={false} inputMode="numeric" /></label>
-          <ConfirmSubmit label="Keep as pay later" title={`Keep ${picked.length} charge${picked.length === 1 ? "" : "s"} as one unpaid invoice?`} lines={[`AED ${fmt(total)} with VAT`]} live={[{ label: "provider", field: "provider" }, { label: "invoice", field: "invoice_number" }]} confirmLabel="YES, KEEP IT" cancelLabel="GO BACK AND EDIT" tone="secondary" disabled={!picked.length} hook="jv-later" />
+          <ConfirmSubmit label="Keep as pay later" title={`Keep ${picked.length} charge${picked.length === 1 ? "" : "s"} as one unpaid invoice?`} lines={[`AED ${fmt(total)} with VAT`]} live={[{ label: "invoice", field: "invoice_number" }]} confirmLabel="YES, KEEP IT" cancelLabel="GO BACK AND EDIT" tone="secondary" disabled={!picked.length} hook="jv-later" />
           <Answer state={later} hook="later" />
         </form>
       </div>

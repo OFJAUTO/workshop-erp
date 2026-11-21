@@ -2549,7 +2549,7 @@ async function expenseByReference(org: string, reference: string): Promise<ZohoE
   return found ? await zohoExpenseById(org, found.expense_id) : null;
 }
 
-async function createExpense(org: string, input: { accountId: string; paidThroughId: string; date: string; amount: number; reference: string; description: string; lines?: ExpenseLine[]; expectTotal?: number }): Promise<ZohoExpense> {
+async function createExpense(org: string, input: { accountId: string; paidThroughId: string; date: string; amount: number; reference: string; description: string; lines?: ExpenseLine[]; expectTotal?: number; /** 21 November 2026: the provider (a Zoho vendor) the reclaimable VAT is booked against. */ vendorId?: string | null }): Promise<ZohoExpense> {
   const existing = await expenseByReference(org, input.reference);
   if (existing) {
     if (!near(existing.total, input.expectTotal ?? input.amount)) throw new ZohoError(`An expense with the reference ${input.reference} already exists in Zoho with a different amount (${existing.total.toFixed(2)} there, ${input.amount.toFixed(2)} here): the accountant checks it in Zoho.`);
@@ -2565,6 +2565,7 @@ async function createExpense(org: string, input: { accountId: string; paidThroug
       amount: input.amount,
       reference_number: cut(input.reference, 100),
       description: cut(input.description, 100),
+      ...(input.vendorId ? { vendor_id: input.vendorId } : {}),
       // Itemised (a settlement's MSF and fee per payment, each with the 5% tax that books the input VAT).
       // A UAE taxed expense needs its tax treatment and place of supply: the bank (Network International) is VAT
       // registered and the service is supplied in Dubai, as on our own invoices.
@@ -2648,6 +2649,10 @@ async function syncJvRow(org: string, accounts: Resolved, voucherId: string): Pr
   const jobWords = ((jobs ?? []) as { job_number: string }[]).map((j) => j.job_number).join(", ");
   const account = accounts.jv[v.expense_type] ?? accounts.jv.other;
   const description = [v.number, jobWords || null, v.provider, v.provider_trn ? `TRN ${v.provider_trn}` : null, v.provider_invoice_number ? `inv ${v.provider_invoice_number}` : null].filter(Boolean).join(" · ");
+  // 21 November 2026 (Section 2): VAT is reclaimed only on a provider's tax invoice (a TRN), booked against that provider.
+  if (vat > 0.004 && !v.provider_trn) throw new ZohoError(`${v.number} has VAT but no provider TRN: VAT is reclaimable only with the provider's TRN. Correct the voucher, then Retry.`);
+  const { data: supRow } = vat > 0.004 && (await schemaReady("journal_vouchers", "supplier_id")) ? await admin.from("journal_vouchers").select("supplier_id").eq("id", v.id).maybeSingle() : { data: null };
+  const vendorId = (supRow as { supplier_id: string | null } | null)?.supplier_id ? await ensureVendor(org, (supRow as { supplier_id: string }).supplier_id) : null;
   let z = v.zoho_expense_id ? await zohoExpenseById(org, v.zoho_expense_id) : null;
   if (!z) {
     z = await createExpense(org, {
@@ -2658,6 +2663,7 @@ async function syncJvRow(org: string, accounts: Resolved, voucherId: string): Pr
       reference: v.number,
       description,
       ...(vat > 0.004 && accounts.taxId ? { lines: [{ account_id: account, amount: net, tax_id: accounts.taxId, description }], expectTotal: total } : {}),
+      vendorId,
     });
   }
   if (!near(z.total, total)) throw new ZohoError(`Totals differ for ${v.number}: Zoho has ${z.total.toFixed(2)}, the ERP has ${total.toFixed(2)}.`);

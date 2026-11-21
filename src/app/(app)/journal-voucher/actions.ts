@@ -39,10 +39,12 @@ async function saveProof(formData: FormData): Promise<{ path: string | null; err
   return { path };
 }
 
-function linesOf(formData: FormData): { chargeLineId: string; amount: number; vat: number }[] {
+type RawBill = { supplierId?: string | null; newProvider?: string | null; trn?: string | null; invoiceNumber?: string | null; invoiceDate?: string | null };
+function linesOf(formData: FormData): { chargeLineId: string; amount: number; vat: number; bill: RawBill | null }[] {
   try {
-    const raw = JSON.parse(String(formData.get("lines") ?? "[]")) as { id: string; amount: string | number; vat: string | number }[];
-    return raw.map((l) => ({ chargeLineId: String(l.id), amount: Number(String(l.amount).replace(/,/g, "")), vat: Number(String(l.vat).replace(/,/g, "")) || 0 }));
+    const raw = JSON.parse(String(formData.get("lines") ?? "[]")) as { id: string; amount: string | number; vat: string | number; bill?: RawBill | null }[];
+    const t = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
+    return raw.map((l) => ({ chargeLineId: String(l.id), amount: Number(String(l.amount).replace(/,/g, "")), vat: Number(String(l.vat).replace(/,/g, "")) || 0, bill: l.bill ? { supplierId: t(l.bill.supplierId), newProvider: t(l.bill.newProvider), trn: t(l.bill.trn), invoiceNumber: t(l.bill.invoiceNumber), invoiceDate: t(l.bill.invoiceDate) } : null }));
   } catch {
     return [];
   }
@@ -72,7 +74,11 @@ export async function payLaterJvAction(_prev: JvState, formData: FormData): Prom
   const w = await who();
   if ("error" in w) return { error: w.error, at: Date.now() };
   try {
-    const r = await payLaterVoucher(linesOf(formData), { provider: String(formData.get("provider") ?? ""), trn: str(formData.get("trn")), invoiceNumber: String(formData.get("invoice_number") ?? ""), invoiceDate: str(formData.get("invoice_date")) }, w.staff, str(formData.get("note")));
+    // 21 November 2026: the provider comes from the supplier list (picked, or added as new).
+    const { resolveProvider } = await import("@/lib/providers");
+    const prov = await resolveProvider({ supplierId: str(formData.get("supplier_id")), newName: str(formData.get("provider_new")), trn: str(formData.get("trn")) }, w.staff);
+    if (prov.error) return { error: prov.error, at: Date.now() };
+    const r = await payLaterVoucher(linesOf(formData), { provider: prov.provider?.name ?? String(formData.get("provider") ?? ""), trn: prov.provider?.trn ?? str(formData.get("trn")), invoiceNumber: String(formData.get("invoice_number") ?? ""), invoiceDate: str(formData.get("invoice_date")), supplierId: prov.provider?.id ?? null }, w.staff, str(formData.get("note")));
     if (r.error) return { error: r.error, at: Date.now() };
     refresh();
     return { ok: true, message: `${r.number}: kept as "pay later" until the provider is paid.`, at: Date.now() };
@@ -132,4 +138,22 @@ export async function voidJvAction(id: string, _prev: JvState, formData: FormDat
   if (r.error) return { error: r.error, at: Date.now() };
   refresh();
   return { ok: true, message: `${r.number} voided: its charge is back to record.`, at: Date.now() };
+}
+
+/** "Ask <advisor> for the receipt" (21 November 2026, Section 2): the answer shows on the row. */
+export async function askReceiptAction(chargeLineId: string, _prev: JvState, _formData: FormData): Promise<JvState> {
+  void _prev;
+  void _formData;
+  const w = await who();
+  if ("error" in w) return { error: w.error, at: Date.now() };
+  try {
+    const { askForReceipt } = await import("@/lib/journal-vouchers");
+    const r = await askForReceipt(chargeLineId, w.staff);
+    if (r.error) return { error: r.error, at: Date.now() };
+    revalidatePath("/journal-voucher");
+    return { ok: true, message: r.words, at: Date.now() };
+  } catch (e) {
+    await logAppError("journal-voucher/ask-receipt", e, { staffId: w.staff.id });
+    return { error: SAVE_FAILED, at: Date.now() };
+  }
 }

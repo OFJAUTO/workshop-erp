@@ -7,6 +7,7 @@ import { jvReady, loadToRecord, loadVouchers } from "@/lib/journal-vouchers";
 import { jvPaidByLabel, jvTypeLabel, toReimburse } from "@/lib/jv-rules";
 import { signJobFiles } from "@/lib/work-data";
 import { Badge, Card, Notice, PageHeader, SectionLabel } from "@/components/ui";
+import { providerList } from "@/lib/providers";
 import { ManualVoucherForm, PayVoucherForm, ReimburseForm, ToRecordList, VoidVoucherForm } from "./JvForms";
 
 /**
@@ -28,6 +29,7 @@ export default async function JournalVoucherPage() {
   const owed = toReimburse(vouchers.map((v) => ({ staffId: v.staffId, staffName: v.staffName, amount: v.amount, vat: v.vat, status: v.status, reimbursedAt: v.reimbursedAt, paidBy: v.paidBy })));
   const fmt = (n: number) => n.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const acts = !staff.viewingAs;
+  const providers = acts ? await providerList() : [];
   return (
     <div className="flex flex-col gap-4" data-journal-voucher>
       <PageHeader title="Journal Voucher" subtitle="Charge costs entered on jobs (recovery, fuel, delivery, other): record who paid them, or keep them to pay later. Accounts and the owner." />
@@ -35,7 +37,7 @@ export default async function JournalVoucherPage() {
 
       <Card className="flex flex-col gap-3" data-jv-to-record>
         <SectionLabel right={`${toRecord.length}`}>To record</SectionLabel>
-        {acts ? <ToRecordList rows={toRecord.map((r) => ({ ...r, receiptUrl: r.receiptPath ? urls[r.receiptPath] ?? null : null }))} staff={staffList} /> : <p className="text-sm text-muted">View as is read-only.</p>}
+        {acts ? <ToRecordList rows={toRecord.map((r) => ({ ...r, receiptUrl: r.receiptPath ? urls[r.receiptPath] ?? null : null }))} staff={staffList} providers={providers} /> : <p className="text-sm text-muted">View as is read-only.</p>}
       </Card>
 
       {unpaid.length ? (
@@ -79,6 +81,7 @@ export default async function JournalVoucherPage() {
 
       <Card className="flex flex-col gap-2" data-jv-history>
         <SectionLabel right={`${vouchers.length}`}>Vouchers</SectionLabel>
+        {vouchers.length ? <a href="/api/export/journal-vouchers" className="self-start text-sm font-bold underline underline-offset-4" data-jv-export>Download Excel</a> : null}
         {vouchers.length === 0 ? <p className="text-sm text-muted">No vouchers yet.</p> : null}
         <ul className="divide-y divide-line">
           {vouchers.map((v) => (
@@ -88,6 +91,8 @@ export default async function JournalVoucherPage() {
               <span className="text-muted">{jvTypeLabel(v.type)}{v.provider ? ` · ${v.provider}` : ""}{v.jobs.length ? ` · ${v.jobs.join(", ")}` : v.kind === "manual" ? " · no car" : ""}</span>
               <Badge tone={v.status === "void" ? "neutral" : v.status === "unpaid" ? "amber" : "green"}>{v.status === "void" ? "Void" : v.status === "unpaid" ? "Pay later" : jvPaidByLabel(v.paidBy)}</Badge>
               {v.paidBy === "staff" ? <Badge tone={v.reimbursedAt ? "green" : "amber"}>{v.staffName}: {v.reimbursedAt ? "reimbursed" : "to reimburse"}</Badge> : null}
+              {v.noReceipt ? <Badge tone="amber" data-jv-tag-no-receipt>No receipt</Badge> : null}
+              {v.providerInvoice || v.providerTrn ? <span className="basis-full text-xs text-muted" data-jv-voucher-bill>{[v.provider, v.providerTrn ? `TRN ${v.providerTrn}` : null, v.providerInvoice ? `invoice ${v.providerInvoice}` : null, v.providerInvoiceDate ? formatDate(v.providerInvoiceDate) : null, v.vat > 0 ? `VAT AED ${fmt(v.vat)} reclaimable` : null].filter(Boolean).join(" · ")}</span> : null}
               {v.proofPath && urls[v.proofPath] ? <a href={urls[v.proofPath]} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4 no-underline">Proof</a> : null}
               <span className="ml-auto font-semibold">AED {fmt(v.amount + v.vat)}</span>
               {v.by ? <span className="basis-full text-xs text-muted">by {v.by}{v.reference ? ` · ref ${v.reference}` : ""}{v.voidReason ? ` · voided: ${v.voidReason}` : ""}</span> : null}

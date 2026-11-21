@@ -5,6 +5,16 @@ import { pageAll } from "./page-all";
 import { formatPlate } from "./types";
 import { checkJvPay, checkPayLater, correctionWords, jvTypeOfKind, type JvType } from "./jv-rules";
 import { reopenZoho, tryEnqueueZoho } from "./zoho-sync";
+import { resolveProvider } from "./providers";
+import { cleanTrn } from "./charge-edit-rules";
+import { notifyStaff } from "./notifications";
+
+/** 21 November 2026 (Section 2): the provider's own invoice for ONE charge, all optional (from the supplier list). */
+export type LineBill = { supplierId?: string | null; newProvider?: string | null; trn?: string | null; invoiceNumber?: string | null; invoiceDate?: string | null };
+type Line = { chargeLineId: string; amount: number; vat: number; bill?: LineBill | null };
+async function jvProviderReady(): Promise<boolean> {
+  return schemaReady("journal_vouchers", "supplier_id, no_receipt");
+}
 
 /*
  * JOURNAL VOUCHERS (17 November 2026, Section 6). THE server side of the Journal Voucher tab (accounts and the owner):
@@ -37,15 +47,21 @@ export type ToRecordRow = {
   date: string;
   enteredBy: string | null;
   receiptPath: string | null;
+  /** 21 November 2026: the charge's provider record, who entered it and when the receipt was asked for. */
+  supplierId: string | null;
+  enteredById: string | null;
+  receiptAskedAt: string | null;
 };
 
-type ChargeRow = { id: string; job_id: string | null; entry_id: string | null; kind: string; description: string; provider: string | null; cost_aed: number | string; cost_vat_aed: number | string | null; supplier_trn: string | null; bill_path: string | null; trip_id: string | null; service_date: string | null; created_at: string; created_by: string | null };
+type ChargeRow = { id: string; job_id: string | null; entry_id: string | null; kind: string; description: string; provider: string | null; cost_aed: number | string; cost_vat_aed: number | string | null; supplier_trn: string | null; bill_path: string | null; trip_id: string | null; service_date: string | null; created_at: string; created_by: string | null; supplier_id?: string | null; receipt_asked_at?: string | null };
+const EXTRA_COLS = ", supplier_id, receipt_asked_at";
 
 /** The charge costs waiting for accounts (oldest first). */
 export async function loadToRecord(): Promise<ToRecordRow[]> {
   if (!(await jvReady())) return [];
   const admin = createAdminClient();
-  const charges = await pageAll<ChargeRow>((a, b) => admin.from("charge_lines").select("id, job_id, entry_id, kind, description, provider, cost_aed, cost_vat_aed, supplier_trn, bill_path, trip_id, service_date, created_at, created_by").eq("is_active", true).gt("cost_aed", 0).is("trip_id", null).order("created_at").range(a, b) as unknown as PromiseLike<{ data: ChargeRow[] | null; error: { message: string } | null }>);
+  const extra = (await schemaReady("charge_lines", "supplier_id, receipt_asked_at")) ? EXTRA_COLS : "";
+  const charges = await pageAll<ChargeRow>((a, b) => admin.from("charge_lines").select(`id, job_id, entry_id, kind, description, provider, cost_aed, cost_vat_aed, supplier_trn, bill_path, trip_id, service_date, created_at, created_by${extra}`).eq("is_active", true).gt("cost_aed", 0).is("trip_id", null).order("created_at").range(a, b) as unknown as PromiseLike<{ data: ChargeRow[] | null; error: { message: string } | null }>);
   if (!charges.length) return [];
   const { data: used } = await admin.from("journal_voucher_lines").select("charge_line_id").eq("is_active", true);
   const taken = new Set(((used ?? []) as { charge_line_id: string }[]).map((u) => u.charge_line_id));
@@ -83,6 +99,9 @@ async function describe(rows: ChargeRow[]): Promise<ToRecordRow[]> {
       date: String(r.service_date ?? r.created_at).slice(0, 10),
       enteredBy: r.created_by ? who.get(r.created_by) ?? null : null,
       receiptPath: r.bill_path ?? fileOf.get(r.id) ?? null,
+      supplierId: r.supplier_id ?? null,
+      enteredById: r.created_by,
+      receiptAskedAt: r.receipt_asked_at ?? null,
     };
   });
 }
@@ -92,14 +111,15 @@ export async function jvToRecordCount(): Promise<number> {
   return (await loadToRecord()).length;
 }
 
-export type VoucherRow = { id: string; number: string; kind: string; status: string; paidBy: string | null; staffId: string | null; staffName: string; paidOn: string | null; reference: string | null; proofPath: string | null; provider: string | null; providerInvoice: string | null; type: JvType; description: string | null; amount: number; vat: number; reimbursedAt: string | null; voidReason: string | null; jobs: string[]; by: string | null; createdAt: string; zoho: boolean };
+export type VoucherRow = { id: string; number: string; kind: string; status: string; paidBy: string | null; staffId: string | null; staffName: string; paidOn: string | null; reference: string | null; proofPath: string | null; provider: string | null; providerInvoice: string | null; providerTrn: string | null; providerInvoiceDate: string | null; noReceipt: boolean; type: JvType; description: string | null; amount: number; vat: number; reimbursedAt: string | null; voidReason: string | null; jobs: string[]; by: string | null; createdAt: string; zoho: boolean };
 
 /** Every voucher, newest first (the history, the unpaid ones, the ones to reimburse). */
 export async function loadVouchers(): Promise<VoucherRow[]> {
   if (!(await jvReady())) return [];
   const admin = createAdminClient();
-  const { data } = await admin.from("journal_vouchers").select("id, number, kind, status, paid_by, staff_id, paid_on, reference, proof_path, provider, provider_invoice_number, expense_type, description, amount_aed, vat_aed, reimbursed_at, void_reason, created_at, created_by, zoho_expense_id").eq("is_active", true).order("created_at", { ascending: false }).limit(500);
-  const vs = (data ?? []) as { id: string; number: string; kind: string; status: string; paid_by: string | null; staff_id: string | null; paid_on: string | null; reference: string | null; proof_path: string | null; provider: string | null; provider_invoice_number: string | null; expense_type: JvType; description: string | null; amount_aed: number | string; vat_aed: number | string; reimbursed_at: string | null; void_reason: string | null; created_at: string; created_by: string | null; zoho_expense_id: string | null }[];
+  const nr = (await jvProviderReady()) ? ", no_receipt" : "";
+  const { data } = await admin.from("journal_vouchers").select("id, number, kind, status, paid_by, staff_id, paid_on, reference, proof_path, provider, provider_trn, provider_invoice_date" + nr + ", provider_invoice_number, expense_type, description, amount_aed, vat_aed, reimbursed_at, void_reason, created_at, created_by, zoho_expense_id").eq("is_active", true).order("created_at", { ascending: false }).limit(500);
+  const vs = (data ?? []) as unknown as { id: string; number: string; kind: string; status: string; paid_by: string | null; staff_id: string | null; paid_on: string | null; reference: string | null; proof_path: string | null; provider: string | null; provider_trn: string | null; provider_invoice_date: string | null; no_receipt?: boolean; provider_invoice_number: string | null; expense_type: JvType; description: string | null; amount_aed: number | string; vat_aed: number | string; reimbursed_at: string | null; void_reason: string | null; created_at: string; created_by: string | null; zoho_expense_id: string | null }[];
   if (!vs.length) return [];
   const { data: lines } = await admin.from("journal_voucher_lines").select("voucher_id, job_id").in("voucher_id", vs.map((v) => v.id)).eq("is_active", true);
   const jobIds = Array.from(new Set(((lines ?? []) as { job_id: string | null }[]).map((l) => l.job_id).filter((x): x is string => !!x)));
@@ -123,6 +143,9 @@ export async function loadVouchers(): Promise<VoucherRow[]> {
     proofPath: v.proof_path,
     provider: v.provider,
     providerInvoice: v.provider_invoice_number,
+    providerTrn: v.provider_trn,
+    providerInvoiceDate: v.provider_invoice_date,
+    noReceipt: !!v.no_receipt,
     type: v.expense_type,
     description: v.description,
     amount: Number(v.amount_aed) || 0,
@@ -143,12 +166,13 @@ const today = () => new Date(Date.now() + 4 * 3600000).toISOString().slice(0, 10
 const may = (by: Actor) => by.role_id === "owner" || by.role_id === "accounts";
 
 /** The ticked charges, read again (they must still be open), with the amounts accounts typed. */
-async function pickCharges(lines: { chargeLineId: string; amount: number; vat: number }[]): Promise<{ rows: ChargeRow[]; error?: string }> {
+async function pickCharges(lines: Line[]): Promise<{ rows: ChargeRow[]; error?: string }> {
   const admin = createAdminClient();
   const ids = Array.from(new Set(lines.map((l) => l.chargeLineId)));
   if (!ids.length) return { rows: [], error: "Tick the charges to record." };
-  const { data } = await admin.from("charge_lines").select("id, job_id, entry_id, kind, description, provider, cost_aed, cost_vat_aed, supplier_trn, bill_path, trip_id, service_date, created_at, created_by").in("id", ids).eq("is_active", true);
-  const rows = (data ?? []) as ChargeRow[];
+  const extra = (await schemaReady("charge_lines", "supplier_id, receipt_asked_at")) ? EXTRA_COLS : "";
+  const { data } = await admin.from("charge_lines").select(`id, job_id, entry_id, kind, description, provider, cost_aed, cost_vat_aed, supplier_trn, bill_path, trip_id, service_date, created_at, created_by${extra}`).in("id", ids).eq("is_active", true);
+  const rows = (data ?? []) as unknown as ChargeRow[];
   if (rows.length !== ids.length) return { rows, error: "One of the ticked charges is not there any more. Reload the page." };
   const { data: used } = await admin.from("journal_voucher_lines").select("charge_line_id").in("charge_line_id", ids).eq("is_active", true);
   if ((used ?? []).length) return { rows, error: "One of the ticked charges is already on a voucher. Reload the page." };
@@ -158,7 +182,7 @@ async function pickCharges(lines: { chargeLineId: string; amount: number; vat: n
 }
 
 /** A corrected amount changes the charge's cost (the job's profit follows), with a line in the job's history. */
-async function applyCorrections(rows: ChargeRow[], lines: { chargeLineId: string; amount: number; vat: number }[], voucherNumber: string, by: Actor): Promise<void> {
+async function applyCorrections(rows: ChargeRow[], lines: Line[], voucherNumber: string, by: Actor): Promise<void> {
   const admin = createAdminClient();
   for (const r of rows) {
     const l = lines.find((x) => x.chargeLineId === r.id)!;
@@ -171,7 +195,7 @@ async function applyCorrections(rows: ChargeRow[], lines: { chargeLineId: string
 }
 
 /** Record ticked charges as PAID: one voucher per charge. */
-export async function recordChargeVouchers(lines: { chargeLineId: string; amount: number; vat: number }[], pay: Pay, by: Actor, note: string | null): Promise<{ error?: string; numbers?: string[] }> {
+export async function recordChargeVouchers(lines: Line[], pay: Pay, by: Actor, note: string | null): Promise<{ error?: string; numbers?: string[] }> {
   if (!may(by)) return { error: "Only accounts or the owner record journal vouchers." };
   if (!(await jvReady())) return { error: "The Journal Voucher switches on once the database change is applied." };
   const bad = checkJvPay({ ...pay, today: today() });
@@ -179,14 +203,32 @@ export async function recordChargeVouchers(lines: { chargeLineId: string; amount
   const picked = await pickCharges(lines);
   if (picked.error) return { error: picked.error };
   const admin = createAdminClient();
-  const numbers: string[] = [];
+  const ready = await jvProviderReady();
+  // 21 November 2026 (Section 2): each ticked charge's own provider and invoice (all optional). Checked for every line
+  // BEFORE anything is saved: VAT only with a provider TRN, an invoice date never in the future.
+  const { data: rcpt } = await admin.from("job_files").select("ref_id").eq("kind", "supplier_invoice").in("ref_id", picked.rows.map((r) => r.id)).is("removed_at", null);
+  const hasReceipt = new Set(((rcpt ?? []) as { ref_id: string }[]).map((f) => f.ref_id));
+  const plan: { r: ChargeRow; l: Line; provider: { id: string | null; name: string | null; trn: string | null }; invoiceNumber: string | null; invoiceDate: string | null; noReceipt: boolean }[] = [];
   for (const r of picked.rows) {
     const l = lines.find((x) => x.chargeLineId === r.id)!;
+    const b = l.bill ?? {};
+    if (b.trn && String(b.trn).trim() && !cleanTrn(b.trn)) return { error: `${r.description}: a TRN has 15 digits. Check it, or leave it empty.` };
+    if (b.invoiceDate && b.invoiceDate > today()) return { error: `${r.description}: the invoice date cannot be in the future.` };
+    const res = b.supplierId || b.newProvider ? await resolveProvider({ supplierId: b.supplierId, newName: b.newProvider, trn: b.trn }, by) : { provider: null };
+    if ("error" in res && res.error) return { error: `${r.description}: ${res.error}` };
+    const provider = res.provider ? { id: res.provider.id, name: res.provider.name, trn: cleanTrn(b.trn) ?? res.provider.trn } : { id: r.supplier_id ?? null, name: r.provider, trn: cleanTrn(b.trn) ?? cleanTrn(r.supplier_trn) };
+    if (l.vat > 0.004 && !provider.trn) return { error: `${r.description}: VAT AED ${l.vat.toFixed(2)} can be reclaimed only with the provider's TRN (a tax invoice). Add the TRN, or record it with no VAT (the amount including everything).` };
+    plan.push({ r, l, provider, invoiceNumber: b.invoiceNumber?.trim() || null, invoiceDate: b.invoiceDate || null, noReceipt: !pay.proofPath && !r.bill_path && !hasReceipt.has(r.id) });
+  }
+  const numbers: string[] = [];
+  for (const { r, l, provider, invoiceNumber, invoiceDate, noReceipt } of plan) {
     const { data: v, error } = await admin
       .from("journal_vouchers")
-      .insert({ kind: "charge", status: "paid", paid_by: pay.paidBy, staff_id: pay.paidBy === "staff" ? pay.staffId : null, paid_on: pay.paidOn, reference: pay.reference, proof_path: pay.proofPath, provider: r.provider, provider_trn: r.supplier_trn, expense_type: jvTypeOfKind(r.kind), description: r.description, amount_aed: r2(l.amount), vat_aed: r2(l.vat), note, created_by: by.id, updated_by: by.id })
+      .insert({ kind: "charge", status: "paid", paid_by: pay.paidBy, staff_id: pay.paidBy === "staff" ? pay.staffId : null, paid_on: pay.paidOn, reference: pay.reference, proof_path: pay.proofPath, provider: provider.name, provider_trn: provider.trn, provider_invoice_number: invoiceNumber, provider_invoice_date: invoiceDate, ...(ready ? { supplier_id: provider.id, no_receipt: noReceipt } : {}), expense_type: jvTypeOfKind(r.kind), description: r.description, amount_aed: r2(l.amount), vat_aed: r2(l.vat), note, created_by: by.id, updated_by: by.id })
       .select("id, number")
       .single();
+    // The charge keeps the same provider record (the voucher and the charge never disagree).
+    if (v && provider.id && provider.id !== (r.supplier_id ?? null) && (await schemaReady("charge_lines", "supplier_id"))) await admin.from("charge_lines").update({ supplier_id: provider.id, provider: provider.name, supplier_trn: provider.trn, updated_by: by.id }).eq("id", r.id);
     if (error || !v) return { error: numbers.length ? `Recorded ${numbers.join(", ")}; the rest could not be saved – reload and try again.` : "Couldn't save – nothing was recorded." };
     const { error: lErr } = await admin.from("journal_voucher_lines").insert({ voucher_id: v.id, charge_line_id: r.id, job_id: r.job_id, amount_aed: r2(l.amount), vat_aed: r2(l.vat), created_by: by.id, updated_by: by.id });
     if (lErr) {
@@ -202,7 +244,7 @@ export async function recordChargeVouchers(lines: { chargeLineId: string; amount
 }
 
 /** "Pay later": the ticked charges of one provider on one invoice = ONE voucher, unpaid until it is paid. */
-export async function payLaterVoucher(lines: { chargeLineId: string; amount: number; vat: number }[], bill: { provider: string; trn: string | null; invoiceNumber: string; invoiceDate: string | null }, by: Actor, note: string | null): Promise<{ error?: string; number?: string }> {
+export async function payLaterVoucher(lines: Line[], bill: { provider: string; trn: string | null; invoiceNumber: string; invoiceDate: string | null; supplierId?: string | null }, by: Actor, note: string | null): Promise<{ error?: string; number?: string }> {
   if (!may(by)) return { error: "Only accounts or the owner record journal vouchers." };
   if (!(await jvReady())) return { error: "The Journal Voucher switches on once the database change is applied." };
   const bad = checkPayLater({ ...bill, today: today(), count: lines.length });
@@ -215,7 +257,7 @@ export async function payLaterVoucher(lines: { chargeLineId: string; amount: num
   const types = Array.from(new Set(picked.rows.map((r) => jvTypeOfKind(r.kind))));
   const { data: v, error } = await admin
     .from("journal_vouchers")
-    .insert({ kind: "charge", status: "unpaid", provider: bill.provider.trim(), provider_trn: bill.trn, provider_invoice_number: bill.invoiceNumber.trim(), provider_invoice_date: bill.invoiceDate, expense_type: types.length === 1 ? types[0] : "other", description: `${bill.provider.trim()} invoice ${bill.invoiceNumber.trim()} (${lines.length} charge${lines.length === 1 ? "" : "s"})`, amount_aed: amount, vat_aed: vat, note, created_by: by.id, updated_by: by.id })
+    .insert({ kind: "charge", status: "unpaid", ...(bill.supplierId && (await jvProviderReady()) ? { supplier_id: bill.supplierId } : {}), provider: bill.provider.trim(), provider_trn: bill.trn, provider_invoice_number: bill.invoiceNumber.trim(), provider_invoice_date: bill.invoiceDate, expense_type: types.length === 1 ? types[0] : "other", description: `${bill.provider.trim()} invoice ${bill.invoiceNumber.trim()} (${lines.length} charge${lines.length === 1 ? "" : "s"})`, amount_aed: amount, vat_aed: vat, note, created_by: by.id, updated_by: by.id })
     .select("id, number")
     .single();
   if (error || !v) return { error: "Couldn't save – nothing was recorded." };
@@ -277,4 +319,19 @@ export async function voidVoucher(id: string, reason: string, by: Actor): Promis
   await admin.from("journal_voucher_lines").update({ is_active: false, updated_by: by.id }).eq("voucher_id", id);
   await reopenZoho("jv", id);
   return { number: v.number as string };
+}
+
+/** "Ask <advisor> for the receipt" (21 November 2026, Section 2): the person who entered the charge is told; they add the photo on the job card. */
+export async function askForReceipt(chargeLineId: string, by: Actor): Promise<{ error?: string; words?: string }> {
+  if (!may(by)) return { error: "Only accounts or the owner ask for a receipt here." };
+  const admin = createAdminClient();
+  const { data: c } = await admin.from("charge_lines").select("id, job_id, description, cost_aed, created_by").eq("id", chargeLineId).eq("is_active", true).maybeSingle();
+  if (!c) return { error: "This charge is not there any more. Reload the page." };
+  if (!c.created_by) return { error: "Nobody is recorded as having entered this charge." };
+  const { data: p } = await admin.from("staff").select("display_name").eq("id", c.created_by).maybeSingle();
+  const { data: j } = c.job_id ? await admin.from("jobs").select("job_number").eq("id", c.job_id).maybeSingle() : { data: null };
+  await notifyStaff([c.created_by], { type: "charge_receipt_asked", title: `Receipt needed · ${c.description}`, body: `${by.display_name} (accounts) asks for the receipt of ${c.description} (AED ${Number(c.cost_aed).toFixed(2)})${j ? ` on ${j.job_number}` : ""}. Open the job card, Charges, and add the photo from your phone.`, jobId: c.job_id, href: c.job_id ? `/jobs/${c.job_id}#charges` : "/pending-charges" });
+  if (await schemaReady("charge_lines", "receipt_asked_at")) await admin.from("charge_lines").update({ receipt_asked_at: new Date().toISOString(), receipt_asked_by: by.id, updated_by: by.id }).eq("id", c.id);
+  if (c.job_id) await admin.from("job_events").insert({ job_id: c.job_id, event_type: "charge_receipt_asked", note: `${by.display_name} asked ${p?.display_name ?? "the advisor"} for the receipt of ${c.description}.`, created_by: by.id });
+  return { words: `${p?.display_name ?? "The advisor"} is asked for the receipt.` };
 }

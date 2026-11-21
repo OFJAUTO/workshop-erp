@@ -30,7 +30,8 @@ try {
   const seed = (await api("/api/e2e/stage", { stage: "approved" })).json;
   const JOB = seed.jobId;
   const mk = async (kind, desc, provider, cost, vat, trn = null) => (await sql("insert into public.charge_lines (job_id, kind, description, provider, cost_aed, cost_vat_aed, supplier_trn, charge_aed) values ($1, $2, $3, $4, $5, $6, $7, 0) returning id", [JOB, kind, desc, provider, cost, vat, trn]))[0].id;
-  const FUEL = await mk("fuel", "FUEL – 20 L", "E2E FUEL STATION", 100, 5);
+  // 21 November 2026: VAT is reclaimable only with the provider's TRN, so the fuel station carries one.
+  const FUEL = await mk("fuel", "FUEL – 20 L", "E2E FUEL STATION", 100, 5, "100000000000011");
   const REC = await mk("recovery", "RECOVERY – FULL DOWN, ONE WAY", "E2E RECOVERY CO", 400, 20, "100000000000003");
   const DEL = await mk("delivery", "DELIVERY – PARTS COURIER", "E2E RECOVERY CO", 50, 2.5);
 
