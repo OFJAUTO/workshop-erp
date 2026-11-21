@@ -1,4 +1,6 @@
 import { FlashNotice } from "@/components/FlashNotice";
+import { chargeEditFacts, chargeEditReady } from "@/lib/charge-edit";
+import { providerList } from "@/lib/providers";
 import { jobAdvanceInvoices } from "@/lib/final-invoice";
 import { FixIt } from "@/components/FixIt";
 import { remindToFix } from "../fix-actions";
@@ -311,6 +313,10 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   const mayAddCharges = chargesOn && !staff.viewingAs && job.is_open;
   const jobCharges = chargesOn ? await loadJobChargeItems(id) : null;
   const chargeItemsList = jobCharges?.items ?? [];
+  // 21 November 2026 (Section 1): "Edit" on every saved charge - the owner, the advisors and accounts.
+  const chargeEditOn = mayAddCharges && ["owner", "service_advisor", "accounts"].includes(role) && (await chargeEditReady());
+  const chargeEditMap = chargeEditOn ? await chargeEditFacts(chargeItemsList.map((i) => i.row?.id).filter((x): x is string => !!x), role) : null;
+  const chargeProviders = chargeEditOn ? await providerList() : [];
   const chargeFiles: Record<string, JobFile[]> = {};
   if (chargeItemsList.length) {
     const { data: cf } = await admin.from("job_files").select("id, storage_path, content_type, caption, ref_id").eq("job_id", id).eq("kind", "supplier_invoice").in("ref_id", chargeItemsList.map((l) => l.billRefId)).is("removed_at", null);
@@ -842,7 +848,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
       <BackOrderSection jobId={id} role={role} viewingAs={!!staff.viewingAs} isOpen={job.is_open} card withCandidates={["in_work", "pending_qc", "pending_wash", "ready", "pending_payment"].includes(job.status)} />
       {declinedItems.length ? <DeclinedWorkSection items={declinedItems} title="Recommended work declined by the customer" /> : null}
       {chargesOn && jobCharges && (chargeItemsList.length || mayAddCharges) ? (
-        <ChargesCard items={chargeItemsList} costs={jobCharges.costs} costReady={jobCharges.costReady} canAdd={mayAddCharges} canCost={chargesOn && !staff.viewingAs} approved={!!job.first_approval_at} onAdd={addJobChargesAction.bind(null, id)} onDecide={(lineId: string) => decideFreeChargeAction.bind(null, id, lineId)} onSaveCost={(lineId: string) => saveQuoteChargeCostAction.bind(null, id, lineId)} isOwner={role === "owner" && !staff.viewingAs} seesTripPrices={role === "owner" || role === "accounts"} jobId={id} files={chargeFiles} recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]} providers={(settings.recovery_companies ?? []) as string[]} quoteHref={(quotationId: string) => `/jobs/${id}/quote/${quotationId}`} mayOpenQuote={seesQuote} message={chargeMessage ?? null} error={chargeError ?? null} />
+        <ChargesCard items={chargeItemsList} costs={jobCharges.costs} costReady={jobCharges.costReady} canAdd={mayAddCharges} canCost={chargesOn && !staff.viewingAs} approved={!!job.first_approval_at} onAdd={addJobChargesAction.bind(null, id)} onDecide={(lineId: string) => decideFreeChargeAction.bind(null, id, lineId)} onSaveCost={(lineId: string) => saveQuoteChargeCostAction.bind(null, id, lineId)} isOwner={role === "owner" && !staff.viewingAs} seesTripPrices={role === "owner" || role === "accounts"} jobId={id} files={chargeFiles} recoveryTypes={(settings.recovery_types ?? []) as { key: string; label: string; cost: number; price: number }[]} providers={(settings.recovery_companies ?? []) as string[]} quoteHref={(quotationId: string) => `/jobs/${id}/quote/${quotationId}`} mayOpenQuote={seesQuote} message={chargeMessage ?? null} error={chargeError ?? null} edit={chargeEditMap ? Object.fromEntries(chargeEditMap) : null} editProviders={chargeProviders} />
       ) : null}
       {jobSupplierInvoices.length ? (
         <Card className="flex flex-col gap-2" data-job-supplier-invoices>

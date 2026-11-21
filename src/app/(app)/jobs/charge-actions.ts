@@ -72,3 +72,36 @@ export async function saveQuoteChargeCostAction(jobId: string, lineId: string, _
   revalidatePath(`/jobs/${jobId}`);
   return { success: r.message, values };
 }
+
+export type ChargeEditState = { ok?: boolean; error?: string; message?: string } | null;
+
+/** "Edit" on a saved charge (21 November 2026, Section 1): the answer shows inside the Edit window. */
+export async function editChargeAction(jobId: string, lineId: string, _prev: ChargeEditState, formData: FormData): Promise<ChargeEditState> {
+  const staff = await requireStaff();
+  if (staff.viewingAs) return { error: "View as is read-only – use Act as to edit a charge." };
+  const n = (k: string) => Number(String(formData.get(k) ?? "").replace(/,/g, "").trim());
+  const s = (k: string) => String(formData.get(k) ?? "").trim() || null;
+  try {
+    const { editCharge } = await import("@/lib/charge-edit");
+    const r = await editCharge(lineId, {
+      description: String(formData.get("description") ?? ""),
+      kind: String(formData.get("kind") ?? ""),
+      trips: formData.get("trips") ? Math.max(0, Math.round(n("trips"))) : null,
+      charge: formData.get("charge") ? n("charge") : 0,
+      free: formData.get("free") === "on",
+      supplierId: s("supplier_id"),
+      newProvider: s("provider_new"),
+      trn: s("trn"),
+      cost: n("cost"),
+      note: s("note"),
+    }, { id: staff.id, display_name: staff.display_name, role_id: staff.role_id });
+    if (r.error) return { error: r.error };
+    revalidatePath(`/jobs/${jobId}`);
+    revalidatePath("/journal-voucher");
+    return { ok: true, message: r.words };
+  } catch (e) {
+    const { logAppError, SAVE_FAILED } = await import("@/lib/app-errors");
+    await logAppError("jobs/charge-edit", e, { staffId: staff.id, jobId });
+    return { error: SAVE_FAILED };
+  }
+}

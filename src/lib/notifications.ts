@@ -187,6 +187,7 @@ export const NOTIFICATION_TYPES: { type: string; label: string; locked?: boolean
   { type: "payment_report_queried", label: "Accounts queried the payment you sent (the advisor)", locked: true },
   { type: "payment_report_late", label: "A payment sent by an advisor is still not recorded after the set working hours (accounts, owner)", locked: true },
   { type: "payment_report_undone", label: "The receipt for the payment you sent was undone: it waits for accounts again (the advisor)", locked: true },
+  { type: "charge_receipt_asked", label: "Accounts ask for the receipt of a charge you entered (add the photo on the job card)", locked: true },
   { type: "overpayment_approval", label: "A payment above the balance needs the owner's approval", locked: true },
   { type: "wash", label: "Car ready for the wash, or wash done", locked: true },
   { type: "parts_not_received", label: "The technician did not receive some parts", locked: true },

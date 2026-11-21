@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { Badge, Button, Card, Notice, SectionLabel } from "@/components/ui";
+import { ChargeEdit, type ChargeHistoryView } from "@/components/ChargeEdit";
+import type { ProviderOption } from "@/components/ProviderPicker";
 import { ChargeLinesEditor } from "@/components/ChargeLinesEditor";
 import type { FormAction } from "@/components/forms";
 import { JobFileUpload, type JobFile } from "@/components/JobFileUpload";
@@ -37,7 +39,10 @@ function quoteTone(status: string): Tone {
  * The totals and the profit line come from THE cost rule (charge-items.ts): every charge counts once; a recovery is
  * costed from its own trips (our trucks, or the same company) once the car has them.
  */
-export function ChargesCard({ items, costs, costReady, canAdd, canCost, approved, onAdd, onDecide, onSaveCost, isOwner, seesTripPrices, jobId, files, recoveryTypes, providers, quoteHref, mayOpenQuote, message, error }: {
+export function ChargesCard({ items, costs, costReady, canAdd, canCost, approved, onAdd, onDecide, onSaveCost, isOwner, seesTripPrices, jobId, files, recoveryTypes, providers, quoteHref, mayOpenQuote, message, error, edit = null, editProviders = [] }: {
+  /** 21 November 2026 (Section 1): the Edit window's facts per saved charge (null = no Edit for this person). */
+  edit?: Record<string, { state: { customerLocked: string | null; costLocked: string | null }; voucher: string | null; history: ChargeHistoryView[]; note: string | null; supplierId: string | null }> | null;
+  editProviders?: ProviderOption[];
   items: ChargeItem[];
   costs: ChargeCosts;
   /** The database update for typing a quotation charge's cost is in (else the bill only). */
@@ -109,6 +114,18 @@ export function ChargesCard({ items, costs, costReady, canAdd, canCost, approved
                     {mayOpenQuote ? <Link href={quoteHref(item.where.id)} className="font-bold text-ink underline underline-offset-4" data-charge-open-quote>{item.where.number}</Link> : <b className="text-ink" data-charge-quote-number>{item.where.number}</b>}
                     {ro.tail}
                   </span>
+                ) : null}
+                {row && edit?.[row.id] ? (
+                  <ChargeEdit
+                    jobId={jobId}
+                    lineId={row.id}
+                    values={{ description: row.description, kind: row.kind, trips: row.trips ?? null, charge: Number(row.charge_aed) || 0, free: !!row.free, cost: Number(row.cost_aed) || 0, note: edit[row.id].note, supplierId: edit[row.id].supplierId, provider: row.provider ?? null, trn: row.supplier_trn ?? null }}
+                    customerLocked={edit[row.id].state.customerLocked}
+                    costLocked={edit[row.id].state.costLocked}
+                    voucher={edit[row.id].voucher}
+                    providers={editProviders}
+                    history={edit[row.id].history}
+                  />
                 ) : null}
                 {row ? (
                   canAdd && !row.invoice_id ? <JobFileUpload jobId={jobId} kind="supplier_invoice" refId={row.id} files={billFiles} accept="any" label="Supplier's bill or fuel receipt" caption={`Bill · ${item.description}`} compact removable /> : billFiles.length ? <span className="text-xs text-muted">{billFiles.length} bill file{billFiles.length === 1 ? "" : "s"}</span> : null
