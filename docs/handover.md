@@ -6,7 +6,8 @@
 1. The advisor (or accounts) opens J-01030 → Charges → **Edit** on "DELIVERY CHARGES - SHANGAI GLOBAL AUTO PARTS" → corrects the wording → Provider: SHANGHAI GLOBAL AUTO SPARE PARTS CO.LLC → Save the changes → YES, SAVE.
 2. Mathew records the Porter parking card (J-01016, 34.10) with provider PORTER TECHNOLOGIES FZCO and its invoice number, or taps "Ask … for the receipt" first.
 3. Mathew confirms the way the advance is deducted on the final tax invoice (this morning's urgent fix), and issues J-01013's final tax invoice.
-4. The Next.js security-upgrade notice (see the morning report): decide whether to run it.
+
+**Security (21 Nov, 3fa11eac):** Next.js 16.4.2 → 16.4.6, zod 4.6.5 → 4.6.7, lint tools fixed; exceljs/uuid left by choice. Live reports 16.4.6. Rollback: git tag pre-next-16.4.6, or Vercel Instant Rollback to dpl_E883cumqs5izwBFka61fNcbqmTAW. Checks: layout 1,602 views clean, security pass, simulation 713/713 (two timing hiccups re-run clean), check:live 33/33.
 
 **Live:** S1 charge edit (bb6c479c, switched on by the apply), S2 Journal Voucher fields (1423a24f). Note `docs/charges-jv-21-nov-note.md`.
 
