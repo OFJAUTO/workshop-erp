@@ -1,15 +1,14 @@
-# Handover – list of 21 November 2026 (Edit a charge + Journal Voucher provider details): DONE
+# Handover – list of 21 November 2026 (Edit a charge + Journal Voucher provider details): DONE AND APPLIED 21 Nov morning
 
-**WAITING FOR APPLY:** 1 file, `supabase/migrations/20261221090000_charge_edit_jv_provider.sql` (backup `backups/2026-11-21T06-44-15`). From your phone: turn auto mode off, reply **apply**.
+**WAITING FOR APPLY:** nothing. Applied 21 Nov (backup `backups/2026-11-21T09-07-32`), check:live 33/33.
 
 **NEEDS OMAR:**
-1. Reply **apply** (switches on Edit on charges and the "No receipt" tag).
-2. After apply: the advisor (or accounts) opens J-01030 → Charges → **Edit** on "DELIVERY CHARGES - SHANGAI GLOBAL AUTO PARTS" → corrects the wording → Provider: SHANGHAI GLOBAL AUTO SPARE PARTS CO.LLC → Save the changes → YES, SAVE.
-3. Mathew records the Porter parking card (J-01016, 34.10) with provider PORTER TECHNOLOGIES FZCO and its invoice number, or taps "Ask … for the receipt" first.
-4. Mathew confirms the way the advance is deducted on the final tax invoice (this morning's urgent fix), and issues J-01013's final tax invoice.
-5. The Next.js security-upgrade notice (see the morning report): decide whether to run it.
+1. The advisor (or accounts) opens J-01030 → Charges → **Edit** on "DELIVERY CHARGES - SHANGAI GLOBAL AUTO PARTS" → corrects the wording → Provider: SHANGHAI GLOBAL AUTO SPARE PARTS CO.LLC → Save the changes → YES, SAVE.
+2. Mathew records the Porter parking card (J-01016, 34.10) with provider PORTER TECHNOLOGIES FZCO and its invoice number, or taps "Ask … for the receipt" first.
+3. Mathew confirms the way the advance is deducted on the final tax invoice (this morning's urgent fix), and issues J-01013's final tax invoice.
+4. The Next.js security-upgrade notice (see the morning report): decide whether to run it.
 
-**Live:** S1 charge edit (bb6c479c, dormant until apply), S2 Journal Voucher fields (1423a24f). Note `docs/charges-jv-21-nov-note.md`.
+**Live:** S1 charge edit (bb6c479c, switched on by the apply), S2 Journal Voucher fields (1423a24f). Note `docs/charges-jv-21-nov-note.md`.
 
 ---
 

@@ -11,11 +11,15 @@ Database changes that are built, tested on the TEST database and pushed, waiting
 
 ## Waiting now
 
+Nothing is waiting.
+
+## Applied on 21 November 2026, morning
+
+The owner replied "apply". A fresh backup was taken first: `backups/2026-11-21T09-07-32` (140 tables, 314,160 rows). The file was run with `scripts/db-sql.mjs` without an error and recorded with `scripts/db-record-migration.mjs`. Checked on live: the 7 new columns exist. `npm run check:live`: 33 passed, 0 failed.
+
 | # | What | What it does on live | Size |
 |---|---|---|---|
 | 1 | `supabase/migrations/20261221090000_charge_edit_jv_provider.sql` (21 Nov list, Sections 1 and 2; backup `backups/2026-11-21T06-44-15`, 140 tables, 313,449 rows) | Adds five columns to `charge_lines`: the provider from the supplier list, a note, the edit history, and when and by whom the receipt was asked for. Adds two columns to `journal_vouchers`: the provider record, and "No receipt". Additive only; the tables already have their rules and triggers. **Switched on by the apply:** "Edit" on every saved charge (with its history), the provider picked from the supplier list, "Ask … for the receipt", the "No receipt" tag, and the voucher's link to the provider record. **Live without it:** per-charge provider, invoice number, invoice date and TRN when recording as paid; VAT only with a TRN; the 5% check; the Excel export; Zoho booking the VAT against the provider. | 7 columns |
-
-**From your phone:** turn auto mode off in the Claude app and reply **apply**.
 
 ## Applied on 21 November 2026, night
 
