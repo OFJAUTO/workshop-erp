@@ -3476,7 +3476,8 @@ await section("d3", "one LPO, several supplier invoices", async () => {
   check(`s1: the other invoice split off at 990.44 + 49.52 (${JSON.stringify(split)})`, split?.a === 990.44 && split?.v === 49.52);
   const firstNow = (await sql("select supplier_invoice_amount::float as a, supplier_invoice_vat_aed::float as v, supplier_invoice_lines from public.purchase_orders where id = $1", [A]))[0];
   check(`s1: 10670962 now covers the hose only, 683.32 + 34.17 (${JSON.stringify(firstNow)})`, firstNow?.a === 683.32 && firstNow?.v === 34.17 && JSON.stringify(firstNow?.supplier_invoice_lines ?? []).includes(hose) && !JSON.stringify(firstNow?.supplier_invoice_lines ?? []).includes(cover));
-  const reopened = (await sql("select status from public.zoho_outbox where kind = 'bill' and record_id = $1", [A]))[0]?.status;
+  // The split's LAST server step reopens the Zoho bill (after the new invoice row and the edit history): wait for it.
+  const reopened = (await until(async () => { const r = (await sql("select status from public.zoho_outbox where kind = 'bill' and record_id = $1", [A]))[0]; return r?.status === "pending" ? r : null; }, 30, 500))?.status ?? (await sql("select status from public.zoho_outbox where kind = 'bill' and record_id = $1", [A]))[0]?.status;
   check(`s1: the first invoice's Zoho bill is reopened for correction (${reopened})`, reopened === "pending");
   await open(A);
   check(`s1: "2 invoices · fully invoiced" (${await summary()})`, /2 invoices · fully invoiced/.test(await summary()));
