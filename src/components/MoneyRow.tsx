@@ -119,7 +119,8 @@ export function MoneyRow({ r, href, canAddAuth = false }: { r: MoneyRowData; hre
           <TaxTodayLine r={r} shown={doc?.number ?? null} />
         </div>
         <div className="flex flex-col items-end text-right ml-auto">
-          {r.total !== null ? <span className="font-semibold">{money(r.total)}</span> : null}
+          {r.total !== null ? <span className="font-semibold" data-money-job-total>{money(r.total)}</span> : null}
+          {r.advanceInvoiced ? <span className="text-xs font-semibold text-muted" data-money-advance-invoiced>Advance invoiced {money(r.advanceInvoiced.total)} ({r.advanceInvoiced.numbers})</span> : null}
           {r.total !== null || r.paid > 0.005 ? <PaidSoFar m={r} showTotal={false} /> : <span className="text-xs text-muted">No approved total yet</span>}
           {r.balance !== null && r.balance <= 0.005 && r.paidAt ? <span className="text-xs text-green-text">{formatDayTime(r.paidAt)}</span> : null}
           <TodayLine r={r} />

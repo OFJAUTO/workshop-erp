@@ -1,4 +1,8 @@
 import { awaitsBank, duplicateWords, pendingLine } from "@/lib/bank-status";
+import { GenerateFinalInvoice } from "@/components/GenerateFinalInvoice";
+import { FinalInvoiceBlock } from "@/components/FinalInvoiceBlock";
+import { finalBlockOf, jobAdvanceInvoices } from "@/lib/final-invoice";
+import { advanceSteps, JOB_DONE_STATUSES, type AdvanceStepKey } from "@/lib/final-invoice-rules";
 import { TaxInvoiceDue } from "@/components/TaxInvoiceDue";
 import { missingTaxInvoices, taxDueViewOf } from "@/lib/tax-invoice-due";
 import { issueTaxInvoiceNowAction } from "@/app/(app)/invoices/tax-due-actions";
@@ -24,7 +28,7 @@ import { requirePermission } from "@/lib/auth";
 import { InvoiceProfitBox } from "@/components/InvoiceProfitBox";
 import { invoiceProfitFor, mayViewJobProfit } from "@/lib/invoice-profit";
 import { detailsWithoutHours, formatDateTime, formatDayTime, hoursQty } from "@/lib/format";
-import { INVOICE_LINE_SELECT, INVOICE_SELECT, METHOD_LABELS, PAYMENT_SELECT, buildInvoiceDraft, creditsOnDocs, invoiceBalance, nextDocumentNumber, toInvoice, toInvoiceLine, toPayment, type PaymentRow } from "@/lib/invoice-data";
+import { INVOICE_LINE_SELECT, INVOICE_SELECT, METHOD_LABELS, PAYMENT_SELECT, buildInvoiceDraft, creditsOnDocs, invoiceBalance, nextDocumentNumber, toInvoice, toInvoiceLine, toPayment, type PaymentRow, type InvoiceRow } from "@/lib/invoice-data";
 import { loadJobCard, vehicleTitle } from "@/lib/job-data";
 import { STATUS_LABELS } from "@/lib/jobs";
 import { PAYMENT_METHOD_LABELS, methodsFor, moneyState, type MoneyInvoice, type MoneyStepKey, bankWaitWords } from "@/lib/money-steps";
@@ -96,7 +100,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
     admin.from("jobs").select("declined_out_at").eq("id", id).maybeSingle(),
   ]);
   const invoices = ((existing ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...toInvoice(r), expected_payment_method: (r.expected_payment_method as string | null) ?? null, customer_says_paid_at: (r.customer_says_paid_at as string | null) ?? null, customer_says_paid_method: (r.customer_says_paid_method as string | null) ?? null, pay_now_enabled: !!r.pay_now_enabled, sent_at: (r.sent_at as string | null) ?? null }));
-  const taxInvoice = (invoices.find((i) => i.kind === "tax_invoice" && i.status === "issued") ?? null) as LiveInvoice | null;
+  const taxInvoice = (invoices.find((i) => i.kind === "tax_invoice" && i.status === "issued" && !i.deposit_for_quotation_id) ?? null) as LiveInvoice | null;
   const proforma = (invoices.find((i) => i.kind === "proforma" && i.status === "issued" && !i.converted_to && !i.deposit_for_quotation_id) ?? null) as (LiveInvoice & { customer_says_paid_method: string | null }) | null;
   const live = taxInvoice ?? proforma;
   const { data: livePays } = live ? await admin.from("payments").select(PAYMENT_SELECT).eq("invoice_id", live.id).eq("is_active", true).order("received_at") : { data: [] };
@@ -140,6 +144,17 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
   // THE job money (3 November 2026): before the proforma "Paid so far · Balance" is the approved total less every cleared
   // payment on the job (deposit documents included, a cheque only once cleared) - the same figures as the job card.
   const jobMoney = await jobMoneyOf(id, settings);
+  // 21 November 2026 (J-01013): an advance tax invoice is never the job's tax invoice. Its job gets the final tax invoice
+  // (the real lines, the advance taken off), and its own steps.
+  const advances = await jobAdvanceInvoices(id);
+  const advanceNumbers = advances.map((a) => a.number).join(", ");
+  const advanceTotal = Math.round(advances.reduce((x, a) => x + a.total_aed, 0) * 100) / 100;
+  const liveBlock = live ? await finalBlockOf({ ...(live as unknown as InvoiceRow), job_id: id }) : null;
+  const jobDoneNow = JOB_DONE_STATUSES.includes(job.status) || !!job.gated_out_at;
+  // The answer of "Generate the final tax invoice" stays where the button was once the page refreshes (10 minutes).
+  // eslint-disable-next-line react-hooks/purity
+  const nowMs = Date.now();
+  const finalJustMade = advances.length && taxInvoice && nowMs - Date.parse(taxInvoice.issued_at) < 10 * 60000 ? taxInvoice : null;
   // "Cheque" or "Transfer": what waits for the bank on this job (9 November 2026).
   const waitingNow = [...payments, ...depositRows].filter((p) => p.status === "recorded" && awaitsBank(p));
   const pendingWord = waitingNow.length && waitingNow.every((p) => p.method === "transfer") ? "Transfer" : "Cheque";
@@ -160,6 +175,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
     waitingHours: Number(settings.payment_waiting_hours) || 24,
     reported: waitingReport ? { by: firstName(waitingReport.reporter) } : null,
     advance: !live && jobMoney ? { paid: jobMoney.paid, left: jobMoney.balance } : null,
+    advanceInvoiced: advances.length && !live ? { numbers: advanceNumbers, total: advanceTotal } : null,
   });
   const links = live ? await paymentLinksOf(live.id) : [];
   const payLink = currentPaymentLink(links);
@@ -240,6 +256,19 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
     { key: "released", label: "Gate-out", state: barState("released"), info: "After full payment, or on the customer's credit terms. The advisor or accounts gate the car out." },
   ];
 
+  // 21 November 2026 (J-01013): a job with an advance tax invoice has its own steps; "Tax invoice" is ticked only with the FINAL one.
+  const ADV_INFO: Record<AdvanceStepKey, string> = {
+    proforma: "The advance proforma the customer paid.",
+    advance_payment: "The advance was received.",
+    advance_invoice: `${advanceNumbers}: the tax invoice for the advance only (VAT taken out of the advance). It is never the job's final tax invoice.`,
+    job_done: "The car is Ready: the work is finished.",
+    final_invoice: "Accounts or the owner generate it: the job's real lines, less the advance already invoiced. VAT is charged once.",
+    balance: "What is left on the final tax invoice after the advance.",
+    gate_out: "Opens with the final tax invoice (or with the owner's approval).",
+  };
+  const shownSteps = advances.length
+    ? advanceSteps({ advancePaid: true, advanceInvoiced: true, jobDone: jobDoneNow, finalInvoice: !!taxInvoice, balancePaid: !!taxInvoice && !unpaid, gatedOut: !!job.gated_out_at }).map((x) => ({ key: x.key as string, label: x.label, state: x.state as StageBoxState, info: ADV_INFO[x.key] }))
+    : barSteps;
   // 18 November 2026 (Section 1): the tax invoice deadline and "Issue tax invoice now" (accounts and the owner).
   const taxDue = proforma && !taxInvoice && can(role, "viewInvoices") ? taxDueViewOf((await missingTaxInvoices({ jobIds: [id] }))[0]) : null;
   const totalDue = live ? live.total_aed : draft.totals.total;
@@ -285,7 +314,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
         {p.status === "recorded" ? <a href={`/api/pdf/receipt/${p.id}`} target="_blank" rel="noreferrer" className="text-xs font-bold underline underline-offset-4">Receipt</a> : null}
         {/* 17 November 2026 (Section 3): the history of corrections, and "Correct this payment" (owner and accounts). */}
         <PaymentCorrections list={corrections.get(p.id) ?? []} />
-        {(p.status === "recorded" || p.status === "pending_owner") && !staff.viewingAs && (role === "owner" || role === "accounts") ? <CorrectCustomerPayment paymentId={p.id} number={p.number} method={p.method} day={dubaiDayOf(p.received_at)} reference={p.reference ?? null} /> : null}
+        {(p.status === "recorded" || p.status === "pending_owner") && !staff.viewingAs && (role === "owner" || role === "accounts") ? <CorrectCustomerPayment paymentId={p.id} number={p.number} method={p.method} day={dubaiDayOf(p.received_at)} reference={p.reference ?? null} allocate={live && (advances.length || isDeposit) && p.invoice_id !== live.id && !p.deposit_invoice_number ? { id: live.id, number: live.number } : null} /> : null}
         {p.proof_path && proofUrls[p.proof_path] ? (
           // 9 November 2026: a proof that is a PDF (a cheque scan) shows as a PDF tile that opens it, never a broken picture.
           <span className="inline-flex" data-proof-link><SlipTile url={proofUrls[p.proof_path] ?? null} path={p.proof_path} label={p.method === "card" ? "Card slip" : p.method === "cheque" ? "Cheque" : "Proof"} hook={p.number} size="h-12 w-12" /></span>
@@ -313,8 +342,8 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 flex flex-col gap-3" data-money-steps>
           <Card className="flex flex-col gap-2" data-money-bar>
-            <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${barSteps.length}, minmax(0, 1fr))` }}>
-              {barSteps.map((b) => (
+            <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${shownSteps.length}, minmax(0, 1fr))` }}>
+              {shownSteps.map((b) => (
                 <div key={b.key} data-step={b.key} data-state={b.state} title={b.info} className={`min-h-11 rounded-control px-1 py-1 flex items-center justify-center gap-1 text-center text-xs leading-tight ${STAGE_BOX_CLASS[b.state]} ${STAGE_BOX_TITLE[b.state]} ${b.state === "current" ? "font-bold" : "font-semibold"}`}>
                   <span>{b.state === "done" ? "✓ " : ""}{b.label}</span>
                   <span aria-hidden className="opacity-50">ⓘ</span>
@@ -326,13 +355,17 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
           {taxDue ? <TaxInvoiceDue v={taxDue} mayIssue={(role === "owner" || role === "accounts") && !staff.viewingAs} isOwner={role === "owner"} action={issueTaxInvoiceNowAction.bind(null, id)} /> : null}
           <Card className="flex flex-col gap-2" data-money-summary>
             <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-3" data-money-figures>
-              <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Total incl. VAT</span><span className="text-xl sm:text-2xl font-extrabold whitespace-nowrap">AED {m(totalDue)}</span></div>
+              <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{advances.length ? "Job total incl. VAT" : "Total incl. VAT"}</span><span className="text-xl sm:text-2xl font-extrabold whitespace-nowrap" data-job-total>AED {m(totalDue)}</span></div>
+              {advances.length ? (
+                <div className="flex flex-col" data-advance-invoiced><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Invoiced in advance</span><span className="text-xl sm:text-2xl font-extrabold whitespace-nowrap">AED {m(advanceTotal)}</span><span className="text-sm font-semibold text-muted">{advanceNumbers}</span></div>
+              ) : null}
               {depRequested ? (
                 <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Deposit</span><span className="text-xl sm:text-2xl font-extrabold whitespace-nowrap">AED {m(dep.received)}</span><span className="text-sm font-semibold text-muted whitespace-nowrap">of {m(dep.required)}</span></div>
               ) : null}
               <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">Paid so far</span><span className="text-xl sm:text-2xl font-extrabold whitespace-nowrap">AED {m(paidSoFar)}</span></div>
               <div className="flex flex-col"><span className="text-xs font-bold uppercase tracking-[0.08em] text-muted">{chequeClearing > 0.005 && balanceDue > 0.005 ? "Balance" : "Balance due"}</span>{chequeClearing > 0.005 && balanceDue > 0.005 ? <span data-balance><BalanceHeadline due={stillDueOf({ total: totalDue, paid: paidSoFar, balance: balanceDue, pending: chequeClearing })} word={pendingWord === "Transfer" ? "transfer" : "cheque"} /></span> : <span className={`text-xl sm:text-2xl font-extrabold whitespace-nowrap ${balTone}`} data-balance>{live && !unpaid ? "Paid in full" : `AED ${m(balanceDue)}`}</span>}</div>
             </div>
+            {liveBlock ? <FinalInvoiceBlock block={liveBlock} vatPercent={draft.vatPercent} paid={Math.max(0, Math.round((paidSoFar - liveBlock.advance.total) * 100) / 100)} balance={balanceDue} tone={balanceDue <= 0.004 ? "paid" : "plain"} /> : null}
             {bankLine ? <p className="text-sm font-semibold text-amber-text" data-bank-pending-line>{bankLine}</p> : chequeClearing ? <p className="text-sm font-semibold text-amber-text">Cheque of AED {m(chequeClearing)} pending clearance.</p> : null}
             {bal?.credited ? <p className="text-sm font-semibold text-muted" data-credit-note-off>Credit notes AED {m(bal.credited)} taken off the balance.</p> : null}
             {proforma && !taxInvoice && acting && ["owner", "accounts", "service_advisor"].includes(role) ? (
@@ -347,6 +380,7 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
 
           <Card id="bank" className="flex flex-col gap-2 border-ink" data-what-now>
             <SectionLabel>What to do now</SectionLabel>
+            {finalJustMade ? <p className="text-sm font-bold text-green-text" data-generate-final-done>{finalJustMade.number} generated: the final tax invoice of {job.job_number}, the advance {advanceNumbers} taken off.</p> : null}
             {mayPay && job.is_open && unpaid ? <Link href={`/customers/${job.customer_id}?receive=1&job=${id}`} className="text-sm font-bold underline underline-offset-4" data-covers-other-cars>This payment also covers other cars of this customer → add jobs</Link> : null}
             {waitingReport && (mayPay || viewPay) ? (
               <div className="flex flex-wrap items-center gap-2 rounded-control border-2 border-amber-bar bg-amber-soft p-3" data-what-now-report>
@@ -380,6 +414,9 @@ export default async function BuildInvoicePage({ params, searchParams }: { param
                     {!canRecord && !canSend ? (viewPay ? <div><RecordPaymentButton jobId={id} readOnly size="md" label="Record the deposit" /></div> : <p className="text-sm text-muted">Waiting for the deposit: accounts record it when it arrives.</p>) : null}
                   </div>
                 );
+              }
+              if (money.action === "generate_final") {
+                return mayPay && job.is_open ? <GenerateFinalInvoice jobId={id} advanceNumbers={advanceNumbers} jobTotal={totalDue} advanceTotal={advanceTotal} paid={paidSoFar} /> : <p className="text-sm font-semibold" data-final-waiting>The job is done. Accounts generate the final tax invoice ({advanceNumbers} is the advance only).</p>;
               }
               if (!live && money.action === "prepare_proforma" && can(role, "markReadyToInvoice") && acting) {
                 return <form action={markReadyToInvoice.bind(null, id)}><Button type="submit" size="lg" className="w-full sm:w-auto">Prepare the proforma</Button></form>;

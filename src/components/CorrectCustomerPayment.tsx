@@ -28,7 +28,7 @@ function todayIso() {
  * reference or the proof, with a reason; the old values stay in the history. The method is NOT pre-selected (the real
  * one is picked). The amount and the customer are not here: void it and record it again for that.
  */
-export function CorrectCustomerPayment({ paymentId, number, method, day, reference }: { paymentId: string; number: string; method: string; day: string; reference: string | null }) {
+export function CorrectCustomerPayment({ paymentId, number, method, day, reference, allocate = null }: { paymentId: string; number: string; method: string; day: string; reference: string | null; /** 21 November 2026: the job's final document it can be put on (never ticked by itself). */ allocate?: { id: string; number: string } | null }) {
   const [state, action] = useActionState<CorrectState, FormData>(correctCustomerPaymentAction.bind(null, paymentId), null);
   const [open, setOpen] = useState(false);
   const [today] = useState(todayIso);
@@ -39,9 +39,15 @@ export function CorrectCustomerPayment({ paymentId, number, method, day, referen
       <form action={action} className="mt-2 flex max-w-xl flex-col gap-3 rounded-control border border-line bg-white p-3" data-correct-form>
         <p className="text-xs text-muted">Now: {showDay(day)} · {LABEL[method] ?? method}{reference ? ` · ${reference}` : ""}. The amount and the customer cannot change here – void it and record it again for that.</p>
         <MoneyDate name="paid_on" label="Payment date" value={newDay} onChange={setNewDay} max={today} hook="data-correct-date" />
+        {allocate ? (
+          <label className="flex min-h-11 items-center gap-2 rounded-control border border-line px-3 text-sm font-semibold" data-correct-allocate>
+            <input type="checkbox" name="allocate_to" value={allocate.id} className="h-5 w-5" />
+            Put it on the final invoice {allocate.number} (not another deposit)
+          </label>
+        ) : null}
         <div data-correct-method>
-          <span className="text-xs font-semibold text-muted">How was it really paid?</span>
-          <ChoiceButtons name="method" columns={3} required options={METHODS} />
+          <span className="text-xs font-semibold text-muted">How was it really paid?{allocate ? " (only if it changes)" : ""}</span>
+          <ChoiceButtons name="method" columns={3} required={!allocate} options={METHODS} />
         </div>
         <label className="flex flex-col gap-1"><span className="text-xs font-semibold text-muted">Reference</span><Input name="reference" defaultValue={reference ?? ""} spell={false} data-correct-reference /></label>
         <ProofFileInput label="New proof (optional)" required={false} name="proof" />

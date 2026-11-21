@@ -71,9 +71,14 @@ export type MoneyInput = {
    * (null while nothing is approved). Only read while there is no invoice yet; leaving it out changes nothing.
    */
   advance?: { paid: number; left: number | null } | null;
+  /**
+   * 21 November 2026 (J-01013): advance tax invoices exist and the job has no FINAL tax invoice yet. The advance invoice
+   * is never the job's tax invoice: once the job is done, the one action is "Generate the final tax invoice".
+   */
+  advanceInvoiced?: { numbers: string; total: number } | null;
 };
 
-export type MoneyAction = "prepare_proforma" | "send_proforma" | "record_payment" | "clear_bank" | "send_tax_invoice" | "gate_out" | "none";
+export type MoneyAction = "generate_final" | "prepare_proforma" | "send_proforma" | "record_payment" | "clear_bank" | "send_tax_invoice" | "gate_out" | "none";
 
 /** 9 November 2026 (J-00858): a cheque or transfer already waiting for the bank covers what is due - the one action is
  *  accounts marking it deposited / cleared, never recording the payment again. */
@@ -141,6 +146,11 @@ export function moneyState(i: MoneyInput): MoneyState {
   // No invoice yet.
   if (i.declinedOut) return { current: "released", done: ["job_done", "proforma_sent", "payment", "tax_invoice"], chip: { text: "Declined, leaves free", tone: "neutral" }, action: "gate_out", actionLabel: "Gate out", waitingHours: null, live: null };
   const ready = ["ready", "pending_payment", "in_delivery"].includes(i.jobStatus);
+  if (i.advanceInvoiced) {
+    const words = `Advance invoiced (${i.advanceInvoiced.numbers}) · ${money(i.advanceInvoiced.total)}`;
+    if (ready) return { current: "tax_invoice", done: ["job_done"], chip: { text: `${words} · final tax invoice to generate`, tone: "amber" }, action: "generate_final", actionLabel: "Generate the final tax invoice", waitingHours: null, live: null };
+    return { current: "job_done", done: [], chip: { text: words, tone: "amber" }, action: "none", actionLabel: "", waitingHours: null, live: null };
+  }
   // An advance before the proforma: the chip says what came in and what is left ("Advance AED 30,000 · AED 7,930 to pay").
   const adv = i.advance && i.advance.paid > 0.005 ? i.advance : null;
   const advChip = adv ? { text: advanceWords(adv.paid, adv.left), tone: "amber" as const } : null;

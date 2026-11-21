@@ -211,6 +211,9 @@ export async function loadMoneyList(settings: Settings, opts: MoneyListScope = {
     const taxInvoice = (issued.find((i) => i.kind === "tax_invoice" && !i.deposit_for_quotation_id) ?? null) as (MoneyInvoice & ListInvoice) | null;
     const proforma = (issued.find((i) => i.kind === "proforma" && !i.converted_to && !i.deposit_for_quotation_id) ?? null) as (MoneyInvoice & ListInvoice) | null;
     const doc = taxInvoice ?? proforma;
+    // 21 November 2026 (J-01013): the advance tax invoices are never the job's tax invoice; the row names them.
+    const advDocs = issued.filter((i) => i.kind === "tax_invoice" && !!i.deposit_for_quotation_id);
+    const advanceInvoiced = advDocs.length ? { numbers: advDocs.map((i) => i.number).join(", "), total: round2(advDocs.reduce((x, i) => x + Number(i.total_aed || 0), 0)) } : null;
     const pays = payOf.get(job.id) ?? [];
     const counted = (doc ? pays.filter((p) => p.invoice_id === doc.id) : pays).filter((p) => p.status === "recorded" && (countsAsPaid(p)));
     const paidAt = counted.map((p) => p.cleared_at ?? p.received_at).sort().at(-1) ?? null;
@@ -241,11 +244,13 @@ export async function loadMoneyList(settings: Settings, opts: MoneyListScope = {
       waitingHours,
       reported: report ? { by: report.by } : null,
       advance: doc ? null : { paid: jm.paid, left: jm.balance },
+      advanceInvoiced: doc ? null : advanceInvoiced,
     });
     const v = job.vehicle;
     const lastAt = [doc?.issued_at, doc?.sent_at, ...pays.map((p) => p.received_at), job.gated_in_at].filter((x): x is string => !!x).sort().at(-1) ?? nowIso;
     rows.push({
       kind: "job",
+      advanceInvoiced,
       key: job.id,
       href: `/jobs/${job.id}/invoice`,
       jobId: job.id,

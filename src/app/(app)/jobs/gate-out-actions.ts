@@ -169,6 +169,15 @@ export async function gateOutJob(jobId: string, _state: FormState, formData: For
     if (releaseReason.length < 5) return { error: `${what} has not cleared yet. Write the reason to release the car before it clears (logged).`, values };
     bankHold = `Released before ${what} cleared: ${releaseReason}`;
   }
+  // 21 November 2026 (J-01013): a job with an advance tax invoice leaves only with its FINAL tax invoice, or with the
+  // owner's approval written on the job (the advance invoice is never the job's tax invoice).
+  const advFinal = await (await import("@/lib/final-invoice")).jobAdvanceInvoices(jobId);
+  if (advFinal.length && bal.invoice?.kind !== "tax_invoice") {
+    const nums = advFinal.map((x) => x.number).join(", ");
+    if (role !== "owner") return { error: `${nums} is the advance tax invoice only. Accounts generate the final tax invoice (job's money page → Generate the final tax invoice) before the car leaves; only the owner can release it without one.`, values };
+    if (releaseReason.length < 5) return { error: `No final tax invoice yet (${nums} is the advance only). Write the reason to release the car without it (logged).`, values };
+    await createAdminClient().from("job_events").insert({ job_id: jobId, event_type: "release_approved", note: `Released without the final tax invoice (advance ${nums} only): ${releaseReason} (${staff.display_name})`, created_by: staff.id });
+  }
   if (bal.state === "no_invoice" && job.declined_out_at) {
     // The customer declined the quotation and no charge was added: the car leaves free, written down.
     releaseBy = staff.id;

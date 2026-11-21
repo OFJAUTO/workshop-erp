@@ -95,7 +95,7 @@ export async function loadWaitingOnYou(staff: CurrentStaff, settings: Settings):
   const depositOf = new Map((await depositsWaiting()).map((d) => [d.jobId, d]));
   // The live proforma or tax invoice of the cars at the money steps, so the next step never says "proforma to prepare" on a paid car.
   const moneyIds = all.filter((j) => ["ready", "pending_payment", "in_delivery"].includes(j.status)).map((j) => j.id);
-  const { data: invRows } = moneyIds.length ? await admin.from("invoices").select("job_id, kind, sent_at, converted_to").in("job_id", moneyIds).eq("status", "issued").eq("is_active", true).is("converted_to", null).in("kind", ["proforma", "tax_invoice"]) : { data: [] as { job_id: string; kind: string; sent_at: string | null }[] };
+  const { data: invRows } = moneyIds.length ? await admin.from("invoices").select("job_id, kind, sent_at, converted_to").in("job_id", moneyIds).eq("status", "issued").eq("is_active", true).is("converted_to", null).in("kind", ["proforma", "tax_invoice"]).is("deposit_for_quotation_id", null) : { data: [] as { job_id: string; kind: string; sent_at: string | null }[] };
   const invoiceOf = new Map<string, { kind: "proforma" | "tax_invoice"; sent_at: string | null }>();
   for (const r of (invRows ?? []) as { job_id: string; kind: string; sent_at: string | null }[]) if (!invoiceOf.has(r.job_id) || r.kind === "tax_invoice") invoiceOf.set(r.job_id, { kind: r.kind as "proforma" | "tax_invoice", sent_at: r.sent_at });
   const myCars = new Set((onCar ?? []).map((t) => t.job_id));

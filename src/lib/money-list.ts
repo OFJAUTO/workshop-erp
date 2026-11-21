@@ -15,6 +15,8 @@ export type AuthMissingPayment = { id: string; number: string; method: string; a
 
 export type MoneyRowData = {
   kind: MoneyRowKind;
+  /** 21 November 2026 (J-01013): the advance tax invoices of the job (the job total stays the whole job). */
+  advanceInvoiced?: { numbers: string; total: number } | null;
   /** The row's own key: the job id for a job, "credit:<customer id>", "charge:<entry id>". */
   key: string;
   /** Where the row opens: the money page, the customer's page (credit) or the pending charges list. */

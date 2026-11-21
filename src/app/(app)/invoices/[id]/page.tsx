@@ -1,4 +1,5 @@
 import { awaitsBank, duplicateWords } from "@/lib/bank-status";
+import { FinalInvoiceBlock } from "@/components/FinalInvoiceBlock";
 import { TaxInvoiceDue } from "@/components/TaxInvoiceDue";
 import { missingTaxInvoices, taxDueViewOf } from "@/lib/tax-invoice-due";
 import { issueTaxInvoiceNowAction } from "@/app/(app)/invoices/tax-due-actions";
@@ -215,9 +216,11 @@ export default async function InvoicePage({ params, searchParams }: { params: Pr
               {rounding ? <><dt className="text-muted">Rounding, as quoted</dt><dd className="text-right">{rounding < 0 ? "− " : ""}AED {m(Math.abs(rounding))}</dd></> : null}
               <dt className="text-muted">Taxable amount</dt><dd className="text-right">AED {m(invoice.taxable_aed)}</dd>
               <dt className="text-muted">VAT</dt><dd className="text-right">AED {m(invoice.vat_aed)}</dd>
-              <dt className="text-lg font-extrabold">Total</dt><dd className="text-right text-lg font-extrabold">AED {m(invoice.total_aed)}</dd>
+              <dt className="text-lg font-extrabold">{bundle.final ? "Total value of the work" : "Total"}</dt><dd className="text-right text-lg font-extrabold">AED {m(invoice.total_aed)}</dd>
               {seesCost && isTax ? <><dt className="text-xs text-muted">Parts and other costs on the lines</dt><dd className="text-right text-xs text-muted">AED {m(cost)}</dd></> : null}
             </dl>
+            {/* 21 November 2026 (J-01013): the final invoice takes off the advance already invoiced - each number once. */}
+            {bundle.final ? <FinalInvoiceBlock block={bundle.final} vatPercent={Number((settings as unknown as Record<string, unknown>).vat_percent) || 5} paid={Math.max(0, Math.round((bal.paid - bundle.final.advance.total) * 100) / 100)} balance={bal.balance} tone={bal.balance <= 0.004 ? "paid" : "plain"} /> : null}
           </Card>
         </div>
 

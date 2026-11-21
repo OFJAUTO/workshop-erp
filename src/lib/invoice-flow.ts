@@ -37,7 +37,7 @@ export async function ensureProforma(jobId: string, actor: Actor, settings: Sett
   if (!job || !job.is_open) return null;
   const { data: existing } = await admin.from("invoices").select(INVOICE_SELECT).eq("job_id", jobId).eq("status", "issued").eq("is_active", true).in("kind", ["tax_invoice", "proforma"]).is("converted_to", null).order("issued_at", { ascending: false });
   const rows = ((existing ?? []) as Record<string, unknown>[]).map(toInvoice);
-  const tax = rows.find((i) => i.kind === "tax_invoice");
+  const tax = rows.find((i) => i.kind === "tax_invoice" && !i.deposit_for_quotation_id);
   if (tax) return tax;
   const pro = rows.find((i) => i.kind === "proforma" && !i.deposit_for_quotation_id);
   if (pro) return pro;
@@ -129,6 +129,10 @@ export async function convertProformaIfPaid(jobId: string, by: string | null, se
   const { data: job } = await admin.from("jobs").select("job_number, status, gated_in_by, vehicle:vehicles(kind, has_plate, plate_country, plate_emirate, plate_code, plate_number, vin)").eq("id", jobId).maybeSingle();
   if (!job) return null;
   const plate = job.vehicle ? formatPlate(job.vehicle as unknown as Parameters<typeof formatPlate>[0]) : job.job_number;
+  // 21 November 2026 (J-01013): the advance tax invoices folded into this proforma make this the FINAL tax invoice,
+  // which takes the advance off (final-invoice-rules.ts). Its words say so.
+  const { data: advRows } = await admin.from("invoices").select("number").eq("job_id", jobId).eq("kind", "tax_invoice").eq("status", "issued").eq("is_active", true).not("deposit_for_quotation_id", "is", null).eq("converted_to", pro.id);
+  const advNumbers = ((advRows ?? []) as { number: string }[]).map((r) => r.number).join(", ");
   const number = await nextDocumentNumber("tax_invoice", settings);
   const token = newToken();
   const { data: lines } = await admin.from("invoice_lines").select(INVOICE_LINE_SELECT).eq("invoice_id", pro.id).eq("is_active", true).order("position");
@@ -157,7 +161,7 @@ export async function convertProformaIfPaid(jobId: string, by: string | null, se
       vehicle_snapshot: pro.vehicle_snapshot,
       payment_link_url: pro.payment_link_url,
       converted_from: pro.id,
-      issue_reason: opts.force?.reason ?? null,
+      issue_reason: opts.force?.reason ?? (advNumbers ? `Final tax invoice after the advance ${advNumbers}` : null),
       created_by: by,
       updated_by: by,
     })
@@ -178,12 +182,16 @@ export async function convertProformaIfPaid(jobId: string, by: string | null, se
   // Zoho Books (one-way): the tax invoice joins the outbox the moment it exists.
   await tryEnqueueZoho("invoice", String(tax.id), jobId, by);
   await admin.from("jobs").update({ ready_token: token, ...(job.status === "pending_payment" && bal.balance <= 0.005 ? { status: "ready" } : {}) }).eq("id", jobId);
-  const paidNote = opts.force ? `${number} issued by the owner before full payment (${money(bal.balance)} still due): ${opts.force.reason}` : `${number} generated: ${pro.number} paid in full`;
+  const paidNote = advNumbers
+    ? `${number} generated as the final tax invoice: the advance ${advNumbers} already invoiced is taken off${bal.balance > 0.005 ? `, ${money(bal.balance)} still due` : ", paid in full"}`
+    : opts.force ? `${number} issued by the owner before full payment (${money(bal.balance)} still due): ${opts.force.reason}` : `${number} generated: ${pro.number} paid in full`;
   await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_issued", note: paidNote, created_by: by });
-  await notifyRoles(["accounts"], { type: "invoice_issued", title: `Tax invoice ${number} ${opts.force ? "issued" : "generated"} · ${job.job_number}`, body: `${paidNote}. Check it.`, jobId, href: `/invoices/${tax.id}` });
-  await notifyStaff(await advisorsOf(jobId, job.gated_in_by), opts.force
+  await notifyRoles(["accounts"], { type: "invoice_issued", title: `${advNumbers ? "Final tax invoice" : "Tax invoice"} ${number} ${opts.force ? "issued" : "generated"} · ${job.job_number}`, body: `${paidNote}. Check it.`, jobId, href: `/invoices/${tax.id}` });
+  await notifyStaff(await advisorsOf(jobId, job.gated_in_by), opts.force && !advNumbers
     ? { type: "invoice_issued", title: `Tax invoice ready to send · ${job.job_number}`, body: `${number} is issued by the owner. Send it to the customer.`, jobId, href: `/jobs/${jobId}/invoice` }
-    : { type: "invoice_paid", title: `Paid: ${plate}, ${money(pro.total_aed)}`, body: `Tax invoice ${number} created. Send it to the customer, then gate out.`, jobId, href: `/jobs/${jobId}/invoice` });
+    : advNumbers && bal.balance > 0.005
+      ? { type: "invoice_issued", title: `Final tax invoice ready to send · ${job.job_number}`, body: `${number}: the advance ${advNumbers} is taken off; ${money(bal.balance)} still due. Send it to the customer.`, jobId, href: `/jobs/${jobId}/invoice` }
+      : { type: "invoice_paid", title: `Paid: ${plate}, ${money(pro.total_aed)}`, body: `${advNumbers ? "Final tax invoice" : "Tax invoice"} ${number} created. Send it to the customer, then gate out.`, jobId, href: `/jobs/${jobId}/invoice` });
   return toInvoice(tax as unknown as Record<string, unknown>);
 }
 

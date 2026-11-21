@@ -79,7 +79,7 @@ export async function loadCommissions(): Promise<{ pending: CommissionRow[]; rea
   const rows = Array.from(byJob.values());
   const jobIds = Array.from(new Set(rows.map((r) => r.job_id as string | null).filter((x): x is string => !!x)));
   const [{ data: invRaw }, { data: paysRaw }, { data: cnotes }, { data: staffRows }] = await Promise.all([
-    jobIds.length ? admin.from("invoices").select("*").in("job_id", jobIds).eq("is_active", true).eq("status", "issued").eq("kind", "tax_invoice").is("converted_to", null) : Promise.resolve({ data: [] }),
+    jobIds.length ? admin.from("invoices").select("*").in("job_id", jobIds).eq("is_active", true).eq("status", "issued").eq("kind", "tax_invoice").is("deposit_for_quotation_id", null).is("converted_to", null) : Promise.resolve({ data: [] }),
     jobIds.length ? admin.from("payments").select(PAYMENT_SELECT).in("job_id", jobIds).eq("is_active", true) : Promise.resolve({ data: [] }),
     jobIds.length ? admin.from("invoices").select("job_id").in("job_id", jobIds).eq("is_active", true).eq("kind", "credit_note") : Promise.resolve({ data: [] }),
     admin.from("staff").select("id, display_name"),

@@ -22,6 +22,7 @@ export async function correctCustomerPaymentAction(paymentId: string, _prev: Cor
         reference: String(formData.get("reference") ?? ""),
         proof: proof instanceof File && proof.size > 0 ? proof : null,
         reason: String(formData.get("reason") ?? ""),
+        allocateTo: formData.get("allocate_to") ? String(formData.get("allocate_to")) : null,
       },
       { id: staff.id, display_name: staff.display_name, role_id: staff.role_id },
       await getSettings(),

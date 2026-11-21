@@ -62,7 +62,7 @@ const nice = (d: string) => (d ? new Date(`${d}T12:00:00Z`).toLocaleDateString("
  */
 export async function correctCustomerPayment(
   paymentId: string,
-  c: { day: string | null; method: string | null; reference: string | null; proof: File | null; reason: string },
+  c: { day: string | null; method: string | null; reference: string | null; proof: File | null; reason: string; /** 21 November 2026: put the payment on the job's final document (proforma or tax invoice). */ allocateTo?: string | null },
   by: { id: string; display_name: string; role_id: string },
   settings: Settings,
 ): Promise<{ error?: string; words?: string }> {
@@ -81,7 +81,17 @@ export async function correctCustomerPayment(
   if (c.method && !(METHODS as readonly string[]).includes(c.method)) return { error: "Pick how it was really paid." };
   const ref = (c.reference ?? "").trim().slice(0, 120) || null;
   const refChanged = ref !== (p.reference ?? null);
-  if (!newDay && !newMethod && !refChanged && !c.proof) return { error: "Nothing changed: change the date, the method, the reference or the proof." };
+  // 21 November 2026 (J-01013): money received after the advance belongs on the FINAL document, never as another deposit.
+  let allocate: { id: string; number: string; kind: string } | null = null;
+  if (c.allocateTo && c.allocateTo !== p.invoice_id) {
+    const { data: doc } = await admin.from("invoices").select("id, number, kind, status, is_active, converted_to, deposit_for_quotation_id, job_id").eq("id", c.allocateTo).maybeSingle();
+    if (!doc || doc.status !== "issued" || !doc.is_active || doc.converted_to || doc.deposit_for_quotation_id || (doc.kind !== "tax_invoice" && doc.kind !== "proforma")) return { error: "That invoice cannot take the payment any more. Reload the page." };
+    if (!p.job_id || doc.job_id !== p.job_id) return { error: `${p.number} belongs to another job: it cannot go on ${doc.number}.` };
+    const { data: own } = await admin.from("payments").select("deposit_invoice_number").eq("id", p.id).maybeSingle();
+    if (own?.deposit_invoice_number) return { error: `${p.number} is the advance's own money (${own.deposit_invoice_number}): it stays there.` };
+    allocate = { id: String(doc.id), number: String(doc.number), kind: String(doc.kind) };
+  }
+  if (!newDay && !newMethod && !refChanged && !c.proof && !allocate) return { error: "Nothing changed: change the date, the method, the reference, the proof or the invoice it is on." };
   if (newDay) {
     const chk = checkPaymentDate({ day: newDay, today, role: dateRoleOf(by.role_id), closedThrough: closedThroughOf(settings) });
     if (!chk.ok) return { error: chk.error };
@@ -113,6 +123,11 @@ export async function correctCustomerPayment(
   if (refChanged) {
     changes.push({ field: "Reference", old: p.reference ?? "", new: ref ?? "" });
     update.reference = ref;
+  }
+  if (allocate) {
+    const { data: was } = p.invoice_id ? await admin.from("invoices").select("number").eq("id", p.invoice_id).maybeSingle() : { data: null };
+    changes.push({ field: "On invoice", old: was?.number ?? "deposit (no invoice)", new: allocate.number });
+    update.invoice_id = allocate.id;
   }
   if (c.proof) {
     if (c.proof.size > 25 * 1024 * 1024) return { error: "The proof is too large (over 25 MB)." };
@@ -147,6 +162,14 @@ export async function correctCustomerPayment(
     }
   } else if (newDay || newMethod || refChanged) {
     await reopenZoho(kind, p.id);
+  }
+  if (allocate) {
+    // Zoho applies it to the invoice when the payment syncs again; a fully paid proforma becomes the tax invoice now.
+    await reopenZoho(kind, p.id);
+    if (allocate.kind === "proforma" && p.job_id) {
+      const { convertProformaIfPaid } = await import("./invoice-flow");
+      await convertProformaIfPaid(p.job_id, by.id, settings);
+    }
   }
   const month = newDay ? await flagPaymentMonth(p.id) : null;
   return { words: `${words}${zohoWords}${month ? ` ${month}` : ""}` };

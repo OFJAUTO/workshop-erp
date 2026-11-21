@@ -17,7 +17,7 @@ export async function loadDocAlerts(jobIds: string[], settings: Settings, now = 
     admin.from("inspections").select("job_id, approved_at, created_at").in("job_id", jobIds).eq("is_active", true).not("approved_at", "is", null).order("created_at", { ascending: false }),
     admin.from("report_links").select("job_id, sent_at, created_at").in("job_id", jobIds).not("sent_at", "is", null).order("created_at", { ascending: false }),
     admin.from("quotations").select("job_id, kind, status, sent_at, opened_at, responded_at, created_at").in("job_id", jobIds).eq("is_active", true).eq("kind", "quotation").order("created_at", { ascending: false }),
-    admin.from("invoices").select("job_id, kind, status, created_at, sent_at, converted_from").in("job_id", jobIds).eq("is_active", true).eq("kind", "tax_invoice").order("created_at", { ascending: false }),
+    admin.from("invoices").select("job_id, kind, status, created_at, sent_at, converted_from").in("job_id", jobIds).eq("is_active", true).eq("kind", "tax_invoice").is("deposit_for_quotation_id", null).order("created_at", { ascending: false }),
     admin.from("part_requests").select("job_id").in("job_id", jobIds).eq("is_active", true),
   ]);
   const limits = docLimitsOf(settings);

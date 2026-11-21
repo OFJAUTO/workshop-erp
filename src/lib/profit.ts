@@ -66,7 +66,7 @@ export type JobProfit = {
  */
 export async function jobProfits(settings: Settings, filter: { from?: string; to?: string; jobIds?: string[]; limit?: number; noComebacks?: boolean } = {}): Promise<JobProfit[]> {
   const admin = createAdminClient();
-  let q = admin.from("invoices").select(INVOICE_SELECT + ", job:jobs!invoices_job_id_fkey(job_number, department, comeback_of, comeback_cause, comeback_claim_status, comeback_claim_amount, vehicle:vehicles(kind, plate_number, plate_code, plate_emirate, has_plate, vin))").eq("is_active", true).eq("status", "issued").eq("kind", "tax_invoice").order("issued_at", { ascending: false });
+  let q = admin.from("invoices").select(INVOICE_SELECT + ", job:jobs!invoices_job_id_fkey(job_number, department, comeback_of, comeback_cause, comeback_claim_status, comeback_claim_amount, vehicle:vehicles(kind, plate_number, plate_code, plate_emirate, has_plate, vin))").eq("is_active", true).eq("status", "issued").eq("kind", "tax_invoice").is("deposit_for_quotation_id", null).order("issued_at", { ascending: false });
   if (filter.from) q = q.gte("issued_at", filter.from);
   if (filter.to) q = q.lt("issued_at", filter.to);
   if (filter.jobIds) q = q.in("job_id", filter.jobIds);
@@ -317,7 +317,7 @@ export async function approvedNotInvoicedProfit(settings: Settings): Promise<num
   const rows = ((qs ?? []) as unknown as (Record<string, unknown> & { job: { id: string; is_open: boolean; department: string | null } })[]);
   if (!rows.length) return 0;
   const jobIds = Array.from(new Set(rows.map((r) => r.job.id)));
-  const { data: taxed } = await admin.from("invoices").select("job_id").in("job_id", jobIds).eq("kind", "tax_invoice").eq("status", "issued").eq("is_active", true);
+  const { data: taxed } = await admin.from("invoices").select("job_id").in("job_id", jobIds).eq("kind", "tax_invoice").is("deposit_for_quotation_id", null).eq("status", "issued").eq("is_active", true);
   const taxedSet = new Set((taxed ?? []).map((t) => t.job_id as string));
   const open = rows.filter((r) => !taxedSet.has(r.job.id));
   if (!open.length) return 0;

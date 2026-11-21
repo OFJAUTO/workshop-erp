@@ -1,3 +1,18 @@
+# Handover – urgent: the final tax invoice after an advance (21 November 2026, DONE)
+
+**WAITING FOR APPLY:** nothing (no database change).
+
+**NEEDS OMAR:**
+1. Mathew issues the final tax invoice for J-01013: Invoices and payments → search "19805" → the J-01013 row → What to do now → **Generate the final tax invoice** → YES, GENERATE IT. It takes off INV-00037; RCT-00106 (2,000.00) goes onto it by itself. Then the advisor sends it and the car can be gated out.
+2. Mathew confirms the way the advance is deducted on the final tax invoice (TOTAL VALUE OF THE WORK / LESS ADVANCE ALREADY INVOICED – INV-… / THIS INVOICE), with the accountant.
+3. J-01029 (advance INV-00042, 800.00 = the whole job): when it is Ready, the same button gives a final tax invoice of 0.00 to pay.
+4. The Next.js build tool printed a security-upgrade notice (see the report); decide whether to run the upgrade.
+5. Items 1-6 of the 20 Nov list below still stand.
+
+**Live:** note `docs/final-invoice-21-nov-note.md`; test `tests/browser/test-final-invoice.mjs` 24/24 on TEST; unit `final-invoice`.
+
+---
+
 # Handover – list of 20 November 2026 (ALL DONE AND APPLIED 21 Nov night; nothing waiting)
 
 **WAITING FOR APPLY:** nothing. The three changes were applied on 21 Nov (backup `backups/2026-11-20T20-24-40`), check:live 33/33.

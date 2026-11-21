@@ -120,7 +120,7 @@ export async function issueInvoice(jobId: string, formData: FormData) {
   const reason = blankToNull(formData.get("reason"));
   const { data: job } = await admin.from("jobs").select("id, job_number, status, is_open").eq("id", jobId).maybeSingle();
   if (!job || !job.is_open) redirect(`${back}?error=${encodeURIComponent("This job is closed.")}`);
-  const { data: existing } = await admin.from("invoices").select("id, number").eq("job_id", jobId).eq("kind", "tax_invoice").eq("status", "issued").eq("is_active", true).maybeSingle();
+  const { data: existing } = await admin.from("invoices").select("id, number").eq("job_id", jobId).eq("kind", "tax_invoice").is("deposit_for_quotation_id", null).eq("status", "issued").eq("is_active", true).maybeSingle();
   if (existing) redirect(`/invoices/${existing.id}?error=${encodeURIComponent(`${existing.number} is already issued for this job. Corrections are by credit note.`)}`);
   const { data: before } = await admin.from("invoices").select("id").eq("job_id", jobId).eq("kind", "proforma").eq("status", "issued").eq("is_active", true).is("converted_to", null).limit(1);
   const hadProforma = (before ?? []).length > 0;
@@ -434,7 +434,7 @@ export async function markInvoiceSent(jobId: string, method: string): Promise<{ 
   const staff = await requirePermission("sendApproval");
   const admin = createAdminClient();
   await admin.from("jobs").update({ invoice_sent_at: new Date().toISOString() }).eq("id", jobId);
-  await admin.from("invoices").update({ sent_by: staff.id, sent_at: new Date().toISOString() }).eq("job_id", jobId).eq("kind", "tax_invoice").eq("is_active", true);
+  await admin.from("invoices").update({ sent_by: staff.id, sent_at: new Date().toISOString() }).eq("job_id", jobId).eq("kind", "tax_invoice").is("deposit_for_quotation_id", null).eq("is_active", true);
   await admin.from("job_events").insert({ job_id: jobId, event_type: "invoice_sent", note: `Tax invoice sent by ${staff.display_name} (${method})`, created_by: staff.id });
   refresh(jobId);
   return { ok: true };

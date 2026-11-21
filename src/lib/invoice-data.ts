@@ -1,4 +1,6 @@
 import { awaitsBank, countsAsPaid } from "@/lib/bank-status";
+import { finalBlockOf } from "./final-invoice";
+import type { FinalBlock } from "./final-invoice-rules";
 import "server-only";
 import { capsText } from "./text-case";
 import { chargesToInvoiceMany } from "./charges";
@@ -223,6 +225,8 @@ export type InvoiceBundle = {
   estimate?: { id: string; number: string } | null;
   billTo?: { company?: string | null; address?: string | null; trn?: string | null; attention?: string | null; po_number?: string | null } | null;
   validUntil?: string | null;
+  /** 21 November 2026 (J-01013): a final document after advance tax invoices - THE final block (final-invoice-rules). */
+  final?: FinalBlock | null;
   /** 13 November 2026 (Section 6): an advance against an estimate - THE advance block (doc-totals advanceMoneyRows). */
   advance?: { estimateTotal: number; alreadyPaid: number; payableNow: number; sections: { labour: number; parts: number; other: number } } | null;
 };
@@ -289,8 +293,11 @@ export async function loadInvoice(id: string): Promise<InvoiceBundle | null> {
   }
   if (!declined.length && notesHaveList) declined = cleanDeclined(splitDeclinedNotes(invoice.notes).legacy);
 
+  // 21 November 2026 (J-01013): the final document takes off the advance tax invoices folded into it.
+  const final = invoice.kind === "tax_invoice" || invoice.kind === "proforma" ? await finalBlockOf(invoice).catch(() => null) : null;
   return {
     invoice,
+    final,
     credited: (await creditsOnDocs([invoice.id])).get(invoice.id) ?? 0,
     estimate,
     advance,

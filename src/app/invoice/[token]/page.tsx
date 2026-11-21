@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+import { FinalInvoiceBlock } from "@/components/FinalInvoiceBlock";
+import { finalBalance, isAdvanceMoney } from "@/lib/final-invoice-rules";
+import { awaitsBank } from "@/lib/bank-status";
 import { advanceMoneyRows, ADVANCE_FINAL_LINE, isProformaBoilerplate } from "@/lib/doc-totals";
 import { staffPreview } from "@/lib/customer-preview";
 import { stillDueOf, WAITING_CLEAR } from "@/lib/still-due";
@@ -59,6 +62,11 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
   const { invoice, payments, customer, vehicle, job } = bundle;
   const live = payments.filter((p) => p.status === "recorded");
   const bal = invoiceBalance(invoice, live, bundle.credited ?? 0);
+  // 21 November 2026 (J-01013): a final invoice after an advance tax invoice shows THE final block (the advance's own
+  // money is paid on the advance invoice, never counted twice here).
+  const fb = bundle.final ?? null;
+  const fbPaid = fb ? Math.round(live.filter((p) => !isAdvanceMoney(p, fb) && !awaitsBank(p)).reduce((x, p) => x + p.amount_aed, 0) * 100) / 100 : 0;
+  const fbBalance = fb ? finalBalance(fb, fbPaid, bundle.credited ?? 0) : 0;
   const car = [vehicle?.make?.name, vehicle?.model?.name, vehicle?.model_year].filter(Boolean).join(" ");
   const isProforma = invoice.kind === "proforma";
   const isTax = invoice.kind === "tax_invoice";
@@ -159,6 +167,8 @@ export default async function CustomerInvoicePage({ params, searchParams }: { pa
             ))}
             <span className="text-[11px] font-semibold uppercase text-[#5F6368]">{ADVANCE_FINAL_LINE}</span>
           </div>
+        ) : fb && payable ? (
+          <FinalInvoiceBlock block={fb} vatPercent={Number((settings as unknown as Record<string, unknown>).vat_percent) || 5} paid={fbPaid} balance={fbBalance} tone={fbBalance <= 0.004 ? "paid" : "plain"} />
         ) : payable ? (
           <div className={`rounded-lg px-4 py-4 flex flex-col gap-1 ${paid ? "bg-green-soft" : "bg-[#F4F4F5]"}`}>
             <span className="text-xs font-bold tracking-[0.1em] uppercase text-[#5F6368]" data-amount-heading>{paid ? "Paid, thank you" : waitingClear ? WAITING_CLEAR : stillDue.state === "part" ? "Still to pay" : "Amount due"}</span>

@@ -1,4 +1,5 @@
 import { batchCell } from "@/lib/warranty";
+import { cleanAdvanceDetails, finalBalance, finalRows, isAdvanceMoney } from "@/lib/final-invoice-rules";
 import { awaitsBank } from "@/lib/bank-status";
 import { SUPPLIER_VAT_PERCENT, supplierMoney } from "@/lib/supplier-money";
 import { NO_VAT_WORDS, supplierChargesVat } from "@/lib/supplier-rules";
@@ -119,7 +120,11 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
   const tintSpec = await tintSpecForJob(invoice.job_id);
   // Section 5.6: the free work's wording follows its reason (goodwill / our mistake / warranty).
   const compReason = await compReasonForJob(invoice.job_id);
-  const docLine = (l: InvoiceLineRow) => docLineOf(l, compReason);
+  // 21 November 2026: an advance line's amount is BEFORE VAT - the old "VAT included in this amount" remark is never printed.
+  const docLine = (l: InvoiceLineRow) => {
+    const d = docLineOf(l, compReason);
+    return invoice.deposit_for_quotation_id ? { ...d, details: cleanAdvanceDetails(d.details) ?? undefined } : d;
+  };
   const tintLimit = tintLimitOf(settings);
   const services = serviceRows.map((l) => {
     const d = docLine(l);
@@ -164,7 +169,35 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
     return { label: pending ? `Cheque pending, not counted yet (${p.number})` : what, value: p.amount_aed, kind: pending ? ("after" as const) : ("paid" as const) };
   });
   const advanceRows = bundle.advance ? advanceMoneyRows(bundle.advance) : null;
-  const rows = advanceRows ?? docMoneyRows({
+  // 21 November 2026 (J-01013): the FINAL document after advance tax invoices - the whole value of the work, less the
+  // advance already invoiced, THIS INVOICE (taxable + VAT), each number once; the advance's own money is paid there and
+  // never counted again here.
+  const fb = bundle.final && !isCredit ? bundle.final : null;
+  const finalMoneyRows = fb ? (() => {
+    const lead = docMoneyRows({
+      sections: sectionCounts,
+      gross,
+      green: [...pkgDiscounts, ...(invoice.discount_aed ? [{ label: discountLabel, value: invoice.discount_aed }] : []), ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: invoice.warranty_credit_aed }] : []), ...(rounding < 0 ? [{ label: "Round-off", value: Math.abs(rounding) }] : [])],
+      roundUp: rounding > 0 ? rounding : 0,
+      net: invoice.taxable_aed,
+      vatPercent,
+      vat: invoice.vat_aed,
+      total: invoice.total_aed,
+      taxDocument: true,
+    }).filter((r) => r.kind === "green" || (r.kind === "plain" && r.label !== "Subtotal before VAT"));
+    const own = live.filter((p) => !isAdvanceMoney(p, fb));
+    const paid = own.map((p) => {
+      const pending = awaitsBank(p);
+      return { label: pending ? `Cheque pending, not counted yet (${p.number})` : `Paid ${formatDate(p.received_at)} · ${METHOD_LABELS[p.method] ?? p.method} (${p.number})`, value: p.amount_aed, kind: pending ? ("after" as const) : ("paid" as const) };
+    });
+    const paidOn = own.filter((p) => !awaitsBank(p) && p.status === "recorded").reduce((x, p) => x + p.amount_aed, 0);
+    const fin = finalRows(fb, vatPercent).map((r) => ({ label: `${r.label}
+${r.split}`, value: r.value, kind: r.key === "advance" ? ("green" as const) : r.key === "this" ? ("total" as const) : r.key === "credit" ? ("after" as const) : ("plain" as const) }));
+    const left = finalBalance(fb, paidOn, bundle.credited ?? 0);
+    const after = [...paid, ...(bundle.credited ? [{ label: "Less credit note", value: bundle.credited, kind: "paid" as const }] : [])].filter((r) => Math.abs(r.value) > 0.004);
+    return [...lead, ...fin, ...after, ...(after.some((r) => r.kind === "paid") ? [{ label: left > 0.004 ? "Balance due" : "Paid in full · balance due", value: left, kind: "balance" as const }] : [])];
+  })() : null;
+  const rows = advanceRows ?? finalMoneyRows ?? docMoneyRows({
     sections: sectionCounts,
     gross,
     green: [...pkgDiscounts, ...(invoice.discount_aed ? [{ label: discountLabel, value: invoice.discount_aed }] : []), ...(invoice.warranty_credit_aed ? [{ label: "Warranty repair, no charge", value: invoice.warranty_credit_aed }] : []), ...(rounding < 0 ? [{ label: "Round-off", value: Math.abs(rounding) }] : [])],
@@ -254,7 +287,7 @@ export async function renderInvoicePdf(bundle: InvoiceBundle, settings: Settings
       <DocumentTail
         tight={tight}
         rows={rows}
-        words={amountInWords(invoice.total_aed)}
+        words={amountInWords(fb ? fb.thisInvoice.total : invoice.total_aed)}
         bank={!isCredit && bal.state !== "paid" ? company.bank : null}
         note={note}
         lead={lead.length ? <>{lead}{notes}</> : null}

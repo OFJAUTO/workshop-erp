@@ -136,7 +136,7 @@ export async function uninvoicedCompCost(settings: Settings, from: string, to: s
   if (!rows.length) return { total: 0, byDay: new Map() };
   const admin = createAdminClient();
   const ids = rows.map((r) => r.jobId).filter((x): x is string => !!x);
-  const { data: inv } = ids.length ? await admin.from("invoices").select("job_id").in("job_id", ids).eq("kind", "tax_invoice").eq("status", "issued").eq("is_active", true) : { data: [] };
+  const { data: inv } = ids.length ? await admin.from("invoices").select("job_id").in("job_id", ids).eq("kind", "tax_invoice").is("deposit_for_quotation_id", null).eq("status", "issued").eq("is_active", true) : { data: [] };
   const invoiced = new Set(((inv ?? []) as { job_id: string }[]).map((i) => i.job_id));
   const dayOf = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Dubai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
   const byDay = new Map<string, number>();

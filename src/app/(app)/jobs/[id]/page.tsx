@@ -1,4 +1,5 @@
 import { FlashNotice } from "@/components/FlashNotice";
+import { jobAdvanceInvoices } from "@/lib/final-invoice";
 import { FixIt } from "@/components/FixIt";
 import { remindToFix } from "../fix-actions";
 import { approvalHeadline } from "@/lib/approval-headline";
@@ -393,7 +394,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     : [{ data: [] }, { data: null }];
   const moneyInvoices = ((moneyInvRows ?? []) as unknown as Record<string, unknown>[]).map((r) => ({ ...toInvoice(r), expected_payment_method: (r.expected_payment_method as string | null) ?? null, customer_says_paid_at: (r.customer_says_paid_at as string | null) ?? null, pay_now_enabled: !!r.pay_now_enabled, sent_at: (r.sent_at as string | null) ?? null }));
   const liveProforma = (moneyInvoices.find((i) => i.kind === "proforma" && !i.converted_to && !i.deposit_for_quotation_id) ?? null) as (MoneyInvoice & { id: string }) | null;
-  const liveTax = (moneyInvoices.find((i) => i.kind === "tax_invoice") ?? null) as (MoneyInvoice & { id: string }) | null;
+  const liveTax = (moneyInvoices.find((i) => i.kind === "tax_invoice" && !i.deposit_for_quotation_id) ?? null) as (MoneyInvoice & { id: string }) | null;
   // The payments advisors sent to accounts on this car (2 November 2026, section 3).
   const reportsOn = await early.reportsOn;
   const jobReports = reportsOn && can(role, "viewInvoices") ? await loadReports({ jobId: id, settings }) : [];
@@ -408,6 +409,8 @@ export default async function JobPage({ params, searchParams }: { params: Promis
   // 9 November 2026: cheques and transfers of this car still waiting for the bank (the words and the one action).
   const bankWait = jobMoney && jobMoney.pendingCheque > 0 ? await loadBankWaiting({ jobIds: [id] }) : [];
   const bankWords = jobMoney ? pendingLine({ paid: jobMoney.paid, pending: bankWait.map((r) => ({ method: r.method, number: r.number, amount: r.amount })), balance: jobMoney.balance }) : null;
+  // 21 November 2026 (J-01013): the advance tax invoices of this job (never its final tax invoice).
+  const jobAdvances = laterStage ? await jobAdvanceInvoices(id) : [];
   const money = moneyState({
     jobStatus: job.status,
     isOpen: job.is_open,
@@ -425,6 +428,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
     waitingHours: Number(settings.payment_waiting_hours) || 24,
     reported: waitingReport ? { by: firstName(waitingReport.reporter) } : null,
     advance: jobMoney && !jobMoney.live ? { paid: jobMoney.paid, left: jobMoney.balance } : null,
+    advanceInvoiced: jobAdvances.length && !liveTax && !liveProforma ? { numbers: jobAdvances.map((x) => x.number).join(", "), total: Math.round(jobAdvances.reduce((t, x) => t + x.total_aed, 0) * 100) / 100 } : null,
   });
   const payNowOn = money.live ? !!currentPaymentLink(await paymentLinksOf(money.live.id)) : false;
   const bankCharges = bankFeesOf(settings);
@@ -1051,6 +1055,7 @@ export default async function JobPage({ params, searchParams }: { params: Promis
                 {can(role, "recordPayments") ? <LinkButton href={`/jobs/${id}/invoice#bank`} size="lg" className="w-full" data-bank-open-money>Mark deposited / cleared</LinkButton> : null}
               </div>
             ) : null}
+            {money.action === "generate_final" && (mayPay || viewPay) && job.is_open ? <LinkButton href={`/jobs/${id}/invoice#bank`} size="lg" className="w-full" data-generate-final-link>Generate the final tax invoice</LinkButton> : null}
             {money.action === "prepare_proforma" && can(role, "markReadyToInvoice") && !staff.viewingAs && job.is_open ? <form action={markReadyToInvoice.bind(null, id)}><Button type="submit" size="lg" className="w-full">Prepare the proforma</Button></form> : null}
             {(money.action === "send_proforma" || money.action === "send_tax_invoice") && money.live && can(role, "sendApproval") && !staff.viewingAs && job.is_open ? (
               <ReadySendControl jobId={id} size="lg" token={money.live.token} shortLink={money.live.token ? await shortFor(`${PRODUCTION_SITE_URL}/${money.live.kind === "tax_invoice" ? "invoice" : "proforma"}/${money.live.token}`) : null} kind={money.live.kind === "tax_invoice" ? "tax_invoice" : "proforma"} siteUrl={site} messageTemplate={money.live.kind === "tax_invoice" ? invoiceTemplate : readyMsg} due={readyDue} phoneDigits={(customer?.phone ?? "").replace(/[^\d]/g, "")} sentAt={money.live.kind === "tax_invoice" ? job.invoice_sent_at : job.ready_sent_at} expectedMethod={liveProforma?.expected_payment_method ?? null} payNowAvailable={ngeniusConfigured()} payNowOn={payNowOn} charges={bankCharges} pdf={money.live.token ? { href: `/api/pdf/invoice/${money.live.token}`, fileName: `OFJ ${money.live.kind === "tax_invoice" ? "Tax invoice" : "Proforma"} ${money.live.number}.pdf` } : null} />

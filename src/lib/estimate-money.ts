@@ -226,7 +226,7 @@ export async function createEstimateProforma(
     if ("error" in p) return { error: p.error };
     const split = advanceSplit(p.amount, vatPercent);
     totals = { gross: split.taxable, discount: 0, taxable: split.taxable, vat: split.vat, total: split.total };
-    lines = [{ section: "services", description: advanceWordsOf(e.number), details: "VAT included in this amount", positions: null, part_number: null, quantity: 1, unit_price: split.taxable, amount_aed: split.taxable, cost_aed: 0, quotation_line_id: null, price_display: "normal", discount_percent: 0, package_items: null, cut_method: null, cut_note: null }];
+    lines = [{ section: "services", description: advanceWordsOf(e.number), details: null, positions: null, part_number: null, quantity: 1, unit_price: split.taxable, amount_aed: split.taxable, cost_aed: 0, quotation_line_id: null, price_display: "normal", discount_percent: 0, package_items: null, cut_method: null, cut_note: null }];
   }
 
   const [{ data: customer }, { data: vehicle }] = await Promise.all([

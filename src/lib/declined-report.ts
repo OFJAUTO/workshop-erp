@@ -30,7 +30,7 @@ export async function declinedCarsReport(month: string, settings: Settings): Pro
   const ids = (jobs ?? []).map((j) => j.id as string);
   const [times, { data: invoices }] = await Promise.all([
     timeSpentFor(ids, settings),
-    ids.length ? admin.from("invoices").select("id, job_id, taxable_aed").in("job_id", ids).eq("kind", "tax_invoice").eq("status", "issued").eq("is_active", true) : Promise.resolve({ data: [] as { id: string; job_id: string; taxable_aed: number }[] }),
+    ids.length ? admin.from("invoices").select("id, job_id, taxable_aed").in("job_id", ids).eq("kind", "tax_invoice").is("deposit_for_quotation_id", null).eq("status", "issued").eq("is_active", true) : Promise.resolve({ data: [] as { id: string; job_id: string; taxable_aed: number }[] }),
   ]);
   const cars: DeclinedCar[] = (jobs ?? []).map((j) => {
     const t = times.get(j.id as string);
